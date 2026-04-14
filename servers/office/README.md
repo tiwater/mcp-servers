@@ -1,10 +1,24 @@
 # office MCP server
 
-This workspace is reserved for the shared Office MCP server surface.
+Shared stdio MCP server for Office document workflows.
 
-The underlying shared runtimes live in:
+## Tools
 
-- `../../packages/docx-cli`
-- `../../packages/xlsx-cli`
+- `docx_inspect`
+- `docx_compare`
+- `docx_validate_template_transform`
+- `docx_strip_direct_formatting`
+- `docx_replace_style_ids`
+- `docx_export_json`
+- `docx_fill_template`
+- `xlsx_inspect`
+- `xlsx_export_json`
+- `xlsx_fill_template`
 
-Lucid and other downstream skills should depend on the Office MCP capability rather than embedding DOCX/XLSX executables locally.
+## Run
+
+```bash
+node servers/office/index.mjs
+```
+
+The server prefers the published `tiwater-docx` and `tiwater-xlsx` commands and falls back to `dotnet run --project ...` from this repo.

@@ -1,9 +1,17 @@
 # pdf MCP server
 
-This workspace is reserved for the shared PDF MCP server surface.
+Shared stdio MCP server for PDF inspection and table extraction.
 
-The underlying shared runtime lives in:
+## Tools
 
-- `../../packages/pdf-cli`
+- `pdf_inspect`
+- `pdf_extract_tables`
+- `pdf_find_table`
 
-Lucid and other downstream skills should depend on the PDF MCP capability rather than embedding PDF executables locally.
+## Run
+
+```bash
+node servers/pdf/index.mjs
+```
+
+The server prefers the published `tiwater-pdf` command and falls back to `python3 -m tiwater_pdf.cli` from this repo.

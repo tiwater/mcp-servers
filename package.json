@@ -1,0 +1,9 @@
+{
+  "name": "@tiwater/mcp-servers",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "office": "node servers/office/index.mjs",
+    "pdf": "node servers/pdf/index.mjs"
+  }
+}
