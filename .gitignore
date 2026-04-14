@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+*.user
+*.suo
+bin/
+obj/
+.venv/
+__pycache__/
+.pytest_cache/
+dist/
