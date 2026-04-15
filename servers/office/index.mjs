@@ -143,7 +143,7 @@ const tools = [
   },
   {
     name: 'xlsx_inspect',
-    description: 'Inspect an XLSX workbook and return sheet-level metrics.',
+    description: 'Inspect an XLSX workbook and return sheet-level metrics, used ranges, formula counts, merged ranges, and note rows.',
     inputSchema: {
       type: 'object',
       properties: { input: { type: 'string' } },
@@ -176,6 +176,47 @@ const tools = [
       required: ['template', 'output'],
     },
   },
+  {
+    name: 'xlsx_edit',
+    description: 'Apply explicit edit operations to an XLSX workbook, including single-cell and range writes for fixed-layout sheets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        output: { type: 'string' },
+        edits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string' },
+              sheet: { type: 'string' },
+              cell: { type: 'string' },
+              value: { type: 'string' },
+              startCell: { type: 'string' },
+              values: { type: 'array', items: { type: 'array', items: { type: 'string' } } }
+            },
+            required: ['type']
+          }
+        },
+        editsPath: { type: 'string' }
+      },
+      required: ['input', 'output'],
+    },
+  },
+  {
+    name: 'xlsx_plan',
+    description: 'Plan fixed-layout spreadsheet edits from extracted source tables and return reviewable xlsx_edit operations before mutation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        data: { type: 'object' },
+        dataPath: { type: 'string' },
+      },
+      required: ['input'],
+    },
+  },
 ];
 
 async function callTool(name, args) {
@@ -202,6 +243,10 @@ async function callTool(name, args) {
       return createToolResult(await xlsxExportJson(args));
     case 'xlsx_fill_template':
       return createToolResult(await xlsxFillTemplate(args));
+    case 'xlsx_edit':
+      return createToolResult(await xlsxEdit(args));
+    case 'xlsx_plan':
+      return createToolResult(await xlsxPlan(args));
     default:
       throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32601 });
   }
@@ -330,6 +375,22 @@ async function xlsxFillTemplate(args) {
   });
 }
 
+async function xlsxPlan(args) {
+  const input = requireString(args.input, 'input');
+  if (args.dataPath) {
+    const dataPath = requireString(args.dataPath, 'dataPath');
+    const result = await runCandidateChain(xlsxCandidates, ['plan', input, dataPath]);
+    return { tool: 'xlsx_plan', runtime: commandRuntime(result), plan: JSON.parse(result.stdout) };
+  }
+  if (args.data === undefined) {
+    throw Object.assign(new Error('data or dataPath is required'), { code: -32602 });
+  }
+  return withTempJsonFile(args.data, async dataPath => {
+    const result = await runCandidateChain(xlsxCandidates, ['plan', input, dataPath]);
+    return { tool: 'xlsx_plan', runtime: commandRuntime(result), plan: JSON.parse(result.stdout) };
+  });
+}
+
 function commandRuntime(result) {
   return {
     command: result.command,
@@ -338,3 +399,21 @@ function commandRuntime(result) {
 }
 
 await new McpStdioServer({ name: 'tiwater-office', version: '0.1.0', tools, callTool }).start();
+
+
+async function xlsxEdit(args) {
+  const input = requireString(args.input, 'input');
+  const output = requireString(args.output, 'output');
+  if (args.editsPath) {
+    const editsPath = requireString(args.editsPath, 'editsPath');
+    const result = await runCandidateChain(xlsxCandidates, ['edit', input, editsPath, output]);
+    return { tool: 'xlsx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  }
+  if (!Array.isArray(args.edits)) {
+    throw Object.assign(new Error('edits or editsPath is required'), { code: -32602 });
+  }
+  return withTempJsonFile({ operations: args.edits }, async editsPath => {
+    const result = await runCandidateChain(xlsxCandidates, ['edit', input, editsPath, output]);
+    return { tool: 'xlsx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  });
+}

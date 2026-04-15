@@ -25,6 +25,8 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
+                "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
+                "plan" => Task.FromResult(Planner.RunPlan(args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -90,6 +92,8 @@ internal static class Cli
         Console.WriteLine("  inspect <input.xlsx> [--json]");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");
+        Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");
+        Console.WriteLine("  plan <input.xlsx> <plan-data.json>");
     }
 
     private static Task<int> FailUnknown(string command)
@@ -114,6 +118,11 @@ internal static class Cli
             Console.WriteLine($"  Sheet: {sheet.Name}");
             Console.WriteLine($"    Rows: {sheet.RowCount}");
             Console.WriteLine($"    Columns: {sheet.ColumnCount}");
+            if (!string.IsNullOrWhiteSpace(sheet.UsedRange))
+            {
+                Console.WriteLine($"    Used Range: {sheet.UsedRange}");
+            }
+            Console.WriteLine($"    Formula Cells: {sheet.FormulaCellCount}");
         }
     }
 }

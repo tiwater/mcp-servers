@@ -1,6 +1,6 @@
 # tiwater-xlsx
 
-A .NET 9 globally installed command-line tool for dynamically inspecting and filling `.xlsx` templates.
+A .NET 9 globally installed command-line tool for inspecting, planning, editing, and filling `.xlsx` workbooks.
 
 ## Installation
 
@@ -18,8 +18,8 @@ In your target Excel template (`.xlsx`):
 
 ## Usage
 
-### 1. Inspect a Template
-Outputs all discovered data placeholders present inside an Excel template, which helps agentic workflows know what shape of data is required before filling it.
+### 1. Inspect a Workbook
+Outputs sheet-level metrics, placeholders, used ranges, formula counts, merged regions, and note rows. This is the canonical low-level read surface for both placeholder templates and fixed-layout workbooks.
 
 ```bash
 tiwater-xlsx inspect <template.xlsx> [--json]
@@ -50,5 +50,35 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
       ["Peak2", "Area2", "RT2"]
     ]
   }
+}
+```
+
+
+### 3. Plan Fixed-Layout Edits
+Builds a reviewable plan for scenario-specific fixed-layout workbooks and emits proposed `xlsx_edit` operations without mutating the workbook.
+
+```bash
+tiwater-xlsx plan <input.xlsx> <plan-data.json>
+```
+
+The current first-class planner is scenario-specific for ANA14-style experimental record attachments. It expects extracted source tables and returns proposed section mappings plus `xlsx_edit` operations.
+
+### 4. Apply Explicit Edit Operations
+Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
+- `setCellValue`
+- `setRangeValues`
+
+```bash
+tiwater-xlsx edit <input.xlsx> <operations.json> <output.xlsx>
+```
+
+Example operations file:
+
+```json
+{
+  "operations": [
+    { "type": "setCellValue", "sheet": "Sheet1", "cell": "D2", "value": "260359-01" },
+    { "type": "setRangeValues", "sheet": "Sheet1", "startCell": "E2", "values": [["233988", "383789"], ["252353", "341366"]] }
+  ]
 }
 ```
