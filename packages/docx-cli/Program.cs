@@ -29,6 +29,7 @@ internal static class Cli
                 "replace-style-ids" => Task.FromResult(Transforms.RunReplaceStyleIds(args[1..])),
                 "export-json" => Task.FromResult(Transforms.RunExportJson(args[1..])),
                 "fill-template" => Task.FromResult(Transforms.RunFillTemplate(args[1..])),
+                "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -96,6 +97,7 @@ internal static class Cli
         Console.WriteLine("  replace-style-ids <input.docx> <output.docx> <style-map.json>");
         Console.WriteLine("  export-json <input.docx> [<output.json>]");
         Console.WriteLine("  fill-template <template.docx> <data.json> <output.docx>");
+        Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
     }
 
     private static Task<int> FailUnknown(string command)
@@ -128,6 +130,7 @@ internal static class Cli
         Console.WriteLine($"Fields: {report.Structure.FieldCount}");
         Console.WriteLine($"Content controls: {report.Structure.ContentControlCount}");
         Console.WriteLine($"Drawings: {report.Structure.DrawingCount}");
+        Console.WriteLine($"Annotation anchors: {report.Structure.AnnotationAnchors.Count}");
         Console.WriteLine($"Direct formatting paragraphs: {report.Formatting.ParagraphsWithDirectFormatting}");
         Console.WriteLine($"Direct formatting runs: {report.Formatting.RunsWithDirectFormatting}");
 
@@ -137,24 +140,12 @@ internal static class Cli
             Console.WriteLine($"  {item.Style}: {item.Count}");
         }
 
-        Console.WriteLine("Run styles in use:");
-        foreach (var item in report.Styles.RunStylesInUse)
+        if (report.Structure.AnnotationAnchors.Count > 0)
         {
-            Console.WriteLine($"  {item.Style}: {item.Count}");
-        }
-
-        Console.WriteLine("Headings:");
-        foreach (var heading in report.Content.Headings)
-        {
-            Console.WriteLine($"  [{heading.Style}] {heading.Text}");
-        }
-
-        if (report.Content.Placeholders.Count > 0)
-        {
-            Console.WriteLine("Placeholders:");
-            foreach (var placeholder in report.Content.Placeholders)
+            Console.WriteLine("Annotation anchors:");
+            foreach (var anchor in report.Structure.AnnotationAnchors.Take(10))
             {
-                Console.WriteLine($"  {placeholder}");
+                Console.WriteLine($"  [{anchor.CommentId}] {anchor.TargetKind} {anchor.AnchorText}");
             }
         }
     }
@@ -180,20 +171,6 @@ internal static class Cli
         {
             Console.WriteLine($"  {diff.Name}: {diff.OldValue} -> {diff.NewValue}");
         }
-
-        if (report.StyleDiffs.AddedParagraphStyles.Count > 0 || report.StyleDiffs.RemovedParagraphStyles.Count > 0)
-        {
-            Console.WriteLine("Paragraph style usage changes:");
-            foreach (var item in report.StyleDiffs.AddedParagraphStyles)
-            {
-                Console.WriteLine($"  + {item.Style}: {item.Count}");
-            }
-
-            foreach (var item in report.StyleDiffs.RemovedParagraphStyles)
-            {
-                Console.WriteLine($"  - {item.Style}: {item.Count}");
-            }
-        }
     }
 
     private static Task<int> RunValidateTemplateTransformAsync(string[] args)
@@ -214,47 +191,11 @@ internal static class Cli
         }
         else
         {
-            RenderTemplateValidation(report);
+            Console.WriteLine($"Source template: {report.SourceTemplate}");
+            Console.WriteLine($"Target template: {report.TargetTemplate}");
+            Console.WriteLine($"Compatible: {report.IsCompatible}");
         }
 
         return Task.FromResult(report.IsCompatible ? 0 : 2);
-    }
-
-    private static void RenderTemplateValidation(TemplateTransformValidationReport report)
-    {
-        Console.WriteLine($"Source template: {report.SourceTemplate}");
-        Console.WriteLine($"Target template: {report.TargetTemplate}");
-        Console.WriteLine($"Compatible: {report.IsCompatible}");
-        Console.WriteLine($"Source body field slots: {report.SourceBodyFieldSlotCount}");
-        Console.WriteLine($"Target body field slots: {report.TargetBodyFieldSlotCount}");
-        Console.WriteLine($"Source empty input slots: {report.SourceEmptyInputSlotCount}");
-        Console.WriteLine($"Target empty input slots: {report.TargetEmptyInputSlotCount}");
-
-        if (report.Errors.Count > 0)
-        {
-            Console.WriteLine("Errors:");
-            foreach (var error in report.Errors)
-            {
-                Console.WriteLine($"  {error}");
-            }
-        }
-
-        if (report.Warnings.Count > 0)
-        {
-            Console.WriteLine("Warnings:");
-            foreach (var warning in report.Warnings)
-            {
-                Console.WriteLine($"  {warning}");
-            }
-        }
-
-        if (report.MismatchedBodySlots.Count > 0)
-        {
-            Console.WriteLine("Mismatched body slots:");
-            foreach (var slot in report.MismatchedBodySlots)
-            {
-                Console.WriteLine($"  {slot.Path}: '{slot.SourceText}' -> '{slot.TargetText}'");
-            }
-        }
     }
 }

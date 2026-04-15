@@ -31,12 +31,25 @@ public sealed record AnnotationSummary(
     int EndnoteCount,
     int TrackedChangeElements);
 
+public sealed record AnnotationAnchor(
+    string CommentId,
+    string? Author,
+    string? CommentText,
+    string AnchorText,
+    string Source,
+    string TargetKind,
+    int? ParagraphIndex,
+    int? TableIndex,
+    int? RowIndex,
+    int? CellIndex);
+
 public sealed record StructureSummary(
     int BookmarkCount,
     int HyperlinkCount,
     int FieldCount,
     int ContentControlCount,
-    int DrawingCount);
+    int DrawingCount,
+    IReadOnlyList<AnnotationAnchor> AnnotationAnchors);
 
 public sealed record FormattingSummary(
     int ParagraphsWithDirectFormatting,
@@ -96,11 +109,35 @@ public sealed record TemplateTransformValidationReport(
     IReadOnlyList<string> Errors,
     IReadOnlyList<string> Warnings);
 
+public sealed record DocxEditOperation(
+    string Type,
+    string? CommentId = null,
+    string? Text = null,
+    int? ParagraphIndex = null,
+    int? TableIndex = null,
+    int? RowIndex = null,
+    int? CellIndex = null,
+    IReadOnlyList<string>? CommentIds = null);
+
+public sealed record DocxEditDocument(
+    IReadOnlyList<DocxEditOperation> Operations);
+
+public sealed record DocxEditAppliedOperation(
+    string Type,
+    bool Applied,
+    string Detail);
+
+public sealed record DocxEditResult(
+    string Input,
+    string Output,
+    IReadOnlyList<DocxEditAppliedOperation> AppliedOperations);
+
 public static class Json
 {
     public static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = true
     };
 }

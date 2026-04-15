@@ -21,7 +21,6 @@ public static class Inspector
 
         var allRoots = GetRoots(doc).ToList();
         var allParagraphs = allRoots.SelectMany(root => root.Descendants<Paragraph>()).ToList();
-        var bodyParagraphs = body.Descendants<Paragraph>().ToList();
         var allTables = allRoots.SelectMany(root => root.Descendants<Table>()).ToList();
         var allTexts = allParagraphs.Select(GetParagraphText).Where(text => !string.IsNullOrWhiteSpace(text)).ToList();
 
@@ -69,6 +68,8 @@ public static class Inspector
             + root.Descendants<Inserted>().Count()
             + root.Descendants<Deleted>().Count());
 
+        var annotationAnchors = BuildAnnotationAnchors(body, mainPart);
+
         return new InspectionReport(
             File: path,
             Package: BuildPackageSummary(path),
@@ -96,10 +97,58 @@ public static class Inspector
                 HyperlinkCount: allRoots.Sum(root => root.Descendants<Hyperlink>().Count()),
                 FieldCount: allRoots.Sum(root => root.Descendants<SimpleField>().Count() + root.Descendants<FieldCode>().Count()),
                 ContentControlCount: allRoots.Sum(root => root.Descendants<SdtElement>().Count()),
-                DrawingCount: allRoots.Sum(root => root.Descendants<Drawing>().Count())),
+                DrawingCount: allRoots.Sum(root => root.Descendants<Drawing>().Count()),
+                AnnotationAnchors: annotationAnchors),
             Formatting: new FormattingSummary(
                 ParagraphsWithDirectFormatting: allParagraphs.Count(HasParagraphDirectFormatting),
                 RunsWithDirectFormatting: allRoots.SelectMany(root => root.Descendants<Run>()).Count(HasRunDirectFormatting)));
+    }
+
+    public static IReadOnlyList<AnnotationAnchor> BuildAnnotationAnchors(Body body, MainDocumentPart mainPart)
+    {
+        var comments = mainPart.WordprocessingCommentsPart?.Comments?.Elements<Comment>()?.ToDictionary(
+            comment => comment.Id?.Value ?? string.Empty,
+            comment => comment,
+            StringComparer.Ordinal) ?? new Dictionary<string, Comment>(StringComparer.Ordinal);
+
+        var anchors = new List<AnnotationAnchor>();
+        var paragraphs = body.Descendants<Paragraph>().ToList();
+        var bodyTables = body.Elements<Table>().ToList();
+
+        for (var paragraphIndex = 0; paragraphIndex < paragraphs.Count; paragraphIndex++)
+        {
+            var paragraph = paragraphs[paragraphIndex];
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var start in paragraph.Descendants<CommentRangeStart>())
+            {
+                var commentId = start.Id?.Value;
+                if (string.IsNullOrWhiteSpace(commentId) || !seen.Add(commentId))
+                {
+                    continue;
+                }
+
+                comments.TryGetValue(commentId, out var comment);
+                var anchorText = GetParagraphText(paragraph);
+                var cell = paragraph.Ancestors<TableCell>().FirstOrDefault();
+                var row = cell?.Parent as TableRow;
+                var table = cell?.Ancestors<Table>().FirstOrDefault();
+                var targetKind = cell is null ? "paragraph" : "tableCell";
+
+                anchors.Add(new AnnotationAnchor(
+                    CommentId: commentId,
+                    Author: comment?.Author?.Value,
+                    CommentText: GetCommentText(comment),
+                    AnchorText: Clip(anchorText, 240),
+                    Source: paragraph.Ancestors().LastOrDefault()?.LocalName ?? "document",
+                    TargetKind: targetKind,
+                    ParagraphIndex: paragraphIndex,
+                    TableIndex: table is null ? null : GetIndexWithinParent(bodyTables, table),
+                    RowIndex: row is null ? null : GetIndexWithinParent(table?.Elements<TableRow>().ToList(), row),
+                    CellIndex: cell is null ? null : GetIndexWithinParent(row?.Elements<TableCell>().ToList(), cell)));
+            }
+        }
+
+        return anchors;
     }
 
     public static IReadOnlyDictionary<string, string> GetPartHashes(string input)
@@ -117,15 +166,7 @@ public static class Inspector
         return hashes;
     }
 
-    private static PackageSummary BuildPackageSummary(string input)
-    {
-        using var stream = File.OpenRead(input);
-        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
-        var parts = archive.Entries.Select(entry => entry.FullName).OrderBy(name => name, StringComparer.Ordinal).ToList();
-        return new PackageSummary(parts.Count, parts);
-    }
-
-    private static IEnumerable<OpenXmlPartRootElement> GetRoots(WordprocessingDocument doc)
+    public static IEnumerable<OpenXmlPartRootElement> GetRoots(WordprocessingDocument doc)
     {
         var mainPart = doc.MainDocumentPart;
         if (mainPart?.Document is not null)
@@ -165,6 +206,46 @@ public static class Inspector
         }
     }
 
+    public static string GetParagraphText(Paragraph paragraph)
+        => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text)).Trim();
+
+    public static int? GetIndexWithinParent<T>(IReadOnlyList<T>? list, T value) where T : class
+    {
+        if (list is null)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (ReferenceEquals(list[i], value))
+            {
+                return i;
+            }
+        }
+
+        return null;
+    }
+
+    public static string? GetCommentText(Comment? comment)
+    {
+        if (comment is null)
+        {
+            return null;
+        }
+
+        var text = string.Concat(comment.Descendants<Text>().Select(node => node.Text)).Trim();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private static PackageSummary BuildPackageSummary(string input)
+    {
+        using var stream = File.OpenRead(input);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var parts = archive.Entries.Select(entry => entry.FullName).OrderBy(name => name, StringComparer.Ordinal).ToList();
+        return new PackageSummary(parts.Count, parts);
+    }
+
     private static bool LooksLikeHeading(Paragraph paragraph, string styleId)
     {
         if (styleId.StartsWith("Heading", StringComparison.OrdinalIgnoreCase))
@@ -174,9 +255,6 @@ public static class Inspector
 
         return paragraph.ParagraphProperties?.OutlineLevel is not null;
     }
-
-    private static string GetParagraphText(Paragraph paragraph)
-        => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text)).Trim();
 
     private static string GetParagraphSource(Paragraph paragraph)
     {

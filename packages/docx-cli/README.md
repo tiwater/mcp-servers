@@ -15,7 +15,7 @@ dotnet tool install -g tiwater.docx.cli
 The CLI provides several commands for document processing, structural inspection, and templating. Appending `--json` to querying commands outputs the data in a machine-readable JSON structure.
 
 ### 1. Inspect a Document
-Outputs comprehensive structural and formatting metrics of a Word document, including paragraph styles, headings, and any identified placeholders.
+Outputs a unified structural report of a Word document, including paragraph styles, headings, placeholders, comments, annotation anchors, fields, drawings, and formatting metrics.
 
 ```bash
 tiwater-docx inspect <input.docx> [--json]
@@ -47,4 +47,44 @@ Replaces internal Style IDs within a document based on a provided JSON mapping s
 
 ```bash
 tiwater-docx replace-style-ids <input.docx> <output.docx> <style-map.json>
+```
+
+### 6. Export Body JSON
+Exports body paragraphs and tables as structured JSON.
+
+```bash
+tiwater-docx export-json <input.docx> [<output.json>]
+```
+
+### 7. Fill Placeholder Template
+Fills a classic placeholder-based template using JSON data.
+
+```bash
+tiwater-docx fill-template <template.docx> <data.json> <output.docx>
+```
+
+### 8. Apply Explicit Edit Operations
+Applies a batch of explicit edits to a DOCX. Supported operation types are:
+- `replaceAnchoredText`
+- `replaceParagraphText`
+- `replaceTableCellText`
+- `deleteComment`
+- `deleteComments`
+- `markFieldsDirty`
+
+```bash
+tiwater-docx edit <input.docx> <operations.json> <output.docx>
+```
+
+Example operations file:
+
+```json
+{
+  "operations": [
+    { "type": "replaceAnchoredText", "commentId": "12", "text": "Final narrative" },
+    { "type": "replaceTableCellText", "tableIndex": 2, "rowIndex": 0, "cellIndex": 3, "text": "2026-04-15" },
+    { "type": "deleteComment", "commentId": "12" },
+    { "type": "markFieldsDirty" }
+  ]
+}
 ```

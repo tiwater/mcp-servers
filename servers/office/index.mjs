@@ -28,7 +28,7 @@ const xlsxCandidates = [
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect a DOCX document and return structural and formatting metrics.',
+    description: 'Inspect a DOCX document and return a unified structural report including placeholders, comments, anchors, tables, fields, and formatting metrics.',
     inputSchema: {
       type: 'object',
       properties: { input: { type: 'string', description: 'Absolute or relative path to a .docx file.' } },
@@ -112,6 +112,36 @@ const tools = [
     },
   },
   {
+    name: 'docx_edit',
+    description: 'Apply explicit edit operations to a DOCX document, including anchored text replacement, paragraph/cell edits, comment deletion, and field refresh.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        output: { type: 'string' },
+        edits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string' },
+              commentId: { type: 'string' },
+              text: { type: 'string' },
+              paragraphIndex: { type: 'integer' },
+              tableIndex: { type: 'integer' },
+              rowIndex: { type: 'integer' },
+              cellIndex: { type: 'integer' },
+              commentIds: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['type']
+          }
+        },
+        editsPath: { type: 'string' }
+      },
+      required: ['input', 'output'],
+    },
+  },
+  {
     name: 'xlsx_inspect',
     description: 'Inspect an XLSX workbook and return sheet-level metrics.',
     inputSchema: {
@@ -164,6 +194,8 @@ async function callTool(name, args) {
       return createToolResult(await docxExportJson(args));
     case 'docx_fill_template':
       return createToolResult(await docxFillTemplate(args));
+    case 'docx_edit':
+      return createToolResult(await docxEdit(args));
     case 'xlsx_inspect':
       return createToolResult(await xlsxInspect(args));
     case 'xlsx_export_json':
@@ -247,6 +279,23 @@ async function docxFillTemplate(args) {
   });
 }
 
+async function docxEdit(args) {
+  const input = requireString(args.input, 'input');
+  const output = requireString(args.output, 'output');
+  if (args.editsPath) {
+    const editsPath = requireString(args.editsPath, 'editsPath');
+    const result = await runCandidateChain(docxCandidates, ['edit', input, editsPath, output]);
+    return { tool: 'docx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  }
+  if (!Array.isArray(args.edits)) {
+    throw Object.assign(new Error('edits or editsPath is required'), { code: -32602 });
+  }
+  return withTempJsonFile({ operations: args.edits }, async editsPath => {
+    const result = await runCandidateChain(docxCandidates, ['edit', input, editsPath, output]);
+    return { tool: 'docx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  });
+}
+
 async function xlsxInspect(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(xlsxCandidates, ['inspect', input, '--json']);
@@ -282,16 +331,10 @@ async function xlsxFillTemplate(args) {
 }
 
 function commandRuntime(result) {
-  return `${result.command} ${result.args.join(' ')}`;
+  return {
+    command: result.command,
+    cwd: result.cwd || path.dirname(result.command),
+  };
 }
 
-const server = new McpStdioServer({
-  name: 'tiwater-office',
-  version: '0.1.2',
-  instructions: 'Shared Office MCP server for DOCX and XLSX inspection, export, validation, and template filling.',
-  tools,
-  callTool,
-  logger: message => process.stderr.write(`${message}\n`),
-});
-
-server.start();
+await new McpStdioServer({ name: 'tiwater-office', version: '0.1.0', tools, callTool }).start();
