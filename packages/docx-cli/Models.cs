@@ -41,7 +41,21 @@ public sealed record AnnotationAnchor(
     int? ParagraphIndex,
     int? TableIndex,
     int? RowIndex,
-    int? CellIndex);
+    int? CellIndex,
+    string? NearestHeadingText = null,
+    string? CurrentParagraphText = null,
+    string? PreviousParagraphText = null,
+    string? FollowingParagraphText = null,
+    int? CurrentTableRowCount = null,
+    int? CurrentTableColumnCount = null);
+
+public sealed record TableMetadata(
+    int TableIndex,
+    int RowCount,
+    int ColumnCount,
+    IReadOnlyList<int> RowWidths,
+    IReadOnlyList<int> RowCellCounts,
+    IReadOnlyList<IReadOnlyList<string>> PreviewRows);
 
 public sealed record StructureSummary(
     int BookmarkCount,
@@ -49,6 +63,7 @@ public sealed record StructureSummary(
     int FieldCount,
     int ContentControlCount,
     int DrawingCount,
+    IReadOnlyList<TableMetadata> Tables,
     IReadOnlyList<AnnotationAnchor> AnnotationAnchors);
 
 public sealed record FormattingSummary(
@@ -131,6 +146,62 @@ public sealed record DocxEditResult(
     string Input,
     string Output,
     IReadOnlyList<DocxEditAppliedOperation> AppliedOperations);
+
+public sealed record DocxPlanRequest(
+    string? Scenario,
+    IReadOnlyList<string>? SourceHints);
+
+public sealed record DocxPlanCandidateTarget(
+    string Kind,
+    string Description,
+    int? ParagraphIndex = null,
+    int? TableIndex = null,
+    int? RowIndex = null,
+    int? CellIndex = null,
+    int? RowCount = null,
+    int? ColumnCount = null);
+
+public sealed record DocxPlanItem(
+    string CommentId,
+    string CommentText,
+    AnnotationAnchor Anchor,
+    string InstructionType,
+    string TargetScope,
+    IReadOnlyList<DocxPlanCandidateTarget> CandidateTargets,
+    IReadOnlyList<string> RequiredSources,
+    string Confidence,
+    string Reasoning,
+    IReadOnlyList<DocxEditOperation> ProposedEdits);
+
+public sealed record DocxPlanResult(
+    string Input,
+    string Scenario,
+    IReadOnlyList<DocxPlanItem> Items,
+    IReadOnlyList<DocxEditOperation> ProposedEdits,
+    IReadOnlyList<string> Warnings,
+    string Confidence);
+
+public sealed record DocxResolveRequest(
+    string? Scenario,
+    string? StabilityDataPath,
+    string? ProtocolPath,
+    string? QualityStandardCnPath,
+    string? ReportPath,
+    string? InspectionReportPath = null,
+    string? SamplingPlanPath = null);
+
+public sealed record DocxResolveUnresolvedItem(
+    string CommentId,
+    string InstructionType,
+    string Reason);
+
+public sealed record DocxResolveResult(
+    string Input,
+    string Scenario,
+    IReadOnlyList<DocxEditOperation> Operations,
+    IReadOnlyList<string> ResolvedCommentIds,
+    IReadOnlyList<DocxResolveUnresolvedItem> UnresolvedItems,
+    IReadOnlyList<string> Warnings);
 
 public static class Json
 {

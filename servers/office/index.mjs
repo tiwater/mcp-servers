@@ -142,6 +142,32 @@ const tools = [
     },
   },
   {
+    name: 'docx_plan',
+    description: 'Plan ANA03-style DOCX edits from an inspection report and emit reviewable proposed docx_edit operations without mutating the document.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        data: { type: 'object' },
+        dataPath: { type: 'string' },
+      },
+      required: ['input'],
+    },
+  },
+  {
+    name: 'docx_resolve',
+    description: 'Resolve a stability-report plan plus exported source JSON paths into explicit docx_edit operations for the first ANA03 slice.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan: { type: 'object' },
+        planPath: { type: 'string' },
+        resolveData: { type: 'object' },
+        resolveDataPath: { type: 'string' },
+      },
+    },
+  },
+  {
     name: 'xlsx_inspect',
     description: 'Inspect an XLSX workbook and return sheet-level metrics, used ranges, formula counts, merged ranges, and note rows.',
     inputSchema: {
@@ -237,6 +263,10 @@ async function callTool(name, args) {
       return createToolResult(await docxFillTemplate(args));
     case 'docx_edit':
       return createToolResult(await docxEdit(args));
+    case 'docx_plan':
+      return createToolResult(await docxPlan(args));
+    case 'docx_resolve':
+      return createToolResult(await docxResolve(args));
     case 'xlsx_inspect':
       return createToolResult(await xlsxInspect(args));
     case 'xlsx_export_json':
@@ -338,6 +368,53 @@ async function docxEdit(args) {
   return withTempJsonFile({ operations: args.edits }, async editsPath => {
     const result = await runCandidateChain(docxCandidates, ['edit', input, editsPath, output]);
     return { tool: 'docx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  });
+}
+
+async function docxPlan(args) {
+  const input = requireString(args.input, 'input');
+  if (args.dataPath) {
+    const dataPath = requireString(args.dataPath, 'dataPath');
+    const result = await runCandidateChain(docxCandidates, ['plan', input, dataPath]);
+    return { tool: 'docx_plan', runtime: commandRuntime(result), plan: JSON.parse(result.stdout) };
+  }
+  if (args.data === undefined) {
+    throw Object.assign(new Error('data or dataPath is required'), { code: -32602 });
+  }
+  return withTempJsonFile(args.data, async dataPath => {
+    const result = await runCandidateChain(docxCandidates, ['plan', input, dataPath]);
+    return { tool: 'docx_plan', runtime: commandRuntime(result), plan: JSON.parse(result.stdout) };
+  });
+}
+
+async function docxResolve(args) {
+  const planPath = args.planPath ? requireString(args.planPath, 'planPath') : null;
+  const resolveDataPath = args.resolveDataPath ? requireString(args.resolveDataPath, 'resolveDataPath') : null;
+  if (!planPath && args.plan === undefined) {
+    throw Object.assign(new Error('plan or planPath is required'), { code: -32602 });
+  }
+  if (resolveDataPath) {
+    if (planPath) {
+      const result = await runCandidateChain(docxCandidates, ['resolve', planPath, resolveDataPath]);
+      return { tool: 'docx_resolve', runtime: commandRuntime(result), result: JSON.parse(result.stdout) };
+    }
+    return withTempJsonFile(args.plan, async planTempPath => {
+      const result = await runCandidateChain(docxCandidates, ['resolve', planTempPath, resolveDataPath]);
+      return { tool: 'docx_resolve', runtime: commandRuntime(result), result: JSON.parse(result.stdout) };
+    });
+  }
+  if (args.resolveData === undefined) {
+    throw Object.assign(new Error('resolveData or resolveDataPath is required'), { code: -32602 });
+  }
+  return withTempJsonFile(args.resolveData, async resolveDataTempPath => {
+    if (planPath) {
+      const result = await runCandidateChain(docxCandidates, ['resolve', planPath, resolveDataTempPath]);
+      return { tool: 'docx_resolve', runtime: commandRuntime(result), result: JSON.parse(result.stdout) };
+    }
+    return withTempJsonFile(args.plan, async planTempPath => {
+      const result = await runCandidateChain(docxCandidates, ['resolve', planTempPath, resolveDataTempPath]);
+      return { tool: 'docx_resolve', runtime: commandRuntime(result), result: JSON.parse(result.stdout) };
+    });
   });
 }
 

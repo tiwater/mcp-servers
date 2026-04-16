@@ -23,6 +23,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
+                "plan" => Task.FromResult(Planner.RunPlan(args[1..])),
+                "resolve" => Task.FromResult(Resolver.RunResolve(args[1..])),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
                 "strip-direct-formatting" => Task.FromResult(Transforms.RunStripDirectFormatting(args[1..])),
@@ -91,6 +93,8 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
+        Console.WriteLine("  plan <input.docx> <plan-data.json>");
+        Console.WriteLine("  resolve <plan.json> <resolve-data.json>");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  strip-direct-formatting <input.docx> <output.docx>");
