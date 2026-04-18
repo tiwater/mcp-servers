@@ -28,4 +28,4 @@ node servers/office/index.mjs
 ```
 
 The server prefers published `tiwater-docx`, `tiwater-xlsx`, and `tiwater-pptx` commands.
-It falls back to `dotnet run --project ...` for docx/xlsx and `python3 packages/pptx-cli/cli.py` for pptx.
+It falls back to `dotnet run --project ...` for docx/xlsx/pptx.

@@ -14,7 +14,7 @@ import {
 
 const docxProject = resolveRepoPath('packages', 'docx-cli', 'docx.csproj');
 const xlsxProject = resolveRepoPath('packages', 'xlsx-cli', 'xlsx.csproj');
-const pptxCli = resolveRepoPath('packages', 'pptx-cli', 'cli.py');
+const pptxProject = resolveRepoPath('packages', 'pptx-cli', 'pptx.csproj');
 
 const docxCandidates = [
   commandCandidate('tiwater-docx'),
@@ -28,7 +28,7 @@ const xlsxCandidates = [
 
 const pptxCandidates = [
   commandCandidate('tiwater-pptx'),
-  commandCandidate('python3', [pptxCli]),
+  commandCandidate('dotnet', ['run', '--project', pptxProject, '--']),
 ];
 
 const tools = [

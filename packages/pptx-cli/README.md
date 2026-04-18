@@ -1,13 +1,19 @@
 # tiwater-pptx
 
-Minimal command-line utility for PPTX inspection, text export, and placeholder filling.
+OpenXML-based command-line utility for PPTX inspection, text export, and placeholder filling.
 
 ## Usage
 
 ```bash
-python3 packages/pptx-cli/cli.py inspect <input.pptx> --json
-python3 packages/pptx-cli/cli.py export-json <input.pptx> [output.json]
-python3 packages/pptx-cli/cli.py fill-template <template.pptx> <data.json> <output.pptx>
+tiwater-pptx inspect <input.pptx> --json
+tiwater-pptx export-json <input.pptx> [output.json]
+tiwater-pptx fill-template <template.pptx> <data.json> <output.pptx>
+```
+
+For local development fallback:
+
+```bash
+dotnet run --project packages/pptx-cli/pptx.csproj -- inspect <input.pptx> --json
 ```
 
 ## Fill Data
