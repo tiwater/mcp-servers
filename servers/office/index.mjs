@@ -14,6 +14,7 @@ import {
 
 const docxProject = resolveRepoPath('packages', 'docx-cli', 'docx.csproj');
 const xlsxProject = resolveRepoPath('packages', 'xlsx-cli', 'xlsx.csproj');
+const pptxCli = resolveRepoPath('packages', 'pptx-cli', 'cli.py');
 
 const docxCandidates = [
   commandCandidate('tiwater-docx'),
@@ -23,6 +24,11 @@ const docxCandidates = [
 const xlsxCandidates = [
   commandCandidate('tiwater-xlsx'),
   commandCandidate('dotnet', ['run', '--project', xlsxProject, '--']),
+];
+
+const pptxCandidates = [
+  commandCandidate('tiwater-pptx'),
+  commandCandidate('python3', [pptxCli]),
 ];
 
 const tools = [
@@ -217,6 +223,41 @@ const tools = [
       required: ['input'],
     },
   },
+  {
+    name: 'pptx_inspect',
+    description: 'Inspect a PPTX file and return slide metrics and discovered placeholders.',
+    inputSchema: {
+      type: 'object',
+      properties: { input: { type: 'string' } },
+      required: ['input'],
+    },
+  },
+  {
+    name: 'pptx_export_json',
+    description: 'Export PPTX slide text and placeholder hints as structured JSON.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        output: { type: 'string' },
+      },
+      required: ['input'],
+    },
+  },
+  {
+    name: 'pptx_fill_template',
+    description: 'Fill PPTX text placeholders using a data object or JSON data file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template: { type: 'string' },
+        output: { type: 'string' },
+        data: { type: 'object' },
+        dataPath: { type: 'string' },
+      },
+      required: ['template', 'output'],
+    },
+  },
 ];
 
 async function callTool(name, args) {
@@ -247,6 +288,12 @@ async function callTool(name, args) {
       return createToolResult(await xlsxEdit(args));
     case 'xlsx_plan':
       return createToolResult(await xlsxPlan(args));
+    case 'pptx_inspect':
+      return createToolResult(await pptxInspect(args));
+    case 'pptx_export_json':
+      return createToolResult(await pptxExportJson(args));
+    case 'pptx_fill_template':
+      return createToolResult(await pptxFillTemplate(args));
     default:
       throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32601 });
   }
@@ -388,6 +435,40 @@ async function xlsxPlan(args) {
   return withTempJsonFile(args.data, async dataPath => {
     const result = await runCandidateChain(xlsxCandidates, ['plan', input, dataPath]);
     return { tool: 'xlsx_plan', runtime: commandRuntime(result), plan: JSON.parse(result.stdout) };
+  });
+}
+
+async function pptxInspect(args) {
+  const input = requireString(args.input, 'input');
+  const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json']);
+  return { tool: 'pptx_inspect', runtime: commandRuntime(result), report: result.json };
+}
+
+async function pptxExportJson(args) {
+  const input = requireString(args.input, 'input');
+  if (args.output) {
+    const output = requireString(args.output, 'output');
+    const result = await runCandidateChain(pptxCandidates, ['export-json', input, output]);
+    return { tool: 'pptx_export_json', runtime: commandRuntime(result), outputPath: output, document: await maybeReadJson(output) };
+  }
+  const result = await runCandidateChain(pptxCandidates, ['export-json', input]);
+  return { tool: 'pptx_export_json', runtime: commandRuntime(result), document: JSON.parse(result.stdout) };
+}
+
+async function pptxFillTemplate(args) {
+  const template = requireString(args.template, 'template');
+  const output = requireString(args.output, 'output');
+  if (args.dataPath) {
+    const dataPath = requireString(args.dataPath, 'dataPath');
+    const result = await runCandidateChain(pptxCandidates, ['fill-template', template, dataPath, output]);
+    return { tool: 'pptx_fill_template', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  }
+  if (args.data === undefined) {
+    throw Object.assign(new Error('data or dataPath is required'), { code: -32602 });
+  }
+  return withTempJsonFile(args.data, async dataPath => {
+    const result = await runCandidateChain(pptxCandidates, ['fill-template', template, dataPath, output]);
+    return { tool: 'pptx_fill_template', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
   });
 }
 

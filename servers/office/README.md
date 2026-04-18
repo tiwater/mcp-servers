@@ -17,6 +17,9 @@ Shared stdio MCP server for Office document workflows.
 - `xlsx_fill_template`
 - `xlsx_edit`
 - `xlsx_plan`
+- `pptx_inspect`
+- `pptx_export_json`
+- `pptx_fill_template`
 
 ## Run
 
@@ -24,4 +27,5 @@ Shared stdio MCP server for Office document workflows.
 node servers/office/index.mjs
 ```
 
-The server prefers the published `tiwater-docx` and `tiwater-xlsx` commands and falls back to `dotnet run --project ...` from this repo.
+The server prefers published `tiwater-docx`, `tiwater-xlsx`, and `tiwater-pptx` commands.
+It falls back to `dotnet run --project ...` for docx/xlsx and `python3 packages/pptx-cli/cli.py` for pptx.
