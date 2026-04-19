@@ -147,62 +147,6 @@ public sealed record DocxEditResult(
     string Output,
     IReadOnlyList<DocxEditAppliedOperation> AppliedOperations);
 
-public sealed record DocxPlanRequest(
-    string? Scenario,
-    IReadOnlyList<string>? SourceHints);
-
-public sealed record DocxPlanCandidateTarget(
-    string Kind,
-    string Description,
-    int? ParagraphIndex = null,
-    int? TableIndex = null,
-    int? RowIndex = null,
-    int? CellIndex = null,
-    int? RowCount = null,
-    int? ColumnCount = null);
-
-public sealed record DocxPlanItem(
-    string CommentId,
-    string CommentText,
-    AnnotationAnchor Anchor,
-    string InstructionType,
-    string TargetScope,
-    IReadOnlyList<DocxPlanCandidateTarget> CandidateTargets,
-    IReadOnlyList<string> RequiredSources,
-    string Confidence,
-    string Reasoning,
-    IReadOnlyList<DocxEditOperation> ProposedEdits);
-
-public sealed record DocxPlanResult(
-    string Input,
-    string Scenario,
-    IReadOnlyList<DocxPlanItem> Items,
-    IReadOnlyList<DocxEditOperation> ProposedEdits,
-    IReadOnlyList<string> Warnings,
-    string Confidence);
-
-public sealed record DocxResolveRequest(
-    string? Scenario,
-    string? StabilityDataPath,
-    string? ProtocolPath,
-    string? QualityStandardCnPath,
-    string? ReportPath,
-    string? InspectionReportPath = null,
-    string? SamplingPlanPath = null);
-
-public sealed record DocxResolveUnresolvedItem(
-    string CommentId,
-    string InstructionType,
-    string Reason);
-
-public sealed record DocxResolveResult(
-    string Input,
-    string Scenario,
-    IReadOnlyList<DocxEditOperation> Operations,
-    IReadOnlyList<string> ResolvedCommentIds,
-    IReadOnlyList<DocxResolveUnresolvedItem> UnresolvedItems,
-    IReadOnlyList<string> Warnings);
-
 public static class Json
 {
     public static readonly JsonSerializerOptions Options = new()

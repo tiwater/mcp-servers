@@ -12,13 +12,10 @@ Shared stdio MCP server for Office document workflows.
 - `docx_export_json`
 - `docx_fill_template`
 - `docx_edit`
-- `docx_plan`
-- `docx_resolve`
 - `xlsx_inspect`
 - `xlsx_export_json`
 - `xlsx_fill_template`
 - `xlsx_edit`
-- `xlsx_plan`
 
 ## Run
 
