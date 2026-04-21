@@ -149,7 +149,7 @@ const tools = [
   },
   {
     name: 'xlsx_inspect',
-    description: 'Inspect an XLSX workbook and return sheet-level metrics, used ranges, formula counts, merged ranges, and note rows.',
+    description: 'Inspect an XLSX workbook and return sheet-level metrics, used ranges, formula counts, and merged ranges.',
     inputSchema: {
       type: 'object',
       properties: { input: { type: 'string' } },
@@ -208,19 +208,6 @@ const tools = [
         editsPath: { type: 'string' }
       },
       required: ['input', 'output'],
-    },
-  },
-  {
-    name: 'xlsx_plan',
-    description: 'Plan fixed-layout spreadsheet edits from extracted source tables and return reviewable xlsx_edit operations before mutation.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        data: { type: 'object' },
-        dataPath: { type: 'string' },
-      },
-      required: ['input'],
     },
   },
   {
@@ -286,8 +273,6 @@ async function callTool(name, args) {
       return createToolResult(await xlsxFillTemplate(args));
     case 'xlsx_edit':
       return createToolResult(await xlsxEdit(args));
-    case 'xlsx_plan':
-      return createToolResult(await xlsxPlan(args));
     case 'pptx_inspect':
       return createToolResult(await pptxInspect(args));
     case 'pptx_export_json':
@@ -422,22 +407,6 @@ async function xlsxFillTemplate(args) {
   });
 }
 
-async function xlsxPlan(args) {
-  const input = requireString(args.input, 'input');
-  if (args.dataPath) {
-    const dataPath = requireString(args.dataPath, 'dataPath');
-    const result = await runCandidateChain(xlsxCandidates, ['plan', input, dataPath]);
-    return { tool: 'xlsx_plan', runtime: commandRuntime(result), plan: JSON.parse(result.stdout) };
-  }
-  if (args.data === undefined) {
-    throw Object.assign(new Error('data or dataPath is required'), { code: -32602 });
-  }
-  return withTempJsonFile(args.data, async dataPath => {
-    const result = await runCandidateChain(xlsxCandidates, ['plan', input, dataPath]);
-    return { tool: 'xlsx_plan', runtime: commandRuntime(result), plan: JSON.parse(result.stdout) };
-  });
-}
-
 async function pptxInspect(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json']);
@@ -471,7 +440,6 @@ async function pptxFillTemplate(args) {
     return { tool: 'pptx_fill_template', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
   });
 }
-
 function commandRuntime(result) {
   return {
     command: result.command,

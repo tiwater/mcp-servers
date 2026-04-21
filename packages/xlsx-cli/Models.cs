@@ -18,13 +18,7 @@ public record SheetReport(
     List<string> TablePlaceholders,
     string? UsedRange = null,
     List<string>? MergedRanges = null,
-    int FormulaCellCount = 0,
-    List<NoteRowReport>? NoteRows = null
-);
-
-public record NoteRowReport(
-    int RowIndex,
-    string Text
+    int FormulaCellCount = 0
 );
 
 public record FillData(
@@ -55,57 +49,6 @@ public sealed record XlsxEditResult(
     string Input,
     string Output,
     IReadOnlyList<XlsxEditAppliedOperation> AppliedOperations
-);
-
-public sealed record XlsxPlanRequest(
-    string? Scenario,
-    string? Sheet,
-    IReadOnlyList<XlsxPlanSourceDocument> Sources
-);
-
-public sealed record XlsxPlanSourceDocument(
-    string Name,
-    string? File,
-    IReadOnlyList<XlsxPlanSourceTable> Tables
-);
-
-public sealed record XlsxPlanSourceTable(
-    string? Title,
-    IReadOnlyList<string>? Header,
-    IReadOnlyList<IReadOnlyList<string>> Rows,
-    int? Page = null
-);
-
-public sealed record XlsxPlanResult(
-    string Input,
-    string Scenario,
-    string Sheet,
-    IReadOnlyList<XlsxPlanSelectedSource> SelectedSources,
-    IReadOnlyList<XlsxPlanSection> Sections,
-    IReadOnlyList<XlsxEditOperation> ProposedEdits,
-    IReadOnlyList<string> Warnings,
-    string Confidence
-);
-
-public sealed record XlsxPlanSelectedSource(
-    string SourceName,
-    string? File,
-    string? TableTitle,
-    int? Page
-);
-
-public sealed record XlsxPlanSection(
-    string Name,
-    string TargetStartCell,
-    string TargetEndCell,
-    bool FormulaDriven,
-    IReadOnlyList<XlsxPlanSampleRow> Samples
-);
-
-public sealed record XlsxPlanSampleRow(
-    string SampleId,
-    int TargetRow,
-    IReadOnlyList<string> Values
 );
 
 internal static class Json

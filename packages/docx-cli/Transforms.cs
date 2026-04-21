@@ -134,6 +134,9 @@ public static class Transforms
 
         var nodes = new List<object>();
 
+        var paragraphIndex = 0;
+        var tableIndex = 0;
+
         foreach (var element in body.ChildElements)
         {
             if (element is Paragraph p)
@@ -142,8 +145,9 @@ public static class Transforms
                 var style = p.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
                 if (!string.IsNullOrEmpty(text))
                 {
-                    nodes.Add(new { Type = "paragraph", Style = style, Text = text });
+                    nodes.Add(new { Type = "paragraph", ParagraphIndex = paragraphIndex, Style = style, Text = text });
                 }
+                paragraphIndex += 1;
             }
             else if (element is Table t)
             {
@@ -157,7 +161,8 @@ public static class Transforms
                     }
                     tableData.Add(rowData);
                 }
-                nodes.Add(new { Type = "table", Rows = tableData });
+                nodes.Add(new { Type = "table", TableIndex = tableIndex, Rows = tableData });
+                tableIndex += 1;
             }
         }
 

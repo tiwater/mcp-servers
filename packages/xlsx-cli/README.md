@@ -1,6 +1,6 @@
 # tiwater-xlsx
 
-A .NET 9 globally installed command-line tool for inspecting, planning, editing, and filling `.xlsx` workbooks.
+A .NET 9 globally installed command-line tool for inspecting, editing, and filling `.xlsx` workbooks.
 
 ## Installation
 
@@ -19,7 +19,7 @@ In your target Excel template (`.xlsx`):
 ## Usage
 
 ### 1. Inspect a Workbook
-Outputs sheet-level metrics, placeholders, used ranges, formula counts, merged regions, and note rows. This is the canonical low-level read surface for both placeholder templates and fixed-layout workbooks.
+Outputs sheet-level metrics, placeholders, used ranges, formula counts, and merged regions. This is the canonical low-level read surface for both placeholder templates and fixed-layout workbooks.
 
 ```bash
 tiwater-xlsx inspect <template.xlsx> [--json]
@@ -54,16 +54,7 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 ```
 
 
-### 3. Plan Fixed-Layout Edits
-Builds a reviewable plan for scenario-specific fixed-layout workbooks and emits proposed `xlsx_edit` operations without mutating the workbook.
-
-```bash
-tiwater-xlsx plan <input.xlsx> <plan-data.json>
-```
-
-The current first-class planner is scenario-specific for ANA14-style experimental record attachments. It expects extracted source tables and returns proposed section mappings plus `xlsx_edit` operations.
-
-### 4. Apply Explicit Edit Operations
+### 3. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue`
 - `setRangeValues`
@@ -82,3 +73,5 @@ Example operations file:
   ]
 }
 ```
+
+Scenario-specific fixed-layout planning workflows now live in Lucid skills and scripts. This CLI remains the generic workbook runtime for inspection, export, template filling, and explicit edit application.

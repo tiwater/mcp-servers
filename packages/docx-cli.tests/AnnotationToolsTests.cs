@@ -77,6 +77,19 @@ public class AnnotationToolsTests
         Assert.Empty(mainPart.Document.Descendants<CommentReference>());
     }
 
+    [Fact]
+    public void ExportJson_includes_body_paragraph_and_table_indexes()
+    {
+        var docPath = CreateAnnotatedFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"export-{Guid.NewGuid():N}.json");
+
+        Transforms.RunExportJson([docPath, output]);
+
+        var json = File.ReadAllText(output);
+        Assert.Contains("\"paragraphIndex\": 0", json, StringComparison.Ordinal);
+        Assert.Contains("\"tableIndex\": 0", json, StringComparison.Ordinal);
+    }
+
     private static string CreateAnnotatedFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"annotated-{Guid.NewGuid():N}.docx");

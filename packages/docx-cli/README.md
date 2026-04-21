@@ -15,7 +15,7 @@ dotnet tool install -g tiwater.docx.cli
 The CLI provides several commands for document processing, structural inspection, and templating. Appending `--json` to querying commands outputs the data in a machine-readable JSON structure.
 
 ### 1. Inspect a Document
-Outputs a unified structural report of a Word document, including paragraph styles, headings, placeholders, comments, annotation anchors, fields, drawings, and formatting metrics.
+Outputs a unified structural report of a Word document, including paragraph styles, headings, placeholders, comments, annotation anchors, table previews, fields, drawings, and formatting metrics.
 
 ```bash
 tiwater-docx inspect <input.docx> [--json]
@@ -50,7 +50,7 @@ tiwater-docx replace-style-ids <input.docx> <output.docx> <style-map.json>
 ```
 
 ### 6. Export Body JSON
-Exports body paragraphs and tables as structured JSON.
+Exports body paragraphs and tables as structured JSON, including `paragraphIndex` on paragraph nodes and `tableIndex` on table nodes.
 
 ```bash
 tiwater-docx export-json <input.docx> [<output.json>]
@@ -88,3 +88,5 @@ Example operations file:
   ]
 }
 ```
+
+Scenario-specific planning and resolution workflows now live in Lucid skills and scripts. This CLI remains the generic document runtime for inspection, export, fill, comparison, and explicit edit application.

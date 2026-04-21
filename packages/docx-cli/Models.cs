@@ -41,7 +41,21 @@ public sealed record AnnotationAnchor(
     int? ParagraphIndex,
     int? TableIndex,
     int? RowIndex,
-    int? CellIndex);
+    int? CellIndex,
+    string? NearestHeadingText = null,
+    string? CurrentParagraphText = null,
+    string? PreviousParagraphText = null,
+    string? FollowingParagraphText = null,
+    int? CurrentTableRowCount = null,
+    int? CurrentTableColumnCount = null);
+
+public sealed record TableMetadata(
+    int TableIndex,
+    int RowCount,
+    int ColumnCount,
+    IReadOnlyList<int> RowWidths,
+    IReadOnlyList<int> RowCellCounts,
+    IReadOnlyList<IReadOnlyList<string>> PreviewRows);
 
 public sealed record StructureSummary(
     int BookmarkCount,
@@ -49,6 +63,7 @@ public sealed record StructureSummary(
     int FieldCount,
     int ContentControlCount,
     int DrawingCount,
+    IReadOnlyList<TableMetadata> Tables,
     IReadOnlyList<AnnotationAnchor> AnnotationAnchors);
 
 public sealed record FormattingSummary(

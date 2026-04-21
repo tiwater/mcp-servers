@@ -1,5 +1,7 @@
 # ANA14 Planning Layer
 
+> **2026-04-21 update:** This historical planning note is superseded. ANA14 scenario planning now lives in Lucid skill-local scripts, not in `mcp-servers`, and `Lucid skill-local planner` is no longer an active server/API surface.
+
 ## Goal
 
 Add a planning layer for the ANA14 workflow so the agent can reliably:
@@ -89,7 +91,7 @@ Suggested shape:
 
 Add a first public planning command in `xlsx-cli`, exposed through the Office MCP server. Recommended surface:
 
-- `xlsx_plan`
+- `Lucid skill-local planner`
 
 Inputs:
 
@@ -168,7 +170,7 @@ Files likely involved:
 - `packages/xlsx-cli/Models.cs`
 - new planner implementation file, likely `packages/xlsx-cli/Planner.cs`
 
-### Step 3. Add `xlsx_plan`
+### Step 3. Add `Lucid skill-local planner`
 
 Implement a new command in `xlsx-cli` and expose it in the Office MCP server.
 
