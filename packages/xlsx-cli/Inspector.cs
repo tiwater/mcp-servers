@@ -24,7 +24,6 @@ public static class Inspector
             var formulaCellCount = 0;
             var placeholders = new HashSet<string>();
             var tablePlaceholders = new HashSet<string>();
-            var noteRows = new List<NoteRowReport>();
 
             if (rowCount > 0 && sheetData != null)
             {
@@ -42,15 +41,9 @@ public static class Inspector
                         columnCount = rowCellCount;
                     }
 
-                    var rowTexts = new List<string>();
-
                     foreach (var cell in rowCells)
                     {
                         var cellValue = GetCellValue(cell, sharedStringTable);
-                        if (!string.IsNullOrWhiteSpace(cellValue))
-                        {
-                            rowTexts.Add(cellValue.Trim());
-                        }
 
                         if (cell.CellFormula is not null)
                         {
@@ -70,12 +63,6 @@ public static class Inspector
                         }
                     }
 
-                    var combinedText = string.Join(" ", rowTexts);
-                    if (!string.IsNullOrWhiteSpace(combinedText) &&
-                        (combinedText.Contains("注意", StringComparison.Ordinal) || combinedText.Length >= 40))
-                    {
-                        noteRows.Add(new NoteRowReport((int)(row.RowIndex?.Value ?? 0), combinedText));
-                    }
                 }
             }
 
@@ -99,7 +86,7 @@ public static class Inspector
                 usedRange,
                 mergedRanges,
                 formulaCellCount,
-                noteRows));
+                []));
         }
 
         return new WorkbookReport(path, sheets.Count, sheets);

@@ -8,7 +8,7 @@ namespace Dockit.Xlsx.Tests;
 public class PlannerTests
 {
     [Fact]
-    public void Inspect_reports_used_range_formula_cells_and_note_rows()
+    public void Inspect_reports_used_range_and_formula_cells_without_note_inference()
     {
         var path = CreateAna14WorkbookFixture();
 
@@ -17,7 +17,7 @@ public class PlannerTests
 
         Assert.Equal("D5:L15", sheet.UsedRange);
         Assert.True(sheet.FormulaCellCount >= 5);
-        Assert.Contains(sheet.NoteRows ?? [], note => note.RowIndex == 15 && note.Text.Contains("注意", StringComparison.Ordinal));
+        Assert.Empty(sheet.NoteRows ?? []);
     }
 
     [Fact]

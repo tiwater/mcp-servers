@@ -19,7 +19,7 @@ In your target Excel template (`.xlsx`):
 ## Usage
 
 ### 1. Inspect a Workbook
-Outputs sheet-level metrics, placeholders, used ranges, formula counts, merged regions, and note rows. This is the canonical low-level read surface for both placeholder templates and fixed-layout workbooks.
+Outputs sheet-level metrics, placeholders, used ranges, formula counts, and merged regions. This is the canonical low-level read surface for both placeholder templates and fixed-layout workbooks.
 
 ```bash
 tiwater-xlsx inspect <template.xlsx> [--json]
