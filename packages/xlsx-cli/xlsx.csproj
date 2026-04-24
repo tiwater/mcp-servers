@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-xlsx</ToolCommandName>
     <PackageId>tiwater.xlsx.cli</PackageId>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
     <Authors>Tiwater</Authors>
     <Description>Inspect XLSX templates, export workbook data, and fill spreadsheet templates from the command line.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
