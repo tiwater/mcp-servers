@@ -23,6 +23,12 @@ jobs:
           dotnet pack -c Release -o ./nupkg
           dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
+      - name: Pack and Publish tiwater-convert
+        run: |
+          cd packages/convert-cli
+          dotnet pack -c Release -o ./nupkg
+          dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
       - name: Pack and Publish tiwater-docx
         run: |
           cd packages/docx-cli
