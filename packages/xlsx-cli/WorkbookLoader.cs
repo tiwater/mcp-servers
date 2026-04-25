@@ -164,9 +164,14 @@ internal static class WorkbookLoader
 
     private static string? GetOpenXmlCellValue(Cell cell, SharedStringTable? sharedStringTable)
     {
+        if (cell.InlineString is not null)
+        {
+            return cell.InlineString?.InnerText ?? cell.InnerText;
+        }
+
         if (cell.CellValue == null)
         {
-            return null;
+            return cell.InnerText;
         }
 
         var text = cell.CellValue.Text;

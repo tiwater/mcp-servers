@@ -207,17 +207,7 @@ public static class Transforms
 
         if (data.CellValues != null)
         {
-            foreach (var textProp in body.Descendants<Text>())
-            {
-                foreach (var kvp in data.CellValues)
-                {
-                    var place = "{{" + kvp.Key + "}}";
-                    if (textProp.Text.Contains(place))
-                    {
-                        textProp.Text = textProp.Text.Replace(place, kvp.Value);
-                    }
-                }
-            }
+            ReplaceCellValuePlaceholders(doc, data.CellValues);
         }
 
         if (data.TableSlots != null)
@@ -260,5 +250,49 @@ public static class Transforms
         doc.MainDocumentPart!.Document.Save();
         Console.WriteLine($"Filled template saved to {output}");
         return 0;
+    }
+
+    private static int ReplaceCellValuePlaceholders(WordprocessingDocument doc, IReadOnlyDictionary<string, string> values)
+    {
+        var replacedParagraphs = 0;
+        foreach (var root in Inspector.GetRoots(doc))
+        {
+            foreach (var paragraph in root.Descendants<Paragraph>())
+            {
+                var texts = paragraph.Descendants<Text>().ToList();
+                if (texts.Count == 0)
+                {
+                    continue;
+                }
+
+                var combined = string.Concat(texts.Select(text => text.Text));
+                var updated = ApplyPlaceholderReplacements(combined, values);
+                if (updated == combined)
+                {
+                    continue;
+                }
+
+                texts[0].Text = updated;
+                texts[0].Space = SpaceProcessingModeValues.Preserve;
+                foreach (var extra in texts.Skip(1))
+                {
+                    extra.Text = string.Empty;
+                }
+
+                replacedParagraphs += 1;
+            }
+        }
+
+        return replacedParagraphs;
+    }
+
+    private static string ApplyPlaceholderReplacements(string input, IReadOnlyDictionary<string, string> values)
+    {
+        var updated = input;
+        foreach (var kvp in values)
+        {
+            updated = updated.Replace("{{" + kvp.Key + "}}", kvp.Value ?? string.Empty, StringComparison.Ordinal);
+        }
+        return updated;
     }
 }

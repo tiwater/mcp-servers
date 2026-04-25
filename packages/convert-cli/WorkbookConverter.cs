@@ -14,7 +14,15 @@ public static class WorkbookConverter
         }
 
         using var inputStream = File.OpenRead(input);
-        var sourceWorkbook = new HSSFWorkbook(inputStream);
+        HSSFWorkbook sourceWorkbook;
+        try
+        {
+            sourceWorkbook = new HSSFWorkbook(inputStream);
+        }
+        catch (Exception ex)
+        {
+            throw ClassifyOpenWorkbookError(input, ex);
+        }
         using var targetWorkbook = new XSSFWorkbook();
 
         for (var sheetIndex = 0; sheetIndex < sourceWorkbook.NumberOfSheets; sheetIndex++)
@@ -72,6 +80,22 @@ public static class WorkbookConverter
 
         using var outputStream = File.Create(output);
         targetWorkbook.Write(outputStream);
+    }
+
+    public static Exception ClassifyOpenWorkbookError(string input, Exception ex)
+    {
+        var message = ex.Message ?? string.Empty;
+        var normalized = message.ToLowerInvariant();
+        if (normalized.Contains("password") || normalized.Contains("encrypted") || normalized.Contains("poi 4.2"))
+        {
+            return new InvalidOperationException(
+                $"Encrypted or password-protected XLS is not supported for conversion: {input}",
+                ex);
+        }
+
+        return new InvalidOperationException(
+            $"Failed to open legacy XLS for conversion: {input} :: {message}",
+            ex);
     }
 
     private static void CopyCellValue(ICell sourceCell, ICell targetCell)

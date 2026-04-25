@@ -19,7 +19,7 @@ pip install tiwater-pdf
 
 ## Commands Reference
 
-The CLI provides three major functionalities:
+The CLI provides four major functionalities:
 
 ### 1. Find a Specific Table
 Searches the document for a table matching a specific heading or name and attempts to extract it.
@@ -43,3 +43,18 @@ Provides a high-level inspection of the PDF's structural layout and tables to de
 ```bash
 tiwater-pdf inspect <report.pdf>
 ```
+
+### 4. OCR Scanned PDFs With a Vision LLM
+Extracts text from scanned or image-only PDFs using an OpenAI-compatible vision model.
+
+```bash
+tiwater-pdf ocr <scan.pdf> [--pages 1,2] [--json]
+```
+
+Configuration is read from explicit flags first, then environment variables:
+
+- `--api-key`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`
+- `--base-url`, `TIWATER_LLM_BASE_URL`, or `OPENAI_BASE_URL`
+- `--llm-model`, `[llm].ocr_model`, `[llm].vision_model`, or the built-in `gpt-4o-mini` OCR default
+
+When only `OPENROUTER_API_KEY` is present, the default base URL is `https://openrouter.ai/api/v1`.

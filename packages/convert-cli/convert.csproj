@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-convert</ToolCommandName>
     <PackageId>tiwater.convert.cli</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>Tiwater</Authors>
     <Description>Generic office format conversion CLI.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

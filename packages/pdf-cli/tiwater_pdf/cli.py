@@ -1,7 +1,9 @@
 """PDF CLI for inspection and table extraction."""
 
 import argparse
+import base64
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -288,28 +290,46 @@ def _render_table_region(doc, page_num: int, table_bbox: tuple) -> bytes:
     return pix.tobytes("png")
 
 
+def _resolve_llm_client(api_key: str | None = None, base_url: str | None = None):
+    """Create an OpenAI-compatible client from explicit args or environment."""
+    from openai import OpenAI
+
+    resolved_api_key = (
+        api_key
+        or os.environ.get("TIWATER_LLM_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("OPENROUTER_API_KEY")
+    )
+    if not resolved_api_key:
+        raise RuntimeError(
+            "LLM OCR requires TIWATER_LLM_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or --api-key"
+        )
+
+    resolved_base_url = (
+        base_url
+        or os.environ.get("TIWATER_LLM_BASE_URL")
+        or os.environ.get("OPENAI_BASE_URL")
+    )
+    if not resolved_base_url and os.environ.get("OPENROUTER_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
+        resolved_base_url = "https://openrouter.ai/api/v1"
+
+    if resolved_base_url:
+        return OpenAI(base_url=resolved_base_url, api_key=resolved_api_key)
+    return OpenAI(api_key=resolved_api_key)
+
+
 def _llm_extract_table(image_bytes: bytes, api_key: str | None = None, llm_model: str = "google/gemini-2.5-flash") -> tuple[list, list]:
     """Use an LLM (via OpenRouter/OpenAI API) to extract a clean JSON table from an image of a table.
     
     Returns:
         (header, rows)
     """
-    import os
-    import base64
-    from openai import OpenAI
-    
-    # Initialize client (will use OPENROUTER_API_KEY or OPENAI_API_KEY depending on setup)
-    # Default to openrouter since it's asked by the user
-    api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        print("Warning: No OPENROUTER_API_KEY provided for LLM fallback.", file=sys.stderr)
+    try:
+        client = _resolve_llm_client(api_key)
+    except RuntimeError as error:
+        print(f"Warning: {error}", file=sys.stderr)
         return [], []
-        
-    client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=api_key
-    )
-    
+
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = (
@@ -347,6 +367,108 @@ def _llm_extract_table(image_bytes: bytes, api_key: str | None = None, llm_model
     except Exception as e:
         print(f"Warning: Failed to parse LLM JSON response: {e}", file=sys.stderr)
         return [], []
+
+
+def _render_page_image(doc, page_num: int, zoom: float = 2.5) -> bytes:
+    page = doc[page_num]
+    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+    return pix.tobytes("png")
+
+
+def _parse_page_numbers(value: str | None) -> list[int] | None:
+    if not value:
+        return None
+    pages = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        pages.append(int(part))
+    return pages
+
+
+def _extract_json_object(text: str) -> dict:
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("empty LLM response")
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
+
+
+def llm_ocr(
+    pdf_path: Path,
+    page_numbers: list[int] | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    llm_model: str = "gpt-4o-mini",
+    zoom: float = 2.5,
+) -> dict:
+    """Extract page text from scanned PDFs using an OpenAI-compatible vision model."""
+    client = _resolve_llm_client(api_key, base_url)
+    doc = fitz.open(pdf_path)
+    pages = []
+
+    prompt = (
+        "Extract the visible text from this PDF page image with high fidelity. "
+        "Preserve Chinese and English text, numbers, units, tables, row labels, and reading order. "
+        "Use markdown tables when the page contains clear tables. "
+        "Do not summarize and do not infer missing values. "
+        "Return one JSON object with keys text, tables, warnings. "
+        "tables should be an array of markdown table strings or empty if no table is visible."
+    )
+
+    try:
+        for page_index in range(len(doc)):
+            page_number = page_index + 1
+            if page_numbers and page_number not in page_numbers:
+                continue
+            image_bytes = _render_page_image(doc, page_index, zoom=zoom)
+            b64_image = base64.b64encode(image_bytes).decode("utf-8")
+            response = client.chat.completions.create(
+                model=llm_model,
+                response_format={"type": "json_object"},
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{b64_image}"},
+                            },
+                        ],
+                    }
+                ],
+                temperature=0.0,
+            )
+            content = response.choices[0].message.content or ""
+            parsed = _extract_json_object(content)
+            pages.append({
+                "page": page_number,
+                "text": str(parsed.get("text", "")).strip(),
+                "tables": parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else [],
+                "warnings": parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else [],
+            })
+    finally:
+        doc.close()
+
+    return {
+        "file": str(pdf_path),
+        "model": llm_model,
+        "pages": pages,
+        "page_count": len(pages),
+        "text": "\n\n".join(page["text"] for page in pages if page.get("text")),
+    }
 
 
 def _reextract_with_columns(doc, page_num: int, table_bbox: tuple, table_cells: list,
@@ -698,14 +820,38 @@ def inspect(pdf_path: Path) -> dict:
         Dictionary with PDF metadata
     """
     doc = fitz.open(pdf_path)
+    page_summaries = []
+    total_images = 0
+    total_words = 0
+    scanned_pages = 0
+    for i, page in enumerate(doc):
+        image_count = len(page.get_images(full=True))
+        word_count = len(page.get_text("words"))
+        total_images += image_count
+        total_words += word_count
+        image_only = image_count > 0 and word_count == 0
+        if image_only:
+            scanned_pages += 1
+        page_summaries.append(
+            {
+                "page": i + 1,
+                "width": page.rect.width,
+                "height": page.rect.height,
+                "image_count": image_count,
+                "word_count": word_count,
+                "image_only": image_only,
+            }
+        )
+
     metadata = {
         "file": str(pdf_path),
         "pages": len(doc),
         "metadata": doc.metadata,
-        "page_sizes": [
-            {"page": i + 1, "width": page.rect.width, "height": page.rect.height}
-            for i, page in enumerate(doc)
-        ],
+        "image_count": total_images,
+        "word_count": total_words,
+        "scanned_page_count": scanned_pages,
+        "image_only": scanned_pages == len(doc) and len(doc) > 0,
+        "page_sizes": page_summaries,
     }
     doc.close()
     return metadata
@@ -774,7 +920,13 @@ def main() -> int:
     config = _load_config()
     llm_config = config.get("llm", {})
     default_api_key = llm_config.get("api_key")
+    default_base_url = llm_config.get("base_url")
     default_llm_model = llm_config.get("model", "qwen/qwen3.5-flash-02-23")
+    default_ocr_model = (
+        llm_config.get("ocr_model")
+        or llm_config.get("vision_model")
+        or "gpt-4o-mini"
+    )
 
     parser = argparse.ArgumentParser(
         description="dockit-pdf - PDF inspection and table extraction CLI"
@@ -805,6 +957,16 @@ def main() -> int:
     find_parser.add_argument("--api-key", type=str, default=default_api_key, help="OpenRouter API Key")
     find_parser.add_argument("--llm-model", type=str, default=default_llm_model, help="LLM model to use on OpenRouter")
     find_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # OCR command
+    ocr_parser = subparsers.add_parser("ocr", help="Extract scanned PDF text with an OpenAI-compatible vision LLM")
+    ocr_parser.add_argument("input", type=Path, help="PDF file to OCR")
+    ocr_parser.add_argument("--pages", type=str, help="Page numbers (comma-separated, 1-indexed)")
+    ocr_parser.add_argument("--api-key", type=str, default=default_api_key, help="LLM API key")
+    ocr_parser.add_argument("--base-url", type=str, default=default_base_url, help="OpenAI-compatible base URL")
+    ocr_parser.add_argument("--llm-model", type=str, default=default_ocr_model, help="Vision model to use")
+    ocr_parser.add_argument("--zoom", type=float, default=2.5, help="PDF render zoom for page images")
+    ocr_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()
 
@@ -861,6 +1023,21 @@ def main() -> int:
             else:
                 print(f"Table '{args.name}' not found", file=sys.stderr)
                 return 1
+
+        elif args.command == "ocr":
+            pages = _parse_page_numbers(args.pages)
+            result = llm_ocr(
+                args.input,
+                pages,
+                api_key=args.api_key,
+                base_url=args.base_url,
+                llm_model=args.llm_model,
+                zoom=args.zoom,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            else:
+                print(result["text"])
 
         return 0
 

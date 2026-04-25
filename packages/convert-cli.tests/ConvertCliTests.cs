@@ -26,6 +26,16 @@ public class ConvertCliTests
         Assert.Equal("2025-09-23", sheet.GetRow(1).GetCell(1).StringCellValue);
     }
 
+    [Fact]
+    public void Classify_open_error_marks_encrypted_workbooks_clearly()
+    {
+        var ex = WorkbookConverter.ClassifyOpenWorkbookError(
+            "/tmp/protected.xls",
+            new InvalidOperationException("Implement it based on poi 4.2 in the future"));
+
+        Assert.Contains("Encrypted or password-protected XLS", ex.Message);
+    }
+
     private static string CreateLegacyXlsFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"legacy-convert-{Guid.NewGuid():N}.xls");

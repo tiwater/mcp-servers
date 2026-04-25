@@ -39,6 +39,7 @@ public class AnnotationToolsTests
 
         var result = Editor.Apply(docPath, output, [
             new DocxEditOperation("replaceAnchoredText", CommentId: "0", Text: "Project code HSP001"),
+            new DocxEditOperation("replaceParagraphText", ParagraphIndex: 1, Text: "Top-level paragraph HSP001"),
             new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 1, Text: "Batch HSP001-01"),
             new DocxEditOperation("markFieldsDirty")
         ]);
@@ -54,6 +55,10 @@ public class AnnotationToolsTests
             .Elements<TableCell>().ElementAt(1)
             .Elements<Paragraph>().Single();
         Assert.Contains("Batch HSP001-01", GetParagraphText(tableCellParagraph));
+
+        var topLevelParagraphs = body.Elements<Paragraph>().ToList();
+        Assert.Contains("Top-level paragraph HSP001", GetParagraphText(topLevelParagraphs[1]));
+        Assert.DoesNotContain("Top-level paragraph HSP001", string.Concat(body.Elements<Table>().Single().Descendants<Text>().Select(text => text.Text)));
         Assert.True(doc.MainDocumentPart.DocumentSettingsPart?.Settings?.Elements<UpdateFieldsOnOpen>().Any() == true);
     }
 
@@ -88,6 +93,38 @@ public class AnnotationToolsTests
         var json = File.ReadAllText(output);
         Assert.Contains("\"paragraphIndex\": 0", json, StringComparison.Ordinal);
         Assert.Contains("\"tableIndex\": 0", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FillTemplate_replaces_split_placeholders_in_body_and_header()
+    {
+        var docPath = CreateSplitPlaceholderFixture();
+        var dataPath = Path.Combine(Path.GetTempPath(), $"fill-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"filled-{Guid.NewGuid():N}.docx");
+
+        File.WriteAllText(
+            dataPath,
+            """
+            {
+              "cellValues": {
+                "effectiveDate": "2024-09-18"
+              }
+            }
+            """,
+            System.Text.Encoding.UTF8);
+
+        Transforms.RunFillTemplate([docPath, dataPath, output]);
+
+        var report = Inspector.Inspect(output);
+        Assert.DoesNotContain("{{effectiveDate}}", report.Content.Placeholders);
+
+        using var doc = WordprocessingDocument.Open(output, false);
+        var bodyText = string.Concat(doc.MainDocumentPart!.Document!.Descendants<Text>().Select(text => text.Text));
+        Assert.Contains("2024-09-18", bodyText);
+
+        var headerText = string.Concat(
+            doc.MainDocumentPart.HeaderParts.SelectMany(part => part.Header!.Descendants<Text>()).Select(text => text.Text));
+        Assert.Contains("2024-09-18", headerText);
     }
 
     private static string CreateAnnotatedFixture()
@@ -143,6 +180,39 @@ public class AnnotationToolsTests
         return new Paragraph(
             new SimpleField { Instruction = "SEQ Figure \\* ARABIC", Dirty = false },
             new Run(new Text("Figure 1")));
+    }
+
+    private static string CreateSplitPlaceholderFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"split-placeholder-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        mainPart.Document = new Document(new Body());
+
+        var headerPart = mainPart.AddNewPart<HeaderPart>();
+        headerPart.Header = new Header(
+            new Paragraph(
+                new Run(new Text("Header date: ")),
+                new Run(new Text("{{")),
+                new Run(new Text("effectiveDate")),
+                new Run(new Text("}}"))));
+
+        var headerPartId = mainPart.GetIdOfPart(headerPart);
+        var sectionProps = new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = headerPartId });
+
+        var body = mainPart.Document.Body!;
+        body.Append(
+            new Paragraph(
+                new Run(new Text("Body date: ")),
+                new Run(new Text("{{")),
+                new Run(new Text("effectiveDate")),
+                new Run(new Text("}}"))));
+        body.Append(new Paragraph(new Run(new Text("after"))));
+        body.Append(sectionProps);
+
+        mainPart.Document.Save();
+        headerPart.Header.Save();
+        return path;
     }
 
     private static Comment CreateComment(string id, string author, string text)

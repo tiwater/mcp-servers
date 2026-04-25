@@ -41,6 +41,22 @@ public class EditorTests
         Assert.Equal("341366", GetCellText(worksheet, sharedStrings, "F3"));
     }
 
+    [Fact]
+    public void ExportJson_preserves_inline_string_headers_and_labels()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-export-{Guid.NewGuid():N}.json");
+
+        Extractor.RunExportJson([path, output]);
+
+        var json = File.ReadAllText(output);
+        var parsed = System.Text.Json.JsonDocument.Parse(json);
+        var rows = parsed.RootElement[0].GetProperty("rows");
+        Assert.Equal("280 nm峰面积", rows[0][3].GetString());
+        Assert.Equal("sample", rows[1][3].GetString());
+        Assert.Equal("std", rows[2][3].GetString());
+    }
+
     private static string CreateWorkbookFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"xlsx-fixture-{Guid.NewGuid():N}.xlsx");

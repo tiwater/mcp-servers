@@ -103,7 +103,7 @@ public static class Editor
             return new DocxEditAppliedOperation(operation.Type, false, "paragraphIndex and text are required");
         }
 
-        var paragraphs = body.Descendants<Paragraph>().ToList();
+        var paragraphs = body.Elements<Paragraph>().ToList();
         if (operation.ParagraphIndex.Value < 0 || operation.ParagraphIndex.Value >= paragraphs.Count)
         {
             return new DocxEditAppliedOperation(operation.Type, false, $"paragraphIndex {operation.ParagraphIndex} is out of range");
