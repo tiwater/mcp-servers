@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish-dotnet:
     name: Publish .NET Global Tools
@@ -17,23 +21,29 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      - name: Login to NuGet
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: tiwater
+
       - name: Pack and Publish tiwater-xlsx
         run: |
           cd packages/xlsx-cli
           dotnet pack -c Release -o ./nupkg
-          dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+          dotnet nuget push ./nupkg/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://www.nuget.org/api/v2/package --skip-duplicate
 
       - name: Pack and Publish tiwater-docx
         run: |
           cd packages/docx-cli
           dotnet pack -c Release -o ./nupkg
-          dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+          dotnet nuget push ./nupkg/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://www.nuget.org/api/v2/package --skip-duplicate
 
       - name: Pack and Publish tiwater-convert
         run: |
           cd packages/convert-cli
           dotnet pack -c Release -o ./nupkg
-          dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+          dotnet nuget push ./nupkg/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://www.nuget.org/api/v2/package --skip-duplicate
 
   publish-python:
     name: Publish Python Runtime (tiwater-pdf)
