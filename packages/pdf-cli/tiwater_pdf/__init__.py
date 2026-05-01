@@ -1,3 +1,3 @@
 """tiwater-pdf - PDF inspection and table extraction CLI."""
 
-__version__ = "0.1.4"
+__version__ = "0.1.10"
