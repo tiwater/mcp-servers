@@ -313,9 +313,10 @@ def _resolve_llm_client(api_key: str | None = None, base_url: str | None = None)
     if not resolved_base_url and os.environ.get("OPENROUTER_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
         resolved_base_url = "https://openrouter.ai/api/v1"
 
+    timeout = float(os.environ.get("TIWATER_LLM_TIMEOUT", "60"))
     if resolved_base_url:
-        return OpenAI(base_url=resolved_base_url, api_key=resolved_api_key)
-    return OpenAI(api_key=resolved_api_key)
+        return OpenAI(base_url=resolved_base_url, api_key=resolved_api_key, timeout=timeout)
+    return OpenAI(api_key=resolved_api_key, timeout=timeout)
 
 
 def _llm_extract_table(image_bytes: bytes, api_key: str | None = None, llm_model: str = "google/gemini-2.5-flash") -> tuple[list, list]:
@@ -451,14 +452,23 @@ def llm_ocr(
                 ],
                 temperature=0.0,
             )
-            content = response.choices[0].message.content or ""
-            parsed = _extract_json_object(content)
-            pages.append({
-                "page": page_number,
-                "text": str(parsed.get("text", "")).strip(),
-                "tables": parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else [],
-                "warnings": parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else [],
-            })
+            try:
+                content = response.choices[0].message.content or ""
+                parsed = _extract_json_object(content)
+                page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
+                pages.append({
+                    "page": page_number,
+                    "text": str(parsed.get("text", "")).strip(),
+                    "tables": parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else [],
+                    "warnings": page_warnings,
+                })
+            except Exception as error:
+                pages.append({
+                    "page": page_number,
+                    "text": "",
+                    "tables": [],
+                    "warnings": [f"OCR page failed: {type(error).__name__}: {error}"],
+                })
     finally:
         doc.close()
 
@@ -895,41 +905,19 @@ def _headers_match(header1: list[str], header2: list[str], threshold: float = 0.
     return key_match or structural_match or (len(intersection) / len(union) >= threshold)
 
 
-def _load_config() -> dict:
-    """Load configuration from ~/.dockit/config.toml or ~/.config/dockit/config.toml if present."""
-    import tomllib
-    
-    config_paths = [
-        Path.home() / ".dockit" / "config.toml",
-        Path.home() / ".config" / "dockit" / "config.toml",
-    ]
-    
-    for p in config_paths:
-        if p.exists():
-            try:
-                with open(p, "rb") as f:
-                    return tomllib.load(f)
-            except Exception as e:
-                print(f"Warning: Failed to parse config {p}: {e}", file=sys.stderr)
-                
-    return {}
-
-
 def main() -> int:
     """Main CLI entry point."""
-    config = _load_config()
-    llm_config = config.get("llm", {})
-    default_api_key = llm_config.get("api_key")
-    default_base_url = llm_config.get("base_url")
-    default_llm_model = llm_config.get("model", "qwen/qwen3.5-flash-02-23")
+    default_api_key = None
+    default_base_url = None
+    default_llm_model = os.environ.get("TIWATER_LLM_MODEL", "qwen/qwen3.5-flash-02-23")
     default_ocr_model = (
-        llm_config.get("ocr_model")
-        or llm_config.get("vision_model")
+        os.environ.get("TIWATER_LLM_OCR_MODEL")
+        or os.environ.get("TIWATER_LLM_VISION_MODEL")
         or "gpt-4o-mini"
     )
 
     parser = argparse.ArgumentParser(
-        description="dockit-pdf - PDF inspection and table extraction CLI"
+        description="tiwater-pdf - PDF inspection and table extraction CLI"
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

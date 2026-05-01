@@ -55,6 +55,6 @@ Configuration is read from explicit flags first, then environment variables:
 
 - `--api-key`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`
 - `--base-url`, `TIWATER_LLM_BASE_URL`, or `OPENAI_BASE_URL`
-- `--llm-model`, `[llm].ocr_model`, `[llm].vision_model`, or the built-in `gpt-4o-mini` OCR default
+- `--llm-model`, `TIWATER_LLM_OCR_MODEL`, `TIWATER_LLM_VISION_MODEL`, or the built-in `gpt-4o-mini` OCR default
 
 When only `OPENROUTER_API_KEY` is present, the default base URL is `https://openrouter.ai/api/v1`.
