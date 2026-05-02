@@ -53,8 +53,9 @@ tiwater-pdf ocr <scan.pdf> [--pages 1,2] [--json]
 
 Configuration is read from explicit flags first, then environment variables:
 
-- `--api-key`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`
-- `--base-url`, `TIWATER_LLM_BASE_URL`, or `OPENAI_BASE_URL`
+- `--api-key`, `SUPEN_LLM_TOKEN`, `SUPEN_LLM_API_KEY`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`
+- `--base-url`, `SUPEN_LLM_GATEWAY_URL`, `SUPEN_LLM_BASE_URL`, `TIWATER_LLM_BASE_URL`, or `OPENAI_BASE_URL`
 - `--llm-model`, `TIWATER_LLM_OCR_MODEL`, `TIWATER_LLM_VISION_MODEL`, or the built-in `gpt-4o-mini` OCR default
 
 When only `OPENROUTER_API_KEY` is present, the default base URL is `https://openrouter.ai/api/v1`.
+When running under Supen, `SUPEN_LLM_GATEWAY_URL` should point at the gateway's OpenAI-compatible route, for example `http://127.0.0.1:2755/api/llm/v1`.

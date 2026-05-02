@@ -4,7 +4,9 @@ import argparse
 import base64
 import json
 import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import fitz
@@ -290,28 +292,46 @@ def _render_table_region(doc, page_num: int, table_bbox: tuple) -> bytes:
     return pix.tobytes("png")
 
 
-def _resolve_llm_client(api_key: str | None = None, base_url: str | None = None):
-    """Create an OpenAI-compatible client from explicit args or environment."""
-    from openai import OpenAI
-
+def _resolve_llm_config(api_key: str | None = None, base_url: str | None = None) -> tuple[str, str | None]:
+    """Resolve OpenAI-compatible LLM credentials from args, config, or environment."""
     resolved_api_key = (
         api_key
+        or os.environ.get("SUPEN_LLM_TOKEN")
+        or os.environ.get("SUPEN_LLM_API_KEY")
         or os.environ.get("TIWATER_LLM_API_KEY")
         or os.environ.get("OPENAI_API_KEY")
         or os.environ.get("OPENROUTER_API_KEY")
     )
     if not resolved_api_key:
         raise RuntimeError(
-            "LLM OCR requires TIWATER_LLM_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or --api-key"
+            "LLM OCR requires SUPEN_LLM_TOKEN, SUPEN_LLM_API_KEY, TIWATER_LLM_API_KEY, "
+            "OPENAI_API_KEY, OPENROUTER_API_KEY, or --api-key"
         )
 
     resolved_base_url = (
         base_url
+        or os.environ.get("SUPEN_LLM_GATEWAY_URL")
+        or os.environ.get("SUPEN_LLM_BASE_URL")
         or os.environ.get("TIWATER_LLM_BASE_URL")
         or os.environ.get("OPENAI_BASE_URL")
     )
-    if not resolved_base_url and os.environ.get("OPENROUTER_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
+    if (
+        not resolved_base_url
+        and os.environ.get("OPENROUTER_API_KEY")
+        and not os.environ.get("OPENAI_API_KEY")
+        and not os.environ.get("SUPEN_LLM_TOKEN")
+        and not os.environ.get("SUPEN_LLM_API_KEY")
+    ):
         resolved_base_url = "https://openrouter.ai/api/v1"
+
+    return resolved_api_key, resolved_base_url
+
+
+def _resolve_llm_client(api_key: str | None = None, base_url: str | None = None):
+    """Create an OpenAI-compatible client from explicit args or environment."""
+    from openai import OpenAI
+
+    resolved_api_key, resolved_base_url = _resolve_llm_config(api_key, base_url)
 
     timeout = float(os.environ.get("TIWATER_LLM_TIMEOUT", "60"))
     if resolved_base_url:
@@ -475,6 +495,53 @@ def llm_ocr(
     return {
         "file": str(pdf_path),
         "model": llm_model,
+        "pages": pages,
+        "page_count": len(pages),
+        "text": "\n\n".join(page["text"] for page in pages if page.get("text")),
+    }
+
+
+def local_tesseract_ocr(
+    pdf_path: Path,
+    page_numbers: list[int] | None = None,
+    zoom: float = 2.5,
+    language: str = "eng",
+) -> dict:
+    """Extract page text from scanned PDFs with the local tesseract binary."""
+    doc = fitz.open(pdf_path)
+    pages = []
+
+    try:
+        for page_index in range(len(doc)):
+            page_number = page_index + 1
+            if page_numbers and page_number not in page_numbers:
+                continue
+
+            image_bytes = _render_page_image(doc, page_index, zoom=zoom)
+            with tempfile.NamedTemporaryFile(suffix=".png") as image_file:
+                image_file.write(image_bytes)
+                image_file.flush()
+                result = subprocess.run(
+                    ["tesseract", image_file.name, "stdout", "-l", language],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or "local tesseract OCR failed")
+
+            pages.append({
+                "page": page_number,
+                "text": result.stdout.strip(),
+                "tables": [],
+                "warnings": [],
+            })
+    finally:
+        doc.close()
+
+    return {
+        "file": str(pdf_path),
+        "model": f"local-tesseract:{language}",
         "pages": pages,
         "page_count": len(pages),
         "text": "\n\n".join(page["text"] for page in pages if page.get("text")),
@@ -953,6 +1020,8 @@ def main() -> int:
     ocr_parser.add_argument("--api-key", type=str, default=default_api_key, help="LLM API key")
     ocr_parser.add_argument("--base-url", type=str, default=default_base_url, help="OpenAI-compatible base URL")
     ocr_parser.add_argument("--llm-model", type=str, default=default_ocr_model, help="Vision model to use")
+    ocr_parser.add_argument("--provider", choices=["local", "llm"], default=os.getenv("TIWATER_PDF_OCR_PROVIDER", "llm"), help="OCR provider")
+    ocr_parser.add_argument("--language", type=str, default=os.getenv("TIWATER_PDF_OCR_LANGUAGE", "eng"), help="Tesseract language for local OCR")
     ocr_parser.add_argument("--zoom", type=float, default=2.5, help="PDF render zoom for page images")
     ocr_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
@@ -1014,14 +1083,22 @@ def main() -> int:
 
         elif args.command == "ocr":
             pages = _parse_page_numbers(args.pages)
-            result = llm_ocr(
-                args.input,
-                pages,
-                api_key=args.api_key,
-                base_url=args.base_url,
-                llm_model=args.llm_model,
-                zoom=args.zoom,
-            )
+            if args.provider == "local":
+                result = local_tesseract_ocr(
+                    args.input,
+                    pages,
+                    zoom=args.zoom,
+                    language=args.language,
+                )
+            else:
+                result = llm_ocr(
+                    args.input,
+                    pages,
+                    api_key=args.api_key,
+                    base_url=args.base_url,
+                    llm_model=args.llm_model,
+                    zoom=args.zoom,
+                )
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))
             else:
