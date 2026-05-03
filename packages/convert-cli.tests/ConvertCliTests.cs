@@ -24,6 +24,7 @@ public class ConvertCliTests
         Assert.Equal("Condition", sheet.GetRow(0).GetCell(0).StringCellValue);
         Assert.Equal("High temperature", sheet.GetRow(1).GetCell(0).StringCellValue);
         Assert.Equal("2025-09-23", sheet.GetRow(1).GetCell(1).StringCellValue);
+        Assert.Equal(BorderStyle.Thin, sheet.GetRow(1).GetCell(0).CellStyle.BorderBottom);
     }
 
     [Fact]
@@ -47,7 +48,11 @@ public class ConvertCliTests
         header.CreateCell(1).SetCellValue("Placement");
 
         var row1 = sheet.CreateRow(1);
-        row1.CreateCell(0).SetCellValue("High temperature");
+        var borderedStyle = workbook.CreateCellStyle();
+        borderedStyle.BorderBottom = BorderStyle.Thin;
+        var styledCell = row1.CreateCell(0);
+        styledCell.SetCellValue("High temperature");
+        styledCell.CellStyle = borderedStyle;
         row1.CreateCell(1).SetCellValue("2025-09-23");
 
         using var output = File.Create(path);

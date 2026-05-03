@@ -24,6 +24,7 @@ public static class WorkbookConverter
             throw ClassifyOpenWorkbookError(input, ex);
         }
         using var targetWorkbook = new XSSFWorkbook();
+        var styleMap = new Dictionary<short, ICellStyle>();
 
         for (var sheetIndex = 0; sheetIndex < sourceWorkbook.NumberOfSheets; sheetIndex++)
         {
@@ -51,6 +52,7 @@ public static class WorkbookConverter
 
                     var targetCell = targetRow.CreateCell(cellIndex);
                     CopyCellValue(sourceCell, targetCell);
+                    CopyCellStyle(targetWorkbook, sourceCell, targetCell, styleMap);
                 }
             }
 
@@ -96,6 +98,51 @@ public static class WorkbookConverter
         return new InvalidOperationException(
             $"Failed to open legacy XLS for conversion: {input} :: {message}",
             ex);
+    }
+
+    private static void CopyCellStyle(
+        XSSFWorkbook targetWorkbook,
+        ICell sourceCell,
+        ICell targetCell,
+        Dictionary<short, ICellStyle> styleMap)
+    {
+        var sourceStyle = sourceCell.CellStyle;
+        if (sourceStyle is null)
+        {
+            return;
+        }
+
+        if (!styleMap.TryGetValue(sourceStyle.Index, out var targetStyle))
+        {
+            targetStyle = targetWorkbook.CreateCellStyle();
+            CopyStyleProperties(sourceStyle, targetStyle);
+            styleMap[sourceStyle.Index] = targetStyle;
+        }
+
+        targetCell.CellStyle = targetStyle;
+    }
+
+    private static void CopyStyleProperties(ICellStyle sourceStyle, ICellStyle targetStyle)
+    {
+        targetStyle.Alignment = sourceStyle.Alignment;
+        targetStyle.VerticalAlignment = sourceStyle.VerticalAlignment;
+        targetStyle.BorderBottom = sourceStyle.BorderBottom;
+        targetStyle.BorderLeft = sourceStyle.BorderLeft;
+        targetStyle.BorderRight = sourceStyle.BorderRight;
+        targetStyle.BorderTop = sourceStyle.BorderTop;
+        targetStyle.BottomBorderColor = sourceStyle.BottomBorderColor;
+        targetStyle.LeftBorderColor = sourceStyle.LeftBorderColor;
+        targetStyle.RightBorderColor = sourceStyle.RightBorderColor;
+        targetStyle.TopBorderColor = sourceStyle.TopBorderColor;
+        targetStyle.DataFormat = sourceStyle.DataFormat;
+        targetStyle.FillBackgroundColor = sourceStyle.FillBackgroundColor;
+        targetStyle.FillForegroundColor = sourceStyle.FillForegroundColor;
+        targetStyle.FillPattern = sourceStyle.FillPattern;
+        targetStyle.Indention = sourceStyle.Indention;
+        targetStyle.IsLocked = sourceStyle.IsLocked;
+        targetStyle.Rotation = sourceStyle.Rotation;
+        targetStyle.ShrinkToFit = sourceStyle.ShrinkToFit;
+        targetStyle.WrapText = sourceStyle.WrapText;
     }
 
     private static void CopyCellValue(ICell sourceCell, ICell targetCell)
