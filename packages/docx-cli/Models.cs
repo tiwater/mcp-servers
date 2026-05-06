@@ -1,5 +1,7 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Unicode;
 
 namespace Dockit.Docx;
 
@@ -151,8 +153,17 @@ public static class Json
 {
     public static readonly JsonSerializerOptions Options = new()
     {
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = true
+    };
+
+    public static readonly JsonSerializerOptions CamelCaseOptions = new()
+    {
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true
     };
 }

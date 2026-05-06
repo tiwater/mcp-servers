@@ -166,7 +166,7 @@ public static class Transforms
             }
         }
 
-        var json = JsonSerializer.Serialize(nodes, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var json = JsonSerializer.Serialize(nodes, Json.CamelCaseOptions);
         if (output != null)
         {
             File.WriteAllText(output, json);

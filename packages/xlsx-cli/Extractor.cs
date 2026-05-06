@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Dockit.Xlsx;
 
 public static class Extractor
@@ -26,7 +24,7 @@ public static class Extractor
             });
         }
 
-        var json = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var json = System.Text.Json.JsonSerializer.Serialize(result, Json.Options);
         if (output != null)
         {
             File.WriteAllText(output, json);

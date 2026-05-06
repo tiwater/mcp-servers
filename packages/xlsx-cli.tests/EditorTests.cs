@@ -50,6 +50,10 @@ public class EditorTests
         Extractor.RunExportJson([path, output]);
 
         var json = File.ReadAllText(output);
+        Assert.Contains("280 nm峰面积", json, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"\u5CF0", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"\u9762", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"\u79EF", json, StringComparison.OrdinalIgnoreCase);
         var parsed = System.Text.Json.JsonDocument.Parse(json);
         var rows = parsed.RootElement[0].GetProperty("rows");
         Assert.Equal("280 nm峰面积", rows[0][3].GetString());

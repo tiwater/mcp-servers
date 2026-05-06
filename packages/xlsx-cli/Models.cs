@@ -1,6 +1,8 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Unicode;
 
 namespace Dockit.Xlsx;
 
@@ -55,6 +57,7 @@ internal static class Json
 {
     public static JsonSerializerOptions Options => new()
     {
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,

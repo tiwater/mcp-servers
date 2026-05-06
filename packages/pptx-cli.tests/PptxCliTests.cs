@@ -36,7 +36,7 @@ public class PptxCliTests
 
         Assert.Equal(path, report.File);
         Assert.Equal(2, report.Slides.Count);
-        Assert.Contains("Project {{title}}", report.Slides[0].Texts);
+        Assert.Contains("Project {{title}} 峰面积", report.Slides[0].Texts);
         Assert.Equal(["title"], report.Slides[0].Placeholders);
         Assert.Contains("Batch {{batch}}", report.Slides[1].Texts);
         Assert.Equal(["batch"], report.Slides[1].Placeholders);
@@ -44,6 +44,15 @@ public class PptxCliTests
         Assert.Equal(1, report.Notes[0].NotesNumber);
         Assert.Equal("ppt/notesSlides/notesSlide1.xml", report.Notes[0].Path);
         Assert.Contains("Notes {{title}}", report.Notes[0].Texts);
+
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-export-{Guid.NewGuid():N}.json");
+        Extractor.RunExportJson([path, output]);
+
+        var json = File.ReadAllText(output);
+        Assert.Contains("Project {{title}} 峰面积", json, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"\u5CF0", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"\u9762", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"\u79EF", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -69,7 +78,7 @@ public class PptxCliTests
             .SlideParts
             .SelectMany(part => part.Slide.Descendants<A.Text>().Select(text => text.Text))
             .ToList();
-        Assert.Contains("Project Q2 Review", slideTexts);
+        Assert.Contains("Project Q2 Review 峰面积", slideTexts);
         Assert.Contains("Batch B-001", slideTexts);
 
         var notesTexts = presentation.PresentationPart!
@@ -100,7 +109,7 @@ public class PptxCliTests
         slideMasterPart.SlideMaster.Save();
 
         var slidePart1 = presentationPart.AddNewPart<SlidePart>("rIdSlide1");
-        slidePart1.Slide = CreateSlide("Project {{title}}");
+        slidePart1.Slide = CreateSlide("Project {{title}} 峰面积");
         slidePart1.AddPart(slideLayoutPart);
         slidePart1.Slide.Save();
 

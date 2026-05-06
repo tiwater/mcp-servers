@@ -91,6 +91,10 @@ public class AnnotationToolsTests
         Transforms.RunExportJson([docPath, output]);
 
         var json = File.ReadAllText(output);
+        Assert.Contains("Project code XXXX 峰面积", json, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"\u5CF0", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"\u9762", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"\u79EF", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("\"paragraphIndex\": 0", json, StringComparison.Ordinal);
         Assert.Contains("\"tableIndex\": 0", json, StringComparison.Ordinal);
     }
@@ -140,7 +144,7 @@ public class AnnotationToolsTests
             CreateComment("1", "tester", "batch id comes from inspection report"));
 
         var body = mainPart.Document.Body!;
-        body.Append(CreateParagraphWithComment("0", "Project code XXXX"));
+        body.Append(CreateParagraphWithComment("0", "Project code XXXX 峰面积"));
         body.Append(CreateTableWithComment());
         body.Append(CreateFieldParagraph());
         mainPart.Document.Save();
