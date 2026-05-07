@@ -33,6 +33,7 @@ public sealed record XlsxEditOperation(
     string? Sheet = null,
     string? Cell = null,
     string? Value = null,
+    string? ValueType = null,
     string? StartCell = null,
     IReadOnlyList<IReadOnlyList<string>>? Values = null
 );

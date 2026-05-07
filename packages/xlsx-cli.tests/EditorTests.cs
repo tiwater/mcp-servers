@@ -1,5 +1,6 @@
 using Xunit;
 using Dockit.Xlsx;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 
@@ -39,6 +40,68 @@ public class EditorTests
         Assert.Equal("383789", GetCellText(worksheet, sharedStrings, "F2"));
         Assert.Equal("252353", GetCellText(worksheet, sharedStrings, "E3"));
         Assert.Equal("341366", GetCellText(worksheet, sharedStrings, "F3"));
+    }
+
+    [Fact]
+    public void Edit_stores_numeric_text_as_number_while_preserving_target_style()
+    {
+        var path = CreateFormattedWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-number-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "A2", Value: "10.2"),
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "C2", Value: "10.2")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet;
+        var styledCell = GetCell(worksheet, "A2");
+        var generalCell = GetCell(worksheet, "C2");
+        Assert.Null(styledCell.DataType);
+        Assert.Equal("10.2", styledCell.CellValue!.Text);
+        Assert.Equal<UInt32Value>(1, styledCell.StyleIndex!);
+        Assert.Null(generalCell.DataType);
+        Assert.Equal("10.2", generalCell.CellValue!.Text);
+    }
+
+    [Fact]
+    public void Edit_keeps_numeric_text_as_text_when_target_cell_is_text_formatted()
+    {
+        var path = CreateTextFormattedWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-text-format-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "A2", Value: "10.2")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var workbookPart = spreadsheet.WorkbookPart!;
+        var worksheet = workbookPart.WorksheetParts.Single().Worksheet;
+        var cell = GetCell(worksheet, "A2");
+        Assert.Equal(CellValues.SharedString, cell.DataType!.Value);
+        Assert.Equal("10.2", workbookPart.SharedStringTablePart!.SharedStringTable.ElementAt(int.Parse(cell.CellValue!.Text)).InnerText);
+        Assert.Equal<UInt32Value>(1, cell.StyleIndex!);
+    }
+
+    [Fact]
+    public void Edit_converts_percent_text_when_target_cell_uses_percent_format()
+    {
+        var path = CreatePercentFormattedWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-percent-format-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "A2", Value: "99.1%")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet;
+        var cell = GetCell(worksheet, "A2");
+        Assert.Null(cell.DataType);
+        Assert.Equal("0.991", cell.CellValue!.Text);
+        Assert.Equal<UInt32Value>(1, cell.StyleIndex!);
     }
 
     [Fact]
@@ -135,6 +198,64 @@ public class EditorTests
         return path;
     }
 
+    private static string CreateTextFormattedWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-text-formatted-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellFormats(
+                new CellFormat { NumberFormatId = 0, ApplyNumberFormat = false },
+                new CellFormat { NumberFormatId = 49, ApplyNumberFormat = true }
+            ) { Count = 2 }
+        );
+        stylesPart.Stylesheet.Save();
+
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        var dataRow = new Row { RowIndex = 2 };
+        dataRow.Append(new Cell { CellReference = "A2", StyleIndex = 1, DataType = CellValues.InlineString, InlineString = new InlineString(new Text("old")) });
+        worksheetPart.Worksheet = new Worksheet(new SheetData(CreateRow(1, ("A1", "Text")), dataRow));
+        var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreatePercentFormattedWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-percent-formatted-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellFormats(
+                new CellFormat { NumberFormatId = 0, ApplyNumberFormat = false },
+                new CellFormat { NumberFormatId = 10, ApplyNumberFormat = true }
+            ) { Count = 2 }
+        );
+        stylesPart.Stylesheet.Save();
+
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        var dataRow = new Row { RowIndex = 2 };
+        dataRow.Append(new Cell { CellReference = "A2", StyleIndex = 1, CellValue = new CellValue("0") });
+        worksheetPart.Worksheet = new Worksheet(new SheetData(CreateRow(1, ("A1", "Percent")), dataRow));
+        var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
     private static Row CreateRow(uint rowIndex, params (string Ref, string Value)[] cells)
     {
         var row = new Row { RowIndex = rowIndex };
@@ -147,11 +268,14 @@ public class EditorTests
 
     private static string GetCellText(Worksheet worksheet, SharedStringTable sharedStrings, string cellRef)
     {
-        var cell = worksheet.Descendants<Cell>().Single(c => c.CellReference?.Value == cellRef);
+        var cell = GetCell(worksheet, cellRef);
         if (cell.DataType?.Value == CellValues.SharedString)
         {
             return sharedStrings.ElementAt(int.Parse(cell.CellValue!.Text)).InnerText;
         }
         return cell.InnerText;
     }
+
+    private static Cell GetCell(Worksheet worksheet, string cellRef)
+        => worksheet.Descendants<Cell>().Single(c => c.CellReference?.Value == cellRef);
 }

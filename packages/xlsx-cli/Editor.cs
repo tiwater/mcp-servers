@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 
@@ -6,6 +8,9 @@ namespace Dockit.Xlsx;
 
 public static class Editor
 {
+    private static readonly Regex NumericTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", RegexOptions.Compiled);
+    private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
+
     public static int RunEdit(string[] args)
     {
         if (args.Length < 3)
@@ -81,7 +86,7 @@ public static class Editor
         }
 
         var cell = GetOrCreateCell(worksheetPart, operation.Cell);
-        SetCellStringValue(cell, operation.Value, workbookPart);
+        SetCellValue(cell, operation.Value, workbookPart, operation.ValueType);
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated {operation.Sheet}!{operation.Cell}");
     }
@@ -107,7 +112,7 @@ public static class Editor
             {
                 var cellReference = GetCellReference(startColumn + colOffset, startRow + rowOffset);
                 var cell = GetOrCreateCell(worksheetPart, cellReference);
-                SetCellStringValue(cell, rowValues[colOffset], workbookPart);
+                SetCellValue(cell, rowValues[colOffset], workbookPart, operation.ValueType);
             }
         }
 
@@ -175,6 +180,81 @@ public static class Editor
         }
     }
 
+    private static void SetCellValue(Cell cell, string value, WorkbookPart workbookPart, string? valueType)
+    {
+        var normalizedValueType = string.IsNullOrWhiteSpace(valueType) ? "auto" : valueType.Trim().ToLowerInvariant();
+        if (normalizedValueType == "number")
+        {
+            if (TryGetNumericCellText(value, cell, workbookPart, allowTextFormat: true, out var numberText))
+            {
+                SetCellNumberValue(cell, numberText);
+                return;
+            }
+        }
+        else if (normalizedValueType == "auto")
+        {
+            if (TryGetNumericCellText(value, cell, workbookPart, allowTextFormat: false, out var numberText))
+            {
+                SetCellNumberValue(cell, numberText);
+                return;
+            }
+        }
+
+        SetCellStringValue(cell, value, workbookPart);
+    }
+
+    private static bool TryGetNumericCellText(string value, Cell cell, WorkbookPart workbookPart, bool allowTextFormat, out string numberText)
+    {
+        numberText = string.Empty;
+        var text = value.Trim();
+        if (text.Length == 0 || text.Contains('\n') || text.Contains('\r'))
+        {
+            return false;
+        }
+
+        if (!allowTextFormat && IsTextFormattedCell(cell, workbookPart))
+        {
+            return false;
+        }
+
+        var normalized = text.Replace(",", string.Empty, StringComparison.Ordinal);
+        if (PercentTextPattern.IsMatch(normalized) && IsPercentFormattedCell(cell, workbookPart))
+        {
+            if (decimal.TryParse(normalized[..^1], NumberStyles.Number, CultureInfo.InvariantCulture, out var percent))
+            {
+                numberText = (percent / 100).ToString("G29", CultureInfo.InvariantCulture);
+                return true;
+            }
+        }
+
+        if (!NumericTextPattern.IsMatch(normalized) || HasUnsafeLeadingZero(normalized))
+        {
+            return false;
+        }
+
+        if (decimal.TryParse(normalized, NumberStyles.Number, CultureInfo.InvariantCulture, out var number))
+        {
+            numberText = number.ToString("G29", CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasUnsafeLeadingZero(string text)
+    {
+        var unsigned = text.TrimStart('+', '-');
+        return unsigned.Length > 1 && unsigned[0] == '0' && unsigned[1] != '.';
+    }
+
+    private static void SetCellNumberValue(Cell cell, string numberText)
+    {
+        cell.CellFormula = null;
+        cell.DataType = null;
+        cell.InlineString = null;
+        cell.CellValue = new CellValue(numberText);
+    }
+
     private static void SetCellStringValue(Cell cell, string value, WorkbookPart workbookPart)
     {
         var sharedStringTablePart = workbookPart.SharedStringTablePart ?? workbookPart.AddNewPart<SharedStringTablePart>();
@@ -200,8 +280,60 @@ public static class Editor
         }
 
         cell.CellFormula = null;
+        cell.InlineString = null;
         cell.DataType = CellValues.SharedString;
         cell.CellValue = new CellValue(index.ToString());
+    }
+
+    private static bool IsTextFormattedCell(Cell cell, WorkbookPart workbookPart)
+    {
+        var formatCode = GetNumberFormatCode(cell, workbookPart);
+        return string.Equals(formatCode, "@", StringComparison.Ordinal);
+    }
+
+    private static bool IsPercentFormattedCell(Cell cell, WorkbookPart workbookPart)
+    {
+        var formatCode = GetNumberFormatCode(cell, workbookPart);
+        return formatCode?.Contains('%', StringComparison.Ordinal) == true;
+    }
+
+    private static string? GetNumberFormatCode(Cell cell, WorkbookPart workbookPart)
+    {
+        var styleIndex = cell.StyleIndex?.Value;
+        var stylesPart = workbookPart.WorkbookStylesPart;
+        if (styleIndex is null || stylesPart?.Stylesheet.CellFormats is null)
+        {
+            return null;
+        }
+
+        var cellFormats = stylesPart.Stylesheet.CellFormats.Elements<CellFormat>().ToList();
+        if (styleIndex.Value >= cellFormats.Count)
+        {
+            return null;
+        }
+
+        var numberFormatId = cellFormats[(int)styleIndex.Value].NumberFormatId?.Value;
+        if (numberFormatId is null)
+        {
+            return null;
+        }
+
+        if (stylesPart.Stylesheet.NumberingFormats is not null)
+        {
+            var custom = stylesPart.Stylesheet.NumberingFormats.Elements<NumberingFormat>()
+                .FirstOrDefault(format => format.NumberFormatId?.Value == numberFormatId.Value);
+            if (custom?.FormatCode?.Value is string formatCode)
+            {
+                return formatCode;
+            }
+        }
+
+        return numberFormatId.Value switch
+        {
+            9 or 10 => "0%",
+            49 => "@",
+            _ => null,
+        };
     }
 
     private static (int Column, int Row) ParseCellReference(string cellReference)

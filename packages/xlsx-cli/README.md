@@ -59,6 +59,12 @@ Applies a batch of explicit fixed-layout workbook edits. Supported operation typ
 - `setCellValue`
 - `setRangeValues`
 
+By default, edit operations use `valueType: "auto"` semantics. Numeric-looking
+values are written as numeric Excel cells unless the target cell is formatted as
+text; other values are written as strings. The target cell's existing style and
+number format are preserved. Set `valueType` to `"text"` or `"number"` on an
+operation when a caller needs explicit behavior.
+
 ```bash
 tiwater-xlsx edit <input.xlsx> <operations.json> <output.xlsx>
 ```
@@ -69,7 +75,8 @@ Example operations file:
 {
   "operations": [
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "D2", "value": "260359-01" },
-    { "type": "setRangeValues", "sheet": "Sheet1", "startCell": "E2", "values": [["233988", "383789"], ["252353", "341366"]] }
+    { "type": "setCellValue", "sheet": "Sheet1", "cell": "E2", "value": "10.2" },
+    { "type": "setRangeValues", "sheet": "Sheet1", "startCell": "F2", "values": [["233988", "383789"], ["252353", "341366"]], "valueType": "number" }
   ]
 }
 ```
