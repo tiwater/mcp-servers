@@ -2,6 +2,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using NPOI.HSSF.UserModel;
 using NPOI.SS.UserModel;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using NpoiCellType = NPOI.SS.UserModel.CellType;
 
@@ -15,6 +16,7 @@ internal static class WorkbookLoader
     internal sealed record SheetDataModel(
         string Name,
         IReadOnlyList<IReadOnlyList<string>> Rows,
+        IReadOnlyList<IReadOnlyList<string>> FormattedRows,
         string? UsedRange,
         IReadOnlyList<string> MergedRanges,
         int FormulaCellCount);
@@ -34,6 +36,7 @@ internal static class WorkbookLoader
         using var spreadsheet = SpreadsheetDocument.Open(path, false);
         var workbookPart = spreadsheet.WorkbookPart ?? throw new InvalidOperationException("Workbook not found.");
         var sharedStringTable = workbookPart.SharedStringTablePart?.SharedStringTable;
+        var stylesPart = workbookPart.WorkbookStylesPart;
         var sheets = new List<SheetDataModel>();
 
         foreach (var sheetPart in workbookPart.WorksheetParts)
@@ -41,6 +44,7 @@ internal static class WorkbookLoader
             var worksheet = sheetPart.Worksheet;
             var sheetData = worksheet?.Elements<DocumentFormat.OpenXml.Spreadsheet.SheetData>().FirstOrDefault();
             var rowsData = new List<IReadOnlyList<string>>();
+            var formattedRowsData = new List<IReadOnlyList<string>>();
             var formulaCellCount = 0;
 
             if (sheetData is not null)
@@ -48,6 +52,7 @@ internal static class WorkbookLoader
                 foreach (var row in sheetData.Elements<Row>())
                 {
                     var rowData = new List<string>();
+                    var formattedRowData = new List<string>();
                     var currentColumn = 1;
 
                     foreach (var cell in row.Elements<Cell>())
@@ -62,12 +67,14 @@ internal static class WorkbookLoader
                                 while (currentColumn < columnIndex)
                                 {
                                     rowData.Add(string.Empty);
+                                    formattedRowData.Add(string.Empty);
                                     currentColumn++;
                                 }
                             }
                         }
 
-                        rowData.Add(GetOpenXmlCellValue(cell, sharedStringTable) ?? string.Empty);
+                        rowData.Add(GetOpenXmlRawCellValue(cell, sharedStringTable) ?? string.Empty);
+                        formattedRowData.Add(GetOpenXmlFormattedCellValue(cell, sharedStringTable, stylesPart) ?? string.Empty);
                         if (cell.CellFormula is not null)
                         {
                             formulaCellCount++;
@@ -77,6 +84,7 @@ internal static class WorkbookLoader
                     }
 
                     rowsData.Add(rowData);
+                    formattedRowsData.Add(formattedRowData);
                 }
             }
 
@@ -90,7 +98,7 @@ internal static class WorkbookLoader
                 .Cast<string>()
                 .ToList() ?? [];
 
-            sheets.Add(new SheetDataModel(name, rowsData, usedRange, mergedRanges, formulaCellCount));
+            sheets.Add(new SheetDataModel(name, rowsData, formattedRowsData, usedRange, mergedRanges, formulaCellCount));
         }
 
         return new WorkbookData(sheets);
@@ -106,6 +114,8 @@ internal static class WorkbookLoader
         {
             var sheet = workbook.GetSheetAt(sheetIndex);
             var rows = new List<IReadOnlyList<string>>();
+            var formattedRows = new List<IReadOnlyList<string>>();
+            var formatter = new DataFormatter(CultureInfo.InvariantCulture);
             var formulaCellCount = 0;
             var maxColumn = 0;
             var firstRowIndex = sheet.PhysicalNumberOfRows > 0 ? sheet.FirstRowNum : 0;
@@ -117,10 +127,12 @@ internal static class WorkbookLoader
                 if (row is null)
                 {
                     rows.Add([]);
+                    formattedRows.Add([]);
                     continue;
                 }
 
                 var rowValues = new List<string>();
+                var formattedRowValues = new List<string>();
                 var lastCellNum = Math.Max((int)row.LastCellNum, 0);
                 if (lastCellNum > maxColumn)
                 {
@@ -135,10 +147,12 @@ internal static class WorkbookLoader
                         formulaCellCount++;
                     }
 
-                    rowValues.Add(GetLegacyCellValue(cell));
+                    rowValues.Add(GetLegacyRawCellValue(cell));
+                    formattedRowValues.Add(GetLegacyFormattedCellValue(cell, formatter));
                 }
 
                 rows.Add(rowValues);
+                formattedRows.Add(formattedRowValues);
             }
 
             var usedRange = maxColumn > 0 && rows.Count > 0
@@ -154,6 +168,7 @@ internal static class WorkbookLoader
             sheets.Add(new SheetDataModel(
                 sheet.SheetName,
                 rows,
+                formattedRows,
                 usedRange,
                 mergedRanges,
                 formulaCellCount));
@@ -162,7 +177,7 @@ internal static class WorkbookLoader
         return new WorkbookData(sheets);
     }
 
-    private static string? GetOpenXmlCellValue(Cell cell, SharedStringTable? sharedStringTable)
+    private static string? GetOpenXmlRawCellValue(Cell cell, SharedStringTable? sharedStringTable)
     {
         if (cell.InlineString is not null)
         {
@@ -183,10 +198,32 @@ internal static class WorkbookLoader
             }
         }
 
+        if (cell.DataType != null && cell.DataType.Value == CellValues.Boolean)
+        {
+            return text == "1" ? "TRUE" : "FALSE";
+        }
+
         return text;
     }
 
-    private static string GetLegacyCellValue(ICell? cell)
+    private static string? GetOpenXmlFormattedCellValue(Cell cell, SharedStringTable? sharedStringTable, WorkbookStylesPart? stylesPart)
+    {
+        var raw = GetOpenXmlRawCellValue(cell, sharedStringTable);
+        if (raw is null)
+        {
+            return null;
+        }
+
+        if ((cell.DataType is null || cell.DataType.Value == CellValues.Number) &&
+            double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var numericValue))
+        {
+            return FormatOpenXmlNumber(numericValue, cell.StyleIndex?.Value, stylesPart);
+        }
+
+        return raw;
+    }
+
+    private static string GetLegacyRawCellValue(ICell? cell)
     {
         if (cell is null)
         {
@@ -197,26 +234,183 @@ internal static class WorkbookLoader
         {
             NpoiCellType.String => cell.StringCellValue ?? string.Empty,
             NpoiCellType.Numeric => DateUtil.IsCellDateFormatted(cell)
-                ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:yyyy-MM-dd}", cell.DateCellValue)
-                : cell.NumericCellValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ? string.Format(CultureInfo.InvariantCulture, "{0:yyyy-MM-dd}", cell.DateCellValue)
+                : cell.NumericCellValue.ToString(CultureInfo.InvariantCulture),
             NpoiCellType.Boolean => cell.BooleanCellValue ? "TRUE" : "FALSE",
-            NpoiCellType.Formula => GetLegacyFormulaValue(cell),
+            NpoiCellType.Formula => GetLegacyRawFormulaValue(cell),
             NpoiCellType.Blank => string.Empty,
             _ => cell.ToString() ?? string.Empty,
         };
     }
 
-    private static string GetLegacyFormulaValue(ICell cell)
+    private static string GetLegacyRawFormulaValue(ICell cell)
     {
         return cell.CachedFormulaResultType switch
         {
             NpoiCellType.String => cell.StringCellValue ?? string.Empty,
             NpoiCellType.Numeric => DateUtil.IsCellDateFormatted(cell)
-                ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:yyyy-MM-dd}", cell.DateCellValue)
-                : cell.NumericCellValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ? string.Format(CultureInfo.InvariantCulture, "{0:yyyy-MM-dd}", cell.DateCellValue)
+                : cell.NumericCellValue.ToString(CultureInfo.InvariantCulture),
             NpoiCellType.Boolean => cell.BooleanCellValue ? "TRUE" : "FALSE",
             _ => cell.ToString() ?? string.Empty,
         };
+    }
+
+    private static string GetLegacyFormattedCellValue(ICell? cell, DataFormatter formatter)
+        => cell is null ? string.Empty : formatter.FormatCellValue(cell);
+
+    private static string FormatOpenXmlNumber(double value, uint? styleIndex, WorkbookStylesPart? stylesPart)
+    {
+        var formatCode = GetNumberFormatCode(styleIndex, stylesPart);
+        if (string.IsNullOrWhiteSpace(formatCode) || string.Equals(formatCode, "General", StringComparison.OrdinalIgnoreCase))
+        {
+            return value.ToString("G15", CultureInfo.InvariantCulture);
+        }
+
+        if (IsDateFormat(formatCode))
+        {
+            try
+            {
+                return DateTime.FromOADate(value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+            catch (ArgumentException)
+            {
+                return value.ToString("G15", CultureInfo.InvariantCulture);
+            }
+        }
+
+        var decimals = DecimalPlacesFromFormat(formatCode);
+        var scaledValue = formatCode.Contains('%', StringComparison.Ordinal) ? value * 100 : value;
+        var formatted = scaledValue.ToString($"F{decimals}", CultureInfo.InvariantCulture);
+        return formatCode.Contains('%', StringComparison.Ordinal) ? $"{formatted}%" : formatted;
+    }
+
+    private static string? GetNumberFormatCode(uint? styleIndex, WorkbookStylesPart? stylesPart)
+    {
+        if (styleIndex is null || stylesPart?.Stylesheet?.CellFormats is null)
+        {
+            return null;
+        }
+
+        var cellFormats = stylesPart.Stylesheet.CellFormats.Elements<CellFormat>().ToList();
+        if (styleIndex.Value >= cellFormats.Count)
+        {
+            return null;
+        }
+
+        var numberFormatId = cellFormats[(int)styleIndex.Value].NumberFormatId?.Value;
+        if (numberFormatId is null)
+        {
+            return null;
+        }
+
+        var custom = stylesPart.Stylesheet.NumberingFormats?
+            .Elements<NumberingFormat>()
+            .FirstOrDefault(format => format.NumberFormatId?.Value == numberFormatId.Value)
+            ?.FormatCode?.Value;
+        if (!string.IsNullOrWhiteSpace(custom))
+        {
+            return custom;
+        }
+
+        return BuiltInNumberFormat(numberFormatId.Value);
+    }
+
+    private static string? BuiltInNumberFormat(uint numberFormatId) => numberFormatId switch
+    {
+        0 => "General",
+        1 => "0",
+        2 => "0.00",
+        3 => "#,##0",
+        4 => "#,##0.00",
+        9 => "0%",
+        10 => "0.00%",
+        11 => "0.00E+00",
+        12 => "# ?/?",
+        13 => "# ??/??",
+        14 => "m/d/yy",
+        15 => "d-mmm-yy",
+        16 => "d-mmm",
+        17 => "mmm-yy",
+        18 => "h:mm AM/PM",
+        19 => "h:mm:ss AM/PM",
+        20 => "h:mm",
+        21 => "h:mm:ss",
+        22 => "m/d/yy h:mm",
+        37 => "#,##0;(#,##0)",
+        38 => "#,##0;[Red](#,##0)",
+        39 => "#,##0.00;(#,##0.00)",
+        40 => "#,##0.00;[Red](#,##0.00)",
+        45 => "mm:ss",
+        46 => "[h]:mm:ss",
+        47 => "mmss.0",
+        48 => "##0.0E+0",
+        49 => "@",
+        _ => null,
+    };
+
+    private static bool IsDateFormat(string formatCode)
+    {
+        var cleaned = StripQuotedAndEscapedFormatText(formatCode).ToLowerInvariant();
+        return cleaned.Contains('y') || cleaned.Contains('d') || cleaned.Contains("m/");
+    }
+
+    private static int DecimalPlacesFromFormat(string formatCode)
+    {
+        var section = StripQuotedAndEscapedFormatText(formatCode).Split(';', 2)[0];
+        var decimalIndex = section.IndexOf('.', StringComparison.Ordinal);
+        if (decimalIndex < 0)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        for (var i = decimalIndex + 1; i < section.Length; i++)
+        {
+            if (section[i] is '0' or '#' or '?')
+            {
+                count++;
+                continue;
+            }
+            break;
+        }
+
+        return count;
+    }
+
+    private static string StripQuotedAndEscapedFormatText(string formatCode)
+    {
+        var chars = new List<char>();
+        var inQuote = false;
+        for (var i = 0; i < formatCode.Length; i++)
+        {
+            var c = formatCode[i];
+            if (c == '"')
+            {
+                inQuote = !inQuote;
+                continue;
+            }
+            if (inQuote)
+            {
+                continue;
+            }
+            if (c == '\\' || c == '_' || c == '*')
+            {
+                i++;
+                continue;
+            }
+            if (c == '[')
+            {
+                while (i < formatCode.Length && formatCode[i] != ']')
+                {
+                    i++;
+                }
+                continue;
+            }
+            chars.Add(c);
+        }
+
+        return new string(chars.ToArray());
     }
 
     private static int GetColumnIndex(string columnName)

@@ -20,7 +20,8 @@ public static class Extractor
             result.Add(new
             {
                 Sheet = sheet.Name,
-                Rows = sheet.Rows
+                Rows = sheet.Rows,
+                FormattedRows = sheet.FormattedRows
             });
         }
 

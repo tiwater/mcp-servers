@@ -61,6 +61,23 @@ public class EditorTests
         Assert.Equal("std", rows[2][3].GetString());
     }
 
+    [Fact]
+    public void ExportJson_uses_display_format_for_numeric_cells()
+    {
+        var path = CreateFormattedWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-formatted-export-{Guid.NewGuid():N}.json");
+
+        Extractor.RunExportJson([path, output]);
+
+        var parsed = System.Text.Json.JsonDocument.Parse(File.ReadAllText(output));
+        var rows = parsed.RootElement[0].GetProperty("rows");
+        var formattedRows = parsed.RootElement[0].GetProperty("formattedRows");
+        Assert.Equal("0.393", rows[1][0].GetString());
+        Assert.Equal("32.299999999999997", rows[1][1].GetString());
+        Assert.Equal("0.4", formattedRows[1][0].GetString());
+        Assert.Equal("32.3", formattedRows[1][1].GetString());
+    }
+
     private static string CreateWorkbookFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"xlsx-fixture-{Guid.NewGuid():N}.xlsx");
@@ -72,6 +89,44 @@ public class EditorTests
             CreateRow(1, ("D1", "280 nm峰面积"), ("E1", "LC"), ("F1", "LC_1d")),
             CreateRow(2, ("D2", "sample"), ("E2", "old"), ("F2", "old")),
             CreateRow(3, ("D3", "std"), ("E3", "old"), ("F3", "old"))
+        ));
+        var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateFormattedWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-formatted-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new NumberingFormats(
+                new NumberingFormat { NumberFormatId = 164, FormatCode = "0.0_);[Red]\\(0.0\\)" }
+            ) { Count = 1 },
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellFormats(
+                new CellFormat { NumberFormatId = 0, ApplyNumberFormat = false },
+                new CellFormat { NumberFormatId = 164, ApplyNumberFormat = true }
+            ) { Count = 2 }
+        );
+        stylesPart.Stylesheet.Save();
+
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        var dataRow = new Row { RowIndex = 2 };
+        dataRow.Append(
+            new Cell { CellReference = "A2", StyleIndex = 1, CellValue = new CellValue("0.393") },
+            new Cell { CellReference = "B2", CellValue = new CellValue("32.299999999999997") }
+        );
+        worksheetPart.Worksheet = new Worksheet(new SheetData(
+            CreateRow(1, ("A1", "Rounded"), ("B1", "General")),
+            dataRow
         ));
         var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
         sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
