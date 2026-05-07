@@ -81,6 +81,27 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_replace_header_text_without_overwriting_other_header_content()
+    {
+        var docPath = CreateHeaderLayoutFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"header-text-edited-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation("replaceHeaderText", FindText: "XX（客户项目代号）（与报告中HSPTEST对应）", Text: "HSPTEST")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var headerParagraph = doc.MainDocumentPart!.HeaderParts.Single().Header!.Elements<Paragraph>().Single();
+        var headerText = string.Concat(headerParagraph.Descendants<Text>().Select(text => text.Text));
+        Assert.Contains("HSPTEST", headerText);
+        Assert.Contains("3.2.S.7 稳定性", headerText);
+        Assert.Contains("SN0000", headerText);
+        Assert.DoesNotContain("XX（客户项目代号）（与报告中HSPTEST对应）", headerText);
+        Assert.True(headerParagraph.Descendants<TabChar>().Count() >= 2);
+    }
+
+    [Fact]
     public void Edit_can_delete_comments_explicitly()
     {
         var docPath = CreateAnnotatedFixture();
@@ -244,6 +265,33 @@ public class AnnotationToolsTests
                 new Run(new Text("effectiveDate")),
                 new Run(new Text("}}"))));
         body.Append(new Paragraph(new Run(new Text("after"))));
+        body.Append(sectionProps);
+
+        mainPart.Document.Save();
+        headerPart.Header.Save();
+        return path;
+    }
+
+    private static string CreateHeaderLayoutFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"header-layout-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        mainPart.Document = new Document(new Body());
+
+        var headerPart = mainPart.AddNewPart<HeaderPart>();
+        headerPart.Header = new Header(
+            new Paragraph(
+                new Run(new Text("XX（客户项目代号）（与报告中HSPTEST对应）")),
+                new Run(new TabChar()),
+                new Run(new Text("3.2.S.7 稳定性")),
+                new Run(new TabChar()),
+                new Run(new Text("SN0000"))));
+
+        var headerPartId = mainPart.GetIdOfPart(headerPart);
+        var sectionProps = new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = headerPartId });
+        var body = mainPart.Document.Body!;
+        body.Append(new Paragraph(new Run(new Text("body"))));
         body.Append(sectionProps);
 
         mainPart.Document.Save();

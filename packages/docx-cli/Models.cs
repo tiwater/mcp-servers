@@ -130,6 +130,7 @@ public sealed record DocxEditOperation(
     string Type,
     string? CommentId = null,
     string? Text = null,
+    string? FindText = null,
     int? HeaderIndex = null,
     int? ParagraphIndex = null,
     int? TableIndex = null,

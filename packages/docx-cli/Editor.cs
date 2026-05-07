@@ -75,6 +75,7 @@ public static class Editor
             "replaceParagraphText" => ReplaceParagraphText(body, operation),
             "replaceAllHeaderParagraphText" => ReplaceAllHeaderParagraphText(doc, operation),
             "replaceHeaderParagraphText" => ReplaceHeaderParagraphText(doc, operation),
+            "replaceHeaderText" => ReplaceHeaderText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
@@ -177,6 +178,34 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated paragraph {operation.ParagraphIndex} in {updated} header part(s)");
+    }
+
+    private static DocxEditAppliedOperation ReplaceHeaderText(WordprocessingDocument doc, DocxEditOperation operation)
+    {
+        if (string.IsNullOrEmpty(operation.FindText) || operation.Text is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "findText and text are required");
+        }
+
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        var replaced = 0;
+        foreach (var headerPart in mainPart.HeaderParts.Where(part => part.Header is not null))
+        {
+            foreach (var paragraph in headerPart.Header!.Descendants<Paragraph>())
+            {
+                if (ReplaceTextInParagraph(paragraph, operation.FindText, operation.Text))
+                {
+                    replaced++;
+                }
+            }
+        }
+
+        if (replaced == 0)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Header text not found: {operation.FindText}");
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Replaced header text in {replaced} paragraph(s)");
     }
 
     private static DocxEditAppliedOperation ReplaceTableCellText(Body body, DocxEditOperation operation)
@@ -294,6 +323,59 @@ public static class Editor
 
         paragraph.RemoveAllChildren<Run>();
         paragraph.Append(CreateStyledRunLike(firstRun, replacementText));
+    }
+
+    private static bool ReplaceTextInParagraph(Paragraph paragraph, string findText, string replacementText)
+    {
+        var texts = paragraph.Descendants<Text>().ToList();
+        if (texts.Count == 0)
+        {
+            return false;
+        }
+
+        var textSpans = new List<(Text Text, int Start, int End)>();
+        var cursor = 0;
+        foreach (var text in texts)
+        {
+            var value = text.Text ?? string.Empty;
+            textSpans.Add((text, cursor, cursor + value.Length));
+            cursor += value.Length;
+        }
+
+        var fullText = string.Concat(texts.Select(text => text.Text ?? string.Empty));
+        var index = fullText.IndexOf(findText, StringComparison.Ordinal);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var endIndex = index + findText.Length;
+        var startSpanIndex = textSpans.FindIndex(span => index >= span.Start && index < span.End);
+        var endSpanIndex = textSpans.FindIndex(span => endIndex > span.Start && endIndex <= span.End);
+        if (startSpanIndex < 0 || endSpanIndex < 0)
+        {
+            return false;
+        }
+
+        var startSpan = textSpans[startSpanIndex];
+        var endSpan = textSpans[endSpanIndex];
+        var prefix = (startSpan.Text.Text ?? string.Empty)[..(index - startSpan.Start)];
+        var suffix = (endSpan.Text.Text ?? string.Empty)[(endIndex - endSpan.Start)..];
+
+        if (startSpanIndex == endSpanIndex)
+        {
+            startSpan.Text.Text = prefix + replacementText + suffix;
+            return true;
+        }
+
+        startSpan.Text.Text = prefix + replacementText;
+        for (var i = startSpanIndex + 1; i < endSpanIndex; i++)
+        {
+            textSpans[i].Text.Text = string.Empty;
+        }
+        endSpan.Text.Text = suffix;
+
+        return true;
     }
 
     private static void ReplaceTableCellText(TableCell cell, string replacementText)
