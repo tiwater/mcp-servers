@@ -37,6 +37,14 @@ public static class Editor
         }
 
         mainPart.Document.Save();
+        foreach (var headerPart in mainPart.HeaderParts)
+        {
+            headerPart.Header?.Save();
+        }
+        foreach (var footerPart in mainPart.FooterParts)
+        {
+            footerPart.Footer?.Save();
+        }
         mainPart.DocumentSettingsPart?.Settings?.Save();
         return new DocxEditResult(Path.GetFullPath(input), Path.GetFullPath(output), applied);
     }
@@ -65,6 +73,8 @@ public static class Editor
         {
             "replaceAnchoredText" => ReplaceAnchoredText(body, operation),
             "replaceParagraphText" => ReplaceParagraphText(body, operation),
+            "replaceAllHeaderParagraphText" => ReplaceAllHeaderParagraphText(doc, operation),
+            "replaceHeaderParagraphText" => ReplaceHeaderParagraphText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
@@ -111,6 +121,62 @@ public static class Editor
 
         ReplaceWholeParagraphText(paragraphs[operation.ParagraphIndex.Value], operation.Text);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated paragraph {operation.ParagraphIndex}");
+    }
+
+    private static DocxEditAppliedOperation ReplaceHeaderParagraphText(WordprocessingDocument doc, DocxEditOperation operation)
+    {
+        if (operation.HeaderIndex is null || operation.ParagraphIndex is null || operation.Text is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "headerIndex, paragraphIndex, and text are required");
+        }
+
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        var headers = mainPart.HeaderParts
+            .Where(part => part.Header is not null)
+            .OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal)
+            .ToList();
+        if (operation.HeaderIndex.Value < 0 || operation.HeaderIndex.Value >= headers.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"headerIndex {operation.HeaderIndex} is out of range");
+        }
+
+        var paragraphs = headers[operation.HeaderIndex.Value].Header!.Elements<Paragraph>().ToList();
+        if (operation.ParagraphIndex.Value < 0 || operation.ParagraphIndex.Value >= paragraphs.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"paragraphIndex {operation.ParagraphIndex} is out of range for header {operation.HeaderIndex}");
+        }
+
+        ReplaceWholeParagraphText(paragraphs[operation.ParagraphIndex.Value], operation.Text);
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated header[{operation.HeaderIndex}].paragraph[{operation.ParagraphIndex}]");
+    }
+
+    private static DocxEditAppliedOperation ReplaceAllHeaderParagraphText(WordprocessingDocument doc, DocxEditOperation operation)
+    {
+        if (operation.ParagraphIndex is null || operation.Text is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "paragraphIndex and text are required");
+        }
+
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        var updated = 0;
+        foreach (var headerPart in mainPart.HeaderParts.Where(part => part.Header is not null))
+        {
+            var paragraphs = headerPart.Header!.Elements<Paragraph>().ToList();
+            if (operation.ParagraphIndex.Value < 0 || operation.ParagraphIndex.Value >= paragraphs.Count)
+            {
+                continue;
+            }
+
+            ReplaceWholeParagraphText(paragraphs[operation.ParagraphIndex.Value], operation.Text);
+            updated++;
+        }
+
+        if (updated == 0)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"paragraphIndex {operation.ParagraphIndex} was not found in any header");
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated paragraph {operation.ParagraphIndex} in {updated} header part(s)");
     }
 
     private static DocxEditAppliedOperation ReplaceTableCellText(Body body, DocxEditOperation operation)

@@ -63,6 +63,24 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_replace_header_paragraph_text()
+    {
+        var docPath = CreateSplitPlaceholderFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"header-edited-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation("replaceAllHeaderParagraphText", ParagraphIndex: 0, Text: "XX（客户项目代号）（与报告中HSPTEST对应）")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var headerText = string.Concat(
+            doc.MainDocumentPart!.HeaderParts.SelectMany(part => part.Header!.Descendants<Text>()).Select(text => text.Text));
+        Assert.Contains("XX（客户项目代号）（与报告中HSPTEST对应）", headerText);
+        Assert.DoesNotContain("Header date", headerText);
+    }
+
+    [Fact]
     public void Edit_can_delete_comments_explicitly()
     {
         var docPath = CreateAnnotatedFixture();
@@ -97,6 +115,20 @@ public class AnnotationToolsTests
         Assert.DoesNotContain(@"\u79EF", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("\"paragraphIndex\": 0", json, StringComparison.Ordinal);
         Assert.Contains("\"tableIndex\": 0", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExportJson_includes_header_paragraphs()
+    {
+        var docPath = CreateSplitPlaceholderFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"export-header-{Guid.NewGuid():N}.json");
+
+        Transforms.RunExportJson([docPath, output]);
+
+        var json = File.ReadAllText(output);
+        Assert.Contains("\"type\": \"headerParagraph\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"headerIndex\": 0", json, StringComparison.Ordinal);
+        Assert.Contains("Header date:", json, StringComparison.Ordinal);
     }
 
     [Fact]

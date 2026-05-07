@@ -137,6 +137,29 @@ public static class Transforms
         var paragraphIndex = 0;
         var tableIndex = 0;
 
+        var headerIndex = 0;
+        foreach (var headerPart in doc.MainDocumentPart?.HeaderParts ?? [])
+        {
+            if (headerPart.Header is null)
+            {
+                continue;
+            }
+
+            var headerParagraphIndex = 0;
+            foreach (var paragraph in headerPart.Header.Elements<Paragraph>())
+            {
+                var text = string.Concat(paragraph.Descendants<Text>().Select(t => t.Text)).Trim();
+                var style = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+                if (!string.IsNullOrEmpty(text))
+                {
+                    nodes.Add(new { Type = "headerParagraph", HeaderIndex = headerIndex, ParagraphIndex = headerParagraphIndex, Style = style, Text = text });
+                }
+                headerParagraphIndex++;
+            }
+
+            headerIndex++;
+        }
+
         foreach (var element in body.ChildElements)
         {
             if (element is Paragraph p)
