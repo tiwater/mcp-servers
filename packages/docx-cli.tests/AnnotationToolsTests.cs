@@ -63,6 +63,39 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_replace_table_with_formatted_rows()
+    {
+        var docPath = CreateAnnotatedFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"table-replaced-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation(
+                "replaceTable",
+                TableIndex: 0,
+                Rows: [
+                    [
+                        new DocxTableCellInput("检测项目", Bold: true),
+                        new DocxTableCellInput("时间点", GridSpan: 2, Bold: true)
+                    ],
+                    [
+                        new DocxTableCellInput("颜色"),
+                        new DocxTableCellInput("1月"),
+                        new DocxTableCellInput("3月")
+                    ]
+                ])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var table = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single();
+        Assert.Equal("5000", table.GetFirstChild<TableProperties>()!.GetFirstChild<TableWidth>()!.Width);
+        Assert.True(table.Elements<TableRow>().First().GetFirstChild<TableRowProperties>()!.Elements<TableHeader>().Any());
+        Assert.True(table.Elements<TableRow>().First().Descendants<Bold>().Any());
+        Assert.Equal(2, table.Elements<TableRow>().First().Elements<TableCell>().ElementAt(1).GetFirstChild<TableCellProperties>()!.GetFirstChild<GridSpan>()!.Val!.Value);
+        Assert.Contains("颜色", string.Concat(table.Descendants<Text>().Select(text => text.Text)));
+    }
+
+    [Fact]
     public void Edit_can_replace_header_paragraph_text()
     {
         var docPath = CreateSplitPlaceholderFixture();

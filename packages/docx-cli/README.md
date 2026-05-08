@@ -68,6 +68,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceAnchoredText`
 - `replaceParagraphText`
 - `replaceTableCellText`
+- `replaceTable`
 - `deleteComment`
 - `deleteComments`
 - `markFieldsDirty`
@@ -83,6 +84,21 @@ Example operations file:
   "operations": [
     { "type": "replaceAnchoredText", "commentId": "12", "text": "Final narrative" },
     { "type": "replaceTableCellText", "tableIndex": 2, "rowIndex": 0, "cellIndex": 3, "text": "2026-04-15" },
+    {
+      "type": "replaceTable",
+      "tableIndex": 0,
+      "rows": [
+        [
+          { "text": "检测项目", "bold": true },
+          { "text": "时间点", "gridSpan": 2, "bold": true }
+        ],
+        [
+          { "text": "颜色" },
+          { "text": "1月" },
+          { "text": "3月" }
+        ]
+      ]
+    },
     { "type": "deleteComment", "commentId": "12" },
     { "type": "markFieldsDirty" }
   ]

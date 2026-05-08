@@ -136,7 +136,14 @@ public sealed record DocxEditOperation(
     int? TableIndex = null,
     int? RowIndex = null,
     int? CellIndex = null,
+    IReadOnlyList<IReadOnlyList<DocxTableCellInput>>? Rows = null,
     IReadOnlyList<string>? CommentIds = null);
+
+public sealed record DocxTableCellInput(
+    string? Text = null,
+    int? GridSpan = null,
+    bool? Bold = null,
+    bool? Header = null);
 
 public sealed record DocxEditDocument(
     IReadOnlyList<DocxEditOperation> Operations);

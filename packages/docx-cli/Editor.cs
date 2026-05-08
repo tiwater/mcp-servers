@@ -77,6 +77,7 @@ public static class Editor
             "replaceHeaderParagraphText" => ReplaceHeaderParagraphText(doc, operation),
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
+            "replaceTable" => ReplaceTable(body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
             "markFieldsDirty" => MarkFieldsDirty(doc),
@@ -235,6 +236,143 @@ public static class Editor
 
         ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}]");
+    }
+
+    private static DocxEditAppliedOperation ReplaceTable(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.Rows is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex and rows are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var sourceTable = tables[operation.TableIndex.Value];
+        var replacement = BuildReplacementTable(sourceTable, operation.Rows);
+        sourceTable.InsertAfterSelf(replacement);
+        sourceTable.Remove();
+        return new DocxEditAppliedOperation(operation.Type, true, $"Replaced table[{operation.TableIndex}] with {operation.Rows.Count} row(s)");
+    }
+
+    private static Table BuildReplacementTable(Table sourceTable, IReadOnlyList<IReadOnlyList<DocxTableCellInput>> rows)
+    {
+        var table = new Table();
+        var sourceProperties = sourceTable.GetFirstChild<TableProperties>();
+        table.AppendChild(sourceProperties is null ? new TableProperties() : (TableProperties)sourceProperties.CloneNode(true));
+        EnsureFullWidth(table.GetFirstChild<TableProperties>()!);
+
+        var maxColumns = rows.Count == 0 ? 1 : rows.Max(row => row.Sum(cell => Math.Max(1, cell.GridSpan ?? 1)));
+        var sourceGrid = sourceTable.GetFirstChild<TableGrid>();
+        if (sourceGrid is not null)
+        {
+            var grid = (TableGrid)sourceGrid.CloneNode(true);
+            while (grid.Elements<GridColumn>().Count() < maxColumns)
+            {
+                grid.AppendChild(new GridColumn { Width = "1200" });
+            }
+            table.AppendChild(grid);
+        }
+        else
+        {
+            var grid = new TableGrid();
+            for (var i = 0; i < maxColumns; i++)
+            {
+                grid.AppendChild(new GridColumn { Width = "1200" });
+            }
+            table.AppendChild(grid);
+        }
+
+        var templateRows = sourceTable.Elements<TableRow>().ToList();
+        for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        {
+            var templateRow = templateRows.ElementAtOrDefault(Math.Min(rowIndex, Math.Max(0, templateRows.Count - 1)));
+            var row = BuildReplacementRow(templateRow, rows[rowIndex], rowIndex == 0 || rows[rowIndex].Any(cell => cell.Header == true));
+            table.AppendChild(row);
+        }
+
+        return table;
+    }
+
+    private static void EnsureFullWidth(TableProperties properties)
+    {
+        properties.RemoveAllChildren<TableWidth>();
+        properties.PrependChild(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct });
+    }
+
+    private static TableRow BuildReplacementRow(TableRow? templateRow, IReadOnlyList<DocxTableCellInput> cells, bool isHeader)
+    {
+        var row = new TableRow();
+        var templateProperties = templateRow?.GetFirstChild<TableRowProperties>();
+        if (templateProperties is not null)
+        {
+            row.AppendChild((TableRowProperties)templateProperties.CloneNode(true));
+        }
+        if (isHeader)
+        {
+            var properties = row.GetFirstChild<TableRowProperties>() ?? row.PrependChild(new TableRowProperties());
+            if (!properties.Elements<TableHeader>().Any())
+            {
+                properties.AppendChild(new TableHeader());
+            }
+        }
+
+        var templateCells = templateRow?.Elements<TableCell>().ToList() ?? [];
+        for (var cellIndex = 0; cellIndex < cells.Count; cellIndex++)
+        {
+            var templateCell = templateCells.ElementAtOrDefault(Math.Min(cellIndex, Math.Max(0, templateCells.Count - 1)));
+            row.AppendChild(BuildReplacementCell(templateCell, cells[cellIndex], isHeader));
+        }
+
+        return row;
+    }
+
+    private static TableCell BuildReplacementCell(TableCell? templateCell, DocxTableCellInput input, bool rowIsHeader)
+    {
+        var cell = new TableCell();
+        var templateProperties = templateCell?.GetFirstChild<TableCellProperties>();
+        if (templateProperties is not null)
+        {
+            cell.AppendChild((TableCellProperties)templateProperties.CloneNode(true));
+        }
+        else
+        {
+            cell.AppendChild(new TableCellProperties());
+        }
+
+        var properties = cell.GetFirstChild<TableCellProperties>()!;
+        properties.RemoveAllChildren<GridSpan>();
+        if (input.GridSpan is > 1)
+        {
+            properties.AppendChild(new GridSpan { Val = input.GridSpan.Value });
+        }
+
+        var paragraph = new Paragraph();
+        var run = new Run();
+        if (input.Bold == true || rowIsHeader)
+        {
+            run.AppendChild(new RunProperties(new Bold()));
+        }
+        AppendTextWithLineBreaks(run, input.Text ?? string.Empty);
+        paragraph.AppendChild(run);
+        cell.AppendChild(paragraph);
+        return cell;
+    }
+
+    private static void AppendTextWithLineBreaks(Run run, string text)
+    {
+        var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (i > 0)
+            {
+                run.AppendChild(new Break());
+            }
+            run.AppendChild(new Text(lines[i]) { Space = SpaceProcessingModeValues.Preserve });
+        }
     }
 
     private static DocxEditAppliedOperation DeleteComments(WordprocessingDocument doc, IReadOnlyList<string> commentIds)
