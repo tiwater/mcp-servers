@@ -29,6 +29,21 @@ internal static class Program
                     }));
                     return 0;
                 default:
+                    if (args[0].EndsWith("-to-pdf", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var sourceFormat = args[0][..^"-to-pdf".Length];
+                        OfficePdfConverter.ConvertToPdf(args[1], args[2], sourceFormat);
+                        Console.WriteLine(JsonSerializer.Serialize(new
+                        {
+                            status = "ok",
+                            input = Path.GetFullPath(args[1]),
+                            output = Path.GetFullPath(args[2]),
+                            source_format = sourceFormat.ToLowerInvariant(),
+                            target_format = "pdf"
+                        }));
+                        return 0;
+                    }
+
                     Console.Error.WriteLine($"Unknown command: {args[0]}");
                     PrintUsage();
                     return 1;
@@ -45,5 +60,6 @@ internal static class Program
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>");
+        Console.WriteLine("  tiwater-convert <docx|xlsx|pptx|doc|xls|ppt|odt|ods|odp|rtf>-to-pdf <input> <output.pdf>");
     }
 }
