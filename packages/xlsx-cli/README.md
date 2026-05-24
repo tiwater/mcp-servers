@@ -56,7 +56,7 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 
 ### 3. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
-- `setCellValue`
+- `setCellValue` (optional `bold: true|false`)
 - `setRangeValues`
 
 By default, edit operations use `valueType: "auto"` semantics. Numeric-looking
@@ -75,6 +75,7 @@ Example operations file:
 {
   "operations": [
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "D2", "value": "260359-01" },
+    { "type": "setCellValue", "sheet": "Sheet1", "cell": "E7", "value": "浅于黄色0.5号标准比色液", "bold": false },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "E2", "value": "10.2" },
     { "type": "setRangeValues", "sheet": "Sheet1", "startCell": "F2", "values": [["233988", "383789"], ["252353", "341366"]], "valueType": "number" }
   ]

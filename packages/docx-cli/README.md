@@ -69,9 +69,16 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceParagraphText`
 - `replaceTableCellText`
 - `replaceTable`
+- `setTableWidth`
+- `setTableCellAlignment`
 - `deleteComment`
 - `deleteComments`
+- `sanitizeFields`
 - `markFieldsDirty`
+
+`replaceTableCellText` accepts optional `alignment` (`left`, `center`, `right`, `both`).
+`setTableWidth` accepts `width` and `widthType` (`pct`, `dxa`, `auto`, `nil`).
+`sanitizeFields` removes update-field prompts and dirty field markers from the package.
 
 ```bash
 tiwater-docx edit <input.docx> <operations.json> <output.docx>
@@ -100,6 +107,9 @@ Example operations file:
       ]
     },
     { "type": "deleteComment", "commentId": "12" },
+    { "type": "setTableWidth", "tableIndex": 0, "width": "5000", "widthType": "pct" },
+    { "type": "setTableCellAlignment", "tableIndex": 1, "rowIndex": 2, "cellIndex": 3, "alignment": "center" },
+    { "type": "sanitizeFields" },
     { "type": "markFieldsDirty" }
   ]
 }

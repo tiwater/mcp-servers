@@ -57,4 +57,52 @@ public class LegacyXlsTests
         workbook.Write(stream);
         return path;
     }
+
+    [Fact]
+    public void ExportJson_resolves_merged_cells()
+    {
+        var input = CreateMergedXlsFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"merged-xls-export-{Guid.NewGuid():N}.json");
+
+        Extractor.RunExportJson([input, output, "--resolve-merged-cells"]);
+
+        var json = File.ReadAllText(output);
+        Assert.Contains("\"MergedValue\"", json, StringComparison.Ordinal);
+        
+        // Let's assert that there are two occurrences of "MergedValue" (one for row 1, one for row 2)
+        var count = 0;
+        var index = 0;
+        while ((index = json.IndexOf("\"MergedValue\"", index, StringComparison.Ordinal)) != -1)
+        {
+            count++;
+            index += 13;
+        }
+        Assert.Equal(4, count);
+    }
+
+    private static string CreateMergedXlsFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"merged-xls-{Guid.NewGuid():N}.xls");
+
+        using var workbook = new HSSFWorkbook();
+        var sheet = workbook.CreateSheet("Data");
+        
+        var row1 = sheet.CreateRow(0);
+        row1.CreateCell(0).SetCellValue("Header");
+        row1.CreateCell(1).SetCellValue("Val");
+
+        var row2 = sheet.CreateRow(1);
+        row2.CreateCell(0).SetCellValue("MergedValue");
+        row2.CreateCell(1).SetCellValue("A");
+
+        var row3 = sheet.CreateRow(2);
+        // Column 0 is left empty (merged)
+        row3.CreateCell(1).SetCellValue("B");
+
+        sheet.AddMergedRegion(new NPOI.SS.Util.CellRangeAddress(1, 2, 0, 0));
+
+        using var stream = File.Create(path);
+        workbook.Write(stream);
+        return path;
+    }
 }

@@ -96,6 +96,66 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_replace_table_with_advanced_formatting()
+    {
+        var docPath = CreateAnnotatedFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"table-advanced-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation(
+                "replaceTable",
+                TableIndex: 0,
+                Rows: [
+                    [
+                        new DocxTableCellInput("Header 1", Bold: true, Shading: "F2F2F2", Alignment: "center"),
+                        new DocxTableCellInput("Header 2", Bold: true, Shading: "F2F2F2", Alignment: "center")
+                    ],
+                    [
+                        new DocxTableCellInput("Merged Row", VMerge: "restart"),
+                        new DocxTableCellInput("Value 1", Alignment: "right")
+                    ],
+                    [
+                        new DocxTableCellInput("", VMerge: "continue"),
+                        new DocxTableCellInput("Value 2", Alignment: "right")
+                    ]
+                ])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var table = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single();
+        
+        var rows = table.Elements<TableRow>().ToList();
+        Assert.Equal(3, rows.Count);
+
+        var cell1 = rows[0].Elements<TableCell>().First();
+        var shading = cell1.GetFirstChild<TableCellProperties>()!.GetFirstChild<Shading>();
+        Assert.NotNull(shading);
+        Assert.Equal("F2F2F2", shading.Fill!.Value);
+
+        var p1 = cell1.Elements<Paragraph>().First();
+        var jc = p1.GetFirstChild<ParagraphProperties>()!.GetFirstChild<Justification>();
+        Assert.NotNull(jc);
+        Assert.Equal(JustificationValues.Center, jc.Val!.Value);
+
+        var cell2_1 = rows[1].Elements<TableCell>().First();
+        var vm1 = cell2_1.GetFirstChild<TableCellProperties>()!.GetFirstChild<VerticalMerge>();
+        Assert.NotNull(vm1);
+        Assert.Equal(MergedCellValues.Restart, vm1.Val!.Value);
+
+        var cell3_1 = rows[2].Elements<TableCell>().First();
+        var vm2 = cell3_1.GetFirstChild<TableCellProperties>()!.GetFirstChild<VerticalMerge>();
+        Assert.NotNull(vm2);
+        Assert.Equal(MergedCellValues.Continue, vm2.Val!.Value);
+
+        var cell2_2 = rows[1].Elements<TableCell>().ElementAt(1);
+        var p2_2 = cell2_2.Elements<Paragraph>().First();
+        var jc2_2 = p2_2.GetFirstChild<ParagraphProperties>()!.GetFirstChild<Justification>();
+        Assert.NotNull(jc2_2);
+        Assert.Equal(JustificationValues.Right, jc2_2.Val!.Value);
+    }
+
+    [Fact]
     public void Edit_can_replace_header_paragraph_text()
     {
         var docPath = CreateSplitPlaceholderFixture();
@@ -329,6 +389,114 @@ public class AnnotationToolsTests
 
         mainPart.Document.Save();
         headerPart.Header.Save();
+        return path;
+    }
+
+    [Fact]
+    public void Edit_can_merge_table_cells_horizontally_and_vertically()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-merge-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("R1C1")))),
+                        new TableCell(new Paragraph(new Run(new Text("R1C2"))))
+                    ),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("R2C1")))),
+                        new TableCell(new Paragraph(new Run(new Text("R2C2"))))
+                    )
+                )
+            ));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"merged-cells-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("mergeTableCells", TableIndex: 0, RowIndex: 0, StartCellIndex: 0, EndCellIndex: 1),
+            new DocxEditOperation("mergeTableCells", TableIndex: 0, CellIndex: 0, StartRowIndex: 0, EndRowIndex: 1)
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using (var doc = WordprocessingDocument.Open(output, false))
+        {
+            var table = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single();
+            var rows = table.Elements<TableRow>().ToList();
+
+            var r1Cell = rows[0].Elements<TableCell>().Single();
+            var span = r1Cell.GetFirstChild<TableCellProperties>()?.GetFirstChild<GridSpan>();
+            Assert.NotNull(span);
+            Assert.Equal(2, span.Val!.Value);
+
+            var vm1 = r1Cell.GetFirstChild<TableCellProperties>()?.GetFirstChild<VerticalMerge>();
+            Assert.NotNull(vm1);
+            Assert.Equal(MergedCellValues.Restart, vm1.Val!.Value);
+
+            var r2Cell = rows[1].Elements<TableCell>().ElementAt(0);
+            var vm2 = r2Cell.GetFirstChild<TableCellProperties>()?.GetFirstChild<VerticalMerge>();
+            Assert.NotNull(vm2);
+            Assert.Equal(MergedCellValues.Continue, vm2.Val!.Value);
+        }
+    }
+
+    [Fact]
+    public void Edit_applies_fillTableSemantically_correctly()
+    {
+        var path = CreateSemanticTableFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"semantic-filled-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("fillTableSemantically", TableIndex: 0, Cells: [
+                new DocxSemanticFillRule(RowPatterns: ["pH"], ColPatterns: ["1个月"], Text: "5.3"),
+                new DocxSemanticFillRule(RowPatterns: ["主峰"], ColPatterns: ["1个月"], Text: "98.6")
+            ])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using (var doc = WordprocessingDocument.Open(output, false))
+        {
+            var table = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single();
+            var gridMap = new TableGridMap(table);
+            
+            Assert.Equal("5.3", string.Concat(gridMap.Grid[1, 3]!.Descendants<Text>().Select(t => t.Text)).Trim());
+            Assert.Equal("98.6", string.Concat(gridMap.Grid[2, 3]!.Descendants<Text>().Select(t => t.Text)).Trim());
+        }
+    }
+
+    private static string CreateSemanticTableFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"semantic-template-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("检测项目")))),
+                        new TableCell(new Paragraph(new Run(new Text("参考标准")))),
+                        new TableCell(new Paragraph(new Run(new Text("T0")))),
+                        new TableCell(new Paragraph(new Run(new Text("1个月"))))
+                    ),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("pH")))),
+                        new TableCell(new Paragraph(new Run(new Text("5.1±0.3")))),
+                        new TableCell(new Paragraph(new Run(new Text("5.2")))),
+                        new TableCell(new Paragraph(new Run(new Text(""))))
+                    ),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("主峰")))),
+                        new TableCell(new Paragraph(new Run(new Text("≥95.0%")))),
+                        new TableCell(new Paragraph(new Run(new Text("98.4")))),
+                        new TableCell(new Paragraph(new Run(new Text(""))))
+                    )
+                )
+            ));
+            mainPart.Document.Save();
+        }
         return path;
     }
 

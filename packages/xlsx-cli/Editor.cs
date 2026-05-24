@@ -87,6 +87,10 @@ public static class Editor
 
         var cell = GetOrCreateCell(worksheetPart, operation.Cell);
         SetCellValue(cell, operation.Value, workbookPart, operation.ValueType);
+        if (operation.Bold.HasValue)
+        {
+            ApplyCellBold(workbookPart, cell, operation.Bold.Value);
+        }
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated {operation.Sheet}!{operation.Cell}");
     }
@@ -283,6 +287,46 @@ public static class Editor
         cell.InlineString = null;
         cell.DataType = CellValues.SharedString;
         cell.CellValue = new CellValue(index.ToString());
+    }
+
+    private static void ApplyCellBold(WorkbookPart workbookPart, Cell cell, bool bold)
+    {
+        var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet ??= new Stylesheet
+        {
+            Fonts = new Fonts(new Font()),
+            Fills = new Fills(new Fill()),
+            Borders = new Borders(new Border()),
+            CellStyleFormats = new CellStyleFormats(new CellFormat()),
+            CellFormats = new CellFormats(new CellFormat()),
+        };
+
+        var stylesheet = stylesPart.Stylesheet;
+        stylesheet.Fonts ??= new Fonts(new Font());
+        stylesheet.CellFormats ??= new CellFormats(new CellFormat());
+
+        var sourceStyleIndex = cell.StyleIndex?.Value ?? 0U;
+        var sourceFormat = stylesheet.CellFormats!.Elements<CellFormat>().ElementAtOrDefault((int)sourceStyleIndex) ?? stylesheet.CellFormats.Elements<CellFormat>().First();
+        var sourceFontIndex = sourceFormat.FontId?.Value ?? 0U;
+        var sourceFont = stylesheet.Fonts!.Elements<Font>().ElementAtOrDefault((int)sourceFontIndex) ?? stylesheet.Fonts.Elements<Font>().First();
+
+        var targetFont = (Font)sourceFont.CloneNode(true);
+        if (targetFont.Bold is null)
+        {
+            targetFont.Bold = new Bold();
+        }
+        targetFont.Bold.Val = bold;
+
+        var fontIndex = (uint)stylesheet.Fonts!.Count();
+        stylesheet.Fonts!.Append(targetFont);
+
+        var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
+        targetFormat.FontId = fontIndex;
+        var formatIndex = (uint)stylesheet.CellFormats!.Count();
+        stylesheet.CellFormats!.Append(targetFormat);
+        stylesPart.Stylesheet.Save();
+
+        cell.StyleIndex = formatIndex;
     }
 
     private static bool IsTextFormattedCell(Cell cell, WorkbookPart workbookPart)

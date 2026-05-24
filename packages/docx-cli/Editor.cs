@@ -78,9 +78,14 @@ public static class Editor
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
             "replaceTable" => ReplaceTable(body, operation),
+            "setTableWidth" => SetTableWidth(body, operation),
+            "setTableCellAlignment" => SetTableCellAlignment(body, operation),
+            "mergeTableCells" => MergeTableCells(body, operation),
+            "fillTableSemantically" => FillTableSemantically(body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
             "markFieldsDirty" => MarkFieldsDirty(doc),
+            "sanitizeFields" => SanitizeFields(doc),
             _ => new DocxEditAppliedOperation(operation.Type, false, $"Unknown operation type: {operation.Type}"),
         };
     }
@@ -234,8 +239,65 @@ public static class Editor
             return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {operation.CellIndex} is out of range");
         }
 
-        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text);
+        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text, operation.Alignment);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}]");
+    }
+
+    private static DocxEditAppliedOperation SetTableWidth(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex is required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var properties = tables[operation.TableIndex.Value].GetFirstChild<TableProperties>() ?? tables[operation.TableIndex.Value].PrependChild(new TableProperties());
+        properties.RemoveAllChildren<TableWidth>();
+        var widthType = string.Equals(operation.WidthType, "dxa", StringComparison.OrdinalIgnoreCase)
+            ? TableWidthUnitValues.Dxa
+            : TableWidthUnitValues.Pct;
+        properties.PrependChild(new TableWidth
+        {
+            Width = string.IsNullOrWhiteSpace(operation.Width) ? "5000" : operation.Width,
+            Type = widthType,
+        });
+        properties.RemoveAllChildren<TableLayout>();
+        properties.AppendChild(new TableLayout { Type = TableLayoutValues.Autofit });
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}] width");
+    }
+
+    private static DocxEditAppliedOperation SetTableCellAlignment(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null || string.IsNullOrWhiteSpace(operation.Alignment))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, cellIndex, and alignment are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value < 0 || operation.RowIndex.Value >= rows.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {operation.RowIndex} is out of range");
+        }
+
+        var cells = rows[operation.RowIndex.Value].Elements<TableCell>().ToList();
+        if (operation.CellIndex.Value < 0 || operation.CellIndex.Value >= cells.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {operation.CellIndex} is out of range");
+        }
+
+        ApplyCellAlignment(cells[operation.CellIndex.Value], operation.Alignment);
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}] alignment");
     }
 
     private static DocxEditAppliedOperation ReplaceTable(Body body, DocxEditOperation operation)
@@ -301,6 +363,8 @@ public static class Editor
     {
         properties.RemoveAllChildren<TableWidth>();
         properties.PrependChild(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct });
+        properties.RemoveAllChildren<TableLayout>();
+        properties.AppendChild(new TableLayout { Type = TableLayoutValues.Autofit });
     }
 
     private static TableRow BuildReplacementRow(TableRow? templateRow, IReadOnlyList<DocxTableCellInput> cells, bool isHeader)
@@ -344,13 +408,42 @@ public static class Editor
         }
 
         var properties = cell.GetFirstChild<TableCellProperties>()!;
+        properties.RemoveAllChildren<TableCellWidth>();
+        
         properties.RemoveAllChildren<GridSpan>();
         if (input.GridSpan is > 1)
         {
             properties.AppendChild(new GridSpan { Val = input.GridSpan.Value });
         }
 
+        properties.RemoveAllChildren<VerticalMerge>();
+        if (input.VMerge is { Length: > 0 } vMergeVal)
+        {
+            var vmVal = vMergeVal.ToLowerInvariant() == "restart" ? MergedCellValues.Restart : MergedCellValues.Continue;
+            properties.AppendChild(new VerticalMerge { Val = vmVal });
+        }
+
+        if (input.Shading is { Length: > 0 } hexColor)
+        {
+            properties.RemoveAllChildren<Shading>();
+            properties.AppendChild(new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = hexColor });
+        }
+
         var paragraph = new Paragraph();
+        var paragraphProperties = new ParagraphProperties();
+        
+        if (input.Alignment is { Length: > 0 } align)
+        {
+            var jcVal = align.ToLowerInvariant() switch
+            {
+                "center" => JustificationValues.Center,
+                "right" => JustificationValues.Right,
+                _ => JustificationValues.Left
+            };
+            paragraphProperties.AppendChild(new Justification { Val = jcVal });
+        }
+        paragraph.AppendChild(paragraphProperties);
+
         var run = new Run();
         if (input.Bold == true || rowIsHeader)
         {
@@ -422,6 +515,22 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation("markFieldsDirty", true, "Marked fields dirty and enabled update on open");
+    }
+
+    private static DocxEditAppliedOperation SanitizeFields(WordprocessingDocument doc)
+    {
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        mainPart.DocumentSettingsPart?.Settings?.RemoveAllChildren<UpdateFieldsOnOpen>();
+
+        foreach (var root in Inspector.GetRoots(doc))
+        {
+            foreach (var fieldChar in root.Descendants<FieldChar>().Where(fieldChar => fieldChar.Dirty != null))
+            {
+                fieldChar.Dirty = null;
+            }
+        }
+
+        return new DocxEditAppliedOperation("sanitizeFields", true, "Sanitized field-update risks");
     }
 
     private static bool ReplaceCommentRangeInParagraph(Paragraph paragraph, string commentId, string replacementText)
@@ -516,11 +625,39 @@ public static class Editor
         return true;
     }
 
-    private static void ReplaceTableCellText(TableCell cell, string replacementText)
+    private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null)
     {
         var firstRun = cell.Descendants<Run>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
-        cell.Append(new Paragraph(CreateStyledRunLike(firstRun, replacementText)));
+        var paragraph = new Paragraph(CreateStyledRunLike(firstRun, replacementText));
+        if (!string.IsNullOrWhiteSpace(alignment))
+        {
+            ApplyParagraphAlignment(paragraph, alignment);
+        }
+        cell.Append(paragraph);
+    }
+
+    private static void ApplyCellAlignment(TableCell cell, string alignment)
+    {
+        foreach (var paragraph in cell.Elements<Paragraph>())
+        {
+            ApplyParagraphAlignment(paragraph, alignment);
+        }
+    }
+
+    private static void ApplyParagraphAlignment(Paragraph paragraph, string alignment)
+    {
+        var properties = paragraph.GetFirstChild<ParagraphProperties>() ?? paragraph.PrependChild(new ParagraphProperties());
+        properties.RemoveAllChildren<Justification>();
+        properties.AppendChild(new Justification
+        {
+            Val = alignment.ToLowerInvariant() switch
+            {
+                "center" => JustificationValues.Center,
+                "right" => JustificationValues.Right,
+                _ => JustificationValues.Left,
+            },
+        });
     }
 
     private static Run CreateStyledRunLike(Run? templateRun, string text)
@@ -531,5 +668,150 @@ public static class Editor
             run.RunProperties = (RunProperties)templateRun.RunProperties.CloneNode(true);
         }
         return run;
+    }
+
+    private static DocxEditAppliedOperation MergeTableCells(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex is required");
+        }
+
+        var tables = body.Descendants<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var table = tables[operation.TableIndex.Value];
+        var rows = table.Elements<TableRow>().ToList();
+
+        if (operation.RowIndex is not null)
+        {
+            var rowIndex = operation.RowIndex.Value;
+            if (rowIndex < 0 || rowIndex >= rows.Count)
+            {
+                return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {rowIndex} is out of range");
+            }
+
+            var row = rows[rowIndex];
+            var cells = row.Elements<TableCell>().ToList();
+            var startCellIndex = operation.StartCellIndex ?? 0;
+            var endCellIndex = operation.EndCellIndex ?? (cells.Count - 1);
+
+            if (startCellIndex < 0 || endCellIndex >= cells.Count || endCellIndex <= startCellIndex)
+            {
+                return new DocxEditAppliedOperation(operation.Type, false, $"Invalid cell range {startCellIndex} to {endCellIndex}");
+            }
+
+            var selected = cells.Skip(startCellIndex).Take(endCellIndex - startCellIndex + 1).ToList();
+            var totalSpan = selected.Sum(cell => {
+                var span = cell.GetFirstChild<TableCellProperties>()?.GetFirstChild<GridSpan>();
+                if (span?.Val?.Value is int val) return val;
+                return 1;
+            });
+
+            var properties = selected[0].GetFirstChild<TableCellProperties>() ?? selected[0].PrependChild(new TableCellProperties());
+            properties.RemoveAllChildren<GridSpan>();
+            if (totalSpan > 1)
+            {
+                properties.AppendChild(new GridSpan { Val = totalSpan });
+            }
+
+            foreach (var cell in selected.Skip(1))
+            {
+                row.RemoveChild(cell);
+            }
+
+            return new DocxEditAppliedOperation(operation.Type, true, $"Merged table[{operation.TableIndex}].row[{rowIndex}].cells[{startCellIndex}..{endCellIndex}]");
+        }
+        else if (operation.CellIndex is not null)
+        {
+            var cellIndex = operation.CellIndex.Value;
+            var startRowIndex = operation.StartRowIndex ?? 0;
+            var endRowIndex = operation.EndRowIndex ?? (rows.Count - 1);
+
+            if (startRowIndex < 0 || endRowIndex >= rows.Count || endRowIndex <= startRowIndex)
+            {
+                return new DocxEditAppliedOperation(operation.Type, false, $"Invalid row range {startRowIndex} to {endRowIndex}");
+            }
+
+            for (var rIdx = startRowIndex; rIdx <= endRowIndex; rIdx++)
+            {
+                var rCells = rows[rIdx].Elements<TableCell>().ToList();
+                if (cellIndex >= rCells.Count)
+                {
+                    return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {cellIndex} is out of range in row {rIdx}");
+                }
+            }
+
+            for (var rIdx = startRowIndex; rIdx <= endRowIndex; rIdx++)
+            {
+                var cell = rows[rIdx].Elements<TableCell>().ElementAt(cellIndex);
+                var properties = cell.GetFirstChild<TableCellProperties>() ?? cell.PrependChild(new TableCellProperties());
+                properties.RemoveAllChildren<VerticalMerge>();
+                var mergeValue = rIdx == startRowIndex ? MergedCellValues.Restart : MergedCellValues.Continue;
+                properties.AppendChild(new VerticalMerge { Val = mergeValue });
+                if (rIdx != startRowIndex)
+                {
+                    cell.RemoveAllChildren<Paragraph>();
+                    cell.AppendChild(new Paragraph());
+                }
+            }
+
+            return new DocxEditAppliedOperation(operation.Type, true, $"Vertically merged table[{operation.TableIndex}].cell[{cellIndex}].rows[{startRowIndex}..{endRowIndex}]");
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, false, "Either rowIndex (horizontal) or cellIndex (vertical) must be specified for merge");
+    }
+
+    private static DocxEditAppliedOperation FillTableSemantically(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.Cells is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex and cells are required");
+        }
+
+        var tables = body.Descendants<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var table = tables[operation.TableIndex.Value];
+        var gridMap = new TableGridMap(table);
+        var appliedCount = 0;
+
+        foreach (var rule in operation.Cells)
+        {
+            for (var r = 0; r < gridMap.RowCount; r++)
+            {
+                var rowContext = gridMap.GetRowContext(r);
+                var rowMatches = rule.RowPatterns.All(p => rowContext.Contains(p, StringComparison.OrdinalIgnoreCase));
+                if (!rowMatches)
+                {
+                    continue;
+                }
+
+                for (var col = 0; col < gridMap.ColumnCount; col++)
+                {
+                    var colContext = gridMap.GetColumnContext(col);
+                    var colMatches = rule.ColPatterns.All(p => colContext.Contains(p, StringComparison.OrdinalIgnoreCase));
+                    if (!colMatches)
+                    {
+                        continue;
+                    }
+
+                    var cell = gridMap.Grid[r, col];
+                    if (cell != null)
+                    {
+                        ReplaceTableCellText(cell, rule.Text);
+                        appliedCount++;
+                    }
+                }
+            }
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Successfully applied semantic fills to {appliedCount} cell(s) in table[{operation.TableIndex}]");
     }
 }

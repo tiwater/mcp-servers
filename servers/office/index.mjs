@@ -119,7 +119,7 @@ const tools = [
   },
   {
     name: 'docx_edit',
-    description: 'Apply explicit edit operations to a DOCX document, including anchored text replacement, paragraph/cell edits, comment deletion, and field refresh.',
+    description: 'Apply explicit edit operations to a DOCX document, including anchored text replacement, paragraph/cell edits, cell merging, comment deletion, and field refresh.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -130,14 +130,50 @@ const tools = [
           items: {
             type: 'object',
             properties: {
-              type: { type: 'string' },
+              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTable', 'mergeTableCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty'] },
               commentId: { type: 'string' },
               text: { type: 'string' },
+              findText: { type: 'string' },
               paragraphIndex: { type: 'integer' },
+              headerIndex: { type: 'integer' },
               tableIndex: { type: 'integer' },
               rowIndex: { type: 'integer' },
               cellIndex: { type: 'integer' },
-              commentIds: { type: 'array', items: { type: 'string' } }
+              commentIds: { type: 'array', items: { type: 'string' } },
+              startCellIndex: { type: 'integer' },
+              endCellIndex: { type: 'integer' },
+              startRowIndex: { type: 'integer' },
+              endRowIndex: { type: 'integer' },
+              rows: {
+                type: 'array',
+                items: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      text: { type: 'string' },
+                      gridSpan: { type: 'integer' },
+                      vMerge: { type: 'string', enum: ['restart', 'continue'] },
+                      bold: { type: 'boolean' },
+                      header: { type: 'boolean' },
+                      shading: { type: 'string' },
+                      alignment: { type: 'string', enum: ['left', 'center', 'right'] }
+                    }
+                  }
+                }
+               },
+              cells: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    rowPatterns: { type: 'array', items: { type: 'string' } },
+                    colPatterns: { type: 'array', items: { type: 'string' } },
+                    text: { type: 'string' }
+                  },
+                  required: ['rowPatterns', 'colPatterns', 'text']
+                }
+              }
             },
             required: ['type']
           }
@@ -164,6 +200,7 @@ const tools = [
       properties: {
         input: { type: 'string' },
         output: { type: 'string' },
+        resolveMergedCells: { type: 'boolean', description: 'Resolve merged cells to project values' }
       },
       required: ['input'],
     },
@@ -381,12 +418,17 @@ async function xlsxInspect(args) {
 
 async function xlsxExportJson(args) {
   const input = requireString(args.input, 'input');
+  const cmdArgs = ['export-json', input];
+  if (args.resolveMergedCells) {
+    cmdArgs.push('--resolve-merged-cells');
+  }
   if (args.output) {
     const output = requireString(args.output, 'output');
-    const result = await runCandidateChain(xlsxCandidates, ['export-json', input, output]);
+    cmdArgs.push(output);
+    const result = await runCandidateChain(xlsxCandidates, cmdArgs);
     return { tool: 'xlsx_export_json', runtime: commandRuntime(result), outputPath: output, workbook: await maybeReadJson(output) };
   }
-  const result = await runCandidateChain(xlsxCandidates, ['export-json', input]);
+  const result = await runCandidateChain(xlsxCandidates, cmdArgs);
   return { tool: 'xlsx_export_json', runtime: commandRuntime(result), workbook: JSON.parse(result.stdout) };
 }
 

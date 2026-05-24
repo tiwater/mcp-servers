@@ -126,6 +126,11 @@ public sealed record TemplateTransformValidationReport(
     IReadOnlyList<string> Errors,
     IReadOnlyList<string> Warnings);
 
+public sealed record DocxSemanticFillRule(
+    IReadOnlyList<string> RowPatterns,
+    IReadOnlyList<string> ColPatterns,
+    string Text);
+
 public sealed record DocxEditOperation(
     string Type,
     string? CommentId = null,
@@ -137,13 +142,24 @@ public sealed record DocxEditOperation(
     int? RowIndex = null,
     int? CellIndex = null,
     IReadOnlyList<IReadOnlyList<DocxTableCellInput>>? Rows = null,
-    IReadOnlyList<string>? CommentIds = null);
+    IReadOnlyList<string>? CommentIds = null,
+    int? StartCellIndex = null,
+    int? EndCellIndex = null,
+    int? StartRowIndex = null,
+    int? EndRowIndex = null,
+    IReadOnlyList<DocxSemanticFillRule>? Cells = null,
+    string? Alignment = null,
+    string? Width = null,
+    string? WidthType = null);
 
 public sealed record DocxTableCellInput(
     string? Text = null,
     int? GridSpan = null,
+    string? VMerge = null,
     bool? Bold = null,
-    bool? Header = null);
+    bool? Header = null,
+    string? Shading = null,
+    string? Alignment = null);
 
 public sealed record DocxEditDocument(
     IReadOnlyList<DocxEditOperation> Operations);

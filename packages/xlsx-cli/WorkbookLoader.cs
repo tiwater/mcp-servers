@@ -21,17 +21,17 @@ internal static class WorkbookLoader
         IReadOnlyList<string> MergedRanges,
         int FormulaCellCount);
 
-    public static WorkbookData Load(string path)
+    public static WorkbookData Load(string path, bool resolveMergedCells = false)
     {
         return IsLegacyXls(path)
-            ? LoadLegacyXls(path)
-            : LoadOpenXmlWorkbook(path);
+            ? LoadLegacyXls(path, resolveMergedCells)
+            : LoadOpenXmlWorkbook(path, resolveMergedCells);
     }
 
     public static bool IsLegacyXls(string path)
         => string.Equals(Path.GetExtension(path), ".xls", StringComparison.OrdinalIgnoreCase);
 
-    private static WorkbookData LoadOpenXmlWorkbook(string path)
+    private static WorkbookData LoadOpenXmlWorkbook(string path, bool resolveMergedCells = false)
     {
         using var spreadsheet = SpreadsheetDocument.Open(path, false);
         var workbookPart = spreadsheet.WorkbookPart ?? throw new InvalidOperationException("Workbook not found.");
@@ -47,47 +47,6 @@ internal static class WorkbookLoader
             var formattedRowsData = new List<IReadOnlyList<string>>();
             var formulaCellCount = 0;
 
-            if (sheetData is not null)
-            {
-                foreach (var row in sheetData.Elements<Row>())
-                {
-                    var rowData = new List<string>();
-                    var formattedRowData = new List<string>();
-                    var currentColumn = 1;
-
-                    foreach (var cell in row.Elements<Cell>())
-                    {
-                        var cellReference = cell.CellReference?.Value;
-                        if (cellReference is not null)
-                        {
-                            var match = Regex.Match(cellReference, @"^[A-Z]+");
-                            if (match.Success)
-                            {
-                                var columnIndex = GetColumnIndex(match.Value);
-                                while (currentColumn < columnIndex)
-                                {
-                                    rowData.Add(string.Empty);
-                                    formattedRowData.Add(string.Empty);
-                                    currentColumn++;
-                                }
-                            }
-                        }
-
-                        rowData.Add(GetOpenXmlRawCellValue(cell, sharedStringTable) ?? string.Empty);
-                        formattedRowData.Add(GetOpenXmlFormattedCellValue(cell, sharedStringTable, stylesPart) ?? string.Empty);
-                        if (cell.CellFormula is not null)
-                        {
-                            formulaCellCount++;
-                        }
-
-                        currentColumn++;
-                    }
-
-                    rowsData.Add(rowData);
-                    formattedRowsData.Add(formattedRowData);
-                }
-            }
-
             var name = workbookPart.Workbook.Descendants<DocumentFormat.OpenXml.Spreadsheet.Sheet>()
                 .FirstOrDefault(s => s.Id == workbookPart.GetIdOfPart(sheetPart))?.Name?.Value ?? "Unknown";
             var usedRange = worksheet?.SheetDimension?.Reference?.Value;
@@ -98,13 +57,125 @@ internal static class WorkbookLoader
                 .Cast<string>()
                 .ToList() ?? [];
 
+            if (sheetData is not null)
+            {
+                if (resolveMergedCells && mergedRanges.Count > 0)
+                {
+                    var rawCells = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    var formattedCells = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    var maxRow = 1;
+                    var maxCol = 1;
+
+                    foreach (var row in sheetData.Elements<Row>())
+                    {
+                        foreach (var cell in row.Elements<Cell>())
+                        {
+                            var cellReference = cell.CellReference?.Value;
+                            if (cellReference is not null)
+                            {
+                                var (cIdx, rIdx) = ParseCellReference(cellReference);
+                                maxRow = Math.Max(maxRow, rIdx);
+                                maxCol = Math.Max(maxCol, cIdx);
+
+                                rawCells[cellReference] = GetOpenXmlRawCellValue(cell, sharedStringTable) ?? string.Empty;
+                                formattedCells[cellReference] = GetOpenXmlFormattedCellValue(cell, sharedStringTable, stylesPart) ?? string.Empty;
+                                if (cell.CellFormula is not null)
+                                {
+                                    formulaCellCount++;
+                                }
+                            }
+                        }
+                    }
+
+                    // Project merged cells
+                    foreach (var rangeStr in mergedRanges)
+                    {
+                        var parts = rangeStr.Split(':');
+                        if (parts.Length == 2)
+                        {
+                            var (startCol, startRow) = ParseCellReference(parts[0]);
+                            var (endCol, endRow) = ParseCellReference(parts[1]);
+
+                            var startRef = parts[0];
+                            var topRaw = rawCells.GetValueOrDefault(startRef) ?? string.Empty;
+                            var topFormatted = formattedCells.GetValueOrDefault(startRef) ?? string.Empty;
+
+                            for (var r = startRow; r <= endRow; r++)
+                            {
+                                for (var c = startCol; c <= endCol; c++)
+                                {
+                                    var cellRef = GetCellReference(c, r);
+                                    rawCells[cellRef] = topRaw;
+                                    formattedCells[cellRef] = topFormatted;
+                                }
+                            }
+                        }
+                    }
+
+                    // Build rectangular grid
+                    for (var r = 1; r <= maxRow; r++)
+                    {
+                        var rowData = new List<string>(maxCol);
+                        var formattedRowData = new List<string>(maxCol);
+                        for (var c = 1; c <= maxCol; c++)
+                        {
+                            var cellRef = GetCellReference(c, r);
+                            rowData.Add(rawCells.GetValueOrDefault(cellRef) ?? string.Empty);
+                            formattedRowData.Add(formattedCells.GetValueOrDefault(cellRef) ?? string.Empty);
+                        }
+                        rowsData.Add(rowData);
+                        formattedRowsData.Add(formattedRowData);
+                    }
+                }
+                else
+                {
+                    foreach (var row in sheetData.Elements<Row>())
+                    {
+                        var rowData = new List<string>();
+                        var formattedRowData = new List<string>();
+                        var currentColumn = 1;
+
+                        foreach (var cell in row.Elements<Cell>())
+                        {
+                            var cellReference = cell.CellReference?.Value;
+                            if (cellReference is not null)
+                            {
+                                var match = Regex.Match(cellReference, @"^[A-Z]+");
+                                if (match.Success)
+                                {
+                                    var columnIndex = GetColumnIndex(match.Value);
+                                    while (currentColumn < columnIndex)
+                                    {
+                                        rowData.Add(string.Empty);
+                                        formattedRowData.Add(string.Empty);
+                                        currentColumn++;
+                                    }
+                                }
+                            }
+
+                            rowData.Add(GetOpenXmlRawCellValue(cell, sharedStringTable) ?? string.Empty);
+                            formattedRowData.Add(GetOpenXmlFormattedCellValue(cell, sharedStringTable, stylesPart) ?? string.Empty);
+                            if (cell.CellFormula is not null)
+                            {
+                                formulaCellCount++;
+                            }
+
+                            currentColumn++;
+                        }
+
+                        rowsData.Add(rowData);
+                        formattedRowsData.Add(formattedRowData);
+                    }
+                }
+            }
+
             sheets.Add(new SheetDataModel(name, rowsData, formattedRowsData, usedRange, mergedRanges, formulaCellCount));
         }
 
         return new WorkbookData(sheets);
     }
 
-    private static WorkbookData LoadLegacyXls(string path)
+    private static WorkbookData LoadLegacyXls(string path, bool resolveMergedCells = false)
     {
         using var stream = File.OpenRead(path);
         var workbook = new HSSFWorkbook(stream);
@@ -121,49 +192,124 @@ internal static class WorkbookLoader
             var firstRowIndex = sheet.PhysicalNumberOfRows > 0 ? sheet.FirstRowNum : 0;
             var lastRowIndex = sheet.PhysicalNumberOfRows > 0 ? sheet.LastRowNum : 0;
 
-            for (var rowIndex = firstRowIndex; rowIndex <= lastRowIndex; rowIndex++)
-            {
-                var row = sheet.GetRow(rowIndex);
-                if (row is null)
-                {
-                    rows.Add([]);
-                    formattedRows.Add([]);
-                    continue;
-                }
-
-                var rowValues = new List<string>();
-                var formattedRowValues = new List<string>();
-                var lastCellNum = Math.Max((int)row.LastCellNum, 0);
-                if (lastCellNum > maxColumn)
-                {
-                    maxColumn = lastCellNum;
-                }
-
-                for (var cellIndex = 0; cellIndex < lastCellNum; cellIndex++)
-                {
-                    var cell = row.GetCell(cellIndex);
-                    if (cell?.CellType == NpoiCellType.Formula)
-                    {
-                        formulaCellCount++;
-                    }
-
-                    rowValues.Add(GetLegacyRawCellValue(cell));
-                    formattedRowValues.Add(GetLegacyFormattedCellValue(cell, formatter));
-                }
-
-                rows.Add(rowValues);
-                formattedRows.Add(formattedRowValues);
-            }
-
-            var usedRange = maxColumn > 0 && rows.Count > 0
-                ? $"A1:{ColumnIndexToName(maxColumn)}{rows.Count}"
-                : null;
             var mergedRanges = new List<string>();
             for (var i = 0; i < sheet.NumMergedRegions; i++)
             {
                 var region = sheet.GetMergedRegion(i);
                 mergedRanges.Add($"{ColumnIndexToName(region.FirstColumn + 1)}{region.FirstRow + 1}:{ColumnIndexToName(region.LastColumn + 1)}{region.LastRow + 1}");
             }
+
+            if (resolveMergedCells && sheet.NumMergedRegions > 0)
+            {
+                var rawCells = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var formattedCells = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var maxR = 0;
+                var maxC = 0;
+
+                for (var rowIndex = firstRowIndex; rowIndex <= lastRowIndex; rowIndex++)
+                {
+                    var row = sheet.GetRow(rowIndex);
+                    if (row is null) continue;
+
+                    var lastCellNum = Math.Max((int)row.LastCellNum, 0);
+                    maxR = Math.Max(maxR, rowIndex + 1);
+                    maxC = Math.Max(maxC, lastCellNum);
+
+                    for (var cellIndex = 0; cellIndex < lastCellNum; cellIndex++)
+                    {
+                        var cell = row.GetCell(cellIndex);
+                        if (cell?.CellType == NpoiCellType.Formula)
+                        {
+                            formulaCellCount++;
+                        }
+
+                        var cellRef = GetCellReference(cellIndex + 1, rowIndex + 1);
+                        rawCells[cellRef] = GetLegacyRawCellValue(cell);
+                        formattedCells[cellRef] = GetLegacyFormattedCellValue(cell, formatter);
+                    }
+                }
+
+                // Project merged ranges
+                for (var i = 0; i < sheet.NumMergedRegions; i++)
+                {
+                    var region = sheet.GetMergedRegion(i);
+                    var startCol = region.FirstColumn + 1;
+                    var startRow = region.FirstRow + 1;
+                    var endCol = region.LastColumn + 1;
+                    var endRow = region.LastRow + 1;
+
+                    var startRef = GetCellReference(startCol, startRow);
+                    var topRaw = rawCells.GetValueOrDefault(startRef) ?? string.Empty;
+                    var topFormatted = formattedCells.GetValueOrDefault(startRef) ?? string.Empty;
+
+                    for (var r = startRow; r <= endRow; r++)
+                    {
+                        for (var c = startCol; c <= endCol; c++)
+                        {
+                            var cellRef = GetCellReference(c, r);
+                            rawCells[cellRef] = topRaw;
+                            formattedCells[cellRef] = topFormatted;
+                        }
+                    }
+                }
+
+                // Build rectangular grid
+                for (var r = 1; r <= maxR; r++)
+                {
+                    var rowData = new List<string>(maxC);
+                    var formattedRowData = new List<string>(maxC);
+                    for (var c = 1; c <= maxC; c++)
+                    {
+                        var cellRef = GetCellReference(c, r);
+                        rowData.Add(rawCells.GetValueOrDefault(cellRef) ?? string.Empty);
+                        formattedRowData.Add(formattedCells.GetValueOrDefault(cellRef) ?? string.Empty);
+                    }
+                    rows.Add(rowData);
+                    formattedRows.Add(formattedRowData);
+                }
+                
+                maxColumn = maxC;
+            }
+            else
+            {
+                for (var rowIndex = firstRowIndex; rowIndex <= lastRowIndex; rowIndex++)
+                {
+                    var row = sheet.GetRow(rowIndex);
+                    if (row is null)
+                    {
+                        rows.Add([]);
+                        formattedRows.Add([]);
+                        continue;
+                    }
+
+                    var rowValues = new List<string>();
+                    var formattedRowValues = new List<string>();
+                    var lastCellNum = Math.Max((int)row.LastCellNum, 0);
+                    if (lastCellNum > maxColumn)
+                    {
+                        maxColumn = lastCellNum;
+                    }
+
+                    for (var cellIndex = 0; cellIndex < lastCellNum; cellIndex++)
+                    {
+                        var cell = row.GetCell(cellIndex);
+                        if (cell?.CellType == NpoiCellType.Formula)
+                        {
+                            formulaCellCount++;
+                        }
+
+                        rowValues.Add(GetLegacyRawCellValue(cell));
+                        formattedRowValues.Add(GetLegacyFormattedCellValue(cell, formatter));
+                    }
+
+                    rows.Add(rowValues);
+                    formattedRows.Add(formattedRowValues);
+                }
+            }
+
+            var usedRange = maxColumn > 0 && rows.Count > 0
+                ? $"A1:{ColumnIndexToName(maxColumn)}{rows.Count}"
+                : null;
 
             sheets.Add(new SheetDataModel(
                 sheet.SheetName,
@@ -175,6 +321,20 @@ internal static class WorkbookLoader
         }
 
         return new WorkbookData(sheets);
+    }
+
+    private static (int Column, int Row) ParseCellReference(string reference)
+    {
+        var colStr = new string(reference.TakeWhile(char.IsLetter).ToArray());
+        var rowStr = new string(reference.Skip(colStr.Length).ToArray());
+        var col = GetColumnIndex(colStr);
+        var row = int.Parse(rowStr, CultureInfo.InvariantCulture);
+        return (col, row);
+    }
+
+    private static string GetCellReference(int column, int row)
+    {
+        return $"{ColumnIndexToName(column)}{row}";
     }
 
     private static string? GetOpenXmlRawCellValue(Cell cell, SharedStringTable? sharedStringTable)
