@@ -63,7 +63,14 @@ Fills a classic placeholder-based template using JSON data.
 tiwater-docx fill-template <template.docx> <data.json> <output.docx>
 ```
 
-### 8. Apply Explicit Edit Operations
+### 8. Normalize OpenXML
+Canonicalizes known WordprocessingML namespace prefixes and orders common run/table property children so Word does not need to repair generated packages.
+
+```bash
+tiwater-docx normalize-openxml <input.docx> <output.docx>
+```
+
+### 9. Apply Explicit Edit Operations
 Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceAnchoredText`
 - `replaceParagraphText`

@@ -29,6 +29,7 @@ internal static class Cli
                 "replace-style-ids" => Task.FromResult(Transforms.RunReplaceStyleIds(args[1..])),
                 "export-json" => Task.FromResult(Transforms.RunExportJson(args[1..])),
                 "fill-template" => Task.FromResult(Transforms.RunFillTemplate(args[1..])),
+                "normalize-openxml" => Task.FromResult(DocxPackageNormalizer.RunNormalize(args[1..])),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 _ => FailUnknown(args[0]),
             };
@@ -97,6 +98,7 @@ internal static class Cli
         Console.WriteLine("  replace-style-ids <input.docx> <output.docx> <style-map.json>");
         Console.WriteLine("  export-json <input.docx> [<output.json>]");
         Console.WriteLine("  fill-template <template.docx> <data.json> <output.docx>");
+        Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
         Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
     }
 

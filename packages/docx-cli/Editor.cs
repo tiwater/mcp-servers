@@ -36,6 +36,7 @@ public static class Editor
             applied.Add(ApplyOperation(doc, body, operation));
         }
 
+        NormalizeGeneratedOpenXml(doc);
         mainPart.Document.Save();
         foreach (var headerPart in mainPart.HeaderParts)
         {
@@ -428,6 +429,7 @@ public static class Editor
             properties.RemoveAllChildren<Shading>();
             properties.AppendChild(new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = hexColor });
         }
+        NormalizeTableCellProperties(properties);
 
         var paragraph = new Paragraph();
         var paragraphProperties = new ParagraphProperties();
@@ -666,9 +668,135 @@ public static class Editor
         if (templateRun?.RunProperties is not null)
         {
             run.RunProperties = (RunProperties)templateRun.RunProperties.CloneNode(true);
+            NormalizeRunProperties(run.RunProperties);
         }
         return run;
     }
+
+    private static void NormalizeGeneratedOpenXml(WordprocessingDocument doc)
+    {
+        foreach (var root in Inspector.GetRoots(doc))
+        {
+            foreach (var properties in root.Descendants<TableProperties>())
+            {
+                NormalizeTableProperties(properties);
+            }
+            foreach (var properties in root.Descendants<TableCellProperties>())
+            {
+                NormalizeTableCellProperties(properties);
+            }
+            foreach (var properties in root.Descendants<RunProperties>())
+            {
+                NormalizeRunProperties(properties);
+            }
+        }
+    }
+
+    private static void NormalizeRunProperties(RunProperties properties)
+        => SortChildrenByOpenXmlOrder(properties, RunPropertyOrder);
+
+    private static void NormalizeTableCellProperties(TableCellProperties properties)
+        => SortChildrenByOpenXmlOrder(properties, TableCellPropertyOrder);
+
+    private static void NormalizeTableProperties(TableProperties properties)
+        => SortChildrenByOpenXmlOrder(properties, TablePropertyOrder);
+
+    private static void SortChildrenByOpenXmlOrder(OpenXmlCompositeElement parent, IReadOnlyDictionary<Type, int> order)
+    {
+        var children = parent.ChildElements.ToList();
+        if (children.Count < 2)
+        {
+            return;
+        }
+
+        var sorted = children
+            .Select((child, index) => new { Child = child, Index = index })
+            .OrderBy(item => order.TryGetValue(item.Child.GetType(), out var childOrder) ? childOrder : int.MaxValue)
+            .ThenBy(item => item.Index)
+            .Select(item => item.Child.CloneNode(true))
+            .ToList();
+        parent.RemoveAllChildren();
+        foreach (var child in sorted)
+        {
+            parent.AppendChild(child);
+        }
+    }
+
+    private static readonly IReadOnlyDictionary<Type, int> RunPropertyOrder = new Dictionary<Type, int>
+    {
+        [typeof(RunStyle)] = 0,
+        [typeof(RunFonts)] = 1,
+        [typeof(Bold)] = 2,
+        [typeof(BoldComplexScript)] = 3,
+        [typeof(Italic)] = 4,
+        [typeof(ItalicComplexScript)] = 5,
+        [typeof(Caps)] = 6,
+        [typeof(SmallCaps)] = 7,
+        [typeof(Strike)] = 8,
+        [typeof(DoubleStrike)] = 9,
+        [typeof(Outline)] = 10,
+        [typeof(Shadow)] = 11,
+        [typeof(Emboss)] = 12,
+        [typeof(Imprint)] = 13,
+        [typeof(NoProof)] = 14,
+        [typeof(SnapToGrid)] = 15,
+        [typeof(Vanish)] = 16,
+        [typeof(WebHidden)] = 17,
+        [typeof(Color)] = 20,
+        [typeof(Spacing)] = 21,
+        [typeof(CharacterScale)] = 22,
+        [typeof(Kern)] = 23,
+        [typeof(Position)] = 24,
+        [typeof(FontSize)] = 30,
+        [typeof(FontSizeComplexScript)] = 31,
+        [typeof(Highlight)] = 32,
+        [typeof(Underline)] = 33,
+        [typeof(TextEffect)] = 34,
+        [typeof(Border)] = 35,
+        [typeof(Shading)] = 36,
+        [typeof(FitText)] = 37,
+        [typeof(VerticalTextAlignment)] = 38,
+        [typeof(RightToLeftText)] = 39,
+        [typeof(Languages)] = 40,
+    };
+
+    private static readonly IReadOnlyDictionary<Type, int> TableCellPropertyOrder = new Dictionary<Type, int>
+    {
+        [typeof(ConditionalFormatStyle)] = 0,
+        [typeof(TableCellWidth)] = 1,
+        [typeof(GridSpan)] = 2,
+        [typeof(HorizontalMerge)] = 3,
+        [typeof(VerticalMerge)] = 4,
+        [typeof(TableCellBorders)] = 5,
+        [typeof(Shading)] = 6,
+        [typeof(NoWrap)] = 7,
+        [typeof(TableCellMargin)] = 8,
+        [typeof(TextDirection)] = 9,
+        [typeof(TableCellFitText)] = 10,
+        [typeof(TableCellVerticalAlignment)] = 11,
+        [typeof(HideMark)] = 12,
+    };
+
+    private static readonly IReadOnlyDictionary<Type, int> TablePropertyOrder = new Dictionary<Type, int>
+    {
+        [typeof(TableStyle)] = 0,
+        [typeof(TablePositionProperties)] = 1,
+        [typeof(TableOverlap)] = 2,
+        [typeof(BiDiVisual)] = 3,
+        [typeof(TableStyleRowBandSize)] = 4,
+        [typeof(TableStyleColumnBandSize)] = 5,
+        [typeof(TableWidth)] = 6,
+        [typeof(TableJustification)] = 7,
+        [typeof(TableCellSpacing)] = 8,
+        [typeof(TableIndentation)] = 9,
+        [typeof(TableBorders)] = 10,
+        [typeof(Shading)] = 11,
+        [typeof(TableLayout)] = 12,
+        [typeof(TableCellMarginDefault)] = 13,
+        [typeof(TableLook)] = 14,
+        [typeof(TableCaption)] = 15,
+        [typeof(TableDescription)] = 16,
+    };
 
     private static DocxEditAppliedOperation MergeTableCells(Body body, DocxEditOperation operation)
     {
@@ -717,6 +845,7 @@ public static class Editor
             {
                 properties.AppendChild(new GridSpan { Val = totalSpan });
             }
+            NormalizeTableCellProperties(properties);
 
             foreach (var cell in selected.Skip(1))
             {
@@ -752,6 +881,7 @@ public static class Editor
                 properties.RemoveAllChildren<VerticalMerge>();
                 var mergeValue = rIdx == startRowIndex ? MergedCellValues.Restart : MergedCellValues.Continue;
                 properties.AppendChild(new VerticalMerge { Val = mergeValue });
+                NormalizeTableCellProperties(properties);
                 if (rIdx != startRowIndex)
                 {
                     cell.RemoveAllChildren<Paragraph>();

@@ -1,6 +1,8 @@
 using Xunit;
+using System.IO.Compression;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Dockit.Docx;
 
@@ -93,6 +95,9 @@ public class AnnotationToolsTests
         Assert.True(table.Elements<TableRow>().First().Descendants<Bold>().Any());
         Assert.Equal(2, table.Elements<TableRow>().First().Elements<TableCell>().ElementAt(1).GetFirstChild<TableCellProperties>()!.GetFirstChild<GridSpan>()!.Val!.Value);
         Assert.Contains("颜色", string.Concat(table.Descendants<Text>().Select(text => text.Text)));
+        Assert.DoesNotContain(
+            new OpenXmlValidator().Validate(doc).Select(error => error.Description),
+            description => description.Contains("unexpected child element", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -137,6 +142,7 @@ public class AnnotationToolsTests
         var jc = p1.GetFirstChild<ParagraphProperties>()!.GetFirstChild<Justification>();
         Assert.NotNull(jc);
         Assert.Equal(JustificationValues.Center, jc.Val!.Value);
+        AssertChildOrder(cell1.GetFirstChild<TableCellProperties>()!, nameof(Shading), nameof(TableCellVerticalAlignment));
 
         var cell2_1 = rows[1].Elements<TableCell>().First();
         var vm1 = cell2_1.GetFirstChild<TableCellProperties>()!.GetFirstChild<VerticalMerge>();
@@ -153,6 +159,45 @@ public class AnnotationToolsTests
         var jc2_2 = p2_2.GetFirstChild<ParagraphProperties>()!.GetFirstChild<Justification>();
         Assert.NotNull(jc2_2);
         Assert.Equal(JustificationValues.Right, jc2_2.Val!.Value);
+
+        Assert.DoesNotContain(
+            new OpenXmlValidator().Validate(doc).Select(error => error.Description),
+            description => description.Contains("unexpected child element", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void NormalizeOpenXml_canonicalizes_prefixes_and_property_order()
+    {
+        var docPath = CreateAnnotatedFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"normalized-{Guid.NewGuid():N}.docx");
+        File.Copy(docPath, output);
+        ReplaceZipEntry(
+            output,
+            "word/document.xml",
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <ns0:document xmlns:ns0="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:ns1="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:ns2="http://schemas.microsoft.com/office/word/2010/wordml" ns1:Ignorable="w14 wp14">
+              <ns0:body>
+                <ns0:p ns2:paraId="11111111" ns2:textId="22222222">
+                  <ns0:r>
+                    <ns0:rPr><ns0:b/><ns0:rFonts ns0:ascii="Times New Roman"/></ns0:rPr>
+                    <ns0:t>Text</ns0:t>
+                  </ns0:r>
+                </ns0:p>
+              </ns0:body>
+            </ns0:document>
+            """);
+
+        DocxPackageNormalizer.Normalize(output, output);
+
+        var xml = ReadZipEntry(output, "word/document.xml");
+        Assert.Contains("xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"", xml);
+        Assert.Contains("xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\"", xml);
+        Assert.Contains("xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\"", xml);
+        Assert.Contains("xmlns:wp14=\"http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing\"", xml);
+        Assert.Contains("mc:Ignorable=\"w14 wp14\"", xml);
+        Assert.DoesNotContain("<ns0:", xml);
+        Assert.True(xml.IndexOf("<w:rFonts", StringComparison.Ordinal) < xml.IndexOf("<w:b", xml.IndexOf("<w:rPr", StringComparison.Ordinal), StringComparison.Ordinal));
     }
 
     [Fact]
@@ -316,14 +361,18 @@ public class AnnotationToolsTests
     }
 
     private static TableCell CreateCell(string text)
-        => new(new Paragraph(new Run(new Text(text))));
+        => new(
+            new TableCellProperties(new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }),
+            new Paragraph(new Run(new Text(text))));
 
     private static TableCell CreateCellWithComment(string commentId, string text)
-        => new(new Paragraph(
-            new CommentRangeStart { Id = commentId },
-            new Run(new Text(text)),
-            new CommentRangeEnd { Id = commentId },
-            new Run(new CommentReference { Id = commentId })));
+        => new(
+            new TableCellProperties(new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }),
+            new Paragraph(
+                new CommentRangeStart { Id = commentId },
+                new Run(new Text(text)),
+                new CommentRangeEnd { Id = commentId },
+                new Run(new CommentReference { Id = commentId })));
 
     private static Paragraph CreateFieldParagraph()
     {
@@ -515,4 +564,32 @@ public class AnnotationToolsTests
 
     private static string GetParagraphText(Paragraph paragraph)
         => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text));
+
+    private static void AssertChildOrder(OpenXmlElement parent, string beforeTypeName, string afterTypeName)
+    {
+        var children = parent.ChildElements.ToList();
+        var beforeIndex = children.FindIndex(child => child.GetType().Name == beforeTypeName);
+        var afterIndex = children.FindIndex(child => child.GetType().Name == afterTypeName);
+        Assert.True(beforeIndex >= 0, $"{beforeTypeName} was not found under {parent.GetType().Name}");
+        Assert.True(afterIndex >= 0, $"{afterTypeName} was not found under {parent.GetType().Name}");
+        Assert.True(beforeIndex < afterIndex, $"{beforeTypeName} should appear before {afterTypeName}");
+    }
+
+    private static string ReadZipEntry(string path, string entryName)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        using var stream = archive.GetEntry(entryName)!.Open();
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static void ReplaceZipEntry(string path, string entryName, string text)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Update);
+        archive.GetEntry(entryName)?.Delete();
+        var entry = archive.CreateEntry(entryName);
+        using var stream = entry.Open();
+        using var writer = new StreamWriter(stream);
+        writer.Write(text);
+    }
 }
