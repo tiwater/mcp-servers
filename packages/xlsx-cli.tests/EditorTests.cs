@@ -141,6 +141,64 @@ public class EditorTests
         Assert.Equal("32.3", formattedRows[1][1].GetString());
     }
 
+    [Fact]
+    public void ExportJson_includes_addressed_cells_with_formulas()
+    {
+        var path = CreateFormulaWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-addressed-export-{Guid.NewGuid():N}.json");
+
+        Extractor.RunExportJson([path, output]);
+
+        var parsed = System.Text.Json.JsonDocument.Parse(File.ReadAllText(output));
+        var cells = parsed.RootElement[0].GetProperty("cells");
+        Assert.Equal("A1", cells[0].GetProperty("reference").GetString());
+        Assert.Equal(1, cells[0].GetProperty("row").GetInt32());
+        Assert.Equal(1, cells[0].GetProperty("column").GetInt32());
+        Assert.Equal("Sample", cells[0].GetProperty("value").GetString());
+        var formulaCell = cells.EnumerateArray().Single(cell => cell.GetProperty("reference").GetString() == "C2");
+        Assert.Equal("A2+B2", formulaCell.GetProperty("formula").GetString());
+        Assert.Equal("3", formulaCell.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public void ExportJson_expands_shared_formulas_in_addressed_cells()
+    {
+        var path = CreateSharedFormulaWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-shared-formula-export-{Guid.NewGuid():N}.json");
+
+        Extractor.RunExportJson([path, output]);
+
+        var parsed = System.Text.Json.JsonDocument.Parse(File.ReadAllText(output));
+        var cells = parsed.RootElement[0].GetProperty("cells");
+        var firstFormula = cells.EnumerateArray().Single(cell => cell.GetProperty("reference").GetString() == "C2");
+        var sharedFormula = cells.EnumerateArray().Single(cell => cell.GetProperty("reference").GetString() == "C3");
+        Assert.Equal("A2+B2", firstFormula.GetProperty("formula").GetString());
+        Assert.Equal("A3+B3", sharedFormula.GetProperty("formula").GetString());
+        Assert.Equal("7", sharedFormula.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public void Edit_inserts_rows_from_template_row_and_translates_formulas()
+    {
+        var path = CreateRowInsertionWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-insert-row-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("insertRows", Sheet: "Sheet1", SourceRow: 2, TargetRow: 3, Count: 2),
+            new XlsxEditOperation("setRangeValues", Sheet: "Sheet1", StartCell: "A3", Values: [["3", "4"], ["5", "6"]])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet;
+        Assert.Equal("Footer", GetCell(worksheet, "A5").InnerText);
+        Assert.Equal<UInt32Value>(5, worksheet.Descendants<Row>().Single(row => row.RowIndex?.Value == 5).RowIndex!);
+        Assert.Equal("A3+B3", GetCell(worksheet, "C3").CellFormula!.Text);
+        Assert.Equal("A4+B4", GetCell(worksheet, "C4").CellFormula!.Text);
+        Assert.Equal<UInt32Value>(1, GetCell(worksheet, "A3").StyleIndex!);
+        Assert.Equal<UInt32Value>(1, GetCell(worksheet, "A4").StyleIndex!);
+    }
+
     private static string CreateWorkbookFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"xlsx-fixture-{Guid.NewGuid():N}.xlsx");
@@ -249,6 +307,100 @@ public class EditorTests
         var dataRow = new Row { RowIndex = 2 };
         dataRow.Append(new Cell { CellReference = "A2", StyleIndex = 1, CellValue = new CellValue("0") });
         worksheetPart.Worksheet = new Worksheet(new SheetData(CreateRow(1, ("A1", "Percent")), dataRow));
+        var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateFormulaWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-formula-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        var dataRow = new Row { RowIndex = 2 };
+        dataRow.Append(
+            new Cell { CellReference = "A2", CellValue = new CellValue("1") },
+            new Cell { CellReference = "B2", CellValue = new CellValue("2") },
+            new Cell { CellReference = "C2", CellFormula = new CellFormula("A2+B2"), CellValue = new CellValue("3") }
+        );
+        worksheetPart.Worksheet = new Worksheet(new SheetData(
+            CreateRow(1, ("A1", "Sample"), ("B1", "Input"), ("C1", "Formula")),
+            dataRow
+        ));
+        var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateSharedFormulaWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-shared-formula-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        var firstDataRow = new Row { RowIndex = 2 };
+        firstDataRow.Append(
+            new Cell { CellReference = "A2", CellValue = new CellValue("1") },
+            new Cell { CellReference = "B2", CellValue = new CellValue("2") },
+            new Cell { CellReference = "C2", CellFormula = new CellFormula("A2+B2") { FormulaType = CellFormulaValues.Shared, Reference = "C2:C3", SharedIndex = 0 }, CellValue = new CellValue("3") }
+        );
+        var secondDataRow = new Row { RowIndex = 3 };
+        secondDataRow.Append(
+            new Cell { CellReference = "A3", CellValue = new CellValue("3") },
+            new Cell { CellReference = "B3", CellValue = new CellValue("4") },
+            new Cell { CellReference = "C3", CellFormula = new CellFormula { FormulaType = CellFormulaValues.Shared, SharedIndex = 0 }, CellValue = new CellValue("7") }
+        );
+        worksheetPart.Worksheet = new Worksheet(new SheetData(
+            CreateRow(1, ("A1", "Left"), ("B1", "Right"), ("C1", "Total")),
+            firstDataRow,
+            secondDataRow
+        ));
+        var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateRowInsertionWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-row-insertion-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellFormats(
+                new CellFormat { NumberFormatId = 0, ApplyNumberFormat = false },
+                new CellFormat { NumberFormatId = 2, ApplyNumberFormat = true }
+            ) { Count = 2 }
+        );
+        stylesPart.Stylesheet.Save();
+
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        var templateRow = new Row { RowIndex = 2, CustomHeight = true, Height = 20 };
+        templateRow.Append(
+            new Cell { CellReference = "A2", StyleIndex = 1, CellValue = new CellValue("1") },
+            new Cell { CellReference = "B2", StyleIndex = 1, CellValue = new CellValue("2") },
+            new Cell { CellReference = "C2", StyleIndex = 1, CellFormula = new CellFormula("A2+B2"), CellValue = new CellValue("3") }
+        );
+        var footerRow = new Row { RowIndex = 3 };
+        footerRow.Append(new Cell { CellReference = "A3", DataType = CellValues.InlineString, InlineString = new InlineString(new Text("Footer")) });
+        worksheetPart.Worksheet = new Worksheet(new SheetData(
+            CreateRow(1, ("A1", "Left"), ("B1", "Right"), ("C1", "Total")),
+            templateRow,
+            footerRow
+        ));
         var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
         sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
         workbookPart.Workbook.Save();

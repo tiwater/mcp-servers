@@ -68,16 +68,15 @@ public class LegacyXlsTests
 
         var json = File.ReadAllText(output);
         Assert.Contains("\"MergedValue\"", json, StringComparison.Ordinal);
-        
-        // Let's assert that there are two occurrences of "MergedValue" (one for row 1, one for row 2)
-        var count = 0;
-        var index = 0;
-        while ((index = json.IndexOf("\"MergedValue\"", index, StringComparison.Ordinal)) != -1)
-        {
-            count++;
-            index += 13;
-        }
-        Assert.Equal(4, count);
+
+        using var parsed = System.Text.Json.JsonDocument.Parse(json);
+        var sheet = parsed.RootElement[0];
+        Assert.Equal("MergedValue", sheet.GetProperty("rows")[1][0].GetString());
+        Assert.Equal("MergedValue", sheet.GetProperty("rows")[2][0].GetString());
+        Assert.Equal("MergedValue", sheet.GetProperty("formattedRows")[1][0].GetString());
+        Assert.Equal("MergedValue", sheet.GetProperty("formattedRows")[2][0].GetString());
+        var mergedCell = sheet.GetProperty("cells").EnumerateArray().Single(cell => cell.GetProperty("reference").GetString() == "A2");
+        Assert.Equal("MergedValue", mergedCell.GetProperty("value").GetString());
     }
 
     private static string CreateMergedXlsFixture()

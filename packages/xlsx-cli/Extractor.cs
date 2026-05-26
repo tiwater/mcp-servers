@@ -24,7 +24,8 @@ public static class Extractor
             {
                 Sheet = sheet.Name,
                 Rows = sheet.Rows,
-                FormattedRows = sheet.FormattedRows
+                FormattedRows = sheet.FormattedRows,
+                Cells = sheet.Cells
             });
         }
 

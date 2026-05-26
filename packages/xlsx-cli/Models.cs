@@ -36,7 +36,12 @@ public sealed record XlsxEditOperation(
     string? ValueType = null,
     string? StartCell = null,
     IReadOnlyList<IReadOnlyList<string>>? Values = null,
-    bool? Bold = null);
+    bool? Bold = null,
+    int? SourceRow = null,
+    int? TargetRow = null,
+    int? Count = null,
+    bool? CopyValues = null
+);
 
 public sealed record XlsxEditDocument(
     IReadOnlyList<XlsxEditOperation> Operations

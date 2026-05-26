@@ -26,7 +26,14 @@ tiwater-xlsx inspect <template.xlsx> [--json]
 ```
 *   `--json` returns structured output suitable for parsers.
 
-### 2. Fill a Template
+### 2. Export Workbook JSON
+Exports workbook content for template analysis. Each sheet includes row arrays for compatibility plus address-level cell records so callers can locate fixed-layout sections without relying on hardcoded row and column positions. Cell records include `reference`, `row`, `column`, `value`, `formattedValue`, and `formula` when present.
+
+```bash
+tiwater-xlsx export-json <input.xlsx> [<output.json>]
+```
+
+### 3. Fill a Template
 Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
 
 ```bash
@@ -54,10 +61,13 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 ```
 
 
-### 3. Apply Explicit Edit Operations
+### 4. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue` (optional `bold: true|false`)
 - `setRangeValues`
+- `insertRows`
+
+`insertRows` copies row styles and formulas from `sourceRow`, inserts `count` rows before `targetRow`, shifts following rows downward, and translates relative formula references into the inserted rows. Non-formula cell values are blank by default so callers can fill the inserted rows with `setRangeValues`; set `copyValues: true` to duplicate values too.
 
 By default, edit operations use `valueType: "auto"` semantics. Numeric-looking
 values are written as numeric Excel cells unless the target cell is formatted as
@@ -74,6 +84,7 @@ Example operations file:
 ```json
 {
   "operations": [
+    { "type": "insertRows", "sheet": "Sheet1", "sourceRow": 2, "targetRow": 3, "count": 2 },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "D2", "value": "260359-01" },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "E7", "value": "浅于黄色0.5号标准比色液", "bold": false },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "E2", "value": "10.2" },
