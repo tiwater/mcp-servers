@@ -116,6 +116,84 @@ public class StructuralEditTests
     }
 
     [Fact]
+    public void Edit_expandSectionRows_copies_original_example_formulas_and_merged_ranges()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-expand-section-formulas-merges-{Guid.NewGuid():N}.xlsx");
+        const string anchorText = "280 nm峰面积-360 nm峰面积*0.784";
+
+        using (var template = SpreadsheetDocument.Open(path, true))
+        {
+            var templateWorksheet = GetWorksheet(template.WorkbookPart!, "RP");
+            var anchorCell = TestWorkbookReader.GetCell(templateWorksheet, "A11");
+            anchorCell.InlineString = new InlineString(new Text(anchorText));
+
+            var exemplarFormula = TestWorkbookReader.GetCell(templateWorksheet, "B12");
+            exemplarFormula.CellFormula = new CellFormula("SUM(B15)");
+            exemplarFormula.CellValue = new CellValue("10");
+
+            var templateMergeCells = templateWorksheet.Elements<MergeCells>().Single();
+            templateMergeCells.AppendChild(new MergeCell { Reference = "A12:C12" });
+            templateWorksheet.Save();
+        }
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation(
+                "expandSectionRows",
+                Sheet: "RP",
+                AnchorText: anchorText,
+                ExampleRows: 2,
+                TargetRows: 4,
+                PreserveStyle: true,
+                PreserveFormulas: true,
+                PreserveMergedRanges: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+
+        Assert.Equal("SUM(B17)", TestWorkbookReader.GetCell(worksheet, "B12").CellFormula!.Text);
+        Assert.Equal("SUM(B17)", TestWorkbookReader.GetCell(worksheet, "B14").CellFormula!.Text);
+
+        var mergeCells = worksheet.Elements<MergeCells>().Single();
+        Assert.Contains(mergeCells.Elements<MergeCell>(), merge => merge.Reference?.Value == "A12:C12");
+        Assert.Contains(mergeCells.Elements<MergeCell>(), merge => merge.Reference?.Value == "A14:C14");
+    }
+
+    [Fact]
+    public void Edit_expandSectionRows_shrink_noop_reports_no_changed_range()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-expand-section-shrink-{Guid.NewGuid():N}.xlsx");
+        const string anchorText = "280 nm峰面积-360 nm峰面积*0.784";
+
+        using (var template = SpreadsheetDocument.Open(path, true))
+        {
+            var worksheet = GetWorksheet(template.WorkbookPart!, "RP");
+            var anchorCell = TestWorkbookReader.GetCell(worksheet, "A11");
+            anchorCell.InlineString = new InlineString(new Text(anchorText));
+            worksheet.Save();
+        }
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation(
+                "expandSectionRows",
+                Sheet: "RP",
+                AnchorText: anchorText,
+                ExampleRows: 2,
+                TargetRows: 1)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+        Assert.Null(operation.ChangedRange);
+        Assert.Contains(operation.Warnings ?? [], warning => warning.Contains("Shrink unsupported", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Edit_copyRow_translates_formula_references_without_rewriting_functions_strings_or_absolute_rows()
     {
         var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();

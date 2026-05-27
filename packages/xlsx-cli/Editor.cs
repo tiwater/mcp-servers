@@ -265,19 +265,26 @@ public static class Editor
                 true,
                 $"Section already has {existingRows} example row(s); shrink to {targetRows} is unsupported",
                 operation.Sheet,
-                changedRange,
-                [$"Shrink unsupported for expandSectionRows; existing rows were left unchanged."]);
+                ChangedRange: null,
+                Warnings: [$"Shrink unsupported for expandSectionRows; existing rows were left unchanged."]);
         }
 
         var preserveStyle = operation.PreserveStyle != false;
         var preserveFormulas = operation.PreserveFormulas != false;
+        var preserveMergedRanges = operation.PreserveMergedRanges != false;
         var rowsToInsert = targetRows - existingRows;
         var firstInsertedRow = firstExampleRow + existingRows;
+        var exemplarRows = sheetData.Elements<Row>()
+            .Where(row => row.RowIndex?.Value >= firstExampleRow && row.RowIndex?.Value < firstExampleRow + existingRows)
+            .ToDictionary(row => (int)row.RowIndex!.Value, row => (Row)row.CloneNode(true));
+        var exemplarMergedRanges = preserveMergedRanges
+            ? GetHorizontalMergedRangesOnRows(worksheet, firstExampleRow, existingRows).ToList()
+            : [];
 
         for (var generatedRowIndex = firstInsertedRow; generatedRowIndex < firstExampleRow + targetRows; generatedRowIndex++)
         {
             var sourceRowIndex = firstExampleRow + ((generatedRowIndex - firstExampleRow) % existingRows);
-            if (!CanCopyRow(sheetData, sourceRowIndex, generatedRowIndex, preserveFormulas, out var copyError))
+            if (!CanCopyRow(exemplarRows[sourceRowIndex], sourceRowIndex, generatedRowIndex, preserveFormulas, out var copyError))
             {
                 return new XlsxEditAppliedOperation(operation.Type, false, copyError!, operation.Sheet);
             }
@@ -288,7 +295,7 @@ public static class Editor
             Type = "insertRows",
             StartRow = firstInsertedRow,
             Count = rowsToInsert
-        }, preserveMergedRanges: operation.PreserveMergedRanges != false);
+        }, preserveMergedRanges);
         if (!insertOperation.Applied)
         {
             return new XlsxEditAppliedOperation(operation.Type, false, insertOperation.Detail, operation.Sheet);
@@ -297,10 +304,15 @@ public static class Editor
         for (var generatedRowIndex = firstInsertedRow; generatedRowIndex < firstExampleRow + targetRows; generatedRowIndex++)
         {
             var sourceRowIndex = firstExampleRow + ((generatedRowIndex - firstExampleRow) % existingRows);
-            if (!TryCopyRow(sheetData, worksheet, sourceRowIndex, generatedRowIndex, preserveStyle, preserveFormulas, translateFormulas: preserveFormulas, out var copyError))
+            if (!TryCopyRow(exemplarRows[sourceRowIndex], sheetData, worksheet, sourceRowIndex, generatedRowIndex, preserveStyle, preserveFormulas, translateFormulas: preserveFormulas, out var copyError))
             {
                 return new XlsxEditAppliedOperation(operation.Type, false, copyError!, operation.Sheet);
             }
+        }
+
+        if (preserveMergedRanges)
+        {
+            DuplicateMergedRangesForGeneratedRows(worksheet, exemplarMergedRanges, firstExampleRow, existingRows, targetRows);
         }
 
         worksheet.Save();
@@ -316,6 +328,11 @@ public static class Editor
             return false;
         }
 
+        return CanCopyRow(sourceRow, sourceRowIndex, targetRowIndex, preserveFormulas, out error);
+    }
+
+    private static bool CanCopyRow(Row sourceRow, int sourceRowIndex, int targetRowIndex, bool preserveFormulas, out string? error)
+    {
         if (!preserveFormulas)
         {
             error = null;
@@ -358,6 +375,20 @@ public static class Editor
             return false;
         }
 
+        return TryCopyRow(sourceRow, sheetData, worksheet, sourceRowIndex, targetRowIndex, preserveStyle, preserveFormulas, translateFormulas, out error);
+    }
+
+    private static bool TryCopyRow(
+        Row sourceRow,
+        SheetData sheetData,
+        Worksheet worksheet,
+        int sourceRowIndex,
+        int targetRowIndex,
+        bool preserveStyle,
+        bool preserveFormulas,
+        bool translateFormulas,
+        out string? error)
+    {
         var rowDelta = targetRowIndex - sourceRowIndex;
         var translatedFormulasByReference = new Dictionary<string, string>(StringComparer.Ordinal);
         if (preserveFormulas && translateFormulas)
@@ -640,6 +671,63 @@ public static class Editor
             }
 
             mergeCell.Reference = $"{GetCellReference(startColumn, mergeStartRow)}:{GetCellReference(endColumn, mergeEndRow)}";
+        }
+    }
+
+    private static IEnumerable<(int Row, int StartColumn, int EndColumn)> GetHorizontalMergedRangesOnRows(Worksheet worksheet, int firstRow, int rowCount)
+    {
+        var lastRow = firstRow + rowCount - 1;
+        foreach (var mergeCell in worksheet.Descendants<MergeCell>())
+        {
+            if (mergeCell.Reference?.Value is not string reference || !TryParseRangeReference(reference, out var startCell, out var endCell))
+            {
+                continue;
+            }
+
+            var (startColumn, mergeStartRow) = ParseCellReference(startCell);
+            var (endColumn, mergeEndRow) = ParseCellReference(endCell);
+            if (mergeStartRow == mergeEndRow && mergeStartRow >= firstRow && mergeStartRow <= lastRow)
+            {
+                yield return (mergeStartRow, startColumn, endColumn);
+            }
+        }
+    }
+
+    private static void DuplicateMergedRangesForGeneratedRows(
+        Worksheet worksheet,
+        IReadOnlyList<(int Row, int StartColumn, int EndColumn)> exemplarMergedRanges,
+        int firstExampleRow,
+        int existingRows,
+        int targetRows)
+    {
+        if (exemplarMergedRanges.Count == 0)
+        {
+            return;
+        }
+
+        var mergeCells = worksheet.GetFirstChild<MergeCells>();
+        if (mergeCells is null)
+        {
+            mergeCells = new MergeCells();
+            worksheet.Append(mergeCells);
+        }
+
+        var existingReferences = mergeCells.Elements<MergeCell>()
+            .Select(merge => merge.Reference?.Value)
+            .Where(reference => !string.IsNullOrWhiteSpace(reference))
+            .ToHashSet(StringComparer.Ordinal);
+
+        for (var generatedRowIndex = firstExampleRow + existingRows; generatedRowIndex < firstExampleRow + targetRows; generatedRowIndex++)
+        {
+            var sourceRowIndex = firstExampleRow + ((generatedRowIndex - firstExampleRow) % existingRows);
+            foreach (var merge in exemplarMergedRanges.Where(merge => merge.Row == sourceRowIndex))
+            {
+                var reference = $"{GetCellReference(merge.StartColumn, generatedRowIndex)}:{GetCellReference(merge.EndColumn, generatedRowIndex)}";
+                if (existingReferences.Add(reference))
+                {
+                    mergeCells.AppendChild(new MergeCell { Reference = reference });
+                }
+            }
         }
     }
 
