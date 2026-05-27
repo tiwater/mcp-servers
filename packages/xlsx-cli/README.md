@@ -60,6 +60,7 @@ Applies a batch of explicit fixed-layout workbook edits. Supported operation typ
 - `setRangeValues` with required `sheet`, `startCell`, and `values`; optional `valueType`
 - `insertRows` with required `sheet`, `startRow`, and `count`
 - `copyRow` with required `sheet`, `sourceRow`, and `targetRow`; optional `translateFormulas`
+- `expandSectionRows` with required `sheet`, `anchorText`, `exampleRows`, and `targetRows`; optional `preserveStyle`, `preserveFormulas`, and `preserveMergedRanges`
 
 By default, edit operations use `valueType: "auto"` semantics. Numeric-looking
 values are written as numeric Excel cells unless the target cell is formatted as
@@ -71,6 +72,12 @@ Formula adjustment for `insertRows` and `copyRow` is intentionally conservative.
 It supports A1-style cell references, including local references and sheet-qualified
 references. Whole-row references, 3D references, structured table references, and
 external workbook references are not guaranteed to be adjusted correctly.
+`expandSectionRows` finds the first visible text cell exactly matching
+`anchorText`, treats the following `exampleRows` as the template section, inserts
+rows until the section reaches `targetRows`, and copies example rows cyclically
+into generated rows. Styles, translated formulas, and merged-range movement are
+preserved by default. Shrinking existing sections is reported as a warning and
+does not delete rows.
 
 ```bash
 tiwater-xlsx edit <input.xlsx> <operations.json> <output.xlsx>
@@ -86,7 +93,8 @@ Example operations file:
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "E2", "value": "10.2" },
     { "type": "setRangeValues", "sheet": "Sheet1", "startCell": "F2", "values": [["233988", "383789"], ["252353", "341366"]], "valueType": "number" },
     { "type": "insertRows", "sheet": "RP", "startRow": 8, "count": 2 },
-    { "type": "copyRow", "sheet": "RP", "sourceRow": 12, "targetRow": 14, "translateFormulas": true }
+    { "type": "copyRow", "sheet": "RP", "sourceRow": 12, "targetRow": 14, "translateFormulas": true },
+    { "type": "expandSectionRows", "sheet": "RP", "anchorText": "impurity peak area", "exampleRows": 2, "targetRows": 4, "preserveStyle": true, "preserveFormulas": true, "preserveMergedRanges": true }
   ]
 }
 ```

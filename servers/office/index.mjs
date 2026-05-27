@@ -221,7 +221,7 @@ const tools = [
   },
   {
     name: 'xlsx_edit',
-    description: 'Apply explicit edit operations to an XLSX workbook, including single-cell writes, range writes, and structural row operations for fixed-layout sheets.',
+    description: 'Apply explicit edit operations to an XLSX workbook, including single-cell writes, range writes, structural row operations, and anchored section expansion for fixed-layout sheets.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -244,7 +244,13 @@ const tools = [
               count: { type: 'integer' },
               sourceRow: { type: 'integer' },
               targetRow: { type: 'integer' },
-              translateFormulas: { type: 'boolean' }
+              translateFormulas: { type: 'boolean' },
+              anchorText: { type: 'string' },
+              exampleRows: { type: 'integer' },
+              targetRows: { type: 'integer' },
+              preserveStyle: { type: 'boolean' },
+              preserveFormulas: { type: 'boolean' },
+              preserveMergedRanges: { type: 'boolean' }
             },
             required: ['type']
           }

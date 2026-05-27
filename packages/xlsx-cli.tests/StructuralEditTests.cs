@@ -70,6 +70,52 @@ public class StructuralEditTests
     }
 
     [Fact]
+    public void Edit_expandSectionRows_expands_existing_template_section_in_place()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-expand-section-rows-{Guid.NewGuid():N}.xlsx");
+        const string anchorText = "280 nm峰面积-360 nm峰面积*0.784";
+
+        using (var template = SpreadsheetDocument.Open(path, true))
+        {
+            var templateWorksheet = GetWorksheet(template.WorkbookPart!, "RP");
+            var anchorCell = TestWorkbookReader.GetCell(templateWorksheet, "A11");
+            anchorCell.InlineString = new InlineString(new Text(anchorText));
+            templateWorksheet.Save();
+        }
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation(
+                "expandSectionRows",
+                Sheet: "RP",
+                AnchorText: anchorText,
+                ExampleRows: 2,
+                TargetRows: 4,
+                PreserveStyle: true,
+                PreserveFormulas: true,
+                PreserveMergedRanges: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+        Assert.Equal("RP", operation.Sheet);
+        Assert.Equal("12:15", operation.ChangedRange);
+
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+        var sheetData = worksheet.GetFirstChild<SheetData>()!;
+
+        Assert.Equal(anchorText, TestWorkbookReader.GetCellText(spreadsheet.WorkbookPart!, worksheet, "A11"));
+        Assert.Contains(sheetData.Elements<Row>(), row => row.RowIndex?.Value == 14);
+        Assert.Contains(sheetData.Elements<Row>(), row => row.RowIndex?.Value == 15);
+        Assert.Equal("B8-B11*0.784", TestWorkbookReader.GetCell(worksheet, "B14").CellFormula!.Text);
+
+        var mergeCells = worksheet.Elements<MergeCells>().Single();
+        Assert.Contains(mergeCells.Elements<MergeCell>(), merge => merge.Reference?.Value == "A17:L17");
+        Assert.DoesNotContain(mergeCells.Elements<MergeCell>(), merge => merge.Reference?.Value == "A15:L15");
+    }
+
+    [Fact]
     public void Edit_copyRow_translates_formula_references_without_rewriting_functions_strings_or_absolute_rows()
     {
         var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();

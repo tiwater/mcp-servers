@@ -71,6 +71,7 @@ public static class Editor
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
             "insertRows" => InsertRowsOperation(workbookPart, operation),
             "copyRow" => CopyRowOperation(workbookPart, operation),
+            "expandSectionRows" => ExpandSectionRowsOperation(workbookPart, operation),
             _ => new XlsxEditAppliedOperation(operation.Type, false, $"Unknown operation type: {operation.Type}"),
         };
     }
@@ -127,7 +128,7 @@ public static class Editor
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated range from {operation.Sheet}!{operation.StartCell}");
     }
 
-    private static XlsxEditAppliedOperation InsertRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    private static XlsxEditAppliedOperation InsertRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation, bool preserveMergedRanges = true)
     {
         if (string.IsNullOrWhiteSpace(operation.Sheet) || operation.StartRow is null || operation.Count is null)
         {
@@ -167,7 +168,10 @@ public static class Editor
         }
 
         ShiftWorksheetDimension(worksheet, operation.StartRow.Value, operation.Count.Value);
-        ShiftMergedRanges(worksheet, operation.StartRow.Value, operation.Count.Value);
+        if (preserveMergedRanges)
+        {
+            ShiftMergedRanges(worksheet, operation.StartRow.Value, operation.Count.Value);
+        }
         ShiftFormulasForInsertedRows(workbookPart, operation.Sheet, operation.StartRow.Value, operation.Count.Value);
 
         worksheet.Save();
@@ -195,15 +199,168 @@ public static class Editor
 
         var worksheet = worksheetPart.Worksheet;
         var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
-        var sourceRow = sheetData.Elements<Row>().FirstOrDefault(row => row.RowIndex?.Value == operation.SourceRow.Value);
-        if (sourceRow is null)
+        if (!TryCopyRow(
+                sheetData,
+                worksheet,
+                operation.SourceRow.Value,
+                operation.TargetRow.Value,
+                preserveStyle: true,
+                preserveFormulas: true,
+                translateFormulas: operation.TranslateFormulas == true,
+                out var copyError))
         {
-            return new XlsxEditAppliedOperation(operation.Type, false, $"Source row not found: {operation.SourceRow}");
+            return new XlsxEditAppliedOperation(operation.Type, false, copyError!);
         }
 
-        var rowDelta = operation.TargetRow.Value - operation.SourceRow.Value;
+        worksheet.Save();
+
+        var changedRange = $"{operation.TargetRow}:{operation.TargetRow}";
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Copied row {operation.SourceRow} to {operation.Sheet}!{operation.TargetRow}", operation.Sheet, changedRange);
+    }
+
+    private static XlsxEditAppliedOperation ExpandSectionRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || operation.AnchorText is null || operation.ExampleRows is null || operation.TargetRows is null)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet, anchorText, exampleRows, and targetRows are required");
+        }
+
+        if (operation.ExampleRows.Value < 1 || operation.TargetRows.Value < 1)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "exampleRows and targetRows must be positive");
+        }
+
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        }
+
+        var worksheet = worksheetPart.Worksheet;
+        var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
+        var anchorCell = FindVisibleTextCell(workbookPart, worksheet, operation.AnchorText);
+        if (anchorCell?.CellReference?.Value is not string anchorReference)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, $"Anchor text not found on sheet {operation.Sheet}: {operation.AnchorText}");
+        }
+
+        var (_, sectionHeaderRow) = ParseCellReference(anchorReference);
+        var firstExampleRow = sectionHeaderRow + 1;
+        var existingRows = operation.ExampleRows.Value;
+        var targetRows = operation.TargetRows.Value;
+        var changedRange = $"{firstExampleRow}:{firstExampleRow + targetRows - 1}";
+
+        for (var sourceRowIndex = firstExampleRow; sourceRowIndex < firstExampleRow + existingRows; sourceRowIndex++)
+        {
+            if (!sheetData.Elements<Row>().Any(row => row.RowIndex?.Value == sourceRowIndex))
+            {
+                return new XlsxEditAppliedOperation(operation.Type, false, $"Example row not found: {sourceRowIndex}", operation.Sheet);
+            }
+        }
+
+        if (targetRows <= existingRows)
+        {
+            return new XlsxEditAppliedOperation(
+                operation.Type,
+                true,
+                $"Section already has {existingRows} example row(s); shrink to {targetRows} is unsupported",
+                operation.Sheet,
+                changedRange,
+                [$"Shrink unsupported for expandSectionRows; existing rows were left unchanged."]);
+        }
+
+        var preserveStyle = operation.PreserveStyle != false;
+        var preserveFormulas = operation.PreserveFormulas != false;
+        var rowsToInsert = targetRows - existingRows;
+        var firstInsertedRow = firstExampleRow + existingRows;
+
+        for (var generatedRowIndex = firstInsertedRow; generatedRowIndex < firstExampleRow + targetRows; generatedRowIndex++)
+        {
+            var sourceRowIndex = firstExampleRow + ((generatedRowIndex - firstExampleRow) % existingRows);
+            if (!CanCopyRow(sheetData, sourceRowIndex, generatedRowIndex, preserveFormulas, out var copyError))
+            {
+                return new XlsxEditAppliedOperation(operation.Type, false, copyError!, operation.Sheet);
+            }
+        }
+
+        var insertOperation = InsertRowsOperation(workbookPart, operation with
+        {
+            Type = "insertRows",
+            StartRow = firstInsertedRow,
+            Count = rowsToInsert
+        }, preserveMergedRanges: operation.PreserveMergedRanges != false);
+        if (!insertOperation.Applied)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, insertOperation.Detail, operation.Sheet);
+        }
+
+        for (var generatedRowIndex = firstInsertedRow; generatedRowIndex < firstExampleRow + targetRows; generatedRowIndex++)
+        {
+            var sourceRowIndex = firstExampleRow + ((generatedRowIndex - firstExampleRow) % existingRows);
+            if (!TryCopyRow(sheetData, worksheet, sourceRowIndex, generatedRowIndex, preserveStyle, preserveFormulas, translateFormulas: preserveFormulas, out var copyError))
+            {
+                return new XlsxEditAppliedOperation(operation.Type, false, copyError!, operation.Sheet);
+            }
+        }
+
+        worksheet.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Expanded section at {operation.Sheet}!{anchorReference} to {targetRows} row(s)", operation.Sheet, changedRange);
+    }
+
+    private static bool CanCopyRow(SheetData sheetData, int sourceRowIndex, int targetRowIndex, bool preserveFormulas, out string? error)
+    {
+        var sourceRow = sheetData.Elements<Row>().FirstOrDefault(row => row.RowIndex?.Value == sourceRowIndex);
+        if (sourceRow is null)
+        {
+            error = $"Source row not found: {sourceRowIndex}";
+            return false;
+        }
+
+        if (!preserveFormulas)
+        {
+            error = null;
+            return true;
+        }
+
+        var rowDelta = targetRowIndex - sourceRowIndex;
+        foreach (var cell in sourceRow.Elements<Cell>())
+        {
+            if (cell.CellFormula?.Text is not string formula)
+            {
+                continue;
+            }
+
+            if (!TryTranslateFormulaRows(formula, rowDelta, out _, out var formulaError))
+            {
+                error = $"Cannot copy row {sourceRowIndex} to {targetRowIndex}: {formulaError}";
+                return false;
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
+    private static bool TryCopyRow(
+        SheetData sheetData,
+        Worksheet worksheet,
+        int sourceRowIndex,
+        int targetRowIndex,
+        bool preserveStyle,
+        bool preserveFormulas,
+        bool translateFormulas,
+        out string? error)
+    {
+        var sourceRow = sheetData.Elements<Row>().FirstOrDefault(row => row.RowIndex?.Value == sourceRowIndex);
+        if (sourceRow is null)
+        {
+            error = $"Source row not found: {sourceRowIndex}";
+            return false;
+        }
+
+        var rowDelta = targetRowIndex - sourceRowIndex;
         var translatedFormulasByReference = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (operation.TranslateFormulas == true)
+        if (preserveFormulas && translateFormulas)
         {
             foreach (var cell in sourceRow.Elements<Cell>())
             {
@@ -214,7 +371,8 @@ public static class Editor
 
                 if (!TryTranslateFormulaRows(formula, rowDelta, out var translatedFormula, out var formulaError))
                 {
-                    return new XlsxEditAppliedOperation(operation.Type, false, $"Cannot copy row {operation.SourceRow} to {operation.TargetRow}: {formulaError}");
+                    error = $"Cannot copy row {sourceRowIndex} to {targetRowIndex}: {formulaError}";
+                    return false;
                 }
 
                 if (cell.CellReference?.Value is string sourceReference)
@@ -224,21 +382,39 @@ public static class Editor
             }
         }
 
-        var existingTargetRow = sheetData.Elements<Row>().FirstOrDefault(row => row.RowIndex?.Value == operation.TargetRow.Value);
+        var existingTargetRow = sheetData.Elements<Row>().FirstOrDefault(row => row.RowIndex?.Value == targetRowIndex);
         existingTargetRow?.Remove();
 
         var targetRow = (Row)sourceRow.CloneNode(true);
-        targetRow.RowIndex = (uint)operation.TargetRow.Value;
+        targetRow.RowIndex = (uint)targetRowIndex;
+        if (!preserveStyle)
+        {
+            targetRow.Height = null;
+            targetRow.CustomHeight = null;
+            targetRow.StyleIndex = null;
+            targetRow.CustomFormat = null;
+        }
+
         foreach (var cell in targetRow.Elements<Cell>())
         {
             var originalReference = cell.CellReference?.Value;
             if (cell.CellReference?.Value is string reference)
             {
                 var (column, _) = ParseCellReference(reference);
-                cell.CellReference = GetCellReference(column, operation.TargetRow.Value);
+                cell.CellReference = GetCellReference(column, targetRowIndex);
             }
 
-            if (operation.TranslateFormulas == true && originalReference is not null && cell.CellFormula?.Text is string formula)
+            if (!preserveStyle)
+            {
+                cell.StyleIndex = null;
+            }
+
+            if (!preserveFormulas && cell.CellFormula is not null)
+            {
+                cell.CellFormula = null;
+                cell.CellValue = null;
+            }
+            else if (translateFormulas && originalReference is not null && cell.CellFormula?.Text is string formula)
             {
                 var translatedFormula = translatedFormulasByReference[originalReference];
                 cell.CellFormula.Text = translatedFormula;
@@ -250,11 +426,9 @@ public static class Editor
         }
 
         InsertRow(sheetData, targetRow);
-        ExpandWorksheetDimensionToRow(worksheet, operation.TargetRow.Value);
-        worksheet.Save();
-
-        var changedRange = $"{operation.TargetRow}:{operation.TargetRow}";
-        return new XlsxEditAppliedOperation(operation.Type, true, $"Copied row {operation.SourceRow} to {operation.Sheet}!{operation.TargetRow}", operation.Sheet, changedRange);
+        ExpandWorksheetDimensionToRow(worksheet, targetRowIndex);
+        error = null;
+        return true;
     }
 
     private static WorksheetPart? GetWorksheetPart(WorkbookPart workbookPart, string sheetName, out string? error)
@@ -268,6 +442,58 @@ public static class Editor
 
         error = null;
         return (WorksheetPart)workbookPart.GetPartById(relationshipId);
+    }
+
+    private static Cell? FindVisibleTextCell(WorkbookPart workbookPart, Worksheet worksheet, string text)
+    {
+        foreach (var row in worksheet.Descendants<Row>().OrderBy(row => row.RowIndex?.Value ?? 0))
+        {
+            if (row.Hidden?.Value == true)
+            {
+                continue;
+            }
+
+            foreach (var cell in row.Elements<Cell>())
+            {
+                if (cell.CellReference?.Value is not string reference || IsColumnHidden(worksheet, reference))
+                {
+                    continue;
+                }
+
+                if (string.Equals(GetCellText(workbookPart, cell), text, StringComparison.Ordinal))
+                {
+                    return cell;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string GetCellText(WorkbookPart workbookPart, Cell cell)
+    {
+        if (cell.DataType?.Value == CellValues.SharedString && cell.CellValue?.Text is string sharedStringIndexText)
+        {
+            var sharedStrings = workbookPart.SharedStringTablePart?.SharedStringTable;
+            return int.TryParse(sharedStringIndexText, out var sharedStringIndex) && sharedStrings is not null
+                ? sharedStrings.ElementAt(sharedStringIndex).InnerText
+                : string.Empty;
+        }
+
+        if (cell.DataType?.Value == CellValues.InlineString)
+        {
+            return cell.InlineString?.InnerText ?? string.Empty;
+        }
+
+        return cell.CellValue?.Text ?? string.Empty;
+    }
+
+    private static bool IsColumnHidden(Worksheet worksheet, string cellReference)
+    {
+        var (columnIndex, _) = ParseCellReference(cellReference);
+        return worksheet.Elements<Columns>()
+            .SelectMany(columns => columns.Elements<Column>())
+            .Any(column => column.Hidden?.Value == true && column.Min?.Value <= columnIndex && column.Max?.Value >= columnIndex);
     }
 
     private static IEnumerable<(string Name, WorksheetPart Part)> GetWorksheetParts(WorkbookPart workbookPart)
