@@ -12,6 +12,14 @@ public record WorkbookReport(
     List<SheetReport> Sheets
 );
 
+public record TextCellReport(string Reference, string Text);
+
+public record FormulaCellReport(string Reference, string Formula, string? CachedValue);
+
+public record RowHeightReport(uint Row, double Height);
+
+public record ColumnWidthReport(uint Column, double Width);
+
 public record SheetReport(
     string Name,
     int RowCount,
@@ -20,7 +28,11 @@ public record SheetReport(
     List<string> TablePlaceholders,
     string? UsedRange = null,
     List<string>? MergedRanges = null,
-    int FormulaCellCount = 0
+    int FormulaCellCount = 0,
+    List<TextCellReport>? TextCells = null,
+    List<FormulaCellReport>? FormulaCells = null,
+    List<RowHeightReport>? RowHeights = null,
+    List<ColumnWidthReport>? ColumnWidths = null
 );
 
 public record FillData(
