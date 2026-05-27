@@ -12,6 +12,14 @@ public record WorkbookReport(
     List<SheetReport> Sheets
 );
 
+public record TextCellReport(string Reference, string Text);
+
+public record FormulaCellReport(string Reference, string Formula, string? CachedValue);
+
+public record RowHeightReport(uint Row, double Height);
+
+public record ColumnWidthReport(uint Column, double Width);
+
 public record SheetReport(
     string Name,
     int RowCount,
@@ -20,7 +28,11 @@ public record SheetReport(
     List<string> TablePlaceholders,
     string? UsedRange = null,
     List<string>? MergedRanges = null,
-    int FormulaCellCount = 0
+    int FormulaCellCount = 0,
+    List<TextCellReport>? TextCells = null,
+    List<FormulaCellReport>? FormulaCells = null,
+    List<RowHeightReport>? RowHeights = null,
+    List<ColumnWidthReport>? ColumnWidths = null
 );
 
 public record FillData(
@@ -37,11 +49,17 @@ public sealed record XlsxEditOperation(
     string? StartCell = null,
     IReadOnlyList<IReadOnlyList<string>>? Values = null,
     bool? Bold = null,
+    int? StartRow = null,
+    int? Count = null,
     int? SourceRow = null,
     int? TargetRow = null,
-    int? Count = null,
-    bool? CopyValues = null
-);
+    bool? TranslateFormulas = null,
+    string? AnchorText = null,
+    int? ExampleRows = null,
+    int? TargetRows = null,
+    bool? PreserveStyle = null,
+    bool? PreserveFormulas = null,
+    bool? PreserveMergedRanges = null);
 
 public sealed record XlsxEditDocument(
     IReadOnlyList<XlsxEditOperation> Operations
@@ -50,13 +68,23 @@ public sealed record XlsxEditDocument(
 public sealed record XlsxEditAppliedOperation(
     string Type,
     bool Applied,
-    string Detail
+    string Detail,
+    string? Sheet = null,
+    string? ChangedRange = null,
+    IReadOnlyList<string>? Warnings = null
 );
 
 public sealed record XlsxEditResult(
     string Input,
     string Output,
     IReadOnlyList<XlsxEditAppliedOperation> AppliedOperations
+);
+
+public sealed record XlsxValidationResult(
+    string File,
+    bool Valid,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<string> Warnings
 );
 
 internal static class Json
