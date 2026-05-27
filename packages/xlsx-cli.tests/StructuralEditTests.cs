@@ -116,7 +116,7 @@ public class StructuralEditTests
     }
 
     [Fact]
-    public void Edit_expandSectionRows_copies_original_example_formulas_and_merged_ranges()
+    public void Edit_expandSectionRows_copies_original_example_formulas_and_preserves_merged_ranges_by_default()
     {
         var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
         var output = Path.Combine(Path.GetTempPath(), $"xlsx-expand-section-formulas-merges-{Guid.NewGuid():N}.xlsx");
@@ -145,8 +145,7 @@ public class StructuralEditTests
                 ExampleRows: 2,
                 TargetRows: 4,
                 PreserveStyle: true,
-                PreserveFormulas: true,
-                PreserveMergedRanges: true)
+                PreserveFormulas: true)
         ]);
 
         var operation = Assert.Single(result.AppliedOperations);
