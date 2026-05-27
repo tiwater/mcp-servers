@@ -48,7 +48,18 @@ public sealed record XlsxEditOperation(
     string? ValueType = null,
     string? StartCell = null,
     IReadOnlyList<IReadOnlyList<string>>? Values = null,
-    bool? Bold = null);
+    bool? Bold = null,
+    int? StartRow = null,
+    int? Count = null,
+    int? SourceRow = null,
+    int? TargetRow = null,
+    bool? TranslateFormulas = null,
+    string? AnchorText = null,
+    int? ExampleRows = null,
+    int? TargetRows = null,
+    bool? PreserveStyle = null,
+    bool? PreserveFormulas = null,
+    bool? PreserveMergedRanges = null);
 
 public sealed record XlsxEditDocument(
     IReadOnlyList<XlsxEditOperation> Operations
@@ -57,7 +68,10 @@ public sealed record XlsxEditDocument(
 public sealed record XlsxEditAppliedOperation(
     string Type,
     bool Applied,
-    string Detail
+    string Detail,
+    string? Sheet = null,
+    string? ChangedRange = null,
+    IReadOnlyList<string>? Warnings = null
 );
 
 public sealed record XlsxEditResult(

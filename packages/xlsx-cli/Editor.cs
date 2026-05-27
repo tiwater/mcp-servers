@@ -10,6 +10,7 @@ public static class Editor
 {
     private static readonly Regex NumericTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", RegexOptions.Compiled);
     private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
+    private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
 
     public static int RunEdit(string[] args)
     {
@@ -68,6 +69,8 @@ public static class Editor
         {
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
+            "insertRows" => InsertRowsOperation(workbookPart, operation),
+            "copyRow" => CopyRowOperation(workbookPart, operation),
             _ => new XlsxEditAppliedOperation(operation.Type, false, $"Unknown operation type: {operation.Type}"),
         };
     }
@@ -122,6 +125,107 @@ public static class Editor
 
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated range from {operation.Sheet}!{operation.StartCell}");
+    }
+
+    private static XlsxEditAppliedOperation InsertRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || operation.StartRow is null || operation.Count is null)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet, startRow, and count are required");
+        }
+
+        if (operation.StartRow.Value < 1 || operation.Count.Value < 1)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "startRow and count must be positive");
+        }
+
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        }
+
+        var worksheet = worksheetPart.Worksheet;
+        var sheetData = worksheet.GetFirstChild<SheetData>();
+        if (sheetData is not null)
+        {
+            foreach (var row in sheetData.Elements<Row>()
+                         .Where(row => row.RowIndex?.Value >= operation.StartRow.Value)
+                         .OrderByDescending(row => row.RowIndex!.Value)
+                         .ToList())
+            {
+                var targetRow = row.RowIndex!.Value + (uint)operation.Count.Value;
+                row.RowIndex = targetRow;
+                foreach (var cell in row.Elements<Cell>())
+                {
+                    if (cell.CellReference?.Value is string reference)
+                    {
+                        cell.CellReference = ShiftCellReference(reference, operation.Count.Value);
+                    }
+                }
+            }
+        }
+
+        ShiftWorksheetDimension(worksheet, operation.StartRow.Value, operation.Count.Value);
+        ShiftMergedRanges(worksheet, operation.StartRow.Value, operation.Count.Value);
+
+        worksheet.Save();
+        var changedRange = $"{operation.StartRow}:{operation.StartRow + operation.Count - 1}";
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Inserted {operation.Count} row(s) at {operation.Sheet}!{operation.StartRow}", operation.Sheet, changedRange);
+    }
+
+    private static XlsxEditAppliedOperation CopyRowOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || operation.SourceRow is null || operation.TargetRow is null)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet, sourceRow, and targetRow are required");
+        }
+
+        if (operation.SourceRow.Value < 1 || operation.TargetRow.Value < 1)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "sourceRow and targetRow must be positive");
+        }
+
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        }
+
+        var worksheet = worksheetPart.Worksheet;
+        var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
+        var sourceRow = sheetData.Elements<Row>().FirstOrDefault(row => row.RowIndex?.Value == operation.SourceRow.Value);
+        if (sourceRow is null)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, $"Source row not found: {operation.SourceRow}");
+        }
+
+        var existingTargetRow = sheetData.Elements<Row>().FirstOrDefault(row => row.RowIndex?.Value == operation.TargetRow.Value);
+        existingTargetRow?.Remove();
+
+        var rowDelta = operation.TargetRow.Value - operation.SourceRow.Value;
+        var targetRow = (Row)sourceRow.CloneNode(true);
+        targetRow.RowIndex = (uint)operation.TargetRow.Value;
+        foreach (var cell in targetRow.Elements<Cell>())
+        {
+            if (cell.CellReference?.Value is string reference)
+            {
+                var (column, _) = ParseCellReference(reference);
+                cell.CellReference = GetCellReference(column, operation.TargetRow.Value);
+            }
+
+            if (operation.TranslateFormulas == true && cell.CellFormula?.Text is string formula)
+            {
+                cell.CellFormula.Text = TranslateFormulaRows(formula, rowDelta);
+            }
+        }
+
+        InsertRow(sheetData, targetRow);
+        ExpandWorksheetDimensionToRow(worksheet, operation.TargetRow.Value);
+        worksheet.Save();
+
+        var changedRange = $"{operation.TargetRow}:{operation.TargetRow}";
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Copied row {operation.SourceRow} to {operation.Sheet}!{operation.TargetRow}", operation.Sheet, changedRange);
     }
 
     private static WorksheetPart? GetWorksheetPart(WorkbookPart workbookPart, string sheetName, out string? error)
@@ -182,6 +286,132 @@ public static class Editor
         {
             row.InsertBefore(cell, nextCell);
         }
+    }
+
+    private static string ShiftCellReference(string cellReference, int rowDelta)
+    {
+        var (column, row) = ParseCellReference(cellReference);
+        return GetCellReference(column, row + rowDelta);
+    }
+
+    private static void ShiftWorksheetDimension(Worksheet worksheet, int startRow, int rowDelta)
+    {
+        var dimension = worksheet.GetFirstChild<SheetDimension>();
+        if (dimension?.Reference?.Value is not string reference)
+        {
+            return;
+        }
+
+        if (!TryParseRangeReference(reference, out var startCell, out var endCell))
+        {
+            return;
+        }
+
+        var (startColumn, rangeStartRow) = ParseCellReference(startCell);
+        var (endColumn, rangeEndRow) = ParseCellReference(endCell);
+        if (rangeStartRow >= startRow)
+        {
+            rangeStartRow += rowDelta;
+        }
+
+        if (rangeEndRow >= startRow)
+        {
+            rangeEndRow += rowDelta;
+        }
+
+        dimension.Reference = $"{GetCellReference(startColumn, rangeStartRow)}:{GetCellReference(endColumn, rangeEndRow)}";
+    }
+
+    private static void ExpandWorksheetDimensionToRow(Worksheet worksheet, int targetRow)
+    {
+        var dimension = worksheet.GetFirstChild<SheetDimension>();
+        if (dimension?.Reference?.Value is not string reference)
+        {
+            return;
+        }
+
+        if (!TryParseRangeReference(reference, out var startCell, out var endCell))
+        {
+            return;
+        }
+
+        var (startColumn, startRow) = ParseCellReference(startCell);
+        var (endColumn, endRow) = ParseCellReference(endCell);
+        if (targetRow < startRow)
+        {
+            startRow = targetRow;
+        }
+
+        if (targetRow > endRow)
+        {
+            endRow = targetRow;
+        }
+
+        dimension.Reference = $"{GetCellReference(startColumn, startRow)}:{GetCellReference(endColumn, endRow)}";
+    }
+
+    private static void ShiftMergedRanges(Worksheet worksheet, int startRow, int rowDelta)
+    {
+        foreach (var mergeCell in worksheet.Descendants<MergeCell>())
+        {
+            if (mergeCell.Reference?.Value is not string reference || !TryParseRangeReference(reference, out var startCell, out var endCell))
+            {
+                continue;
+            }
+
+            var (startColumn, mergeStartRow) = ParseCellReference(startCell);
+            var (endColumn, mergeEndRow) = ParseCellReference(endCell);
+            if (mergeStartRow >= startRow)
+            {
+                mergeStartRow += rowDelta;
+                mergeEndRow += rowDelta;
+            }
+            else if (mergeEndRow >= startRow)
+            {
+                mergeEndRow += rowDelta;
+            }
+
+            mergeCell.Reference = $"{GetCellReference(startColumn, mergeStartRow)}:{GetCellReference(endColumn, mergeEndRow)}";
+        }
+    }
+
+    private static bool TryParseRangeReference(string reference, out string startCell, out string endCell)
+    {
+        var parts = reference.Split(':', StringSplitOptions.TrimEntries);
+        if (parts.Length == 1)
+        {
+            startCell = parts[0];
+            endCell = parts[0];
+            return true;
+        }
+
+        if (parts.Length == 2)
+        {
+            startCell = parts[0];
+            endCell = parts[1];
+            return true;
+        }
+
+        startCell = string.Empty;
+        endCell = string.Empty;
+        return false;
+    }
+
+    private static string TranslateFormulaRows(string formula, int rowDelta)
+    {
+        return FormulaCellReferencePattern.Replace(formula, match =>
+        {
+            var columnAbsolute = match.Groups[1].Value;
+            var column = match.Groups[2].Value;
+            var rowAbsolute = match.Groups[3].Value;
+            var rowText = match.Groups[4].Value;
+            if (rowAbsolute == "$" || !int.TryParse(rowText, out var row))
+            {
+                return match.Value;
+            }
+
+            return $"{columnAbsolute}{column}{row + rowDelta}";
+        });
     }
 
     private static void SetCellValue(Cell cell, string value, WorkbookPart workbookPart, string? valueType)
