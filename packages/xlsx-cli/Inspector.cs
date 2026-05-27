@@ -156,12 +156,12 @@ public static class Inspector
         var text = cell.CellValue?.Text;
         if (text is null)
         {
-            return cell.InnerText;
+            return null;
         }
 
         if (cell.DataType?.Value == CellValues.SharedString && sharedStrings is not null && int.TryParse(text, out var index))
         {
-            return sharedStrings.ElementAt(index).InnerText;
+            return sharedStrings.ElementAtOrDefault(index)?.InnerText;
         }
 
         if (cell.DataType?.Value == CellValues.Boolean)
