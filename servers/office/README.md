@@ -16,6 +16,7 @@ Shared stdio MCP server for Office document workflows.
 - `xlsx_export_json`
 - `xlsx_fill_template`
 - `xlsx_edit`
+- `xlsx_validate`
 - `pptx_inspect`
 - `pptx_export_json`
 - `pptx_fill_template`

@@ -1,3 +1,4 @@
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 
@@ -5,6 +6,8 @@ namespace Dockit.Xlsx;
 
 public static class Validator
 {
+    private const int MaxValidationErrors = 100;
+
     public static XlsxValidationResult Validate(string input)
     {
         var file = Path.GetFullPath(input);
@@ -26,13 +29,22 @@ public static class Validator
                 return new XlsxValidationResult(file, false, errors, warnings);
             }
 
-            var validator = new OpenXmlValidator();
-            foreach (var error in validator.Validate(spreadsheet).Take(100))
+            var validator = new OpenXmlValidator(FileFormatVersions.Microsoft365)
+            {
+                MaxNumberOfErrors = MaxValidationErrors
+            };
+
+            foreach (var error in validator.Validate(spreadsheet))
             {
                 var xpath = error.Path?.XPath;
                 errors.Add(string.IsNullOrWhiteSpace(xpath)
                     ? error.Description
                     : $"{xpath}: {error.Description}");
+            }
+
+            if (errors.Count >= MaxValidationErrors)
+            {
+                warnings.Add($"Validation returned {MaxValidationErrors} errors; validation output may be truncated.");
             }
 
             return new XlsxValidationResult(file, errors.Count == 0, errors, warnings);
