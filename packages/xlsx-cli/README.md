@@ -67,6 +67,11 @@ text; other values are written as strings. The target cell's existing style and
 number format are preserved. Set `valueType` to `"text"` or `"number"` on an
 operation when a caller needs explicit behavior.
 
+Formula adjustment for `insertRows` and `copyRow` is intentionally conservative.
+It supports A1-style cell references, including local references and sheet-qualified
+references. Whole-row references, 3D references, structured table references, and
+external workbook references are not guaranteed to be adjusted correctly.
+
 ```bash
 tiwater-xlsx edit <input.xlsx> <operations.json> <output.xlsx>
 ```

@@ -131,6 +131,25 @@ public class StructuralEditTests
     }
 
     [Fact]
+    public void Edit_copyRow_rejects_translation_that_would_create_invalid_row_references()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-copy-row-invalid-upward-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("copyRow", Sheet: "RP", SourceRow: 12, TargetRow: 1, TranslateFormulas: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.False(operation.Applied);
+        Assert.Contains("row < 1", operation.Detail, StringComparison.Ordinal);
+
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+        Assert.DoesNotContain(worksheet.Descendants<Cell>(), cell => cell.CellReference?.Value == "C1");
+    }
+
+    [Fact]
     public void Edit_copyRow_does_not_rewrite_single_quoted_sheet_names()
     {
         var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();

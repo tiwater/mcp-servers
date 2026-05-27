@@ -244,13 +244,7 @@ const tools = [
               count: { type: 'integer' },
               sourceRow: { type: 'integer' },
               targetRow: { type: 'integer' },
-              translateFormulas: { type: 'boolean' },
-              anchorText: { type: 'string' },
-              exampleRows: { type: 'integer' },
-              targetRows: { type: 'integer' },
-              preserveStyle: { type: 'boolean' },
-              preserveFormulas: { type: 'boolean' },
-              preserveMergedRanges: { type: 'boolean' }
+              translateFormulas: { type: 'boolean' }
             },
             required: ['type']
           }

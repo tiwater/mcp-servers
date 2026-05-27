@@ -201,23 +201,46 @@ public static class Editor
             return new XlsxEditAppliedOperation(operation.Type, false, $"Source row not found: {operation.SourceRow}");
         }
 
+        var rowDelta = operation.TargetRow.Value - operation.SourceRow.Value;
+        var translatedFormulasByReference = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (operation.TranslateFormulas == true)
+        {
+            foreach (var cell in sourceRow.Elements<Cell>())
+            {
+                if (cell.CellFormula?.Text is not string formula)
+                {
+                    continue;
+                }
+
+                if (!TryTranslateFormulaRows(formula, rowDelta, out var translatedFormula, out var formulaError))
+                {
+                    return new XlsxEditAppliedOperation(operation.Type, false, $"Cannot copy row {operation.SourceRow} to {operation.TargetRow}: {formulaError}");
+                }
+
+                if (cell.CellReference?.Value is string sourceReference)
+                {
+                    translatedFormulasByReference[sourceReference] = translatedFormula;
+                }
+            }
+        }
+
         var existingTargetRow = sheetData.Elements<Row>().FirstOrDefault(row => row.RowIndex?.Value == operation.TargetRow.Value);
         existingTargetRow?.Remove();
 
-        var rowDelta = operation.TargetRow.Value - operation.SourceRow.Value;
         var targetRow = (Row)sourceRow.CloneNode(true);
         targetRow.RowIndex = (uint)operation.TargetRow.Value;
         foreach (var cell in targetRow.Elements<Cell>())
         {
+            var originalReference = cell.CellReference?.Value;
             if (cell.CellReference?.Value is string reference)
             {
                 var (column, _) = ParseCellReference(reference);
                 cell.CellReference = GetCellReference(column, operation.TargetRow.Value);
             }
 
-            if (operation.TranslateFormulas == true && cell.CellFormula?.Text is string formula)
+            if (operation.TranslateFormulas == true && originalReference is not null && cell.CellFormula?.Text is string formula)
             {
-                var translatedFormula = TranslateFormulaRows(formula, rowDelta);
+                var translatedFormula = translatedFormulasByReference[originalReference];
                 cell.CellFormula.Text = translatedFormula;
                 if (!string.Equals(translatedFormula, formula, StringComparison.Ordinal))
                 {
@@ -418,7 +441,18 @@ public static class Editor
 
     private static string TranslateFormulaRows(string formula, int rowDelta)
     {
-        return FormulaCellReferencePattern.Replace(formula, match =>
+        if (!TryTranslateFormulaRows(formula, rowDelta, out var translatedFormula, out _))
+        {
+            return formula;
+        }
+
+        return translatedFormula;
+    }
+
+    private static bool TryTranslateFormulaRows(string formula, int rowDelta, out string translatedFormula, out string? error)
+    {
+        string? formulaError = null;
+        var result = FormulaCellReferencePattern.Replace(formula, match =>
         {
             if (ShouldSkipFormulaReferenceMatch(formula, match))
             {
@@ -434,8 +468,19 @@ public static class Editor
                 return match.Value;
             }
 
-            return $"{columnAbsolute}{column}{row + rowDelta}";
+            var targetRow = row + rowDelta;
+            if (targetRow < 1)
+            {
+                formulaError ??= $"formula translation would produce row < 1 from reference {match.Value}";
+                return match.Value;
+            }
+
+            return $"{columnAbsolute}{column}{targetRow}";
         });
+
+        translatedFormula = formulaError is null ? result : formula;
+        error = formulaError;
+        return formulaError is null;
     }
 
     private static void ShiftFormulasForInsertedRows(WorkbookPart workbookPart, string editedSheetName, int startRow, int rowDelta)
