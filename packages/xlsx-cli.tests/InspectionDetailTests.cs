@@ -27,6 +27,7 @@ public class InspectionDetailTests
         Assert.DoesNotContain(sheet.TextCells!, cell => cell.Reference == "B14");
         Assert.Contains("A15:L15", sheet.MergedRanges!);
         Assert.Contains(sheet.RowHeights!, row => row.Row == 15 && row.Height == 42);
+        Assert.DoesNotContain(sheet.RowHeights!, row => row.Row == 16);
         Assert.Contains(sheet.ColumnWidths!, column => column.Column == 1 && column.Width > 20);
     }
 
@@ -47,10 +48,12 @@ public class InspectionDetailTests
             CreateFormulaRow(12, "B12", "B6-B9*0.784", "10"),
             CreateFormulaRow(13, "B13", "B7-B10*0.784", "11"),
             CreateFormulaWithoutCachedValueRow(),
-            CreateInlineStringRow(15, ("A15", "merged title"))
+            CreateInlineStringRow(15, ("A15", "merged title")),
+            CreateInlineStringRow(16, ("A16", "default height flag"))
         );
         sheetData.Elements<Row>().Single(row => row.RowIndex?.Value == 15).Height = 42;
         sheetData.Elements<Row>().Single(row => row.RowIndex?.Value == 15).CustomHeight = true;
+        sheetData.Elements<Row>().Single(row => row.RowIndex?.Value == 16).Height = 36;
 
         worksheetPart.Worksheet = new Worksheet(
             new Columns(new Column { Min = 1, Max = 1, Width = 24, CustomWidth = true }),

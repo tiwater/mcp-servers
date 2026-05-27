@@ -106,7 +106,9 @@ public static class Inspector
             {
                 foreach (var row in sheetData.Elements<Row>())
                 {
-                    if (row.RowIndex?.Value is uint rowIndex && row.Height?.Value is double height)
+                    if (row.RowIndex?.Value is uint rowIndex &&
+                        row.Height?.Value is double height &&
+                        row.CustomHeight?.Value == true)
                     {
                         rowHeights.Add(new RowHeightReport(rowIndex, height));
                     }
