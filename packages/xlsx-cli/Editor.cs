@@ -217,6 +217,7 @@ public static class Editor
             if (operation.TranslateFormulas == true && cell.CellFormula?.Text is string formula)
             {
                 cell.CellFormula.Text = TranslateFormulaRows(formula, rowDelta);
+                cell.CellValue = null;
             }
         }
 
@@ -401,6 +402,11 @@ public static class Editor
     {
         return FormulaCellReferencePattern.Replace(formula, match =>
         {
+            if (IsInsideQuotedString(formula, match.Index) || IsIdentifierOrFunctionNameMatch(formula, match))
+            {
+                return match.Value;
+            }
+
             var columnAbsolute = match.Groups[1].Value;
             var column = match.Groups[2].Value;
             var rowAbsolute = match.Groups[3].Value;
@@ -412,6 +418,39 @@ public static class Editor
 
             return $"{columnAbsolute}{column}{row + rowDelta}";
         });
+    }
+
+    private static bool IsInsideQuotedString(string formula, int index)
+    {
+        var inString = false;
+        for (var i = 0; i < index; i++)
+        {
+            if (formula[i] != '"')
+            {
+                continue;
+            }
+
+            if (inString && i + 1 < formula.Length && formula[i + 1] == '"')
+            {
+                i++;
+                continue;
+            }
+
+            inString = !inString;
+        }
+
+        return inString;
+    }
+
+    private static bool IsIdentifierOrFunctionNameMatch(string formula, Match match)
+    {
+        var nextIndex = match.Index + match.Length;
+        return nextIndex < formula.Length && (formula[nextIndex] == '(' || IsFormulaIdentifierCharacter(formula[nextIndex]));
+    }
+
+    private static bool IsFormulaIdentifierCharacter(char value)
+    {
+        return char.IsLetterOrDigit(value) || value == '_';
     }
 
     private static void SetCellValue(Cell cell, string value, WorkbookPart workbookPart, string? valueType)
