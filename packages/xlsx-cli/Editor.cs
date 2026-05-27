@@ -168,6 +168,7 @@ public static class Editor
 
         ShiftWorksheetDimension(worksheet, operation.StartRow.Value, operation.Count.Value);
         ShiftMergedRanges(worksheet, operation.StartRow.Value, operation.Count.Value);
+        ShiftFormulasForInsertedRows(worksheet, operation.StartRow.Value, operation.Count.Value);
 
         worksheet.Save();
         var changedRange = $"{operation.StartRow}:{operation.StartRow + operation.Count - 1}";
@@ -421,6 +422,46 @@ public static class Editor
             }
 
             return $"{columnAbsolute}{column}{row + rowDelta}";
+        });
+    }
+
+    private static void ShiftFormulasForInsertedRows(Worksheet worksheet, int startRow, int rowDelta)
+    {
+        foreach (var cell in worksheet.Descendants<Cell>())
+        {
+            if (cell.CellFormula?.Text is not string formula)
+            {
+                continue;
+            }
+
+            var shiftedFormula = ShiftFormulaRowsForInsertion(formula, startRow, rowDelta);
+            cell.CellFormula.Text = shiftedFormula;
+            if (!string.Equals(shiftedFormula, formula, StringComparison.Ordinal))
+            {
+                cell.CellValue = null;
+            }
+        }
+    }
+
+    private static string ShiftFormulaRowsForInsertion(string formula, int startRow, int rowDelta)
+    {
+        return FormulaCellReferencePattern.Replace(formula, match =>
+        {
+            if (IsInsideQuotedSegment(formula, match.Index) || IsIdentifierOrFunctionNameMatch(formula, match))
+            {
+                return match.Value;
+            }
+
+            var columnAbsolute = match.Groups[1].Value;
+            var column = match.Groups[2].Value;
+            var rowAbsolute = match.Groups[3].Value;
+            var rowText = match.Groups[4].Value;
+            if (!int.TryParse(rowText, out var row) || row < startRow)
+            {
+                return match.Value;
+            }
+
+            return $"{columnAbsolute}{column}{rowAbsolute}{row + rowDelta}";
         });
     }
 

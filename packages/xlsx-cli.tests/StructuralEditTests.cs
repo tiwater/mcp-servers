@@ -30,8 +30,9 @@ public class StructuralEditTests
         Assert.Equal("280 nm peak area", TestWorkbookReader.GetCellText(workbookPart, worksheet, "A5"));
         Assert.Equal("360 nm peak area", TestWorkbookReader.GetCellText(workbookPart, worksheet, "A10"));
         Assert.Equal("impurity peak area", TestWorkbookReader.GetCellText(workbookPart, worksheet, "A13"));
-        Assert.Equal("B6-B9*0.784", TestWorkbookReader.GetCell(worksheet, "B14").CellFormula!.Text);
-        Assert.Equal("B7-B10*0.784", TestWorkbookReader.GetCell(worksheet, "B15").CellFormula!.Text);
+        Assert.Equal("B6-B11*0.784", TestWorkbookReader.GetCell(worksheet, "B14").CellFormula!.Text);
+        Assert.Equal("B7-B12*0.784", TestWorkbookReader.GetCell(worksheet, "B15").CellFormula!.Text);
+        Assert.Equal("B11+$B$11+\"B9\"+'Q1'!B11", TestWorkbookReader.GetCell(worksheet, "D5").CellFormula!.Text);
 
         var mergeCells = worksheet.Elements<MergeCells>().Single();
         Assert.Contains(mergeCells.Elements<MergeCell>(), merge => merge.Reference?.Value == "A17:L17");
@@ -188,7 +189,7 @@ internal static class WorkbookFixtures
 
         var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
         var sheetData = new SheetData(
-            CreateInlineStringRow(5, ("A5", "280 nm peak area"), ("B5", "area"), ("C5", "ratio")),
+            CreateMixedRow(5, ("A5", "280 nm peak area"), ("B5", "area"), ("C5", "ratio")),
             CreateInlineStringRow(6, ("A6", "sample 280"), ("B6", "125.000")),
             CreateInlineStringRow(7, ("A7", "sample 280 repeat"), ("B7", "130.000")),
             CreateInlineStringRow(8, ("A8", "360 nm peak area"), ("B8", "area")),
@@ -256,6 +257,20 @@ internal static class WorkbookFixtures
                 InlineString = new InlineString(new Text(value))
             });
         }
+
+        return row;
+    }
+
+    private static Row CreateMixedRow(uint rowIndex, params (string Reference, string Value)[] cells)
+    {
+        var row = CreateInlineStringRow(rowIndex, cells);
+        row.Append(new Cell
+        {
+            CellReference = "D5",
+            StyleIndex = 1,
+            CellFormula = new CellFormula("B9+$B$9+\"B9\"+'Q1'!B9"),
+            CellValue = new CellValue("25")
+        });
 
         return row;
     }
