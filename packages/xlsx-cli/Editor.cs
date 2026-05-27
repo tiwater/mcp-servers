@@ -216,8 +216,12 @@ public static class Editor
 
             if (operation.TranslateFormulas == true && cell.CellFormula?.Text is string formula)
             {
-                cell.CellFormula.Text = TranslateFormulaRows(formula, rowDelta);
-                cell.CellValue = null;
+                var translatedFormula = TranslateFormulaRows(formula, rowDelta);
+                cell.CellFormula.Text = translatedFormula;
+                if (!string.Equals(translatedFormula, formula, StringComparison.Ordinal))
+                {
+                    cell.CellValue = null;
+                }
             }
         }
 
