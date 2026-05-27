@@ -127,6 +127,47 @@ public class StructuralEditTests
         Assert.Equal("115.2", targetCell.CellValue!.Text);
     }
 
+    [Fact]
+    public void Edit_copyRow_does_not_rewrite_single_quoted_sheet_names()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-copy-row-sheet-name-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("copyRow", Sheet: "RP", SourceRow: 12, TargetRow: 14, TranslateFormulas: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+        var targetCell = TestWorkbookReader.GetCell(worksheet, "E14");
+
+        Assert.Equal("='Q1'!A3", targetCell.CellFormula!.Text);
+    }
+
+    [Fact]
+    public void Edit_copyRow_translates_lowercase_references_and_clears_cached_value()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-copy-row-lowercase-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("copyRow", Sheet: "RP", SourceRow: 12, TargetRow: 14, TranslateFormulas: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+        var targetCell = TestWorkbookReader.GetCell(worksheet, "F14");
+
+        Assert.Equal("a3+b3", targetCell.CellFormula!.Text);
+        Assert.Null(targetCell.CellValue);
+    }
+
     private static Worksheet GetWorksheet(WorkbookPart workbookPart, string sheetName)
     {
         var sheet = workbookPart.Workbook.Descendants<Sheet>().Single(s => s.Name?.Value == sheetName);
@@ -154,7 +195,7 @@ internal static class WorkbookFixtures
             CreateInlineStringRow(9, ("A9", "blank 360"), ("B9", "12.500")),
             CreateInlineStringRow(10, ("A10", "blank 360 repeat"), ("B10", "13.000")),
             CreateInlineStringRow(11, ("A11", "impurity peak area"), ("B11", "area")),
-            CreateFormulaRow(12, ("B12", "B6-B9*0.784", "115.2"), ("C12", "LOG10(A1)+\"A12\"+$B$12", "7.5"), ("D12", "$B$12", "115.2")),
+            CreateFormulaRow(12, ("B12", "B6-B9*0.784", "115.2"), ("C12", "LOG10(A1)+\"A12\"+$B$12", "7.5"), ("D12", "$B$12", "115.2"), ("E12", "='Q1'!A1", "11"), ("F12", "a1+b1", "22")),
             CreateFormulaRow(13, "B13", "B7-B10*0.784", "119.808"),
             CreateInlineStringRow(15, ("A15", "calculation note spans report width"))
         );

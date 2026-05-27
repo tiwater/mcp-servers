@@ -10,7 +10,7 @@ public static class Editor
 {
     private static readonly Regex NumericTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", RegexOptions.Compiled);
     private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
-    private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
+    private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
 
     public static int RunEdit(string[] args)
     {
@@ -406,7 +406,7 @@ public static class Editor
     {
         return FormulaCellReferencePattern.Replace(formula, match =>
         {
-            if (IsInsideQuotedString(formula, match.Index) || IsIdentifierOrFunctionNameMatch(formula, match))
+            if (IsInsideQuotedSegment(formula, match.Index) || IsIdentifierOrFunctionNameMatch(formula, match))
             {
                 return match.Value;
             }
@@ -424,26 +424,33 @@ public static class Editor
         });
     }
 
-    private static bool IsInsideQuotedString(string formula, int index)
+    private static bool IsInsideQuotedSegment(string formula, int index)
     {
-        var inString = false;
+        char? quote = null;
         for (var i = 0; i < index; i++)
         {
-            if (formula[i] != '"')
+            if (formula[i] != '"' && formula[i] != '\'')
             {
                 continue;
             }
 
-            if (inString && i + 1 < formula.Length && formula[i + 1] == '"')
+            if (quote == formula[i] && i + 1 < formula.Length && formula[i + 1] == formula[i])
             {
                 i++;
                 continue;
             }
 
-            inString = !inString;
+            if (quote == formula[i])
+            {
+                quote = null;
+            }
+            else if (quote is null)
+            {
+                quote = formula[i];
+            }
         }
 
-        return inString;
+        return quote is not null;
     }
 
     private static bool IsIdentifierOrFunctionNameMatch(string formula, Match match)
