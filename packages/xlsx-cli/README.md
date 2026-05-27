@@ -1,6 +1,6 @@
 # tiwater-xlsx
 
-A .NET 9 globally installed command-line tool for inspecting, editing, and filling `.xlsx` workbooks.
+A .NET 9 globally installed command-line tool for inspecting, editing, validating, and filling `.xlsx` workbooks.
 
 ## Installation
 
@@ -99,4 +99,11 @@ Example operations file:
 }
 ```
 
-Scenario-specific fixed-layout planning workflows now live in Lucid skills and scripts. This CLI remains the generic workbook runtime for inspection, export, template filling, and explicit edit application.
+### 4. Validate a Workbook Package
+Validates an `.xlsx` workbook as an Open XML spreadsheet package and returns JSON validation evidence. The command exits `0` when the workbook is valid and `1` when validation errors are found or the file is not a valid XLSX package.
+
+```bash
+tiwater-xlsx validate <input.xlsx>
+```
+
+Scenario-specific fixed-layout planning workflows now live in Lucid skills and scripts. This CLI remains the generic workbook runtime for inspection, export, template filling, explicit edit application, and package validation.

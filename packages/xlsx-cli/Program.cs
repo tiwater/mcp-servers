@@ -26,6 +26,7 @@ internal static class Cli
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
+                "validate" => RunValidateAsync(args[1..]),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -85,6 +86,18 @@ internal static class Cli
         return Task.FromResult(0);
     }
 
+    private static Task<int> RunValidateAsync(string[] args)
+    {
+        if (args.Length < 1)
+        {
+            throw new InvalidOperationException("validate requires <input.xlsx>");
+        }
+
+        var result = Validator.Validate(args[0]);
+        WriteJson(result);
+        return Task.FromResult(result.Valid ? 0 : 1);
+    }
+
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
@@ -92,6 +105,7 @@ internal static class Cli
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");
         Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");
+        Console.WriteLine("  validate <input.xlsx>");
     }
 
     private static Task<int> FailUnknown(string command)

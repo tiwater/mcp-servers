@@ -80,6 +80,13 @@ public sealed record XlsxEditResult(
     IReadOnlyList<XlsxEditAppliedOperation> AppliedOperations
 );
 
+public sealed record XlsxValidationResult(
+    string File,
+    bool Valid,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<string> Warnings
+);
+
 internal static class Json
 {
     public static JsonSerializerOptions Options => new()

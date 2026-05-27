@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { McpStdioServer } from '../_shared/mcp-stdio.mjs';
 import {
   commandCandidate,
@@ -261,6 +262,15 @@ const tools = [
     },
   },
   {
+    name: 'xlsx_validate',
+    description: 'Validate an XLSX workbook package and return Open XML validation evidence.',
+    inputSchema: {
+      type: 'object',
+      properties: { input: { type: 'string', description: 'Absolute or relative path to a .xlsx file.' } },
+      required: ['input'],
+    },
+  },
+  {
     name: 'pptx_inspect',
     description: 'Inspect a PPTX file and return slide metrics and discovered placeholders.',
     inputSchema: {
@@ -323,6 +333,8 @@ async function callTool(name, args) {
       return createToolResult(await xlsxFillTemplate(args));
     case 'xlsx_edit':
       return createToolResult(await xlsxEdit(args));
+    case 'xlsx_validate':
+      return createToolResult(await xlsxValidate(args));
     case 'pptx_inspect':
       return createToolResult(await pptxInspect(args));
     case 'pptx_export_json':
@@ -462,6 +474,12 @@ async function xlsxFillTemplate(args) {
   });
 }
 
+async function xlsxValidate(args) {
+  const input = requireString(args.input, 'input');
+  const result = await runXlsxValidateCandidateChain(['validate', input]);
+  return { tool: 'xlsx_validate', runtime: commandRuntime(result), result: result.json };
+}
+
 async function pptxInspect(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json']);
@@ -519,5 +537,61 @@ async function xlsxEdit(args) {
   return withTempJsonFile({ operations: args.edits }, async editsPath => {
     const result = await runCandidateChain(xlsxCandidates, ['edit', input, editsPath, output]);
     return { tool: 'xlsx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  });
+}
+
+async function runXlsxValidateCandidateChain(args) {
+  const errors = [];
+  for (const candidate of xlsxCandidates) {
+    try {
+      const result = await runValidationCommand(candidate, args);
+      const text = result.stdout.trim();
+      if (!text) return { ...result, json: null };
+      try {
+        return { ...result, json: JSON.parse(text) };
+      } catch {
+        if (result.code !== 0) {
+          errors.push(`${candidate.command}: validate did not return JSON`);
+          continue;
+        }
+        throw new Error(`Expected JSON output but received: ${text.slice(0, 300)}${text.length > 300 ? '…' : ''}`);
+      }
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        errors.push(`${candidate.command}: not found`);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(`No runnable command candidate succeeded. ${errors.join('; ')}`);
+}
+
+async function runValidationCommand(candidate, args) {
+  const env = { ...process.env, ...(candidate.env || {}) };
+  const cwd = candidate.cwd || resolveRepoPath();
+  const commandArgs = [...(candidate.argsPrefix || []), ...args];
+
+  return await new Promise((resolve, reject) => {
+    const child = spawn(candidate.command, commandArgs, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', chunk => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0 || code === 1) {
+        resolve({ code, stdout, stderr, command: candidate.command, args: commandArgs });
+        return;
+      }
+      reject(new Error(`${candidate.command} ${commandArgs.join(' ')} failed with exit code ${code}\n${stderr || stdout}`));
+    });
   });
 }
