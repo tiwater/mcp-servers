@@ -26,13 +26,15 @@ public class StructuralEditTests
         using var spreadsheet = SpreadsheetDocument.Open(output, false);
         var workbookPart = spreadsheet.WorkbookPart!;
         var worksheet = GetWorksheet(workbookPart, "RP");
+        var summary = GetWorksheet(workbookPart, "Summary");
 
         Assert.Equal("280 nm peak area", TestWorkbookReader.GetCellText(workbookPart, worksheet, "A5"));
         Assert.Equal("360 nm peak area", TestWorkbookReader.GetCellText(workbookPart, worksheet, "A10"));
         Assert.Equal("impurity peak area", TestWorkbookReader.GetCellText(workbookPart, worksheet, "A13"));
         Assert.Equal("B6-B11*0.784", TestWorkbookReader.GetCell(worksheet, "B14").CellFormula!.Text);
         Assert.Equal("B7-B12*0.784", TestWorkbookReader.GetCell(worksheet, "B15").CellFormula!.Text);
-        Assert.Equal("B11+$B$11+\"B9\"+'Q1'!B11", TestWorkbookReader.GetCell(worksheet, "D5").CellFormula!.Text);
+        Assert.Equal("B11+$B$11+\"B9\"+'Q1'!B9+Q1!A9", TestWorkbookReader.GetCell(worksheet, "D5").CellFormula!.Text);
+        Assert.Equal("RP!B11", TestWorkbookReader.GetCell(summary, "A1").CellFormula!.Text);
 
         var mergeCells = worksheet.Elements<MergeCells>().Single();
         Assert.Contains(mergeCells.Elements<MergeCell>(), merge => merge.Reference?.Value == "A17:L17");
@@ -149,6 +151,26 @@ public class StructuralEditTests
     }
 
     [Fact]
+    public void Edit_copyRow_preserves_unquoted_sheet_names_while_translating_references()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-copy-row-unquoted-sheet-name-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("copyRow", Sheet: "RP", SourceRow: 12, TargetRow: 14, TranslateFormulas: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+        var targetCell = TestWorkbookReader.GetCell(worksheet, "G14");
+
+        Assert.Equal("Q1!A3", targetCell.CellFormula!.Text);
+    }
+
+    [Fact]
     public void Edit_copyRow_translates_lowercase_references_and_clears_cached_value()
     {
         var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
@@ -196,7 +218,7 @@ internal static class WorkbookFixtures
             CreateInlineStringRow(9, ("A9", "blank 360"), ("B9", "12.500")),
             CreateInlineStringRow(10, ("A10", "blank 360 repeat"), ("B10", "13.000")),
             CreateInlineStringRow(11, ("A11", "impurity peak area"), ("B11", "area")),
-            CreateFormulaRow(12, ("B12", "B6-B9*0.784", "115.2"), ("C12", "LOG10(A1)+\"A12\"+$B$12", "7.5"), ("D12", "$B$12", "115.2"), ("E12", "='Q1'!A1", "11"), ("F12", "a1+b1", "22")),
+            CreateFormulaRow(12, ("B12", "B6-B9*0.784", "115.2"), ("C12", "LOG10(A1)+\"A12\"+$B$12", "7.5"), ("D12", "$B$12", "115.2"), ("E12", "='Q1'!A1", "11"), ("F12", "a1+b1", "22"), ("G12", "Q1!A1", "33")),
             CreateFormulaRow(13, "B13", "B7-B10*0.784", "119.808"),
             CreateInlineStringRow(15, ("A15", "calculation note spans report width"))
         );
@@ -216,10 +238,24 @@ internal static class WorkbookFixtures
             new MergeCells(new MergeCell { Reference = "A15:L15" })
         );
 
+        var summaryPart = workbookPart.AddNewPart<WorksheetPart>();
+        summaryPart.Worksheet = new Worksheet(new SheetData(
+            CreateFormulaRow(1, "A1", "RP!B9", "12.5")
+        ));
+
+        var q1Part = workbookPart.AddNewPart<WorksheetPart>();
+        q1Part.Worksheet = new Worksheet(new SheetData(
+            CreateInlineStringRow(1, ("A1", "Q1 value"))
+        ));
+
         var sheets = workbookPart.Workbook.AppendChild(new Sheets());
         sheets.AppendChild(new Sheet { Id = workbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "RP" });
+        sheets.AppendChild(new Sheet { Id = workbookPart.GetIdOfPart(summaryPart), SheetId = 2, Name = "Summary" });
+        sheets.AppendChild(new Sheet { Id = workbookPart.GetIdOfPart(q1Part), SheetId = 3, Name = "Q1" });
         workbookPart.Workbook.Save();
         worksheetPart.Worksheet.Save();
+        summaryPart.Worksheet.Save();
+        q1Part.Worksheet.Save();
         return path;
     }
 
@@ -268,7 +304,7 @@ internal static class WorkbookFixtures
         {
             CellReference = "D5",
             StyleIndex = 1,
-            CellFormula = new CellFormula("B9+$B$9+\"B9\"+'Q1'!B9"),
+            CellFormula = new CellFormula("B9+$B$9+\"B9\"+'Q1'!B9+Q1!A9"),
             CellValue = new CellValue("25")
         });
 

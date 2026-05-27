@@ -168,7 +168,7 @@ public static class Editor
 
         ShiftWorksheetDimension(worksheet, operation.StartRow.Value, operation.Count.Value);
         ShiftMergedRanges(worksheet, operation.StartRow.Value, operation.Count.Value);
-        ShiftFormulasForInsertedRows(worksheet, operation.StartRow.Value, operation.Count.Value);
+        ShiftFormulasForInsertedRows(workbookPart, operation.Sheet, operation.StartRow.Value, operation.Count.Value);
 
         worksheet.Save();
         var changedRange = $"{operation.StartRow}:{operation.StartRow + operation.Count - 1}";
@@ -245,6 +245,19 @@ public static class Editor
 
         error = null;
         return (WorksheetPart)workbookPart.GetPartById(relationshipId);
+    }
+
+    private static IEnumerable<(string Name, WorksheetPart Part)> GetWorksheetParts(WorkbookPart workbookPart)
+    {
+        foreach (var sheet in workbookPart.Workbook.Descendants<Sheet>())
+        {
+            if (sheet.Name?.Value is not string sheetName || sheet.Id?.Value is not string relationshipId)
+            {
+                continue;
+            }
+
+            yield return (sheetName, (WorksheetPart)workbookPart.GetPartById(relationshipId));
+        }
     }
 
     private static Cell GetOrCreateCell(WorksheetPart worksheetPart, string cellReference)
@@ -407,7 +420,7 @@ public static class Editor
     {
         return FormulaCellReferencePattern.Replace(formula, match =>
         {
-            if (IsInsideQuotedSegment(formula, match.Index) || IsIdentifierOrFunctionNameMatch(formula, match))
+            if (ShouldSkipFormulaReferenceMatch(formula, match))
             {
                 return match.Value;
             }
@@ -425,29 +438,48 @@ public static class Editor
         });
     }
 
-    private static void ShiftFormulasForInsertedRows(Worksheet worksheet, int startRow, int rowDelta)
+    private static void ShiftFormulasForInsertedRows(WorkbookPart workbookPart, string editedSheetName, int startRow, int rowDelta)
     {
-        foreach (var cell in worksheet.Descendants<Cell>())
+        foreach (var (sheetName, worksheetPart) in GetWorksheetParts(workbookPart))
         {
-            if (cell.CellFormula?.Text is not string formula)
+            var changed = false;
+            foreach (var cell in worksheetPart.Worksheet.Descendants<Cell>())
             {
-                continue;
+                if (cell.CellFormula?.Text is not string formula)
+                {
+                    continue;
+                }
+
+                var shiftedFormula = ShiftFormulaRowsForInsertion(formula, sheetName, editedSheetName, startRow, rowDelta);
+                cell.CellFormula.Text = shiftedFormula;
+                if (!string.Equals(shiftedFormula, formula, StringComparison.Ordinal))
+                {
+                    cell.CellValue = null;
+                    changed = true;
+                }
             }
 
-            var shiftedFormula = ShiftFormulaRowsForInsertion(formula, startRow, rowDelta);
-            cell.CellFormula.Text = shiftedFormula;
-            if (!string.Equals(shiftedFormula, formula, StringComparison.Ordinal))
+            if (changed)
             {
-                cell.CellValue = null;
+                worksheetPart.Worksheet.Save();
             }
         }
     }
 
-    private static string ShiftFormulaRowsForInsertion(string formula, int startRow, int rowDelta)
+    private static string ShiftFormulaRowsForInsertion(string formula, string formulaSheetName, string editedSheetName, int startRow, int rowDelta)
     {
         return FormulaCellReferencePattern.Replace(formula, match =>
         {
-            if (IsInsideQuotedSegment(formula, match.Index) || IsIdentifierOrFunctionNameMatch(formula, match))
+            if (ShouldSkipFormulaReferenceMatch(formula, match))
+            {
+                return match.Value;
+            }
+
+            var qualifier = GetSheetQualifier(formula, match.Index);
+            var targetsEditedSheet = qualifier is null
+                ? string.Equals(formulaSheetName, editedSheetName, StringComparison.OrdinalIgnoreCase)
+                : string.Equals(qualifier, editedSheetName, StringComparison.OrdinalIgnoreCase);
+            if (!targetsEditedSheet)
             {
                 return match.Value;
             }
@@ -463,6 +495,13 @@ public static class Editor
 
             return $"{columnAbsolute}{column}{rowAbsolute}{row + rowDelta}";
         });
+    }
+
+    private static bool ShouldSkipFormulaReferenceMatch(string formula, Match match)
+    {
+        return IsInsideQuotedSegment(formula, match.Index)
+            || IsIdentifierOrFunctionNameMatch(formula, match)
+            || IsUnquotedSheetNameMatch(formula, match);
     }
 
     private static bool IsInsideQuotedSegment(string formula, int index)
@@ -498,6 +537,55 @@ public static class Editor
     {
         var nextIndex = match.Index + match.Length;
         return nextIndex < formula.Length && (formula[nextIndex] == '(' || IsFormulaIdentifierCharacter(formula[nextIndex]));
+    }
+
+    private static bool IsUnquotedSheetNameMatch(string formula, Match match)
+    {
+        var nextIndex = match.Index + match.Length;
+        return nextIndex < formula.Length && formula[nextIndex] == '!';
+    }
+
+    private static string? GetSheetQualifier(string formula, int referenceIndex)
+    {
+        var bangIndex = referenceIndex - 1;
+        if (bangIndex < 1 || formula[bangIndex] != '!')
+        {
+            return null;
+        }
+
+        if (formula[bangIndex - 1] == '\'')
+        {
+            return GetQuotedSheetQualifier(formula, bangIndex - 1);
+        }
+
+        var start = bangIndex - 1;
+        while (start >= 0 && IsFormulaIdentifierCharacter(formula[start]))
+        {
+            start--;
+        }
+
+        return formula[(start + 1)..bangIndex];
+    }
+
+    private static string? GetQuotedSheetQualifier(string formula, int closingQuoteIndex)
+    {
+        for (var i = closingQuoteIndex - 1; i >= 0; i--)
+        {
+            if (formula[i] != '\'')
+            {
+                continue;
+            }
+
+            if (i > 0 && formula[i - 1] == '\'')
+            {
+                i--;
+                continue;
+            }
+
+            return formula[(i + 1)..closingQuoteIndex].Replace("''", "'", StringComparison.Ordinal);
+        }
+
+        return null;
     }
 
     private static bool IsFormulaIdentifierCharacter(char value)
