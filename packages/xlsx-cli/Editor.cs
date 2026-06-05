@@ -154,6 +154,7 @@ public static class Editor
         }
 
         var worksheet = worksheetPart.Worksheet;
+        MaterializeSharedFormulas(worksheet);
         var sheetData = worksheet.GetFirstChild<SheetData>();
         Row? legacyTemplateRow = null;
         if (legacyTemplateSourceRow is not null)
@@ -238,6 +239,7 @@ public static class Editor
         }
 
         var worksheet = worksheetPart.Worksheet;
+        MaterializeSharedFormulas(worksheet);
         var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
         if (!TryCopyRow(
                 sheetData,
@@ -277,6 +279,7 @@ public static class Editor
         }
 
         var worksheet = worksheetPart.Worksheet;
+        MaterializeSharedFormulas(worksheet);
         var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
         var anchorCell = FindVisibleTextCell(workbookPart, worksheet, operation.AnchorText);
         if (anchorCell?.CellReference?.Value is not string anchorReference)
@@ -795,7 +798,7 @@ public static class Editor
 
     private static string TranslateFormulaRows(string formula, int rowDelta)
     {
-        if (!TryTranslateFormulaRows(formula, rowDelta, out var translatedFormula, out _))
+        if (!TryTranslateFormulaReferences(formula, rowDelta, columnDelta: 0, out var translatedFormula, out _))
         {
             return formula;
         }
@@ -804,6 +807,11 @@ public static class Editor
     }
 
     private static bool TryTranslateFormulaRows(string formula, int rowDelta, out string translatedFormula, out string? error)
+    {
+        return TryTranslateFormulaReferences(formula, rowDelta, columnDelta: 0, out translatedFormula, out error);
+    }
+
+    private static bool TryTranslateFormulaReferences(string formula, int rowDelta, int columnDelta, out string translatedFormula, out string? error)
     {
         string? formulaError = null;
         var result = FormulaCellReferencePattern.Replace(formula, match =>
@@ -817,9 +825,23 @@ public static class Editor
             var column = match.Groups[2].Value;
             var rowAbsolute = match.Groups[3].Value;
             var rowText = match.Groups[4].Value;
+            var translatedColumn = column;
+            if (columnAbsolute != "$")
+            {
+                var targetColumn = GetColumnIndex(column) + columnDelta;
+                if (targetColumn < 1)
+                {
+                    formulaError ??= $"formula translation would produce column < 1 from reference {match.Value}";
+                    return match.Value;
+                }
+
+                translatedColumn = PreserveColumnCase(GetColumnReference(targetColumn), column);
+            }
+
+            var translatedRow = rowText;
             if (rowAbsolute == "$" || !int.TryParse(rowText, out var row))
             {
-                return match.Value;
+                return $"{columnAbsolute}{translatedColumn}{rowAbsolute}{translatedRow}";
             }
 
             var targetRow = row + rowDelta;
@@ -829,12 +851,65 @@ public static class Editor
                 return match.Value;
             }
 
-            return $"{columnAbsolute}{column}{targetRow}";
+            translatedRow = targetRow.ToString(CultureInfo.InvariantCulture);
+            return $"{columnAbsolute}{translatedColumn}{rowAbsolute}{translatedRow}";
         });
 
         translatedFormula = formulaError is null ? result : formula;
         error = formulaError;
         return formulaError is null;
+    }
+
+    private static void MaterializeSharedFormulas(Worksheet worksheet)
+    {
+        var sharedFormulaCells = worksheet.Descendants<Cell>()
+            .Where(cell => cell.CellFormula?.FormulaType?.Value == CellFormulaValues.Shared)
+            .ToList();
+        if (sharedFormulaCells.Count == 0)
+        {
+            return;
+        }
+
+        var masters = sharedFormulaCells
+            .Where(cell => cell.CellFormula?.SharedIndex?.Value is not null
+                && !string.IsNullOrWhiteSpace(cell.CellFormula.Text))
+            .GroupBy(cell => cell.CellFormula!.SharedIndex!.Value)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        foreach (var cell in sharedFormulaCells)
+        {
+            var formula = cell.CellFormula!;
+            var sharedIndex = formula.SharedIndex?.Value;
+            if (sharedIndex is null || !masters.TryGetValue(sharedIndex.Value, out var master))
+            {
+                continue;
+            }
+
+            var masterFormula = master.CellFormula?.Text;
+            if (string.IsNullOrWhiteSpace(masterFormula)
+                || master.CellReference?.Value is not string masterReference
+                || cell.CellReference?.Value is not string cellReference)
+            {
+                continue;
+            }
+
+            var (masterColumn, masterRow) = ParseCellReference(masterReference);
+            var (cellColumn, cellRow) = ParseCellReference(cellReference);
+            if (TryTranslateFormulaReferences(
+                    masterFormula,
+                    cellRow - masterRow,
+                    cellColumn - masterColumn,
+                    out var materializedFormula,
+                    out _))
+            {
+                formula.Text = materializedFormula;
+            }
+
+            formula.FormulaType = null;
+            formula.Reference = null;
+            formula.SharedIndex = null;
+            cell.CellValue = null;
+        }
     }
 
     private static void ShiftFormulasForInsertedRows(WorkbookPart workbookPart, string editedSheetName, int startRow, int rowDelta)
@@ -1209,7 +1284,7 @@ public static class Editor
         return index;
     }
 
-    private static string GetCellReference(int column, int row)
+    private static string GetColumnReference(int column)
     {
         var letters = new Stack<char>();
         while (column > 0)
@@ -1218,6 +1293,19 @@ public static class Editor
             letters.Push((char)('A' + (column % 26)));
             column /= 26;
         }
-        return $"{new string(letters.ToArray())}{row}";
+
+        return new string(letters.ToArray());
+    }
+
+    private static string GetCellReference(int column, int row)
+    {
+        return $"{GetColumnReference(column)}{row}";
+    }
+
+    private static string PreserveColumnCase(string columnReference, string originalColumn)
+    {
+        return originalColumn.All(char.IsLower)
+            ? columnReference.ToLowerInvariant()
+            : columnReference;
     }
 }

@@ -163,6 +163,65 @@ public class StructuralEditTests
     }
 
     [Fact]
+    public void Edit_expandSectionRows_materializes_shared_formulas_before_copying_rows()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-expand-section-shared-formulas-{Guid.NewGuid():N}.xlsx");
+        const string anchorText = "280 nm峰面积-360 nm峰面积*0.784";
+
+        using (var template = SpreadsheetDocument.Open(path, true))
+        {
+            var templateWorksheet = GetWorksheet(template.WorkbookPart!, "RP");
+            var anchorCell = TestWorkbookReader.GetCell(templateWorksheet, "A11");
+            anchorCell.InlineString = new InlineString(new Text(anchorText));
+
+            var master = TestWorkbookReader.GetCell(templateWorksheet, "F12");
+            master.CellFormula = new CellFormula("F6-F11*0.784")
+            {
+                FormulaType = CellFormulaValues.Shared,
+                Reference = "F12:G12",
+                SharedIndex = 0
+            };
+            master.CellValue = new CellValue("10");
+
+            var follower = TestWorkbookReader.GetCell(templateWorksheet, "G12");
+            follower.CellFormula = new CellFormula
+            {
+                FormulaType = CellFormulaValues.Shared,
+                SharedIndex = 0
+            };
+            follower.CellValue = new CellValue("20");
+
+            templateWorksheet.Save();
+        }
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation(
+                "expandSectionRows",
+                Sheet: "RP",
+                AnchorText: anchorText,
+                ExampleRows: 2,
+                TargetRows: 4,
+                PreserveStyle: true,
+                PreserveFormulas: true,
+                PreserveMergedRanges: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+
+        var validation = Validator.Validate(output);
+        Assert.True(validation.Valid, string.Join(Environment.NewLine, validation.Errors));
+
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+        Assert.Equal("F6-F11*0.784", TestWorkbookReader.GetCell(worksheet, "F12").CellFormula!.Text);
+        Assert.Equal("G6-G11*0.784", TestWorkbookReader.GetCell(worksheet, "G12").CellFormula!.Text);
+        Assert.Equal("F8-F13*0.784", TestWorkbookReader.GetCell(worksheet, "F14").CellFormula!.Text);
+        Assert.Null(TestWorkbookReader.GetCell(worksheet, "F14").CellFormula!.FormulaType);
+    }
+
+    [Fact]
     public void Edit_expandSectionRows_shrink_noop_reports_no_changed_range()
     {
         var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
