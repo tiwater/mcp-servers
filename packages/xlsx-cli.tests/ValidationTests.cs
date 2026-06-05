@@ -55,6 +55,19 @@ public class ValidationTests
     }
 
     [Fact]
+    public void Validate_rejects_shared_formula_master_outside_its_reference_range()
+    {
+        var path = CreateWorkbookWithStaleSharedFormulaReference();
+
+        var result = Validator.Validate(path);
+
+        Assert.False(result.Valid);
+        Assert.Contains(result.Errors, error => error.Contains("shared formula", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Errors, error => error.Contains("F16", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Errors, error => error.Contains("F12:K12", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task Cli_validate_exits_one_and_emits_json_for_invalid_non_xlsx_file()
     {
         var path = Path.Combine(Path.GetTempPath(), $"xlsx-cli-invalid-text-{Guid.NewGuid():N}.xlsx");
@@ -86,6 +99,65 @@ public class ValidationTests
 
         workbookPart.Workbook.Save();
         return path;
+    }
+
+    private static string CreateWorkbookWithStaleSharedFormulaReference()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-stale-shared-formula-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+
+        worksheetPart.Worksheet = new Worksheet(new SheetData(
+            CreateNumericRow(6, ("F6", "382027"), ("G6", "422908")),
+            CreateNumericRow(11, ("F11", "141701"), ("G11", "0")),
+            CreateFormulaRow(16)
+        ));
+
+        var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "RP" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static Row CreateFormulaRow(uint rowIndex)
+    {
+        var row = new Row { RowIndex = rowIndex };
+        row.Append(
+            new Cell
+            {
+                CellReference = "F16",
+                CellFormula = new CellFormula("F6-F11*0.784")
+                {
+                    FormulaType = CellFormulaValues.Shared,
+                    Reference = "F12:K12",
+                    SharedIndex = 0,
+                }
+            },
+            new Cell
+            {
+                CellReference = "G16",
+                CellFormula = new CellFormula
+                {
+                    FormulaType = CellFormulaValues.Shared,
+                    SharedIndex = 0,
+                },
+                CellValue = new CellValue("0")
+            }
+        );
+        return row;
+    }
+
+    private static Row CreateNumericRow(uint rowIndex, params (string Ref, string Value)[] cells)
+    {
+        var row = new Row { RowIndex = rowIndex };
+        foreach (var (cellRef, value) in cells)
+        {
+            row.Append(new Cell { CellReference = cellRef, CellValue = new CellValue(value) });
+        }
+        return row;
     }
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunXlsxCliAsync(params string[] args)
