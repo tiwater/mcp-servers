@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-pptx</ToolCommandName>
     <PackageId>tiwater.pptx.cli</PackageId>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Authors>Tiwater</Authors>
     <Description>Inspect PowerPoint templates, export slide text, and fill placeholders from the command line.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

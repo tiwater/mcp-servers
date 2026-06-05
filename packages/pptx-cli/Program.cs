@@ -25,6 +25,7 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
+                "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -44,6 +45,13 @@ internal static class Cli
 
         var input = args[0];
         var json = args.Skip(1).Contains("--json", StringComparer.Ordinal);
+        var detail = args.Skip(1).Contains("--detail", StringComparer.Ordinal);
+        if (detail)
+        {
+            WriteJson(Inspector.InspectDetail(input));
+            return Task.FromResult(0);
+        }
+
         var report = Inspector.Inspect(input);
         if (json)
         {
@@ -56,6 +64,18 @@ internal static class Cli
             Console.WriteLine($"Placeholders: {string.Join(", ", report.Placeholders)}");
         }
 
+        return Task.FromResult(0);
+    }
+
+    private static Task<int> RunApplyFormatEditsAsync(string[] args)
+    {
+        if (args.Length < 3)
+        {
+            throw new InvalidOperationException("apply-format-edits requires <input.pptx> <plan.json> <output.pptx>");
+        }
+
+        var result = FormatEditor.Apply(args[0], args[1], args[2]);
+        WriteJson(result);
         return Task.FromResult(0);
     }
 
@@ -79,8 +99,10 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.pptx> [--json]");
+        Console.WriteLine("  inspect <input.pptx> --json --detail");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
+        Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
     }
 
     private static Task<int> FailUnknown(string command)

@@ -89,6 +89,74 @@ public class PptxCliTests
         Assert.Contains("Notes Q2 Review", notesTexts);
     }
 
+    [Fact]
+    public void InspectDetail_reports_shape_positions_and_run_formatting()
+    {
+        var path = CreateFixture();
+
+        var report = Inspector.InspectDetail(path);
+
+        Assert.Equal(path, report.File);
+        Assert.Equal(2, report.SlideCount);
+        Assert.Equal(9144000L, report.SlideSize.Cx);
+        Assert.Equal(6858000L, report.SlideSize.Cy);
+
+        var firstShape = Assert.Single(report.Slides[0].Shapes);
+        Assert.Equal(2U, firstShape.ShapeId);
+        Assert.Equal("TextBox 1", firstShape.Name);
+        Assert.Equal("shape", firstShape.Kind);
+        Assert.Equal("Project {{title}} 峰面积", firstShape.Text);
+        Assert.Equal(914400L, firstShape.Transform?.X);
+        Assert.Equal(457200L, firstShape.Transform?.Y);
+        Assert.Equal(3657600L, firstShape.Transform?.Cx);
+        Assert.Equal(457200L, firstShape.Transform?.Cy);
+
+        var run = Assert.Single(firstShape.Runs);
+        Assert.Equal(0, run.RunIndex);
+        Assert.Equal("Project {{title}} 峰面积", run.Text);
+        Assert.Equal("微软雅黑", run.FontFamily);
+        Assert.Equal(16d, run.FontSize);
+        Assert.Equal("287341", run.Color);
+        Assert.True(run.Bold);
+    }
+
+    [Fact]
+    public void ApplyFormatEdits_updates_targeted_run_formatting_and_reports_changes()
+    {
+        var template = CreateFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-format-{Guid.NewGuid():N}.pptx");
+        var plan = new FormatEditPlan([
+            new FormatEditOperation(
+                SlideNumber: 1,
+                ShapeId: 2U,
+                RunIndex: 0,
+                FontFamily: "Arial",
+                FontSize: 20d,
+                Color: "F59B0F",
+                Bold: false,
+                ParagraphAlignment: "center")
+        ]);
+
+        var result = FormatEditor.Apply(template, plan, output);
+
+        Assert.Equal(template, result.Input);
+        Assert.Equal(output, result.Output);
+        Assert.Equal(1, result.OperationCount);
+        Assert.Equal(1, result.ChangedCount);
+        var change = Assert.Single(result.Changes);
+        Assert.Equal(1, change.SlideNumber);
+        Assert.Equal(2U, change.ShapeId);
+        Assert.Equal(0, change.RunIndex);
+
+        var detail = Inspector.InspectDetail(output);
+        var run = Assert.Single(detail.Slides[0].Shapes[0].Runs);
+        Assert.Equal("Arial", run.FontFamily);
+        Assert.Equal(20d, run.FontSize);
+        Assert.Equal("F59B0F", run.Color);
+        Assert.False(run.Bold);
+        Assert.Equal("center", detail.Slides[0].Shapes[0].Paragraphs[0].Alignment);
+    }
+
     private static string CreateFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"pptx-fixture-{Guid.NewGuid():N}.pptx");
@@ -144,11 +212,24 @@ public class PptxCliTests
                             new P.NonVisualDrawingProperties { Id = 2U, Name = "TextBox 1" },
                             new P.NonVisualShapeDrawingProperties(new A.ShapeLocks { NoGrouping = true }),
                             new P.ApplicationNonVisualDrawingProperties()),
-                        new P.ShapeProperties(),
+                        new P.ShapeProperties(
+                            new A.Transform2D(
+                                new A.Offset { X = 914400L, Y = 457200L },
+                                new A.Extents { Cx = 3657600L, Cy = 457200L })),
                         new P.TextBody(
                             new A.BodyProperties(),
                             new A.ListStyle(),
-                            new A.Paragraph(new A.Run(new A.Text(text))))))),
+                            new A.Paragraph(
+                                new A.ParagraphProperties(
+                                    new A.DefaultRunProperties(
+                                        new A.SolidFill(new A.RgbColorModelHex { Val = "287341" }),
+                                        new A.LatinFont { Typeface = "微软雅黑" },
+                                        new A.EastAsianFont { Typeface = "微软雅黑" })
+                                    {
+                                        FontSize = 1600,
+                                        Bold = true
+                                    }),
+                                new A.Run(new A.Text(text))))))),
             new P.ColorMapOverride(new A.MasterColorMapping()));
     }
 

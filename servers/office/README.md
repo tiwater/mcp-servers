@@ -18,8 +18,10 @@ Shared stdio MCP server for Office document workflows.
 - `xlsx_edit`
 - `xlsx_validate`
 - `pptx_inspect`
+- `pptx_inspect_detail`
 - `pptx_export_json`
 - `pptx_fill_template`
+- `pptx_apply_format_edits`
 
 ## Run
 

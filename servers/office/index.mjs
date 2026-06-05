@@ -280,6 +280,15 @@ const tools = [
     },
   },
   {
+    name: 'pptx_inspect_detail',
+    description: 'Inspect a PPTX file and return detailed slide, shape, transform, paragraph, and run-format evidence.',
+    inputSchema: {
+      type: 'object',
+      properties: { input: { type: 'string' } },
+      required: ['input'],
+    },
+  },
+  {
     name: 'pptx_export_json',
     description: 'Export PPTX slide text and placeholder hints as structured JSON.',
     inputSchema: {
@@ -303,6 +312,20 @@ const tools = [
         dataPath: { type: 'string' },
       },
       required: ['template', 'output'],
+    },
+  },
+  {
+    name: 'pptx_apply_format_edits',
+    description: 'Copy a PPTX and apply targeted run-format edits from a data object or JSON edit plan file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        output: { type: 'string' },
+        plan: { type: 'object' },
+        planPath: { type: 'string' },
+      },
+      required: ['input', 'output'],
     },
   },
 ];
@@ -337,10 +360,14 @@ async function callTool(name, args) {
       return createToolResult(await xlsxValidate(args));
     case 'pptx_inspect':
       return createToolResult(await pptxInspect(args));
+    case 'pptx_inspect_detail':
+      return createToolResult(await pptxInspectDetail(args));
     case 'pptx_export_json':
       return createToolResult(await pptxExportJson(args));
     case 'pptx_fill_template':
       return createToolResult(await pptxFillTemplate(args));
+    case 'pptx_apply_format_edits':
+      return createToolResult(await pptxApplyFormatEdits(args));
     default:
       throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32601 });
   }
@@ -486,6 +513,12 @@ async function pptxInspect(args) {
   return { tool: 'pptx_inspect', runtime: commandRuntime(result), report: result.json };
 }
 
+async function pptxInspectDetail(args) {
+  const input = requireString(args.input, 'input');
+  const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json', '--detail']);
+  return { tool: 'pptx_inspect_detail', runtime: commandRuntime(result), report: result.json };
+}
+
 async function pptxExportJson(args) {
   const input = requireString(args.input, 'input');
   if (args.output) {
@@ -511,6 +544,23 @@ async function pptxFillTemplate(args) {
   return withTempJsonFile(args.data, async dataPath => {
     const result = await runCandidateChain(pptxCandidates, ['fill-template', template, dataPath, output]);
     return { tool: 'pptx_fill_template', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  });
+}
+
+async function pptxApplyFormatEdits(args) {
+  const input = requireString(args.input, 'input');
+  const output = requireString(args.output, 'output');
+  if (args.planPath) {
+    const planPath = requireString(args.planPath, 'planPath');
+    const result = await runCandidateChain(pptxCandidates, ['apply-format-edits', input, planPath, output]);
+    return { tool: 'pptx_apply_format_edits', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
+  }
+  if (args.plan === undefined) {
+    throw Object.assign(new Error('plan or planPath is required'), { code: -32602 });
+  }
+  return withTempJsonFile(args.plan, async planPath => {
+    const result = await runCandidateChain(pptxCandidates, ['apply-format-edits', input, planPath, output]);
+    return { tool: 'pptx_apply_format_edits', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
   });
 }
 function commandRuntime(result) {
