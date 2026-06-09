@@ -90,6 +90,7 @@ public static class Editor
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
             "markFieldsDirty" => MarkFieldsDirty(doc),
             "sanitizeFields" => SanitizeFields(doc),
+            "freezeFields" => FreezeFields(doc),
             _ => new DocxEditAppliedOperation(operation.Type, false, $"Unknown operation type: {operation.Type}"),
         };
     }
@@ -571,6 +572,121 @@ public static class Editor
 
         return new DocxEditAppliedOperation("sanitizeFields", true, "Sanitized field-update risks");
     }
+
+    private static DocxEditAppliedOperation FreezeFields(WordprocessingDocument doc)
+    {
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        mainPart.DocumentSettingsPart?.Settings?.RemoveAllChildren<UpdateFieldsOnOpen>();
+
+        var frozenSimpleFields = 0;
+        var frozenComplexFields = 0;
+
+        foreach (var root in Inspector.GetRoots(doc))
+        {
+            foreach (var simpleField in root.Descendants<SimpleField>().ToList())
+            {
+                var replacement = simpleField.ChildElements.Select(child => child.CloneNode(true)).ToList();
+                foreach (var child in replacement)
+                {
+                    simpleField.InsertBeforeSelf(child);
+                }
+
+                simpleField.Remove();
+                frozenSimpleFields++;
+            }
+
+            foreach (var paragraph in root.Descendants<Paragraph>().ToList())
+            {
+                frozenComplexFields += FreezeComplexFieldsInParagraph(paragraph);
+            }
+        }
+
+        return new DocxEditAppliedOperation(
+            "freezeFields",
+            true,
+            $"Froze {frozenSimpleFields} simple field(s) and {frozenComplexFields} complex field(s)");
+    }
+
+    private static int FreezeComplexFieldsInParagraph(Paragraph paragraph)
+    {
+        var frozen = 0;
+        var index = 0;
+
+        while (index < paragraph.ChildElements.Count)
+        {
+            var children = paragraph.ChildElements.ToList();
+            var begin = children.FindIndex(index, IsFieldBeginRun);
+            if (begin < 0)
+            {
+                break;
+            }
+
+            var depth = 0;
+            var separate = -1;
+            var end = -1;
+            for (var cursor = begin; cursor < children.Count; cursor++)
+            {
+                if (children[cursor] is not Run run)
+                {
+                    continue;
+                }
+
+                var fieldCharType = run.GetFirstChild<FieldChar>()?.FieldCharType?.Value;
+                if (fieldCharType == FieldCharValues.Begin)
+                {
+                    depth++;
+                }
+                else if (fieldCharType == FieldCharValues.Separate && depth == 1)
+                {
+                    separate = cursor;
+                }
+                else if (fieldCharType == FieldCharValues.End)
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        end = cursor;
+                        break;
+                    }
+                }
+            }
+
+            if (end < 0)
+            {
+                index = begin + 1;
+                continue;
+            }
+
+            var resultStart = separate >= 0 ? separate + 1 : end;
+            var resultRuns = children
+                .Skip(resultStart)
+                .Take(end - resultStart)
+                .Where(child => child is Run run && !IsFieldCodeRun(run))
+                .Select(child => child.CloneNode(true))
+                .ToList();
+
+            foreach (var child in resultRuns)
+            {
+                paragraph.InsertBefore(child, children[begin]);
+            }
+
+            for (var cursor = begin; cursor <= end; cursor++)
+            {
+                children[cursor].Remove();
+            }
+
+            frozen++;
+            index = begin + resultRuns.Count;
+        }
+
+        return frozen;
+    }
+
+    private static bool IsFieldBeginRun(OpenXmlElement element)
+        => element is Run run && run.GetFirstChild<FieldChar>()?.FieldCharType?.Value == FieldCharValues.Begin;
+
+    private static bool IsFieldCodeRun(Run run)
+        => run.Elements<FieldChar>().Any() || run.Elements<FieldCode>().Any();
 
     private static bool ReplaceCommentRangeInParagraph(Paragraph paragraph, string commentId, string replacementText)
     {

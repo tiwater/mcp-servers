@@ -414,6 +414,28 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_freeze_fields_to_current_display_text()
+    {
+        var docPath = CreateFieldFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"freeze-fields-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation("freezeFields")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var body = doc.MainDocumentPart!.Document!.Body!;
+        Assert.Empty(body.Descendants<SimpleField>());
+        Assert.Empty(body.Descendants<FieldCode>());
+        Assert.Empty(body.Descendants<FieldChar>());
+
+        var text = string.Concat(body.Descendants<Text>().Select(text => text.Text));
+        Assert.Contains("见表 11。", text);
+        Assert.Contains("表 11. HSP-PTMs样品翻译后修饰结果", text);
+    }
+
+    [Fact]
     public void Edit_can_delete_comments_explicitly()
     {
         var docPath = CreateAnnotatedFixture();
@@ -595,6 +617,36 @@ public class AnnotationToolsTests
                 new Run(new Text(text)),
                 new CommentRangeEnd { Id = commentId },
                 new Run(new CommentReference { Id = commentId })));
+
+    private static string CreateFieldFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"field-freeze-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        var body = new Body();
+        mainPart.Document = new Document(body);
+
+        body.Append(new Paragraph(
+            new Run(new Text("见")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+            new Run(new FieldCode(" REF _RefTable11 \\h ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            new Run(new Text("表 11")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End }),
+            new Run(new Text("。"))));
+
+        body.Append(new Paragraph(
+            new BookmarkStart { Id = "1", Name = "_RefTable11" },
+            new Run(new Text("表 ")),
+            new SimpleField(
+                new Run(new Text("11")))
+            { Instruction = "SEQ 表 \\* ARABIC", Dirty = false },
+            new BookmarkEnd { Id = "1" },
+            new Run(new Text(". HSP-PTMs样品翻译后修饰结果"))));
+
+        mainPart.Document.Save();
+        return path;
+    }
 
     private static Paragraph CreateFieldParagraph()
     {
