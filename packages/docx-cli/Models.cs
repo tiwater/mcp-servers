@@ -59,6 +59,59 @@ public sealed record TableMetadata(
     IReadOnlyList<int> RowCellCounts,
     IReadOnlyList<IReadOnlyList<string>> PreviewRows);
 
+public sealed record TableRunDetail(
+    int RunIndex,
+    string Text,
+    string? Style,
+    string? Color,
+    string? Underline,
+    bool Bold,
+    bool Italic,
+    string? FontAscii,
+    string? FontHighAnsi,
+    string? FontEastAsia,
+    string? FontComplexScript,
+    string? FontSize,
+    bool HasTextFill);
+
+public sealed record TableParagraphDetail(
+    int ParagraphIndex,
+    string Text,
+    string? Style,
+    string? Justification,
+    IReadOnlyList<TableRunDetail> Runs);
+
+public sealed record TableCellDetail(
+    int CellIndex,
+    int GridColumnStart,
+    int GridColumnEnd,
+    int GridSpan,
+    string? VMerge,
+    string? Width,
+    string? WidthType,
+    string? VerticalAlignment,
+    string? ShadingFill,
+    string Text,
+    IReadOnlyList<TableParagraphDetail> Paragraphs);
+
+public sealed record TableRowDetail(
+    int RowIndex,
+    int GridBefore,
+    int GridAfter,
+    int CellCount,
+    int GridWidth,
+    IReadOnlyList<TableCellDetail> Cells);
+
+public sealed record TableDetail(
+    int TableIndex,
+    int RowCount,
+    int ColumnCount,
+    IReadOnlyList<TableRowDetail> Rows);
+
+public sealed record TableInspectionReport(
+    string File,
+    IReadOnlyList<TableDetail> Tables);
+
 public sealed record StructureSummary(
     int BookmarkCount,
     int HyperlinkCount,

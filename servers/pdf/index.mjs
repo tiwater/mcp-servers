@@ -64,6 +64,18 @@ const tools = [
       required: ['input', 'name'],
     },
   },
+  {
+    name: 'pdf_extract_table_details',
+    description: 'Extract detected PDF tables with visual cell bboxes, text spans, colors, fonts, and line evidence for format validation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        pages: { type: 'array', items: { type: 'number' } },
+      },
+      required: ['input'],
+    },
+  },
 ];
 
 async function callTool(name, args) {
@@ -74,6 +86,8 @@ async function callTool(name, args) {
       return createToolResult(await pdfExtractTables(args));
     case 'pdf_find_table':
       return createToolResult(await pdfFindTable(args));
+    case 'pdf_extract_table_details':
+      return createToolResult(await pdfExtractTableDetails(args));
     default:
       throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32601 });
   }
@@ -102,6 +116,17 @@ async function pdfFindTable(args) {
   commandArgs.push('--json');
   const result = await runJsonCandidateChain(pdfCandidates, commandArgs);
   return { tool: 'pdf_find_table', runtime: commandRuntime(result), report: result.json };
+}
+
+async function pdfExtractTableDetails(args) {
+  const input = requireString(args.input, 'input');
+  const commandArgs = ['extract-table-details', input];
+  if (Array.isArray(args.pages) && args.pages.length > 0) {
+    commandArgs.push('--pages', args.pages.join(','));
+  }
+  commandArgs.push('--json');
+  const result = await runJsonCandidateChain(pdfCandidates, commandArgs);
+  return { tool: 'pdf_extract_table_details', runtime: commandRuntime(result), report: result.json };
 }
 
 function appendPdfFlags(commandArgs, args) {

@@ -23,6 +23,7 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
+                "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
                 "strip-direct-formatting" => Task.FromResult(Transforms.RunStripDirectFormatting(args[1..])),
@@ -64,6 +65,29 @@ internal static class Cli
         return Task.FromResult(0);
     }
 
+    private static Task<int> RunInspectTablesAsync(string[] args)
+    {
+        if (args.Length < 1)
+        {
+            throw new InvalidOperationException("inspect-tables requires <input.docx>");
+        }
+
+        var input = args[0];
+        var json = args.Skip(1).Contains("--json", StringComparer.Ordinal);
+        var report = Inspector.InspectTables(input);
+
+        if (json)
+        {
+            WriteJson(report);
+        }
+        else
+        {
+            RenderInspectTables(report);
+        }
+
+        return Task.FromResult(0);
+    }
+
     private static Task<int> RunCompareAsync(string[] args)
     {
         if (args.Length < 2)
@@ -92,6 +116,7 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
+        Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  strip-direct-formatting <input.docx> <output.docx>");
@@ -172,6 +197,24 @@ internal static class Cli
         foreach (var diff in report.MetricDiffs.Where(d => d.OldValue != d.NewValue))
         {
             Console.WriteLine($"  {diff.Name}: {diff.OldValue} -> {diff.NewValue}");
+        }
+    }
+
+    private static void RenderInspectTables(TableInspectionReport report)
+    {
+        Console.WriteLine($"File: {report.File}");
+        Console.WriteLine($"Tables: {report.Tables.Count}");
+        foreach (var table in report.Tables)
+        {
+            Console.WriteLine($"Table {table.TableIndex}: {table.RowCount} row(s), {table.ColumnCount} column(s)");
+            foreach (var row in table.Rows.Take(5))
+            {
+                var cells = row.Cells
+                    .Take(5)
+                    .Select(cell => $"[{cell.GridColumnStart}-{cell.GridColumnEnd} {cell.VMerge ?? "-"}] {cell.Text}")
+                    .ToArray();
+                Console.WriteLine($"  Row {row.RowIndex}: {string.Join(" | ", cells)}");
+            }
         }
     }
 

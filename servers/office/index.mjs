@@ -43,6 +43,15 @@ const tools = [
     },
   },
   {
+    name: 'docx_inspect_tables',
+    description: 'Inspect DOCX body tables with row, cell, merge, paragraph alignment, run font, color, underline, and text-fill details.',
+    inputSchema: {
+      type: 'object',
+      properties: { input: { type: 'string', description: 'Absolute or relative path to a .docx file.' } },
+      required: ['input'],
+    },
+  },
+  {
     name: 'docx_compare',
     description: 'Compare two DOCX files and report package, metric, and style differences.',
     inputSchema: {
@@ -360,6 +369,8 @@ async function callTool(name, args) {
   switch (name) {
     case 'docx_inspect':
       return createToolResult(await docxInspect(args));
+    case 'docx_inspect_tables':
+      return createToolResult(await docxInspectTables(args));
     case 'docx_compare':
       return createToolResult(await docxCompare(args));
     case 'docx_validate_template_transform':
@@ -403,6 +414,12 @@ async function docxInspect(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(docxCandidates, ['inspect', input, '--json']);
   return { tool: 'docx_inspect', runtime: commandRuntime(result), report: result.json };
+}
+
+async function docxInspectTables(args) {
+  const input = requireString(args.input, 'input');
+  const result = await runJsonCandidateChain(docxCandidates, ['inspect-tables', input, '--json']);
+  return { tool: 'docx_inspect_tables', runtime: commandRuntime(result), report: result.json };
 }
 
 async function docxCompare(args) {

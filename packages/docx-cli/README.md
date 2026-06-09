@@ -21,6 +21,13 @@ Outputs a unified structural report of a Word document, including paragraph styl
 tiwater-docx inspect <input.docx> [--json]
 ```
 
+### 1a. Inspect Table Details
+Exports body table rows, cells, grid spans, vertical merges, paragraph alignment, run font, color, underline, and text-fill details. Use this for template-fidelity validation where row/cell merge structure and run-level formatting matter.
+
+```bash
+tiwater-docx inspect-tables <input.docx> [--json]
+```
+
 ### 2. Compare Two Documents
 Compares a baseline and an updated document. Reports on differences in package structure, overall metrics, and paragraph style usage changes.
 

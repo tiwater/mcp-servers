@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx;
 
@@ -108,6 +109,83 @@ public static class Inspector
             Formatting: new FormattingSummary(
                 ParagraphsWithDirectFormatting: allParagraphs.Count(HasParagraphDirectFormatting),
                 RunsWithDirectFormatting: allRoots.SelectMany(root => root.Descendants<Run>()).Count(HasRunDirectFormatting)));
+    }
+
+    public static TableInspectionReport InspectTables(string input)
+    {
+        var path = Path.GetFullPath(input);
+        using var doc = WordprocessingDocument.Open(path, false);
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+        var tables = body.Elements<Table>().ToList();
+        var details = new List<TableDetail>(tables.Count);
+
+        for (var tableIndex = 0; tableIndex < tables.Count; tableIndex++)
+        {
+            var table = tables[tableIndex];
+            var rows = table.Elements<TableRow>().ToList();
+            var rowDetails = new List<TableRowDetail>(rows.Count);
+            var columnCount = 0;
+
+            for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            {
+                var row = rows[rowIndex];
+                var gridBefore = GetTableRowOffset(row.TableRowProperties, "gridBefore");
+                var gridAfter = GetTableRowOffset(row.TableRowProperties, "gridAfter");
+                var cells = row.Elements<TableCell>().ToList();
+                var cellDetails = new List<TableCellDetail>(cells.Count);
+                var gridColumn = gridBefore;
+
+                for (var cellIndex = 0; cellIndex < cells.Count; cellIndex++)
+                {
+                    var cell = cells[cellIndex];
+                    var properties = cell.TableCellProperties;
+                    var gridSpan = Math.Max(1, properties?.GridSpan?.Val?.Value ?? 1);
+                    var paragraphDetails = BuildTableParagraphDetails(cell);
+                    var vMerge = properties?.VerticalMerge is null
+                        ? null
+                        : GetValAttribute(properties.VerticalMerge) ?? "continue";
+                    var width = properties?.TableCellWidth?.Width?.Value;
+                    var widthType = GetValAttribute(properties?.TableCellWidth);
+                    var verticalAlignment = GetValAttribute(properties?.TableCellVerticalAlignment);
+                    var shadingFill = properties?.Shading?.Fill?.Value;
+                    var text = string.Concat(cell.Descendants<Text>().Select(node => node.Text)).Trim();
+
+                    cellDetails.Add(new TableCellDetail(
+                        CellIndex: cellIndex,
+                        GridColumnStart: gridColumn,
+                        GridColumnEnd: gridColumn + gridSpan - 1,
+                        GridSpan: gridSpan,
+                        VMerge: vMerge,
+                        Width: width,
+                        WidthType: widthType,
+                        VerticalAlignment: verticalAlignment,
+                        ShadingFill: shadingFill,
+                        Text: text,
+                        Paragraphs: paragraphDetails));
+
+                    gridColumn += gridSpan;
+                }
+
+                var gridWidth = gridColumn + gridAfter;
+                columnCount = Math.Max(columnCount, gridWidth);
+                rowDetails.Add(new TableRowDetail(
+                    RowIndex: rowIndex,
+                    GridBefore: gridBefore,
+                    GridAfter: gridAfter,
+                    CellCount: cells.Count,
+                    GridWidth: gridWidth,
+                    Cells: cellDetails));
+            }
+
+            details.Add(new TableDetail(
+                TableIndex: tableIndex,
+                RowCount: rows.Count,
+                ColumnCount: columnCount,
+                Rows: rowDetails));
+        }
+
+        return new TableInspectionReport(path, details);
     }
 
     public static IReadOnlyList<AnnotationAnchor> BuildAnnotationAnchors(
@@ -230,6 +308,65 @@ public static class Inspector
 
     public static string GetParagraphText(Paragraph paragraph)
         => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text)).Trim();
+
+    private static IReadOnlyList<TableParagraphDetail> BuildTableParagraphDetails(TableCell cell)
+    {
+        var paragraphs = cell.Elements<Paragraph>().ToList();
+        var result = new List<TableParagraphDetail>(paragraphs.Count);
+        for (var paragraphIndex = 0; paragraphIndex < paragraphs.Count; paragraphIndex++)
+        {
+            var paragraph = paragraphs[paragraphIndex];
+            var runs = paragraph.Elements<Run>().ToList();
+            var runDetails = new List<TableRunDetail>(runs.Count);
+            for (var runIndex = 0; runIndex < runs.Count; runIndex++)
+            {
+                runDetails.Add(BuildTableRunDetail(runs[runIndex], runIndex));
+            }
+
+            result.Add(new TableParagraphDetail(
+                ParagraphIndex: paragraphIndex,
+                Text: GetParagraphText(paragraph),
+                Style: paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
+                Justification: GetValAttribute(paragraph.ParagraphProperties?.Justification),
+                Runs: runDetails));
+        }
+
+        return result;
+    }
+
+    private static TableRunDetail BuildTableRunDetail(Run run, int runIndex)
+    {
+        var properties = run.RunProperties;
+        var fonts = properties?.RunFonts;
+        return new TableRunDetail(
+            RunIndex: runIndex,
+            Text: string.Concat(run.Descendants<Text>().Select(node => node.Text)),
+            Style: properties?.RunStyle?.Val?.Value,
+            Color: properties?.Color?.Val?.Value,
+            Underline: properties?.Underline is null ? null : GetValAttribute(properties.Underline) ?? "single",
+            Bold: IsOn(properties?.Bold),
+            Italic: IsOn(properties?.Italic),
+            FontAscii: fonts?.Ascii?.Value,
+            FontHighAnsi: fonts?.HighAnsi?.Value,
+            FontEastAsia: fonts?.EastAsia?.Value,
+            FontComplexScript: fonts?.ComplexScript?.Value,
+            FontSize: properties?.FontSize?.Val?.Value,
+            HasTextFill: properties?.Descendants<W14.FillTextEffect>().Any() == true);
+    }
+
+    private static bool IsOn(OnOffType? value)
+    {
+        if (value is null)
+        {
+            return false;
+        }
+
+        var raw = GetValAttribute(value);
+        return raw is null || !raw.Equals("false", StringComparison.OrdinalIgnoreCase) && raw != "0" && !raw.Equals("off", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetValAttribute(OpenXmlElement? element)
+        => element?.GetAttributes().FirstOrDefault(attribute => attribute.LocalName == "val").Value;
 
     public static int? GetIndexWithinParent<T>(IReadOnlyList<T>? list, T value) where T : class
     {

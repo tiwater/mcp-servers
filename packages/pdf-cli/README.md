@@ -37,14 +37,21 @@ Extracts all tables detected within the PDF or from specific pages.
 tiwater-pdf extract-tables <report.pdf> [--pages 1,3,4] [--auto-span] [--json]
 ```
 
-### 3. Inspect PDF
+### 3. Extract Table Details
+Extracts detected PDF tables with visual evidence for format validation: cell bounding boxes, null detected cells, text spans with font/size/color, and table-region line/rectangle drawings. PDF table cells are visual detections, so `null` cells may indicate merged or suppressed visual cells but are not authoritative DOCX-style rowspan/colspan.
+
+```bash
+tiwater-pdf extract-table-details <report.pdf> [--pages 1,3,4] [--json]
+```
+
+### 4. Inspect PDF
 Provides a high-level inspection of the PDF's structural layout and tables to determine its format.
 
 ```bash
 tiwater-pdf inspect <report.pdf>
 ```
 
-### 4. OCR Scanned PDFs With a Vision LLM
+### 5. OCR Scanned PDFs With a Vision LLM
 Extracts text from scanned or image-only PDFs using an OpenAI-compatible vision model.
 
 ```bash

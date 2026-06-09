@@ -258,6 +258,67 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void InspectTables_exports_cell_merge_and_run_format_details()
+    {
+        var docPath = CreateAnnotatedFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"table-detail-{Guid.NewGuid():N}.docx");
+
+        Editor.Apply(docPath, output, [
+            new DocxEditOperation(
+                "replaceTable",
+                TableIndex: 0,
+                Rows: [
+                    [
+                        new DocxTableCellInput("序号", Bold: true, Shading: "F2F2F2", Alignment: "center"),
+                        new DocxTableCellInput("EIC 比例", GridSpan: 2, Bold: true, Shading: "F2F2F2", Alignment: "center")
+                    ],
+                    [
+                        new DocxTableCellInput("1", VMerge: "restart", Alignment: "center"),
+                        new DocxTableCellInput(
+                            VMerge: "restart",
+                            Alignment: "center",
+                            RichText: [
+                                new DocxRichTextSegment("QV"),
+                                new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                                new DocxRichTextSegment("LVQSGAEVK")
+                            ]),
+                        new DocxTableCellInput("/", Alignment: "center")
+                    ],
+                    [
+                        new DocxTableCellInput("", VMerge: "continue", Alignment: "center"),
+                        new DocxTableCellInput("", VMerge: "continue", Alignment: "center"),
+                        new DocxTableCellInput("99.7", Alignment: "center")
+                    ]
+                ])
+        ]);
+
+        var report = Inspector.InspectTables(output);
+
+        var table = Assert.Single(report.Tables);
+        Assert.Equal(3, table.RowCount);
+        Assert.Equal(3, table.ColumnCount);
+
+        var headerCells = table.Rows[0].Cells;
+        Assert.Equal(2, headerCells.Count);
+        Assert.Equal(1, headerCells[1].GridColumnStart);
+        Assert.Equal(2, headerCells[1].GridColumnEnd);
+        Assert.Equal(2, headerCells[1].GridSpan);
+        Assert.Equal("F2F2F2", headerCells[1].ShadingFill);
+        Assert.Equal("center", headerCells[1].Paragraphs[0].Justification);
+
+        var sequenceCell = table.Rows[1].Cells[1];
+        Assert.Equal("restart", sequenceCell.VMerge);
+        Assert.Equal("QVQLVQSGAEVK", sequenceCell.Text);
+        var markedRun = Assert.Single(sequenceCell.Paragraphs[0].Runs, run => run.Text == "Q");
+        Assert.Equal("FF0000", markedRun.Color);
+        Assert.Equal("single", markedRun.Underline);
+        Assert.False(markedRun.HasTextFill);
+
+        var sequenceContinue = table.Rows[2].Cells[1];
+        Assert.Equal("continue", sequenceContinue.VMerge);
+    }
+
+    [Fact]
     public void NormalizeOpenXml_canonicalizes_prefixes_and_property_order()
     {
         var docPath = CreateAnnotatedFixture();

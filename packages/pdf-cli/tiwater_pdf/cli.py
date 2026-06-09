@@ -2,6 +2,8 @@
 
 import argparse
 import base64
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -10,6 +12,16 @@ import tempfile
 from pathlib import Path
 
 import fitz
+
+
+def _find_tables_quiet(page):
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        tables = page.find_tables()
+    warning = buffer.getvalue().strip()
+    if warning:
+        print(warning, file=sys.stderr)
+    return tables
 
 
 def _print_markdown_table(header, rows):
@@ -396,6 +408,101 @@ def _render_page_image(doc, page_num: int, zoom: float = 2.5) -> bytes:
     return pix.tobytes("png")
 
 
+def _color_to_hex(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (tuple, list)) and len(value) >= 3:
+        try:
+            r, g, b = [max(0, min(255, round(float(channel) * 255))) for channel in value[:3]]
+        except (TypeError, ValueError):
+            return None
+        return f"#{r:02X}{g:02X}{b:02X}"
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return f"#{number & 0xFFFFFF:06X}"
+
+
+def _rect_list(rect) -> list[float]:
+    r = fitz.Rect(rect)
+    return [r.x0, r.y0, r.x1, r.y1]
+
+
+def _extract_spans_in_rect(page, rect) -> list[dict]:
+    region = fitz.Rect(rect)
+    spans = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                span_rect = fitz.Rect(span.get("bbox"))
+                if not region.intersects(span_rect):
+                    continue
+                spans.append(
+                    {
+                        "text": span.get("text", ""),
+                        "bbox": _rect_list(span_rect),
+                        "font": span.get("font"),
+                        "size": span.get("size"),
+                        "color": _color_to_hex(span.get("color")),
+                        "flags": span.get("flags"),
+                    }
+                )
+    return spans
+
+
+def _extract_line_segments_in_rect(page, rect) -> list[dict]:
+    region = fitz.Rect(rect)
+    segments = []
+    for drawing in page.get_drawings():
+        drawing_rect = drawing.get("rect")
+        if drawing_rect is not None:
+            drect = fitz.Rect(drawing_rect)
+            padded = fitz.Rect(drect.x0 - 1, drect.y0 - 1, drect.x1 + 1, drect.y1 + 1)
+            if not region.intersects(padded):
+                continue
+        for item in drawing.get("items", []):
+            kind = item[0]
+            if kind == "l":
+                p1, p2 = item[1], item[2]
+                line_rect = fitz.Rect(p1, p2)
+                padded_line_rect = fitz.Rect(
+                    line_rect.x0 - 1,
+                    line_rect.y0 - 1,
+                    line_rect.x1 + 1,
+                    line_rect.y1 + 1,
+                )
+                if not region.intersects(padded_line_rect):
+                    continue
+                orientation = "horizontal" if abs(p1.y - p2.y) <= 0.5 else "vertical" if abs(p1.x - p2.x) <= 0.5 else "diagonal"
+                segments.append(
+                    {
+                        "kind": "line",
+                        "orientation": orientation,
+                        "from": [p1.x, p1.y],
+                        "to": [p2.x, p2.y],
+                        "color": _color_to_hex(drawing.get("color")),
+                        "width": drawing.get("width"),
+                    }
+                )
+            elif kind == "re":
+                box = fitz.Rect(item[1])
+                if not region.intersects(box):
+                    continue
+                segments.append(
+                    {
+                        "kind": "rect",
+                        "bbox": _rect_list(box),
+                        "color": _color_to_hex(drawing.get("color")),
+                        "fill": _color_to_hex(drawing.get("fill")),
+                        "width": drawing.get("width"),
+                    }
+                )
+    return segments
+
+
 def _parse_page_numbers(value: str | None) -> list[int] | None:
     if not value:
         return None
@@ -649,7 +756,7 @@ def extract_tables(pdf_path: Path, page_numbers: list[int] | None = None, auto_s
 
         page = doc[page_num]
 
-        for table in page.find_tables():
+        for table in _find_tables_quiet(page):
             title = _detect_table_title(page, table.bbox)
             header = table.header.names
             rows = table.extract()
@@ -839,6 +946,96 @@ def extract_tables(pdf_path: Path, page_numbers: list[int] | None = None, auto_s
     }
 
 
+def extract_table_details(pdf_path: Path, page_numbers: list[int] | None = None) -> dict:
+    """Extract detected PDF tables with visual cell and text-span evidence.
+
+    This is intentionally lower-level than extract_tables. PDF table detection does
+    not expose true DOCX-style rowspan/colspan semantics, so null cells and line
+    segments are preserved as evidence for downstream validation.
+    """
+    doc = fitz.open(pdf_path)
+    all_tables = []
+
+    for page_num in range(len(doc)):
+        if page_numbers and (page_num + 1) not in page_numbers:
+            continue
+
+        page = doc[page_num]
+        for table_index, table in enumerate(_find_tables_quiet(page)):
+            title = _detect_table_title(page, table.bbox)
+            extracted_rows = table.extract()
+            detail_rows = []
+
+            for row_index, row in enumerate(table.rows):
+                detail_cells = []
+                for col_index, cell_bbox in enumerate(row.cells):
+                    extracted_text = None
+                    if row_index < len(extracted_rows) and col_index < len(extracted_rows[row_index]):
+                        extracted_text = extracted_rows[row_index][col_index]
+
+                    if cell_bbox is None:
+                        detail_cells.append(
+                            {
+                                "row": row_index,
+                                "column": col_index,
+                                "bbox": None,
+                                "extractedText": extracted_text,
+                                "isDetectedCell": False,
+                                "spans": [],
+                            }
+                        )
+                        continue
+
+                    spans = _extract_spans_in_rect(page, cell_bbox)
+                    detail_cells.append(
+                        {
+                            "row": row_index,
+                            "column": col_index,
+                            "bbox": _rect_list(cell_bbox),
+                            "extractedText": extracted_text,
+                            "isDetectedCell": True,
+                            "spans": spans,
+                            "spanText": "".join(span.get("text", "") for span in spans).strip(),
+                            "spanColors": sorted({span["color"] for span in spans if span.get("color")}),
+                        }
+                    )
+
+                detail_rows.append(
+                    {
+                        "row": row_index,
+                        "bbox": _rect_list(row.bbox) if row.bbox is not None else None,
+                        "cells": detail_cells,
+                    }
+                )
+
+            all_tables.append(
+                {
+                    "page": page_num + 1,
+                    "tableIndex": table_index,
+                    "title": title,
+                    "bbox": _rect_list(table.bbox),
+                    "rowCount": table.row_count,
+                    "columnCount": table.col_count,
+                    "header": table.header.names,
+                    "rows": extracted_rows,
+                    "detectedCellCount": sum(1 for row in table.rows for cell in row.cells if cell is not None),
+                    "expectedGridCellCount": table.row_count * table.col_count,
+                    "cellDetectionNote": "PDF cells are visual detections; null cells may indicate merged or suppressed visual cells, not authoritative DOCX rowspan/colspan.",
+                    "detailRows": detail_rows,
+                    "lineSegments": _extract_line_segments_in_rect(page, table.bbox),
+                }
+            )
+
+    total_pages = len(doc)
+    doc.close()
+    return {
+        "file": str(pdf_path),
+        "total_pages": total_pages,
+        "tables_found": len(all_tables),
+        "tables": all_tables,
+    }
+
+
 def find_table_by_name(pdf_path: Path, table_name: str, auto_span: bool = False, llm_fallback: bool = False, api_key: str | None = None, llm_model: str = "google/gemini-2.5-flash") -> dict | None:
     """Find a table by its name/header in the PDF.
 
@@ -1003,6 +1200,12 @@ def main() -> int:
     extract_parser.add_argument("--llm-model", type=str, default=default_llm_model, help="LLM model to use on OpenRouter")
     extract_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
+    # extract-table-details command
+    detail_parser = subparsers.add_parser("extract-table-details", help="Extract PDF tables with cell bbox, text spans, colors, and line evidence")
+    detail_parser.add_argument("input", type=Path, help="PDF file to extract from")
+    detail_parser.add_argument("--pages", type=str, help="Page numbers (comma-separated, 1-indexed)")
+    detail_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
     # find-table command
     find_parser = subparsers.add_parser("find-table", help="Find table by name")
     find_parser.add_argument("input", type=Path, help="PDF file to search")
@@ -1060,6 +1263,23 @@ def main() -> int:
                     
                     if table.get("rows") or table.get("header"):
                         print(_print_markdown_table(table.get("header", []), table.get("rows", [])))
+
+        elif args.command == "extract-table-details":
+            pages = None
+            if args.pages:
+                pages = [int(p.strip()) for p in args.pages.split(",")]
+            result = extract_table_details(args.input, pages)
+            if args.json:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            else:
+                print(f"File: {result['file']}")
+                print(f"Tables found: {result['tables_found']}")
+                for table in result["tables"]:
+                    print(
+                        f"Table {table['tableIndex']} on page {table['page']}: "
+                        f"{table['rowCount']}x{table['columnCount']}, "
+                        f"{table['detectedCellCount']}/{table['expectedGridCellCount']} detected cells"
+                    )
 
         elif args.command == "find-table":
             result = find_table_by_name(args.input, args.name, auto_span=args.auto_span, llm_fallback=args.llm_fallback, api_key=args.api_key)
