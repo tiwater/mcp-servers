@@ -120,7 +120,7 @@ const tools = [
   },
   {
     name: 'docx_edit',
-    description: 'Apply explicit edit operations to a DOCX document, including anchored text replacement, paragraph/cell edits, cell merging, comment deletion, and field refresh.',
+    description: 'Apply explicit edit operations to a DOCX document, including anchored text replacement, paragraph/cell edits, rich text table cells, cell merging, comment deletion, and field refresh.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -131,9 +131,22 @@ const tools = [
           items: {
             type: 'object',
             properties: {
-              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTable', 'mergeTableCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty'] },
+              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTableCellRichText', 'replaceTable', 'mergeTableCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty'] },
               commentId: { type: 'string' },
               text: { type: 'string' },
+              richText: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    text: { type: 'string' },
+                    color: { type: 'string' },
+                    underline: { type: 'boolean' },
+                    bold: { type: 'boolean' }
+                  },
+                  required: ['text']
+                }
+              },
               findText: { type: 'string' },
               paragraphIndex: { type: 'integer' },
               headerIndex: { type: 'integer' },
@@ -158,7 +171,20 @@ const tools = [
                       bold: { type: 'boolean' },
                       header: { type: 'boolean' },
                       shading: { type: 'string' },
-                      alignment: { type: 'string', enum: ['left', 'center', 'right'] }
+                      alignment: { type: 'string', enum: ['left', 'center', 'right'] },
+                      richText: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            text: { type: 'string' },
+                            color: { type: 'string' },
+                            underline: { type: 'boolean' },
+                            bold: { type: 'boolean' }
+                          },
+                          required: ['text']
+                        }
+                      }
                     }
                   }
                 }

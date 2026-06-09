@@ -5,6 +5,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Dockit.Docx;
+using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx.Tests;
 
@@ -101,6 +102,50 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_replace_table_with_rich_text_cells()
+    {
+        var docPath = CreateAnnotatedFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"table-rich-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation(
+                "replaceTable",
+                TableIndex: 0,
+                Rows: [
+                    [
+                        new DocxTableCellInput("序号", Bold: true),
+                        new DocxTableCellInput(
+                            RichText: [
+                                new DocxRichTextSegment("QV"),
+                                new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                                new DocxRichTextSegment("LV"),
+                                new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                                new DocxRichTextSegment("SGAEVK")
+                            ])
+                    ]
+                ])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var richCell = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single()
+            .Elements<TableRow>().Single()
+            .Elements<TableCell>().ElementAt(1);
+        var runs = richCell.Descendants<Run>().ToList();
+        Assert.Equal(["QV", "Q", "LV", "Q", "SGAEVK"], runs.Select(run => string.Concat(run.Descendants<Text>().Select(text => text.Text))).ToArray());
+        Assert.All(runs.Where(run => string.Concat(run.Descendants<Text>().Select(text => text.Text)) == "Q"), run =>
+        {
+            var properties = run.RunProperties;
+            Assert.NotNull(properties);
+            Assert.Equal("FF0000", properties!.GetFirstChild<Color>()!.Val!.Value);
+            Assert.Equal(UnderlineValues.Single, properties.GetFirstChild<Underline>()!.Val!.Value);
+        });
+        Assert.DoesNotContain(
+            new OpenXmlValidator().Validate(doc).Select(error => error.Description),
+            description => description.Contains("unexpected child element", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Edit_can_replace_table_with_advanced_formatting()
     {
         var docPath = CreateAnnotatedFixture();
@@ -160,6 +205,53 @@ public class AnnotationToolsTests
         Assert.NotNull(jc2_2);
         Assert.Equal(JustificationValues.Right, jc2_2.Val!.Value);
 
+        Assert.DoesNotContain(
+            new OpenXmlValidator().Validate(doc).Select(error => error.Description),
+            description => description.Contains("unexpected child element", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Edit_can_replace_table_cell_with_rich_text_runs_and_remove_text_fill()
+    {
+        var path = CreateRichTextTableFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"rich-cell-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: 0,
+                CellIndex: 0,
+                RichText: [
+                    new DocxRichTextSegment("QV"),
+                    new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                    new DocxRichTextSegment("LV"),
+                    new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                    new DocxRichTextSegment("SGAEVK")
+                ])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var cell = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single()
+            .Elements<TableRow>().Single()
+            .Elements<TableCell>().Single();
+        var runs = cell.Descendants<Run>().ToList();
+        Assert.Equal(["QV", "Q", "LV", "Q", "SGAEVK"], runs.Select(run => string.Concat(run.Descendants<Text>().Select(text => text.Text))).ToArray());
+
+        var markedRuns = runs.Where(run => string.Concat(run.Descendants<Text>().Select(text => text.Text)) == "Q").ToList();
+        Assert.Equal(2, markedRuns.Count);
+        Assert.All(markedRuns, run =>
+        {
+            var properties = run.RunProperties;
+            Assert.NotNull(properties);
+            Assert.Equal("FF0000", properties!.GetFirstChild<Color>()!.Val!.Value);
+            Assert.Equal(UnderlineValues.Single, properties.GetFirstChild<Underline>()!.Val!.Value);
+            Assert.Empty(properties.Elements<W14.FillTextEffect>());
+        });
+
+        var xml = ReadZipEntry(output, "word/document.xml");
+        Assert.DoesNotContain("w14:textFill", xml, StringComparison.Ordinal);
         Assert.DoesNotContain(
             new OpenXmlValidator().Validate(doc).Select(error => error.Description),
             description => description.Contains("unexpected child element", StringComparison.OrdinalIgnoreCase));
@@ -340,6 +432,28 @@ public class AnnotationToolsTests
         body.Append(CreateFieldParagraph());
         mainPart.Document.Save();
         commentsPart.Comments.Save();
+        return path;
+    }
+
+    private static string CreateRichTextTableFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"rich-text-table-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        mainPart.Document = new Document(new Body(
+            new Table(
+                new TableProperties(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct }),
+                new TableGrid(new GridColumn { Width = "2400" }),
+                new TableRow(
+                    new TableCell(
+                        new TableCellProperties(new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }),
+                        new Paragraph(
+                            new Run(
+                                new RunProperties(
+                                    new Color { Val = "000000" },
+                                    new W14.FillTextEffect()),
+                                new Text("QVQLVQSGAEVK"))))))));
+        mainPart.Document.Save();
         return path;
     }
 

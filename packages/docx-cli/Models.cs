@@ -150,7 +150,8 @@ public sealed record DocxEditOperation(
     IReadOnlyList<DocxSemanticFillRule>? Cells = null,
     string? Alignment = null,
     string? Width = null,
-    string? WidthType = null);
+    string? WidthType = null,
+    IReadOnlyList<DocxRichTextSegment>? RichText = null);
 
 public sealed record DocxTableCellInput(
     string? Text = null,
@@ -159,7 +160,14 @@ public sealed record DocxTableCellInput(
     bool? Bold = null,
     bool? Header = null,
     string? Shading = null,
-    string? Alignment = null);
+    string? Alignment = null,
+    IReadOnlyList<DocxRichTextSegment>? RichText = null);
+
+public sealed record DocxRichTextSegment(
+    string Text,
+    string? Color = null,
+    bool? Underline = null,
+    bool? Bold = null);
 
 public sealed record DocxEditDocument(
     IReadOnlyList<DocxEditOperation> Operations);

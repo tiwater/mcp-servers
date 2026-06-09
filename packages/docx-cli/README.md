@@ -75,6 +75,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceAnchoredText`
 - `replaceParagraphText`
 - `replaceTableCellText`
+- `replaceTableCellRichText`
 - `replaceTable`
 - `setTableWidth`
 - `setTableCellAlignment`
@@ -84,6 +85,8 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `markFieldsDirty`
 
 `replaceTableCellText` accepts optional `alignment` (`left`, `center`, `right`, `both`).
+`replaceTableCellRichText` accepts `richText` segments with `text`, optional `color`, `underline`, and `bold`.
+`replaceTable` row cell objects may use the same `richText` segments instead of plain `text`.
 `setTableWidth` accepts `width` and `widthType` (`pct`, `dxa`, `auto`, `nil`).
 `sanitizeFields` removes update-field prompts and dirty field markers from the package.
 
@@ -99,6 +102,17 @@ Example operations file:
     { "type": "replaceAnchoredText", "commentId": "12", "text": "Final narrative" },
     { "type": "replaceTableCellText", "tableIndex": 2, "rowIndex": 0, "cellIndex": 3, "text": "2026-04-15" },
     {
+      "type": "replaceTableCellRichText",
+      "tableIndex": 2,
+      "rowIndex": 1,
+      "cellIndex": 2,
+      "richText": [
+        { "text": "QV" },
+        { "text": "Q", "color": "FF0000", "underline": true },
+        { "text": "LVQSGAEVK" }
+      ]
+    },
+    {
       "type": "replaceTable",
       "tableIndex": 0,
       "rows": [
@@ -108,7 +122,12 @@ Example operations file:
         ],
         [
           { "text": "颜色" },
-          { "text": "1月" },
+          {
+            "richText": [
+              { "text": "1" },
+              { "text": "月", "color": "FF0000", "underline": true }
+            ]
+          },
           { "text": "3月" }
         ]
       ]

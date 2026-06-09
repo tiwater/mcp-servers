@@ -2,6 +2,7 @@ using System.Text.Json;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx;
 
@@ -78,6 +79,7 @@ public static class Editor
             "replaceHeaderParagraphText" => ReplaceHeaderParagraphText(doc, operation),
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
+            "replaceTableCellRichText" => ReplaceTableCellRichText(body, operation),
             "replaceTable" => ReplaceTable(body, operation),
             "setTableWidth" => SetTableWidth(body, operation),
             "setTableCellAlignment" => SetTableCellAlignment(body, operation),
@@ -446,13 +448,23 @@ public static class Editor
         }
         paragraph.AppendChild(paragraphProperties);
 
-        var run = new Run();
-        if (input.Bold == true || rowIsHeader)
+        if (input.RichText is { Count: > 0 } richText)
         {
-            run.AppendChild(new RunProperties(new Bold()));
+            foreach (var segment in richText)
+            {
+                paragraph.AppendChild(CreateRichRunLike(templateCell?.Descendants<Run>().FirstOrDefault(), segment, rowIsHeader));
+            }
         }
-        AppendTextWithLineBreaks(run, input.Text ?? string.Empty);
-        paragraph.AppendChild(run);
+        else
+        {
+            var run = new Run();
+            if (input.Bold == true || rowIsHeader)
+            {
+                run.AppendChild(new RunProperties(new Bold()));
+            }
+            AppendTextWithLineBreaks(run, input.Text ?? string.Empty);
+            paragraph.AppendChild(run);
+        }
         cell.AppendChild(paragraph);
         return cell;
     }
@@ -639,6 +651,51 @@ public static class Editor
         cell.Append(paragraph);
     }
 
+    private static DocxEditAppliedOperation ReplaceTableCellRichText(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null || operation.RichText is not { Count: > 0 })
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, cellIndex, and richText are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value < 0 || operation.RowIndex.Value >= rows.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {operation.RowIndex} is out of range");
+        }
+
+        var cells = rows[operation.RowIndex.Value].Elements<TableCell>().ToList();
+        if (operation.CellIndex.Value < 0 || operation.CellIndex.Value >= cells.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {operation.CellIndex} is out of range");
+        }
+
+        ReplaceTableCellRichText(cells[operation.CellIndex.Value], operation.RichText, operation.Alignment);
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated rich text in table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}]");
+    }
+
+    private static void ReplaceTableCellRichText(TableCell cell, IReadOnlyList<DocxRichTextSegment> segments, string? alignment = null)
+    {
+        var firstRun = cell.Descendants<Run>().FirstOrDefault();
+        cell.RemoveAllChildren<Paragraph>();
+        var paragraph = new Paragraph();
+        foreach (var segment in segments)
+        {
+            paragraph.AppendChild(CreateRichRunLike(firstRun, segment));
+        }
+        if (!string.IsNullOrWhiteSpace(alignment))
+        {
+            ApplyParagraphAlignment(paragraph, alignment);
+        }
+        cell.Append(paragraph);
+    }
+
     private static void ApplyCellAlignment(TableCell cell, string alignment)
     {
         foreach (var paragraph in cell.Elements<Paragraph>())
@@ -671,6 +728,56 @@ public static class Editor
             NormalizeRunProperties(run.RunProperties);
         }
         return run;
+    }
+
+    private static Run CreateRichRunLike(Run? templateRun, DocxRichTextSegment segment, bool forceBold = false)
+    {
+        var run = new Run();
+        if (templateRun?.RunProperties is not null)
+        {
+            run.RunProperties = (RunProperties)templateRun.RunProperties.CloneNode(true);
+        }
+
+        var properties = run.RunProperties ?? run.PrependChild(new RunProperties());
+        RemoveTextFill(properties);
+
+        if (forceBold || segment.Bold == true)
+        {
+            properties.RemoveAllChildren<Bold>();
+            properties.AppendChild(new Bold());
+        }
+        else if (segment.Bold == false)
+        {
+            properties.RemoveAllChildren<Bold>();
+        }
+
+        if (!string.IsNullOrWhiteSpace(segment.Color))
+        {
+            properties.RemoveAllChildren<Color>();
+            properties.AppendChild(new Color { Val = segment.Color });
+        }
+
+        if (segment.Underline == true)
+        {
+            properties.RemoveAllChildren<Underline>();
+            properties.AppendChild(new Underline { Val = UnderlineValues.Single });
+        }
+        else if (segment.Underline == false)
+        {
+            properties.RemoveAllChildren<Underline>();
+        }
+
+        NormalizeRunProperties(properties);
+        AppendTextWithLineBreaks(run, segment.Text);
+        return run;
+    }
+
+    private static void RemoveTextFill(RunProperties properties)
+    {
+        foreach (var textFill in properties.Elements<W14.FillTextEffect>().ToList())
+        {
+            textFill.Remove();
+        }
     }
 
     private static void NormalizeGeneratedOpenXml(WordprocessingDocument doc)
