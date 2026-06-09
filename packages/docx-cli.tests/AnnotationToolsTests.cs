@@ -427,8 +427,11 @@ public class AnnotationToolsTests
         using var doc = WordprocessingDocument.Open(output, false);
         var body = doc.MainDocumentPart!.Document!.Body!;
         Assert.Empty(body.Descendants<SimpleField>());
-        Assert.Empty(body.Descendants<FieldCode>());
-        Assert.Empty(body.Descendants<FieldChar>());
+        var fieldCodes = body.Descendants<FieldCode>().Select(code => code.Text).ToList();
+        Assert.DoesNotContain(fieldCodes, code => code.Contains("REF", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(fieldCodes, code => code.Contains("SEQ", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(fieldCodes, code => code.Contains("PAGE", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(body.Descendants<FieldChar>());
 
         var text = string.Concat(body.Descendants<Text>().Select(text => text.Text));
         Assert.Contains("见表 11。", text);
@@ -643,6 +646,14 @@ public class AnnotationToolsTests
             { Instruction = "SEQ 表 \\* ARABIC", Dirty = false },
             new BookmarkEnd { Id = "1" },
             new Run(new Text(". HSP-PTMs样品翻译后修饰结果"))));
+
+        body.Append(new Paragraph(
+            new Run(new Text("页码：")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+            new Run(new FieldCode(" PAGE ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            new Run(new Text("1")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End })));
 
         mainPart.Document.Save();
         return path;

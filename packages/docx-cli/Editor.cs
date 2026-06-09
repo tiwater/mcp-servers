@@ -585,6 +585,11 @@ public static class Editor
         {
             foreach (var simpleField in root.Descendants<SimpleField>().ToList())
             {
+                if (!ShouldFreezeFieldInstruction(simpleField.Instruction?.Value))
+                {
+                    continue;
+                }
+
                 var replacement = simpleField.ChildElements.Select(child => child.CloneNode(true)).ToList();
                 foreach (var child in replacement)
                 {
@@ -657,6 +662,18 @@ public static class Editor
                 continue;
             }
 
+            var instruction = string.Concat(children
+                .Skip(begin + 1)
+                .Take((separate >= 0 ? separate : end) - begin - 1)
+                .OfType<Run>()
+                .SelectMany(run => run.Elements<FieldCode>())
+                .Select(code => code.Text));
+            if (!ShouldFreezeFieldInstruction(instruction))
+            {
+                index = end + 1;
+                continue;
+            }
+
             var resultStart = separate >= 0 ? separate + 1 : end;
             var resultRuns = children
                 .Skip(resultStart)
@@ -687,6 +704,13 @@ public static class Editor
 
     private static bool IsFieldCodeRun(Run run)
         => run.Elements<FieldChar>().Any() || run.Elements<FieldCode>().Any();
+
+    private static bool ShouldFreezeFieldInstruction(string? instruction)
+    {
+        var trimmed = (instruction ?? string.Empty).TrimStart();
+        return trimmed.StartsWith("REF ", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("SEQ ", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool ReplaceCommentRangeInParagraph(Paragraph paragraph, string commentId, string replacementText)
     {
