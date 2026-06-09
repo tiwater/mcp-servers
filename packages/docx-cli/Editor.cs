@@ -85,6 +85,7 @@ public static class Editor
             "setTableWidth" => SetTableWidth(body, operation),
             "setTableCellAlignment" => SetTableCellAlignment(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
+            "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
             "fillTableSemantically" => FillTableSemantically(body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
@@ -1165,6 +1166,76 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation(operation.Type, false, "Either rowIndex (horizontal) or cellIndex (vertical) must be specified for merge");
+    }
+
+    private static DocxEditAppliedOperation UnmergeTableColumnVerticalCells(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.CellIndex is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex and cellIndex are required");
+        }
+
+        var tables = body.Descendants<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var table = tables[operation.TableIndex.Value];
+        var rows = table.Elements<TableRow>().ToList();
+        var cellIndex = operation.CellIndex.Value;
+        var startRowIndex = operation.StartRowIndex ?? 0;
+        var endRowIndex = operation.EndRowIndex ?? (rows.Count - 1);
+
+        if (startRowIndex < 0 || endRowIndex >= rows.Count || endRowIndex < startRowIndex)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Invalid row range {startRowIndex} to {endRowIndex}");
+        }
+
+        List<OpenXmlElement>? latestVisibleContent = null;
+        var changed = 0;
+        for (var rIdx = startRowIndex; rIdx <= endRowIndex; rIdx++)
+        {
+            var cells = rows[rIdx].Elements<TableCell>().ToList();
+            if (cellIndex < 0 || cellIndex >= cells.Count)
+            {
+                return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {cellIndex} is out of range in row {rIdx}");
+            }
+
+            var cell = cells[cellIndex];
+            var properties = cell.GetFirstChild<TableCellProperties>() ?? cell.PrependChild(new TableCellProperties());
+            var verticalMerge = properties.GetFirstChild<VerticalMerge>();
+            var isContinuation = verticalMerge is not null
+                && (verticalMerge.Val is null || verticalMerge.Val.Value == MergedCellValues.Continue);
+
+            if (!isContinuation)
+            {
+                latestVisibleContent = cell.Elements<Paragraph>()
+                    .Select(p => p.CloneNode(true))
+                    .ToList();
+            }
+
+            if (verticalMerge is not null)
+            {
+                properties.RemoveAllChildren<VerticalMerge>();
+                NormalizeTableCellProperties(properties);
+                changed++;
+            }
+
+            if (isContinuation && latestVisibleContent is { Count: > 0 })
+            {
+                cell.RemoveAllChildren<Paragraph>();
+                foreach (var paragraph in latestVisibleContent)
+                {
+                    cell.Append(paragraph.CloneNode(true));
+                }
+            }
+        }
+
+        return new DocxEditAppliedOperation(
+            operation.Type,
+            true,
+            $"Unmerged vertical cells in table[{operation.TableIndex}].cell[{cellIndex}].rows[{startRowIndex}..{endRowIndex}], removed {changed} vMerge marker(s)");
     }
 
     private static DocxEditAppliedOperation FillTableSemantically(Body body, DocxEditOperation operation)

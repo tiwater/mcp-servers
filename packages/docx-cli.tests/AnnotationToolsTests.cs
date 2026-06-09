@@ -778,6 +778,55 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_unmerge_table_column_vertical_cells_and_fill_continuations()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-unmerge-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("A1")))),
+                        new TableCell(
+                            new TableCellProperties(new VerticalMerge { Val = MergedCellValues.Restart }),
+                            new Paragraph(new Run(new Text("Ratio")))
+                        )
+                    ),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("A2")))),
+                        new TableCell(
+                            new TableCellProperties(new VerticalMerge { Val = MergedCellValues.Continue }),
+                            new Paragraph()
+                        )
+                    )
+                )
+            ));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"unmerged-cells-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("unmergeTableColumnVerticalCells", TableIndex: 0, CellIndex: 1, StartRowIndex: 0, EndRowIndex: 1)
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using (var doc = WordprocessingDocument.Open(output, false))
+        {
+            var table = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single();
+            var rows = table.Elements<TableRow>().ToList();
+
+            foreach (var row in rows)
+            {
+                var cell = row.Elements<TableCell>().ElementAt(1);
+                Assert.Null(cell.GetFirstChild<TableCellProperties>()?.GetFirstChild<VerticalMerge>());
+                Assert.Equal("Ratio", string.Concat(cell.Descendants<Text>().Select(t => t.Text)));
+            }
+        }
+    }
+
+    [Fact]
     public void Edit_applies_fillTableSemantically_correctly()
     {
         var path = CreateSemanticTableFixture();
