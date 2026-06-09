@@ -75,6 +75,7 @@ public static class Editor
         {
             "replaceAnchoredText" => ReplaceAnchoredText(body, operation),
             "replaceParagraphText" => ReplaceParagraphText(body, operation),
+            "replaceBodyText" => ReplaceBodyText(body, operation),
             "replaceAllHeaderParagraphText" => ReplaceAllHeaderParagraphText(doc, operation),
             "replaceHeaderParagraphText" => ReplaceHeaderParagraphText(doc, operation),
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
@@ -131,6 +132,30 @@ public static class Editor
 
         ReplaceWholeParagraphText(paragraphs[operation.ParagraphIndex.Value], operation.Text);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated paragraph {operation.ParagraphIndex}");
+    }
+
+    private static DocxEditAppliedOperation ReplaceBodyText(Body body, DocxEditOperation operation)
+    {
+        if (string.IsNullOrEmpty(operation.FindText) || operation.Text is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "findText and text are required");
+        }
+
+        var replaced = 0;
+        foreach (var paragraph in body.Descendants<Paragraph>())
+        {
+            if (ReplaceTextInParagraph(paragraph, operation.FindText, operation.Text))
+            {
+                replaced++;
+            }
+        }
+
+        if (replaced == 0)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Body text not found: {operation.FindText}");
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Replaced body text in {replaced} paragraph(s)");
     }
 
     private static DocxEditAppliedOperation ReplaceHeaderParagraphText(WordprocessingDocument doc, DocxEditOperation operation)

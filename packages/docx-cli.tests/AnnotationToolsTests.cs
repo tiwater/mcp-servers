@@ -393,6 +393,27 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_replace_body_text_without_rewriting_paragraph_structure()
+    {
+        var docPath = CreateSplitBodyTextFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"body-text-edited-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation("replaceBodyText", FindText: "HSPXXX", Text: "HSP-PTMs")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var paragraph = doc.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single();
+        var runs = paragraph.Elements<Run>().ToList();
+        var bodyText = string.Concat(runs.Select(run => string.Concat(run.Descendants<Text>().Select(text => text.Text))));
+        Assert.Equal("表 11. HSP-PTMs 样品翻译后修饰结果", bodyText);
+        Assert.Equal(3, runs.Count);
+        Assert.Equal("Times New Roman", runs[0].RunProperties!.RunFonts!.Ascii!.Value);
+        Assert.Equal("000000", runs[0].RunProperties!.Color!.Val!.Value);
+    }
+
+    [Fact]
     public void Edit_can_delete_comments_explicitly()
     {
         var docPath = CreateAnnotatedFixture();
@@ -514,6 +535,32 @@ public class AnnotationToolsTests
                                     new Color { Val = "000000" },
                                     new W14.FillTextEffect()),
                                 new Text("QVQLVQSGAEVK"))))))));
+        mainPart.Document.Save();
+        return path;
+    }
+
+    private static string CreateSplitBodyTextFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"split-body-text-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        mainPart.Document = new Document(new Body(
+            new Paragraph(
+                new Run(
+                    new RunProperties(
+                        new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman" },
+                        new Color { Val = "000000" }),
+                    new Text("表 11. H")),
+                new Run(
+                    new RunProperties(
+                        new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman" },
+                        new Color { Val = "000000" }),
+                    new Text("SPXXX")),
+                new Run(
+                    new RunProperties(
+                        new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman" },
+                        new Color { Val = "000000" }),
+                    new Text(" 样品翻译后修饰结果")))));
         mainPart.Document.Save();
         return path;
     }

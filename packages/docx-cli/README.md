@@ -81,6 +81,7 @@ tiwater-docx normalize-openxml <input.docx> <output.docx>
 Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceAnchoredText`
 - `replaceParagraphText`
+- `replaceBodyText`
 - `replaceTableCellText`
 - `replaceTableCellRichText`
 - `replaceTable`
@@ -107,6 +108,7 @@ Example operations file:
 {
   "operations": [
     { "type": "replaceAnchoredText", "commentId": "12", "text": "Final narrative" },
+    { "type": "replaceBodyText", "findText": "HSPXXX", "text": "HSP-PTMs" },
     { "type": "replaceTableCellText", "tableIndex": 2, "rowIndex": 0, "cellIndex": 3, "text": "2026-04-15" },
     {
       "type": "replaceTableCellRichText",
