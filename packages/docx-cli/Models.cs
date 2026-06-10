@@ -200,6 +200,7 @@ public sealed record DocxEditOperation(
     int? EndCellIndex = null,
     int? StartRowIndex = null,
     int? EndRowIndex = null,
+    int? TemplateRowIndex = null,
     IReadOnlyList<DocxSemanticFillRule>? Cells = null,
     string? Alignment = null,
     string? Width = null,

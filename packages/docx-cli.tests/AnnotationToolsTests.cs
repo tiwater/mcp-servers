@@ -211,6 +211,104 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_insert_and_replace_table_rows_using_existing_row_style()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-row-edit-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct }),
+                    new TableGrid(
+                        new GridColumn { Width = "1000" },
+                        new GridColumn { Width = "2000" }),
+                    new TableRow(
+                        new TableRowProperties(new TableHeader()),
+                        new TableCell(
+                            new TableCellProperties(new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = "D9EAF7" }),
+                            new Paragraph(new Run(new RunProperties(new Bold()), new Text("序号")))),
+                        new TableCell(
+                            new TableCellProperties(new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = "D9EAF7" }),
+                            new Paragraph(new Run(new RunProperties(new Bold()), new Text("肽段序列"))))
+                    ),
+                    new TableRow(
+                        new TableCell(
+                            new TableCellProperties(new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }),
+                            new Paragraph(new Run(new RunProperties(new RunFonts { Ascii = "Times New Roman" }), new Text("1")))),
+                        new TableCell(
+                            new TableCellProperties(new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }),
+                            new Paragraph(new Run(new RunProperties(new RunFonts { Ascii = "Times New Roman" }), new Text("QVQLVQSGAEVK"))))
+                    ),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("footer")))),
+                        new TableCell(new Paragraph(new Run(new Text("keep"))))
+                    )
+                )
+            ));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"row-edited-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "replaceTableRows",
+                TableIndex: 0,
+                StartRowIndex: 1,
+                EndRowIndex: 1,
+                TemplateRowIndex: 1,
+                Rows: [
+                    [
+                        new DocxTableCellInput("1"),
+                        new DocxTableCellInput(
+                            RichText: [
+                                new DocxRichTextSegment("QV"),
+                                new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                                new DocxRichTextSegment("LVQSGAEVK")
+                            ])
+                    ],
+                    [
+                        new DocxTableCellInput("2"),
+                        new DocxTableCellInput("KPGASVK")
+                    ]
+                ]),
+            new DocxEditOperation(
+                "insertTableRows",
+                TableIndex: 0,
+                RowIndex: 3,
+                TemplateRowIndex: 1,
+                Rows: [
+                    [
+                        new DocxTableCellInput("3"),
+                        new DocxTableCellInput("PGASVK")
+                    ]
+                ])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var table = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single();
+        var rows = table.Elements<TableRow>().ToList();
+
+        Assert.Equal(5, rows.Count);
+        Assert.Equal("序号肽段序列", string.Concat(rows[0].Descendants<Text>().Select(t => t.Text)));
+        Assert.Equal("1QVQLVQSGAEVK", string.Concat(rows[1].Descendants<Text>().Select(t => t.Text)));
+        Assert.Equal("2KPGASVK", string.Concat(rows[2].Descendants<Text>().Select(t => t.Text)));
+        Assert.Equal("3PGASVK", string.Concat(rows[3].Descendants<Text>().Select(t => t.Text)));
+        Assert.Equal("footerkeep", string.Concat(rows[4].Descendants<Text>().Select(t => t.Text)));
+
+        var copiedCellProperties = rows[2].Elements<TableCell>().First().GetFirstChild<TableCellProperties>();
+        Assert.NotNull(copiedCellProperties?.GetFirstChild<TableCellVerticalAlignment>());
+        var markedRun = rows[1].Elements<TableCell>().ElementAt(1).Descendants<Run>().Single(run => string.Concat(run.Descendants<Text>().Select(t => t.Text)) == "Q");
+        Assert.Equal("FF0000", markedRun.RunProperties!.GetFirstChild<Color>()!.Val!.Value);
+        Assert.Equal(UnderlineValues.Single, markedRun.RunProperties.GetFirstChild<Underline>()!.Val!.Value);
+        Assert.DoesNotContain(
+            new OpenXmlValidator().Validate(edited).Select(error => error.Description),
+            description => description.Contains("unexpected child element", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Edit_can_replace_table_cell_with_rich_text_runs_and_remove_text_fill()
     {
         var path = CreateRichTextTableFixture();

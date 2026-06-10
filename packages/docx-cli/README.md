@@ -85,6 +85,8 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceTableCellText`
 - `replaceTableCellRichText`
 - `replaceTable`
+- `insertTableRows`
+- `replaceTableRows`
 - `setTableWidth`
 - `setTableCellAlignment`
 - `deleteComment`
@@ -96,6 +98,8 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 `replaceTableCellText` accepts optional `alignment` (`left`, `center`, `right`, `both`).
 `replaceTableCellRichText` accepts `richText` segments with `text`, optional `color`, `underline`, and `bold`.
 `replaceTable` row cell objects may use the same `richText` segments instead of plain `text`.
+`insertTableRows` inserts `rows` before `rowIndex`; `templateRowIndex` controls which existing row supplies row/cell/run styling.
+`replaceTableRows` replaces inclusive `startRowIndex`..`endRowIndex` with `rows`, preserving the surrounding table and using `templateRowIndex` for row/cell/run styling.
 `setTableWidth` accepts `width` and `widthType` (`pct`, `dxa`, `auto`, `nil`).
 `sanitizeFields` removes update-field prompts and dirty field markers from the package.
 `freezeFields` converts visible field results into ordinary content so converters cannot recalculate cross-references or sequence numbers.

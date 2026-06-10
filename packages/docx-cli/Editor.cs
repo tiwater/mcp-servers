@@ -82,6 +82,8 @@ public static class Editor
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
             "replaceTableCellRichText" => ReplaceTableCellRichText(body, operation),
             "replaceTable" => ReplaceTable(body, operation),
+            "insertTableRows" => InsertTableRows(body, operation),
+            "replaceTableRows" => ReplaceTableRows(body, operation),
             "setTableWidth" => SetTableWidth(body, operation),
             "setTableCellAlignment" => SetTableCellAlignment(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
@@ -422,6 +424,109 @@ public static class Editor
         }
 
         return row;
+    }
+
+    private static DocxEditAppliedOperation InsertTableRows(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.Rows is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, and rows are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var table = tables[operation.TableIndex.Value];
+        var existingRows = table.Elements<TableRow>().ToList();
+        var insertBeforeIndex = operation.RowIndex.Value;
+        if (insertBeforeIndex < 0 || insertBeforeIndex > existingRows.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {insertBeforeIndex} is out of range");
+        }
+
+        var templateRowResult = ResolveTemplateRow(existingRows, operation.TemplateRowIndex, insertBeforeIndex);
+        if (!templateRowResult.Valid)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, templateRowResult.Error ?? "Invalid template row");
+        }
+
+        var templateRow = templateRowResult.Row;
+        InsertBuiltRows(table, existingRows.ElementAtOrDefault(insertBeforeIndex), templateRow, operation.Rows);
+        return new DocxEditAppliedOperation(operation.Type, true, $"Inserted {operation.Rows.Count} row(s) into table[{operation.TableIndex}] before row[{insertBeforeIndex}]");
+    }
+
+    private static DocxEditAppliedOperation ReplaceTableRows(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.StartRowIndex is null || operation.EndRowIndex is null || operation.Rows is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, startRowIndex, endRowIndex, and rows are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var table = tables[operation.TableIndex.Value];
+        var existingRows = table.Elements<TableRow>().ToList();
+        var start = operation.StartRowIndex.Value;
+        var end = operation.EndRowIndex.Value;
+        if (start < 0 || end >= existingRows.Count || end < start)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Invalid row range {start} to {end}");
+        }
+
+        var templateRowResult = ResolveTemplateRow(existingRows, operation.TemplateRowIndex, start);
+        if (!templateRowResult.Valid)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, templateRowResult.Error ?? "Invalid template row");
+        }
+
+        var templateRow = templateRowResult.Row;
+        var anchor = existingRows[start];
+        InsertBuiltRows(table, anchor, templateRow, operation.Rows);
+        foreach (var row in existingRows.Skip(start).Take(end - start + 1))
+        {
+            row.Remove();
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Replaced table[{operation.TableIndex}].rows[{start}..{end}] with {operation.Rows.Count} row(s)");
+    }
+
+    private static (bool Valid, TableRow? Row, string? Error) ResolveTemplateRow(IReadOnlyList<TableRow> rows, int? templateRowIndex, int fallbackIndex)
+    {
+        if (rows.Count == 0)
+        {
+            return (true, null, null);
+        }
+
+        var index = templateRowIndex ?? Math.Clamp(fallbackIndex, 0, rows.Count - 1);
+        if (index < 0 || index >= rows.Count)
+        {
+            return (false, null, $"templateRowIndex {index} is out of range");
+        }
+
+        return (true, rows[index], null);
+    }
+
+    private static void InsertBuiltRows(Table table, TableRow? beforeRow, TableRow? templateRow, IReadOnlyList<IReadOnlyList<DocxTableCellInput>> rows)
+    {
+        foreach (var rowInput in rows)
+        {
+            var row = BuildReplacementRow(templateRow, rowInput, rowInput.Any(cell => cell.Header == true));
+            if (beforeRow is null)
+            {
+                table.AppendChild(row);
+            }
+            else
+            {
+                table.InsertBefore(row, beforeRow);
+            }
+        }
     }
 
     private static TableCell BuildReplacementCell(TableCell? templateCell, DocxTableCellInput input, bool rowIsHeader)
