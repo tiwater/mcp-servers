@@ -84,6 +84,7 @@ public static class Editor
             "replaceTable" => ReplaceTable(body, operation),
             "insertTableRows" => InsertTableRows(body, operation),
             "replaceTableRows" => ReplaceTableRows(body, operation),
+            "insertTableColumns" => InsertTableColumns(body, operation),
             "setTableWidth" => SetTableWidth(body, operation),
             "setTableCellAlignment" => SetTableCellAlignment(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
@@ -527,6 +528,174 @@ public static class Editor
                 table.InsertBefore(row, beforeRow);
             }
         }
+    }
+
+    private static DocxEditAppliedOperation InsertTableColumns(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.ColumnIndex is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex and columnIndex are required");
+        }
+
+        var tables = body.Descendants<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var columnIndex = operation.ColumnIndex.Value;
+        var columnCount = operation.ColumnCount ?? 1;
+        if (columnIndex < 0 || columnCount < 1)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Invalid columnIndex {columnIndex} or columnCount {columnCount}");
+        }
+
+        var table = tables[operation.TableIndex.Value];
+        var existingGridWidth = GetTableGridWidth(table);
+        if (columnIndex > existingGridWidth)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"columnIndex {columnIndex} is out of range for grid width {existingGridWidth}");
+        }
+
+        var templateColumnIndex = operation.TemplateColumnIndex ?? Math.Clamp(columnIndex == existingGridWidth ? columnIndex - 1 : columnIndex, 0, Math.Max(0, existingGridWidth - 1));
+        if (existingGridWidth > 0 && (templateColumnIndex < 0 || templateColumnIndex >= existingGridWidth))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"templateColumnIndex {templateColumnIndex} is out of range for grid width {existingGridWidth}");
+        }
+
+        InsertGridColumns(table, columnIndex, templateColumnIndex, columnCount, existingGridWidth);
+
+        var rows = table.Elements<TableRow>().ToList();
+        foreach (var row in rows)
+        {
+            InsertColumnsIntoRow(row, columnIndex, templateColumnIndex, columnCount);
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Inserted {columnCount} column(s) into table[{operation.TableIndex}] before grid column {columnIndex}");
+    }
+
+    private static int GetTableGridWidth(Table table)
+    {
+        var gridColumns = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count() ?? 0;
+        var rowWidth = table.Elements<TableRow>()
+            .Select(row => row.Elements<TableCell>().Sum(GetCellGridSpan))
+            .DefaultIfEmpty(0)
+            .Max();
+        return Math.Max(gridColumns, rowWidth);
+    }
+
+    private static void InsertGridColumns(Table table, int columnIndex, int templateColumnIndex, int columnCount, int existingGridWidth)
+    {
+        var properties = table.GetFirstChild<TableProperties>();
+        if (properties is null)
+        {
+            properties = new TableProperties();
+            table.PrependChild(properties);
+        }
+
+        var grid = table.GetFirstChild<TableGrid>();
+        if (grid is null)
+        {
+            grid = new TableGrid();
+            for (var i = 0; i < existingGridWidth; i++)
+            {
+                grid.AppendChild(new GridColumn { Width = "1200" });
+            }
+
+            table.InsertAfter(grid, properties);
+        }
+
+        var columns = grid.Elements<GridColumn>().ToList();
+        var template = columns.ElementAtOrDefault(templateColumnIndex);
+        for (var i = 0; i < columnCount; i++)
+        {
+            var inserted = template is null
+                ? new GridColumn { Width = "1200" }
+                : (GridColumn)template.CloneNode(true);
+            var before = columns.ElementAtOrDefault(columnIndex + i);
+            if (before is null)
+            {
+                grid.AppendChild(inserted);
+            }
+            else
+            {
+                grid.InsertBefore(inserted, before);
+            }
+            columns.Insert(Math.Min(columnIndex + i, columns.Count), inserted);
+        }
+    }
+
+    private static void InsertColumnsIntoRow(TableRow row, int columnIndex, int templateColumnIndex, int columnCount)
+    {
+        var cells = row.Elements<TableCell>().ToList();
+        var cursor = 0;
+        TableCell? insertBefore = null;
+        TableCell? templateCell = null;
+
+        foreach (var cell in cells)
+        {
+            var span = GetCellGridSpan(cell);
+            var start = cursor;
+            var endExclusive = cursor + span;
+
+            if (templateCell is null && templateColumnIndex >= start && templateColumnIndex < endExclusive)
+            {
+                templateCell = cell;
+            }
+
+            if (columnIndex > start && columnIndex < endExclusive)
+            {
+                SetCellGridSpan(cell, span + columnCount);
+                return;
+            }
+
+            if (columnIndex <= start)
+            {
+                insertBefore = cell;
+                break;
+            }
+
+            cursor = endExclusive;
+        }
+
+        templateCell ??= cells.LastOrDefault();
+        for (var i = 0; i < columnCount; i++)
+        {
+            var cell = BuildInsertedColumnCell(templateCell);
+            if (insertBefore is null)
+            {
+                row.AppendChild(cell);
+            }
+            else
+            {
+                row.InsertBefore(cell, insertBefore);
+            }
+        }
+    }
+
+    private static int GetCellGridSpan(TableCell cell)
+        => Math.Max(1, cell.GetFirstChild<TableCellProperties>()?.GetFirstChild<GridSpan>()?.Val?.Value ?? 1);
+
+    private static void SetCellGridSpan(TableCell cell, int span)
+    {
+        var properties = cell.GetFirstChild<TableCellProperties>() ?? cell.PrependChild(new TableCellProperties());
+        properties.RemoveAllChildren<GridSpan>();
+        if (span > 1)
+        {
+            properties.AppendChild(new GridSpan { Val = span });
+        }
+        NormalizeTableCellProperties(properties);
+    }
+
+    private static TableCell BuildInsertedColumnCell(TableCell? templateCell)
+    {
+        var cell = templateCell is null
+            ? new TableCell(new TableCellProperties(), new Paragraph(new Run(new Text(string.Empty))))
+            : (TableCell)templateCell.CloneNode(true);
+        SetCellGridSpan(cell, 1);
+        cell.GetFirstChild<TableCellProperties>()?.RemoveAllChildren<VerticalMerge>();
+        ReplaceTableCellText(cell, string.Empty);
+        return cell;
     }
 
     private static TableCell BuildReplacementCell(TableCell? templateCell, DocxTableCellInput input, bool rowIsHeader)

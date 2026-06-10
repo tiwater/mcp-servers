@@ -140,7 +140,7 @@ const tools = [
           items: {
             type: 'object',
             properties: {
-              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceBodyText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTableCellRichText', 'replaceTable', 'mergeTableCells', 'unmergeTableColumnVerticalCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty', 'sanitizeFields', 'freezeFields'] },
+              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceBodyText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTableCellRichText', 'replaceTable', 'insertTableColumns', 'mergeTableCells', 'unmergeTableColumnVerticalCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty', 'sanitizeFields', 'freezeFields'] },
               commentId: { type: 'string' },
               text: { type: 'string' },
               richText: {
@@ -167,6 +167,9 @@ const tools = [
               endCellIndex: { type: 'integer' },
               startRowIndex: { type: 'integer' },
               endRowIndex: { type: 'integer' },
+              columnIndex: { type: 'integer' },
+              columnCount: { type: 'integer' },
+              templateColumnIndex: { type: 'integer' },
               rows: {
                 type: 'array',
                 items: {

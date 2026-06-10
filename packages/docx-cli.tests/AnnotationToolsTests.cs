@@ -876,6 +876,75 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_insert_table_columns_and_expand_crossing_grid_spans()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-column-insert-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableGrid(
+                        new GridColumn { Width = "1800" },
+                        new GridColumn { Width = "800" },
+                        new GridColumn { Width = "800" },
+                        new GridColumn { Width = "800" }
+                    ),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("条件")))),
+                        new TableCell(new Paragraph(new Run(new Text("T0")))),
+                        new TableCell(new Paragraph(new Run(new Text("1月")))),
+                        new TableCell(new Paragraph(new Run(new Text("3月"))))
+                    ),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("反复冻融试验")))),
+                        new TableCell(
+                            new TableCellProperties(new GridSpan { Val = 3 }),
+                            new Paragraph(new Run(new Text("冻融3个循环、5个循环，取样检测按A进行测定")))
+                        )
+                    ),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("长期")))),
+                        new TableCell(new Paragraph(new Run(new Text("--")))),
+                        new TableCell(new Paragraph(new Run(new Text("A")))),
+                        new TableCell(new Paragraph(new Run(new Text("B"))))
+                    )
+                )
+            ));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"column-inserted-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("insertTableColumns", TableIndex: 0, ColumnIndex: 3, ColumnCount: 2, TemplateColumnIndex: 2),
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 3, Text: "6月"),
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 4, Text: "9月"),
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 2, CellIndex: 3, Text: "A"),
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 2, CellIndex: 4, Text: "--")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using (var doc = WordprocessingDocument.Open(output, false))
+        {
+            var table = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single();
+            Assert.Equal(6, table.GetFirstChild<TableGrid>()!.Elements<GridColumn>().Count());
+
+            var rows = table.Elements<TableRow>().ToList();
+            Assert.Equal(["条件", "T0", "1月", "6月", "9月", "3月"], rows[0].Elements<TableCell>().Select(GetCellText).ToArray());
+
+            var freezeThawCells = rows[1].Elements<TableCell>().ToList();
+            Assert.Equal(2, freezeThawCells.Count);
+            var span = freezeThawCells[1].GetFirstChild<TableCellProperties>()?.GetFirstChild<GridSpan>()?.Val?.Value;
+            Assert.Equal(5, span);
+            Assert.Contains("冻融3个循环", GetCellText(freezeThawCells[1]));
+
+            Assert.Equal(["长期", "--", "A", "A", "--", "B"], rows[2].Elements<TableCell>().Select(GetCellText).ToArray());
+            Assert.Empty(new OpenXmlValidator().Validate(doc));
+        }
+    }
+
+    [Fact]
     public void Edit_can_unmerge_table_column_vertical_cells_and_fill_continuations()
     {
         var path = Path.Combine(Path.GetTempPath(), $"fixture-unmerge-{Guid.NewGuid():N}.docx");
@@ -996,6 +1065,9 @@ public class AnnotationToolsTests
 
     private static string GetParagraphText(Paragraph paragraph)
         => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text));
+
+    private static string GetCellText(TableCell cell)
+        => string.Concat(cell.Descendants<Text>().Select(text => text.Text));
 
     private static void AssertChildOrder(OpenXmlElement parent, string beforeTypeName, string afterTypeName)
     {
