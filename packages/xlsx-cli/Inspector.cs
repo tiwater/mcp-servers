@@ -57,13 +57,21 @@ public static class Inspector
                 sheet.UsedRange,
                 sheet.MergedRanges.ToList(),
                 sheet.FormulaCellCount,
-                openXmlDetails.GetValueOrDefault(sheet.Name)?.TextCells,
+                openXmlDetails.GetValueOrDefault(sheet.Name)?.TextCells ?? GetLoadedTextCells(sheet),
                 openXmlDetails.GetValueOrDefault(sheet.Name)?.FormulaCells,
                 openXmlDetails.GetValueOrDefault(sheet.Name)?.RowHeights,
                 openXmlDetails.GetValueOrDefault(sheet.Name)?.ColumnWidths));
         }
 
         return new WorkbookReport(path, sheets.Count, sheets);
+    }
+
+    private static List<TextCellReport> GetLoadedTextCells(WorkbookLoader.SheetDataModel sheet)
+    {
+        return sheet.Cells
+            .Where(cell => !string.IsNullOrWhiteSpace(cell.Value))
+            .Select(cell => new TextCellReport(cell.Reference, cell.Value, cell.RichTextRuns))
+            .ToList();
     }
 
     private static Dictionary<string, SheetInspectionDetails> InspectOpenXmlDetails(string path)
@@ -124,7 +132,10 @@ public static class Inspector
                         var visibleText = GetVisibleCellText(cell, sharedStrings);
                         if (!string.IsNullOrWhiteSpace(visibleText))
                         {
-                            textCells.Add(new TextCellReport(reference, visibleText));
+                            textCells.Add(new TextCellReport(
+                                reference,
+                                visibleText,
+                                OpenXmlRichText.GetCellRichTextRuns(cell, sharedStrings)));
                         }
 
                         if (cell.CellFormula is not null)

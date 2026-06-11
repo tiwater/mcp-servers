@@ -28,7 +28,8 @@ internal static class WorkbookLoader
         int Column,
         string Value,
         string FormattedValue,
-        string? Formula);
+        string? Formula,
+        IReadOnlyList<RichTextRunReport>? RichTextRuns = null);
 
     private sealed record SharedFormula(string Formula, int BaseRow, int BaseColumn);
 
@@ -106,6 +107,7 @@ internal static class WorkbookLoader
 
                         var rawValue = GetOpenXmlRawCellValue(cell, sharedStringTable) ?? string.Empty;
                         var formattedValue = GetOpenXmlFormattedCellValue(cell, sharedStringTable, stylesPart) ?? string.Empty;
+                        var richTextRuns = OpenXmlRichText.GetCellRichTextRuns(cell, sharedStringTable);
                         if (!resolveMergedCells)
                         {
                             rowData.Add(rawValue);
@@ -125,7 +127,8 @@ internal static class WorkbookLoader
                             cellColumn,
                             rawValue,
                             formattedValue,
-                            string.IsNullOrWhiteSpace(formula) ? null : formula));
+                            string.IsNullOrWhiteSpace(formula) ? null : formula,
+                            richTextRuns));
 
                         if (resolveMergedCells && rawCells is not null && formattedCells is not null)
                         {
@@ -255,6 +258,7 @@ internal static class WorkbookLoader
 
                     var rawValue = GetLegacyRawCellValue(cell);
                     var formattedValue = GetLegacyFormattedCellValue(cell, formatter);
+                    var richTextRuns = GetLegacyRichTextRuns(cell, workbook);
                     if (!resolveMergedCells)
                     {
                         rowValues.Add(rawValue);
@@ -270,7 +274,8 @@ internal static class WorkbookLoader
                             cellIndex + 1,
                             rawValue,
                             formattedValue,
-                            string.IsNullOrWhiteSpace(formula) ? null : formula));
+                            string.IsNullOrWhiteSpace(formula) ? null : formula,
+                            richTextRuns));
                         if (resolveMergedCells && rawCells is not null && formattedCells is not null)
                         {
                             rawCells[cellRef] = rawValue;
@@ -477,6 +482,85 @@ internal static class WorkbookLoader
 
     private static string GetLegacyFormattedCellValue(ICell? cell, DataFormatter formatter)
         => cell is null ? string.Empty : formatter.FormatCellValue(cell);
+
+    private static IReadOnlyList<RichTextRunReport>? GetLegacyRichTextRuns(ICell? cell, HSSFWorkbook workbook)
+    {
+        if (cell is null || cell.CellType != NpoiCellType.String || cell.RichStringCellValue is not HSSFRichTextString richText)
+        {
+            return null;
+        }
+
+        var text = richText.String;
+        if (string.IsNullOrEmpty(text) || richText.NumFormattingRuns == 0)
+        {
+            return null;
+        }
+
+        var runs = new List<RichTextRunReport>();
+        var position = 0;
+        for (var index = 0; index < richText.NumFormattingRuns; index++)
+        {
+            var start = richText.GetIndexOfFormattingRun(index);
+            if (start > position)
+            {
+                runs.Add(new RichTextRunReport(text[position..start]));
+            }
+
+            var end = index + 1 < richText.NumFormattingRuns
+                ? richText.GetIndexOfFormattingRun(index + 1)
+                : text.Length;
+            if (end <= start)
+            {
+                continue;
+            }
+
+            var fontIndex = richText.GetFontOfFormattingRun(index);
+            var font = fontIndex == HSSFRichTextString.NO_FONT ? null : workbook.GetFontAt(fontIndex);
+            runs.Add(new RichTextRunReport(
+                text[start..end],
+                font?.FontName,
+                GetLegacyFontColor(font, workbook),
+                GetLegacyUnderline(font),
+                font?.IsBold ?? false,
+                font?.IsItalic ?? false));
+            position = end;
+        }
+
+        if (position < text.Length)
+        {
+            runs.Add(new RichTextRunReport(text[position..]));
+        }
+
+        return runs.Count == 0 ? null : runs;
+    }
+
+    private static string? GetLegacyFontColor(IFont? font, HSSFWorkbook workbook)
+    {
+        if (font is null)
+        {
+            return null;
+        }
+
+        var colorIndex = font.Color;
+        var color = workbook.GetCustomPalette().GetColor(colorIndex);
+        if (color is null)
+        {
+            return colorIndex == 0 ? null : $"indexed:{colorIndex}";
+        }
+
+        var triplet = color.GetTriplet();
+        return string.Format(CultureInfo.InvariantCulture, "{0:X2}{1:X2}{2:X2}", triplet[0], triplet[1], triplet[2]);
+    }
+
+    private static string? GetLegacyUnderline(IFont? font)
+    {
+        if (font is null || font.Underline == FontUnderlineType.None)
+        {
+            return null;
+        }
+
+        return font.Underline.ToString().ToLowerInvariant();
+    }
 
     private static string FormatOpenXmlNumber(double value, uint? styleIndex, WorkbookStylesPart? stylesPart)
     {

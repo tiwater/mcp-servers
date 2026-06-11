@@ -1,5 +1,8 @@
 using Dockit.Xlsx;
 using NPOI.HSSF.UserModel;
+using NPOI.HSSF.Util;
+using NPOI.SS.UserModel;
+using System.Text.Json;
 using Xunit;
 
 namespace Dockit.Xlsx.Tests;
@@ -17,6 +20,9 @@ public class LegacyXlsTests
         Assert.Equal("Plan", sheet.Name);
         Assert.Equal(3, sheet.RowCount);
         Assert.True(sheet.ColumnCount >= 3);
+        var richCell = Assert.Single(sheet.TextCells!, cell => cell.Reference == "D2");
+        Assert.Equal("QVQLVQSGAEVK", richCell.Text);
+        Assert.Contains(richCell.RichTextRuns!, run => run.Text == "Q" && run.Color == "FF0000" && run.Underline == "single");
     }
 
     [Fact]
@@ -30,6 +36,15 @@ public class LegacyXlsTests
         var json = File.ReadAllText(output);
         Assert.Contains("\"sheet\": \"Plan\"", json, StringComparison.Ordinal);
         Assert.Contains("\"2025-09-23\"", json, StringComparison.Ordinal);
+
+        using var parsed = JsonDocument.Parse(json);
+        var cells = parsed.RootElement[0].GetProperty("cells").EnumerateArray().ToList();
+        var richCell = cells.Single(cell => cell.GetProperty("reference").GetString() == "D2");
+        var runs = richCell.GetProperty("richTextRuns").EnumerateArray().ToList();
+        Assert.Contains(runs, run =>
+            run.GetProperty("text").GetString() == "Q" &&
+            run.GetProperty("color").GetString() == "FF0000" &&
+            run.GetProperty("underline").GetString() == "single");
     }
 
     private static string CreateLegacyXlsFixture()
@@ -47,6 +62,7 @@ public class LegacyXlsTests
         row1.CreateCell(0).SetCellValue("High temperature");
         row1.CreateCell(1).SetCellValue("2025-09-23");
         row1.CreateCell(2).SetCellValue("2025-10-23");
+        row1.CreateCell(3).SetCellValue(CreateLegacyRichString(workbook));
 
         var row2 = sheet.CreateRow(2);
         row2.CreateCell(0).SetCellValue("Freeze-thaw");
@@ -56,6 +72,17 @@ public class LegacyXlsTests
         using var stream = File.Create(path);
         workbook.Write(stream);
         return path;
+    }
+
+    private static HSSFRichTextString CreateLegacyRichString(HSSFWorkbook workbook)
+    {
+        var redUnderlinedFont = workbook.CreateFont();
+        redUnderlinedFont.Color = HSSFColor.Red.Index;
+        redUnderlinedFont.Underline = FontUnderlineType.Single;
+
+        var richText = new HSSFRichTextString("QVQLVQSGAEVK");
+        richText.ApplyFont(2, 3, redUnderlinedFont);
+        return richText;
     }
 
     [Fact]

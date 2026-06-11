@@ -25,6 +25,7 @@ Outputs sheet-level metrics, placeholders, used ranges, formula counts, and merg
 tiwater-xlsx inspect <template.xlsx> [--json]
 ```
 *   `--json` returns structured output suitable for parsers.
+*   Text cells that use XLSX rich text expose `richTextRuns` with per-run text, font name, color, underline, bold, and italic fields.
 
 ### 2. Fill a Template
 Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
@@ -107,3 +108,4 @@ tiwater-xlsx validate <input.xlsx>
 ```
 
 Scenario-specific fixed-layout planning workflows now live in Lucid skills and scripts. This CLI remains the generic workbook runtime for inspection, export, template filling, explicit edit application, and package validation.
+`export-json` also includes each cell's `richTextRuns` when the Open XML workbook stores inline or shared-string rich text, so downstream document generators can preserve source text markings without parsing package XML directly.

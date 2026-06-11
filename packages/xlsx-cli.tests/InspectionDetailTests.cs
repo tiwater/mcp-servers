@@ -2,6 +2,7 @@ using Dockit.Xlsx;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using System.Text.Json;
 using Xunit;
 
 namespace Dockit.Xlsx.Tests;
@@ -22,6 +23,12 @@ public class InspectionDetailTests
         Assert.Contains(sheet.TextCells!, cell => cell.Reference == "C5" && cell.Text == "shared label");
         Assert.Contains(sheet.TextCells!, cell => cell.Reference == "D5" && cell.Text == "TRUE");
         Assert.Contains(sheet.TextCells!, cell => cell.Reference == "E5" && cell.Text == "123.45");
+        var inlineRichCell = Assert.Single(sheet.TextCells!, cell => cell.Reference == "F5");
+        Assert.Equal("QVQLVQSGAEVK", inlineRichCell.Text);
+        Assert.Contains(inlineRichCell.RichTextRuns!, run => run.Text == "Q" && run.Color == "FFFF0000" && run.Underline == "single");
+        var sharedRichCell = Assert.Single(sheet.TextCells!, cell => cell.Reference == "G5");
+        Assert.Equal("QAPGQGLEWMGWIYPGSANTK", sharedRichCell.Text);
+        Assert.Contains(sharedRichCell.RichTextRuns!, run => run.Text == "N" && run.Color == "FFFF0000" && run.Underline == "single");
         Assert.Contains(sheet.FormulaCells!, cell => cell.Reference == "B12" && cell.Formula == "B6-B9*0.784" && cell.CachedValue == "10");
         Assert.Contains(sheet.FormulaCells!, cell => cell.Reference == "B14" && cell.Formula == "B12*2" && cell.CachedValue is null);
         Assert.DoesNotContain(sheet.TextCells!, cell => cell.Reference == "B14");
@@ -31,6 +38,31 @@ public class InspectionDetailTests
         Assert.Contains(sheet.ColumnWidths!, column => column.Column == 1 && column.Width > 20);
     }
 
+    [Fact]
+    public void ExportJson_exposes_rich_text_runs_for_openxml_cells()
+    {
+        var path = CreateAna14LikeWorkbook();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-export-rich-text-{Guid.NewGuid():N}.json");
+
+        Extractor.RunExportJson([path, output]);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(output));
+        var cells = document.RootElement[0].GetProperty("cells").EnumerateArray().ToList();
+        var inlineRichCell = cells.Single(cell => cell.GetProperty("reference").GetString() == "F5");
+        var inlineRuns = inlineRichCell.GetProperty("richTextRuns").EnumerateArray().ToList();
+        Assert.Contains(inlineRuns, run =>
+            run.GetProperty("text").GetString() == "Q" &&
+            run.GetProperty("color").GetString() == "FFFF0000" &&
+            run.GetProperty("underline").GetString() == "single");
+
+        var sharedRichCell = cells.Single(cell => cell.GetProperty("reference").GetString() == "G5");
+        var sharedRuns = sharedRichCell.GetProperty("richTextRuns").EnumerateArray().ToList();
+        Assert.Contains(sharedRuns, run =>
+            run.GetProperty("text").GetString() == "N" &&
+            run.GetProperty("color").GetString() == "FFFF0000" &&
+            run.GetProperty("underline").GetString() == "single");
+    }
+
     private static string CreateAna14LikeWorkbook()
     {
         var path = Path.Combine(Path.GetTempPath(), $"xlsx-inspection-detail-{Guid.NewGuid():N}.xlsx");
@@ -38,7 +70,9 @@ public class InspectionDetailTests
         var workbookPart = spreadsheet.AddWorkbookPart();
         workbookPart.Workbook = new Workbook();
         var sharedStringPart = workbookPart.AddNewPart<SharedStringTablePart>();
-        sharedStringPart.SharedStringTable = new SharedStringTable(new SharedStringItem(new Text("shared label")));
+        sharedStringPart.SharedStringTable = new SharedStringTable(
+            new SharedStringItem(new Text("shared label")),
+            CreateRichSharedString());
         var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
 
         var sheetData = new SheetData(
@@ -75,8 +109,35 @@ public class InspectionDetailTests
             new Cell { CellReference = "A5", DataType = CellValues.InlineString, InlineString = new InlineString(new Text("280 nm峰面积")) },
             new Cell { CellReference = "C5", DataType = CellValues.SharedString, CellValue = new CellValue("0") },
             new Cell { CellReference = "D5", DataType = CellValues.Boolean, CellValue = new CellValue("1") },
-            new Cell { CellReference = "E5", CellValue = new CellValue("123.45") })
+            new Cell { CellReference = "E5", CellValue = new CellValue("123.45") },
+            new Cell { CellReference = "F5", DataType = CellValues.InlineString, InlineString = CreateRichInlineString() },
+            new Cell { CellReference = "G5", DataType = CellValues.SharedString, CellValue = new CellValue("1") })
         { RowIndex = 5 };
+    }
+
+    private static InlineString CreateRichInlineString()
+    {
+        return new InlineString(
+            new Run(new Text("QV")),
+            CreateRedUnderlinedRun("Q"),
+            new Run(new Text("LVQSGAEVK")));
+    }
+
+    private static SharedStringItem CreateRichSharedString()
+    {
+        return new SharedStringItem(
+            new Run(new Text("QAPGQGLEWMGWIYPGSA")),
+            CreateRedUnderlinedRun("N"),
+            new Run(new Text("TK")));
+    }
+
+    private static Run CreateRedUnderlinedRun(string text)
+    {
+        return new Run(
+            new RunProperties(
+                new Color { Rgb = "FFFF0000" },
+                new Underline { Val = UnderlineValues.Single }),
+            new Text(text));
     }
 
     private static Row CreateInlineStringRow(uint rowIndex, params (string Reference, string Value)[] cells)

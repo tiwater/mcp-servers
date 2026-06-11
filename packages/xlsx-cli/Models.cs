@@ -12,7 +12,15 @@ public record WorkbookReport(
     List<SheetReport> Sheets
 );
 
-public record TextCellReport(string Reference, string Text);
+public record RichTextRunReport(
+    string Text,
+    string? FontName = null,
+    string? Color = null,
+    string? Underline = null,
+    bool Bold = false,
+    bool Italic = false);
+
+public record TextCellReport(string Reference, string Text, IReadOnlyList<RichTextRunReport>? RichTextRuns = null);
 
 public record FormulaCellReport(string Reference, string Formula, string? CachedValue);
 
