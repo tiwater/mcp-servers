@@ -92,6 +92,9 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `setTableCellAlignment`
 - `setTableCellFontSize`
 - `setTableRowHeight`
+- `mergeTableCells`
+- `unmergeTableRowHorizontalCells`
+- `unmergeTableColumnVerticalCells`
 - `deleteComment`
 - `deleteComments`
 - `sanitizeFields`
@@ -107,6 +110,9 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 `setTableWidth` accepts `width` and `widthType` (`pct`, `dxa`, `auto`, `nil`).
 `setTableCellFontSize` accepts `fontSize` as OpenXML half-points (`18`) or points (`9pt`).
 `setTableRowHeight` accepts `height` in twips and optional `heightRule` (`atLeast`, `exact`, `auto`).
+`mergeTableCells` merges a horizontal cell range when `rowIndex/startCellIndex/endCellIndex` are provided, or a vertical row range when `cellIndex/startRowIndex/endRowIndex` are provided.
+`unmergeTableRowHorizontalCells` splits one horizontally merged visible cell in `tableIndex/rowIndex/cellIndex` back into its grid columns, preserving the original text in the first cell and inserting empty styled cells for the remaining columns.
+`unmergeTableColumnVerticalCells` removes vertical merge markers in `tableIndex/cellIndex/startRowIndex/endRowIndex` and fills continuation cells from the latest visible content.
 `sanitizeFields` removes update-field prompts and dirty field markers from the package.
 `freezeFields` converts visible field results into ordinary content so converters cannot recalculate cross-references or sequence numbers.
 

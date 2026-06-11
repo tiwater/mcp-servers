@@ -90,6 +90,7 @@ public static class Editor
             "setTableCellFontSize" => SetTableCellFontSize(body, operation),
             "setTableRowHeight" => SetTableRowHeight(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
+            "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
             "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
             "fillTableSemantically" => FillTableSemantically(body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
@@ -1568,6 +1569,67 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation(operation.Type, false, "Either rowIndex (horizontal) or cellIndex (vertical) must be specified for merge");
+    }
+
+    private static DocxEditAppliedOperation UnmergeTableRowHorizontalCells(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, and cellIndex are required");
+        }
+
+        var tables = body.Descendants<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var table = tables[operation.TableIndex.Value];
+        var rows = table.Elements<TableRow>().ToList();
+        var rowIndex = operation.RowIndex.Value;
+        if (rowIndex < 0 || rowIndex >= rows.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {rowIndex} is out of range");
+        }
+
+        var row = rows[rowIndex];
+        var cells = row.Elements<TableCell>().ToList();
+        var cellIndex = operation.CellIndex.Value;
+        if (cellIndex < 0 || cellIndex >= cells.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {cellIndex} is out of range");
+        }
+
+        var cell = cells[cellIndex];
+        var properties = cell.GetFirstChild<TableCellProperties>() ?? cell.PrependChild(new TableCellProperties());
+        var span = properties.GetFirstChild<GridSpan>()?.Val?.Value ?? 1;
+        if (span <= 1)
+        {
+            return new DocxEditAppliedOperation(operation.Type, true, $"Cell table[{operation.TableIndex}].row[{rowIndex}].cell[{cellIndex}] is not horizontally merged");
+        }
+
+        properties.RemoveAllChildren<GridSpan>();
+        NormalizeTableCellProperties(properties);
+
+        for (var i = 1; i < span; i++)
+        {
+            var newCell = (TableCell)cell.CloneNode(true);
+            foreach (var child in newCell.ChildElements.Where(child => child is not TableCellProperties).ToList())
+            {
+                child.Remove();
+            }
+            newCell.AppendChild(new Paragraph());
+            var newProperties = newCell.GetFirstChild<TableCellProperties>() ?? newCell.PrependChild(new TableCellProperties());
+            newProperties.RemoveAllChildren<GridSpan>();
+            NormalizeTableCellProperties(newProperties);
+            row.InsertAfter(newCell, cell);
+            cell = newCell;
+        }
+
+        return new DocxEditAppliedOperation(
+            operation.Type,
+            true,
+            $"Unmerged horizontal cell in table[{operation.TableIndex}].row[{rowIndex}].cell[{cellIndex}], expanded {span} grid columns");
     }
 
     private static DocxEditAppliedOperation UnmergeTableColumnVerticalCells(Body body, DocxEditOperation operation)

@@ -140,7 +140,7 @@ const tools = [
           items: {
             type: 'object',
             properties: {
-              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceBodyText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTableCellRichText', 'replaceTable', 'insertTableRows', 'replaceTableRows', 'insertTableColumns', 'setTableWidth', 'setTableCellAlignment', 'setTableCellFontSize', 'setTableRowHeight', 'mergeTableCells', 'unmergeTableColumnVerticalCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty', 'sanitizeFields', 'freezeFields'] },
+              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceBodyText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTableCellRichText', 'replaceTable', 'insertTableRows', 'replaceTableRows', 'insertTableColumns', 'setTableWidth', 'setTableCellAlignment', 'setTableCellFontSize', 'setTableRowHeight', 'mergeTableCells', 'unmergeTableRowHorizontalCells', 'unmergeTableColumnVerticalCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty', 'sanitizeFields', 'freezeFields'] },
               commentId: { type: 'string' },
               text: { type: 'string' },
               richText: {

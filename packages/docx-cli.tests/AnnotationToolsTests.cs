@@ -1043,6 +1043,52 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_unmerge_table_row_horizontal_cells()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-unmerge-horizontal-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(),
+                    new TableGrid(
+                        new GridColumn { Width = "1000" },
+                        new GridColumn { Width = "1000" },
+                        new GridColumn { Width = "1000" }
+                    ),
+                    new TableRow(
+                        new TableCell(
+                            new TableCellProperties(new GridSpan { Val = 3 }),
+                            new Paragraph(new Run(new Text("高温试验")))
+                        )
+                    )
+                )
+            ));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"unmerged-horizontal-cells-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("unmergeTableRowHorizontalCells", TableIndex: 0, RowIndex: 0, CellIndex: 0)
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using (var doc = WordprocessingDocument.Open(output, false))
+        {
+            var table = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single();
+            var cells = table.Elements<TableRow>().Single().Elements<TableCell>().ToList();
+            Assert.Equal(3, cells.Count);
+            Assert.Null(cells[0].GetFirstChild<TableCellProperties>()?.GetFirstChild<GridSpan>());
+            Assert.Equal("高温试验", GetCellText(cells[0]));
+            Assert.Equal("", GetCellText(cells[1]));
+            Assert.Equal("", GetCellText(cells[2]));
+            Assert.Empty(new OpenXmlValidator().Validate(doc));
+        }
+    }
+
+    [Fact]
     public void Edit_applies_fillTableSemantically_correctly()
     {
         var path = CreateSemanticTableFixture();
