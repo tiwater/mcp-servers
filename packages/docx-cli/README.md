@@ -102,7 +102,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `markFieldsDirty`
 
 `replaceTableCellText` accepts optional `alignment` (`left`, `center`, `right`, `both`).
-`replaceTableCellRichText` accepts `richText` segments with `text`, optional `color`, `underline`, and `bold`.
+`replaceTableCellRichText` accepts `richText` segments with `text`, optional `color`, `underline`, `bold`, and `fontName`.
 `replaceTable` row cell objects may use the same `richText` segments instead of plain `text`.
 `insertTableRows` inserts `rows` before `rowIndex`; `templateRowIndex` controls which existing row supplies row/cell/run styling.
 `replaceTableRows` replaces inclusive `startRowIndex`..`endRowIndex` with `rows`, preserving the surrounding table and using `templateRowIndex` for row/cell/run styling.
@@ -135,7 +135,7 @@ Example operations file:
       "cellIndex": 2,
       "richText": [
         { "text": "QV" },
-        { "text": "Q", "color": "FF0000", "underline": true },
+        { "text": "Q", "color": "FF0000", "underline": true, "fontName": "Times New Roman" },
         { "text": "LVQSGAEVK" }
       ]
     },

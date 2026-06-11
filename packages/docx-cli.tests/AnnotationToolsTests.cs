@@ -322,9 +322,9 @@ public class AnnotationToolsTests
                 CellIndex: 0,
                 RichText: [
                     new DocxRichTextSegment("QV"),
-                    new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                    new DocxRichTextSegment("Q", Color: "FF0000", Underline: true, FontName: "Times New Roman"),
                     new DocxRichTextSegment("LV"),
-                    new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                    new DocxRichTextSegment("Q", Color: "FF0000", Underline: true, FontName: "Times New Roman"),
                     new DocxRichTextSegment("SGAEVK")
                 ])
         ]);
@@ -345,6 +345,10 @@ public class AnnotationToolsTests
             Assert.NotNull(properties);
             Assert.Equal("FF0000", properties!.GetFirstChild<Color>()!.Val!.Value);
             Assert.Equal(UnderlineValues.Single, properties.GetFirstChild<Underline>()!.Val!.Value);
+            var fonts = properties.GetFirstChild<RunFonts>();
+            Assert.NotNull(fonts);
+            Assert.Equal("Times New Roman", fonts!.Ascii!.Value);
+            Assert.Equal("Times New Roman", fonts.HighAnsi!.Value);
             Assert.Empty(properties.Elements<W14.FillTextEffect>());
         });
 
@@ -408,7 +412,7 @@ public class AnnotationToolsTests
                             Alignment: "center",
                             RichText: [
                                 new DocxRichTextSegment("QV"),
-                                new DocxRichTextSegment("Q", Color: "FF0000", Underline: true),
+                                new DocxRichTextSegment("Q", Color: "FF0000", Underline: true, FontName: "Times New Roman"),
                                 new DocxRichTextSegment("LVQSGAEVK")
                             ]),
                         new DocxTableCellInput("/", Alignment: "center")
@@ -441,6 +445,8 @@ public class AnnotationToolsTests
         var markedRun = Assert.Single(sequenceCell.Paragraphs[0].Runs, run => run.Text == "Q");
         Assert.Equal("FF0000", markedRun.Color);
         Assert.Equal("single", markedRun.Underline);
+        Assert.Equal("Times New Roman", markedRun.FontAscii);
+        Assert.Equal("Times New Roman", markedRun.FontHighAnsi);
         Assert.False(markedRun.HasTextFill);
 
         var sequenceContinue = table.Rows[2].Cells[1];

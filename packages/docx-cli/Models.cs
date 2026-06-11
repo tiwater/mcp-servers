@@ -227,7 +227,8 @@ public sealed record DocxRichTextSegment(
     string Text,
     string? Color = null,
     bool? Underline = null,
-    bool? Bold = null);
+    bool? Bold = null,
+    string? FontName = null);
 
 public sealed record DocxEditDocument(
     IReadOnlyList<DocxEditOperation> Operations);

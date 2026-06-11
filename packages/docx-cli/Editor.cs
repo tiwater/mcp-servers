@@ -1326,6 +1326,16 @@ public static class Editor
             properties.AppendChild(new Color { Val = segment.Color });
         }
 
+        if (!string.IsNullOrWhiteSpace(segment.FontName))
+        {
+            properties.RemoveAllChildren<RunFonts>();
+            properties.PrependChild(new RunFonts
+            {
+                Ascii = segment.FontName,
+                HighAnsi = segment.FontName,
+            });
+        }
+
         if (segment.Underline == true)
         {
             properties.RemoveAllChildren<Underline>();
