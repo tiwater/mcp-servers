@@ -90,6 +90,8 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `insertTableColumns`
 - `setTableWidth`
 - `setTableCellAlignment`
+- `setTableCellFontSize`
+- `setTableRowHeight`
 - `deleteComment`
 - `deleteComments`
 - `sanitizeFields`
@@ -103,6 +105,8 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 `replaceTableRows` replaces inclusive `startRowIndex`..`endRowIndex` with `rows`, preserving the surrounding table and using `templateRowIndex` for row/cell/run styling.
 `insertTableColumns` inserts empty columns before a visual grid `columnIndex`; `columnCount` defaults to `1`, and `templateColumnIndex` controls which existing grid column/cell supplies width and cell styling. If the insertion point falls inside an existing horizontally merged cell, that cell's `gridSpan` is expanded instead of creating a new physical cell in that row.
 `setTableWidth` accepts `width` and `widthType` (`pct`, `dxa`, `auto`, `nil`).
+`setTableCellFontSize` accepts `fontSize` as OpenXML half-points (`18`) or points (`9pt`).
+`setTableRowHeight` accepts `height` in twips and optional `heightRule` (`atLeast`, `exact`, `auto`).
 `sanitizeFields` removes update-field prompts and dirty field markers from the package.
 `freezeFields` converts visible field results into ordinary content so converters cannot recalculate cross-references or sequence numbers.
 
@@ -153,6 +157,8 @@ Example operations file:
     { "type": "deleteComment", "commentId": "12" },
     { "type": "setTableWidth", "tableIndex": 0, "width": "5000", "widthType": "pct" },
     { "type": "setTableCellAlignment", "tableIndex": 1, "rowIndex": 2, "cellIndex": 3, "alignment": "center" },
+    { "type": "setTableCellFontSize", "tableIndex": 1, "rowIndex": 2, "cellIndex": 3, "fontSize": "9pt" },
+    { "type": "setTableRowHeight", "tableIndex": 1, "rowIndex": 2, "height": "240", "heightRule": "exact" },
     { "type": "sanitizeFields" },
     { "type": "freezeFields" },
     { "type": "markFieldsDirty" }

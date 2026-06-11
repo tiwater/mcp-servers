@@ -356,6 +356,37 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_set_table_cell_font_size_and_row_height()
+    {
+        var docPath = CreateTwoCellTableFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"table-layout-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation("setTableCellFontSize", TableIndex: 0, RowIndex: 0, CellIndex: 1, FontSize: "9pt"),
+            new DocxEditOperation("setTableRowHeight", TableIndex: 0, RowIndex: 0, Height: "240", HeightRule: "exact")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var row = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().Single();
+        var targetCell = row.Elements<TableCell>().ElementAt(1);
+        Assert.All(targetCell.Descendants<Run>(), run =>
+        {
+            var properties = run.RunProperties;
+            Assert.NotNull(properties);
+            Assert.Equal("18", properties!.GetFirstChild<FontSize>()!.Val!.Value);
+            Assert.Equal("18", properties.GetFirstChild<FontSizeComplexScript>()!.Val!.Value);
+        });
+
+        var height = row.GetFirstChild<TableRowProperties>()!.GetFirstChild<TableRowHeight>();
+        Assert.NotNull(height);
+        Assert.Equal((UInt32Value)240U, height!.Val!);
+        Assert.Equal(HeightRuleValues.Exact, height.HeightType!.Value);
+        var validationErrors = new OpenXmlValidator().Validate(doc).Select(error => error.Description).ToList();
+        Assert.True(validationErrors.Count == 0, string.Join(Environment.NewLine, validationErrors));
+    }
+
+    [Fact]
     public void InspectTables_exports_cell_merge_and_run_format_details()
     {
         var docPath = CreateAnnotatedFixture();
@@ -658,6 +689,24 @@ public class AnnotationToolsTests
                                     new Color { Val = "000000" },
                                     new W14.FillTextEffect()),
                                 new Text("QVQLVQSGAEVK"))))))));
+        mainPart.Document.Save();
+        return path;
+    }
+
+    private static string CreateTwoCellTableFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"two-cell-table-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        mainPart.Document = new Document(new Body(
+            new Table(
+                new TableProperties(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct }),
+                new TableGrid(
+                    new GridColumn { Width = "2400" },
+                    new GridColumn { Width = "2400" }),
+                new TableRow(
+                    new TableCell(new Paragraph(new Run(new Text("Label")))),
+                    new TableCell(new Paragraph(new Run(new Text("Batch YYYY"))))))));
         mainPart.Document.Save();
         return path;
     }

@@ -87,6 +87,8 @@ public static class Editor
             "insertTableColumns" => InsertTableColumns(body, operation),
             "setTableWidth" => SetTableWidth(body, operation),
             "setTableCellAlignment" => SetTableCellAlignment(body, operation),
+            "setTableCellFontSize" => SetTableCellFontSize(body, operation),
+            "setTableRowHeight" => SetTableRowHeight(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
             "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
             "fillTableSemantically" => FillTableSemantically(body, operation),
@@ -331,6 +333,132 @@ public static class Editor
 
         ApplyCellAlignment(cells[operation.CellIndex.Value], operation.Alignment);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}] alignment");
+    }
+
+    private static DocxEditAppliedOperation SetTableCellFontSize(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null || string.IsNullOrWhiteSpace(operation.FontSize))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, cellIndex, and fontSize are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value < 0 || operation.RowIndex.Value >= rows.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {operation.RowIndex} is out of range");
+        }
+
+        var cells = rows[operation.RowIndex.Value].Elements<TableCell>().ToList();
+        if (operation.CellIndex.Value < 0 || operation.CellIndex.Value >= cells.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {operation.CellIndex} is out of range");
+        }
+
+        var normalizedSize = NormalizeFontSize(operation.FontSize);
+        if (normalizedSize is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Invalid fontSize: {operation.FontSize}");
+        }
+        foreach (var run in cells[operation.CellIndex.Value].Descendants<Run>())
+        {
+            var properties = run.RunProperties ?? run.PrependChild(new RunProperties());
+            properties.RemoveAllChildren<FontSize>();
+            properties.RemoveAllChildren<FontSizeComplexScript>();
+            properties.AppendChild(new FontSize { Val = normalizedSize });
+            properties.AppendChild(new FontSizeComplexScript { Val = normalizedSize });
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}] font size");
+    }
+
+    private static DocxEditAppliedOperation SetTableRowHeight(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || string.IsNullOrWhiteSpace(operation.Height))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, and height are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value < 0 || operation.RowIndex.Value >= rows.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {operation.RowIndex} is out of range");
+        }
+
+        if (!uint.TryParse(operation.Height, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var height))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Invalid height: {operation.Height}");
+        }
+
+        var heightRule = ParseHeightRule(operation.HeightRule);
+        if (heightRule is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Invalid heightRule: {operation.HeightRule}");
+        }
+
+        var properties = rows[operation.RowIndex.Value].GetFirstChild<TableRowProperties>() ?? rows[operation.RowIndex.Value].PrependChild(new TableRowProperties());
+        properties.RemoveAllChildren<TableRowHeight>();
+        properties.AppendChild(new TableRowHeight
+        {
+            Val = UInt32Value.FromUInt32(height),
+            HeightType = heightRule.Value,
+        });
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}] height");
+    }
+
+    private static string? NormalizeFontSize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim();
+        if (normalized.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+        {
+            var pointValue = normalized[..^2].Trim();
+            if (!decimal.TryParse(pointValue, System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var points) || points <= 0)
+            {
+                return null;
+            }
+
+            return decimal.Round(points * 2, 0, MidpointRounding.AwayFromZero).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (!uint.TryParse(normalized, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var halfPoints) || halfPoints == 0)
+        {
+            return null;
+        }
+
+        return halfPoints.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static HeightRuleValues? ParseHeightRule(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return HeightRuleValues.AtLeast;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "auto" => HeightRuleValues.Auto,
+            "atleast" or "at-least" or "at_least" => HeightRuleValues.AtLeast,
+            "exact" => HeightRuleValues.Exact,
+            _ => null,
+        };
     }
 
     private static DocxEditAppliedOperation ReplaceTable(Body body, DocxEditOperation operation)
