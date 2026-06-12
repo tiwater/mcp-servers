@@ -76,6 +76,7 @@ public static class Editor
             "replaceAnchoredText" => ReplaceAnchoredText(body, operation),
             "replaceParagraphText" => ReplaceParagraphText(body, operation),
             "replaceBodyText" => ReplaceBodyText(body, operation),
+            "startSectionBeforeParagraph" => StartSectionBeforeParagraph(body, operation),
             "replaceAllHeaderParagraphText" => ReplaceAllHeaderParagraphText(doc, operation),
             "replaceHeaderParagraphText" => ReplaceHeaderParagraphText(doc, operation),
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
@@ -83,10 +84,12 @@ public static class Editor
             "replaceTableCellRichText" => ReplaceTableCellRichText(body, operation),
             "replaceTable" => ReplaceTable(body, operation),
             "insertTableRows" => InsertTableRows(body, operation),
+            "deleteTableRows" => DeleteTableRows(body, operation),
             "replaceTableRows" => ReplaceTableRows(body, operation),
             "insertTableColumns" => InsertTableColumns(body, operation),
             "setTableWidth" => SetTableWidth(body, operation),
             "setTableCellAlignment" => SetTableCellAlignment(body, operation),
+            "setTableCellNoWrap" => SetTableCellNoWrap(body, operation),
             "setTableCellFontSize" => SetTableCellFontSize(body, operation),
             "setTableRowHeight" => SetTableRowHeight(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
@@ -123,6 +126,95 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated comment anchor {operation.CommentId}");
+    }
+
+    private static DocxEditAppliedOperation StartSectionBeforeParagraph(Body body, DocxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.FindText) || string.IsNullOrWhiteSpace(operation.Orientation))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "findText and orientation are required");
+        }
+
+        var children = body.ChildElements.ToList();
+        var target = children
+            .OfType<Paragraph>()
+            .FirstOrDefault(paragraph => GetParagraphText(paragraph).Contains(operation.FindText, StringComparison.Ordinal));
+        if (target is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Paragraph not found: {operation.FindText}");
+        }
+
+        var targetIndex = children.IndexOf(target);
+        if (targetIndex < 0)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Paragraph is not a direct body child: {operation.FindText}");
+        }
+
+        var nextSectionProperties = FindNextSectionProperties(children, targetIndex);
+        if (nextSectionProperties is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"No following section properties found after paragraph: {operation.FindText}");
+        }
+
+        var breakParagraph = new Paragraph(new ParagraphProperties((SectionProperties)nextSectionProperties.CloneNode(true)));
+        body.InsertBefore(breakParagraph, target);
+        SetSectionOrientation(nextSectionProperties, operation.Orientation);
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Started {operation.Orientation} section before paragraph containing: {operation.FindText}");
+    }
+
+    private static SectionProperties? FindNextSectionProperties(IReadOnlyList<OpenXmlElement> bodyChildren, int startIndex)
+    {
+        for (var index = startIndex; index < bodyChildren.Count; index++)
+        {
+            if (bodyChildren[index] is Paragraph paragraph)
+            {
+                var sectionProperties = paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>();
+                if (sectionProperties is not null)
+                {
+                    return sectionProperties;
+                }
+            }
+
+            if (bodyChildren[index] is SectionProperties bodySectionProperties)
+            {
+                return bodySectionProperties;
+            }
+        }
+
+        return null;
+    }
+
+    private static void SetSectionOrientation(SectionProperties sectionProperties, string orientation)
+    {
+        var pageSize = sectionProperties.GetFirstChild<PageSize>();
+        if (pageSize is null)
+        {
+            pageSize = sectionProperties.PrependChild(new PageSize { Width = 11906, Height = 16838 });
+        }
+
+        var width = pageSize.Width?.Value ?? 11906U;
+        var height = pageSize.Height?.Value ?? 16838U;
+        var shortSide = Math.Min(width, height);
+        var longSide = Math.Max(width, height);
+
+        if (string.Equals(orientation, "landscape", StringComparison.OrdinalIgnoreCase))
+        {
+            pageSize.Width = longSide;
+            pageSize.Height = shortSide;
+            pageSize.Orient = PageOrientationValues.Landscape;
+            return;
+        }
+
+        if (string.Equals(orientation, "portrait", StringComparison.OrdinalIgnoreCase))
+        {
+            pageSize.Width = shortSide;
+            pageSize.Height = longSide;
+            pageSize.Orient = null;
+            return;
+        }
+
+        throw new InvalidOperationException($"Unsupported section orientation: {orientation}");
     }
 
     private static DocxEditAppliedOperation ReplaceParagraphText(Body body, DocxEditOperation operation)
@@ -275,7 +367,8 @@ public static class Editor
             return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {operation.CellIndex} is out of range");
         }
 
-        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text, operation.Alignment);
+        var fallbackRun = FindNearestTableRun(rows, operation.RowIndex.Value, operation.CellIndex.Value);
+        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text, operation.Alignment, fallbackRun);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}]");
     }
 
@@ -302,8 +395,6 @@ public static class Editor
             Width = string.IsNullOrWhiteSpace(operation.Width) ? "5000" : operation.Width,
             Type = widthType,
         });
-        properties.RemoveAllChildren<TableLayout>();
-        properties.AppendChild(new TableLayout { Type = TableLayoutValues.Autofit });
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}] width");
     }
 
@@ -334,6 +425,44 @@ public static class Editor
 
         ApplyCellAlignment(cells[operation.CellIndex.Value], operation.Alignment);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}] alignment");
+    }
+
+    private static DocxEditAppliedOperation SetTableCellNoWrap(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, and cellIndex are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value < 0 || operation.RowIndex.Value >= rows.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {operation.RowIndex} is out of range");
+        }
+
+        var cells = rows[operation.RowIndex.Value].Elements<TableCell>().ToList();
+        if (operation.CellIndex.Value < 0 || operation.CellIndex.Value >= cells.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {operation.CellIndex} is out of range");
+        }
+
+        var properties = cells[operation.CellIndex.Value].GetFirstChild<TableCellProperties>()
+            ?? cells[operation.CellIndex.Value].PrependChild(new TableCellProperties());
+        properties.RemoveAllChildren<NoWrap>();
+        var noWrap = operation.NoWrap is not false;
+        if (noWrap)
+        {
+            properties.AppendChild(new NoWrap());
+        }
+        NormalizeTableCellProperties(properties);
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}] noWrap={noWrap}");
     }
 
     private static DocxEditAppliedOperation SetTableCellFontSize(Body body, DocxEditOperation operation)
@@ -525,8 +654,6 @@ public static class Editor
     {
         properties.RemoveAllChildren<TableWidth>();
         properties.PrependChild(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct });
-        properties.RemoveAllChildren<TableLayout>();
-        properties.AppendChild(new TableLayout { Type = TableLayoutValues.Autofit });
     }
 
     private static TableRow BuildReplacementRow(TableRow? templateRow, IReadOnlyList<DocxTableCellInput> cells, bool isHeader)
@@ -618,13 +745,44 @@ public static class Editor
 
         var templateRow = templateRowResult.Row;
         var anchor = existingRows[start];
-        InsertBuiltRows(table, anchor, templateRow, operation.Rows);
+        var templateCandidates = existingRows.Skip(start).Take(end - start + 1).ToList();
+        InsertBuiltRows(table, anchor, templateRow, operation.Rows, templateCandidates);
         foreach (var row in existingRows.Skip(start).Take(end - start + 1))
         {
             row.Remove();
         }
 
         return new DocxEditAppliedOperation(operation.Type, true, $"Replaced table[{operation.TableIndex}].rows[{start}..{end}] with {operation.Rows.Count} row(s)");
+    }
+
+    private static DocxEditAppliedOperation DeleteTableRows(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.StartRowIndex is null || operation.EndRowIndex is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, startRowIndex, and endRowIndex are required");
+        }
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+        }
+
+        var table = tables[operation.TableIndex.Value];
+        var existingRows = table.Elements<TableRow>().ToList();
+        var start = operation.StartRowIndex.Value;
+        var end = operation.EndRowIndex.Value;
+        if (start < 0 || end >= existingRows.Count || end < start)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"Invalid row range {start} to {end}");
+        }
+
+        foreach (var row in existingRows.Skip(start).Take(end - start + 1))
+        {
+            row.Remove();
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Deleted table[{operation.TableIndex}].rows[{start}..{end}]");
     }
 
     private static (bool Valid, TableRow? Row, string? Error) ResolveTemplateRow(IReadOnlyList<TableRow> rows, int? templateRowIndex, int fallbackIndex)
@@ -643,11 +801,17 @@ public static class Editor
         return (true, rows[index], null);
     }
 
-    private static void InsertBuiltRows(Table table, TableRow? beforeRow, TableRow? templateRow, IReadOnlyList<IReadOnlyList<DocxTableCellInput>> rows)
+    private static void InsertBuiltRows(
+        Table table,
+        TableRow? beforeRow,
+        TableRow? templateRow,
+        IReadOnlyList<IReadOnlyList<DocxTableCellInput>> rows,
+        IReadOnlyList<TableRow>? templateCandidates = null)
     {
         foreach (var rowInput in rows)
         {
-            var row = BuildReplacementRow(templateRow, rowInput, rowInput.Any(cell => cell.Header == true));
+            var rowTemplate = ResolveReplacementRowTemplate(rowInput, templateCandidates, templateRow);
+            var row = BuildReplacementRow(rowTemplate, rowInput, rowInput.Any(cell => cell.Header == true));
             if (beforeRow is null)
             {
                 table.AppendChild(row);
@@ -657,6 +821,27 @@ public static class Editor
                 table.InsertBefore(row, beforeRow);
             }
         }
+    }
+
+    private static TableRow? ResolveReplacementRowTemplate(
+        IReadOnlyList<DocxTableCellInput> rowInput,
+        IReadOnlyList<TableRow>? candidates,
+        TableRow? fallback)
+    {
+        if (candidates is not { Count: > 0 })
+        {
+            return fallback;
+        }
+
+        var inputPattern = rowInput.Select(cell => Math.Max(1, cell.GridSpan ?? 1)).ToArray();
+        var exact = candidates.FirstOrDefault(row => row.Elements<TableCell>().Select(GetCellGridSpan).SequenceEqual(inputPattern));
+        if (exact is not null)
+        {
+            return exact;
+        }
+
+        var sameCellCount = candidates.FirstOrDefault(row => row.Elements<TableCell>().Count() == rowInput.Count);
+        return sameCellCount ?? fallback;
     }
 
     private static DocxEditAppliedOperation InsertTableColumns(Body body, DocxEditOperation operation)
@@ -841,8 +1026,6 @@ public static class Editor
         }
 
         var properties = cell.GetFirstChild<TableCellProperties>()!;
-        properties.RemoveAllChildren<TableCellWidth>();
-        
         properties.RemoveAllChildren<GridSpan>();
         if (input.GridSpan is > 1)
         {
@@ -863,8 +1046,8 @@ public static class Editor
         }
         NormalizeTableCellProperties(properties);
 
-        var paragraph = new Paragraph();
-        var paragraphProperties = new ParagraphProperties();
+        var paragraph = CreateParagraphLike(templateCell?.Elements<Paragraph>().FirstOrDefault());
+        var paragraphProperties = paragraph.GetFirstChild<ParagraphProperties>() ?? paragraph.PrependChild(new ParagraphProperties());
         
         if (input.Alignment is { Length: > 0 } align)
         {
@@ -874,9 +1057,9 @@ public static class Editor
                 "right" => JustificationValues.Right,
                 _ => JustificationValues.Left
             };
+            paragraphProperties.RemoveAllChildren<Justification>();
             paragraphProperties.AppendChild(new Justification { Val = jcVal });
         }
-        paragraph.AppendChild(paragraphProperties);
 
         if (input.RichText is { Count: > 0 } richText)
         {
@@ -887,12 +1070,13 @@ public static class Editor
         }
         else
         {
-            var run = new Run();
+            var run = CreateStyledRunLike(templateCell?.Descendants<Run>().FirstOrDefault(), input.Text ?? string.Empty);
             if (input.Bold == true || rowIsHeader)
             {
-                run.AppendChild(new RunProperties(new Bold()));
+                var runProperties = run.RunProperties ?? run.PrependChild(new RunProperties());
+                runProperties.RemoveAllChildren<Bold>();
+                runProperties.AppendChild(new Bold());
             }
-            AppendTextWithLineBreaks(run, input.Text ?? string.Empty);
             paragraph.AppendChild(run);
         }
         cell.AppendChild(paragraph);
@@ -1208,11 +1392,14 @@ public static class Editor
         return true;
     }
 
-    private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null)
+    private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null, Run? fallbackRun = null)
     {
-        var firstRun = cell.Descendants<Run>().FirstOrDefault();
+        var ownRun = cell.Descendants<Run>().FirstOrDefault();
+        var firstRun = ownRun ?? fallbackRun;
+        var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
-        var paragraph = new Paragraph(CreateStyledRunLike(firstRun, replacementText));
+        var paragraph = CreateParagraphLike(firstParagraph);
+        paragraph.AppendChild(CreateStyledRunLike(firstRun, replacementText, preserveEmphasis: ownRun is not null));
         if (!string.IsNullOrWhiteSpace(alignment))
         {
             ApplyParagraphAlignment(paragraph, alignment);
@@ -1245,24 +1432,115 @@ public static class Editor
             return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {operation.CellIndex} is out of range");
         }
 
-        ReplaceTableCellRichText(cells[operation.CellIndex.Value], operation.RichText, operation.Alignment);
+        var fallbackRun = FindNearestTableRun(rows, operation.RowIndex.Value, operation.CellIndex.Value);
+        ReplaceTableCellRichText(cells[operation.CellIndex.Value], operation.RichText, operation.Alignment, fallbackRun);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated rich text in table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}]");
     }
 
-    private static void ReplaceTableCellRichText(TableCell cell, IReadOnlyList<DocxRichTextSegment> segments, string? alignment = null)
+    private static void ReplaceTableCellRichText(TableCell cell, IReadOnlyList<DocxRichTextSegment> segments, string? alignment = null, Run? fallbackRun = null)
     {
-        var firstRun = cell.Descendants<Run>().FirstOrDefault();
+        var ownRun = cell.Descendants<Run>().FirstOrDefault();
+        var firstRun = ownRun ?? fallbackRun;
+        var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
-        var paragraph = new Paragraph();
+        var paragraph = CreateParagraphLike(firstParagraph);
         foreach (var segment in segments)
         {
-            paragraph.AppendChild(CreateRichRunLike(firstRun, segment));
+            paragraph.AppendChild(CreateRichRunLike(firstRun, segment, preserveEmphasis: ownRun is not null));
         }
         if (!string.IsNullOrWhiteSpace(alignment))
         {
             ApplyParagraphAlignment(paragraph, alignment);
         }
         cell.Append(paragraph);
+    }
+
+    private static Run? FindNearestTableRun(IReadOnlyList<TableRow> rows, int rowIndex, int cellIndex)
+    {
+        var exactRow = FindNearestRunInRow(rows[rowIndex], cellIndex);
+        if (exactRow is not null)
+        {
+            return exactRow;
+        }
+
+        for (var offset = 1; offset < rows.Count; offset++)
+        {
+            var previous = rowIndex - offset;
+            if (previous >= 0)
+            {
+                var run = FindNearestRunInRow(rows[previous], cellIndex);
+                if (run is not null)
+                {
+                    return run;
+                }
+            }
+
+            var next = rowIndex + offset;
+            if (next < rows.Count)
+            {
+                var run = FindNearestRunInRow(rows[next], cellIndex);
+                if (run is not null)
+                {
+                    return run;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static Run? FindNearestRunInRow(TableRow row, int cellIndex)
+    {
+        var cells = row.Elements<TableCell>().ToList();
+        if (cells.Count == 0)
+        {
+            return null;
+        }
+
+        if (cellIndex >= 0 && cellIndex < cells.Count)
+        {
+            var run = cells[cellIndex].Descendants<Run>().FirstOrDefault();
+            if (run is not null)
+            {
+                return run;
+            }
+        }
+
+        for (var offset = 1; offset < cells.Count; offset++)
+        {
+            var previous = cellIndex - offset;
+            if (previous >= 0)
+            {
+                var run = cells[previous].Descendants<Run>().FirstOrDefault();
+                if (run is not null)
+                {
+                    return run;
+                }
+            }
+
+            var next = cellIndex + offset;
+            if (next < cells.Count)
+            {
+                var run = cells[next].Descendants<Run>().FirstOrDefault();
+                if (run is not null)
+                {
+                    return run;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static Paragraph CreateParagraphLike(Paragraph? templateParagraph)
+    {
+        var paragraph = new Paragraph();
+        var templateProperties = templateParagraph?.GetFirstChild<ParagraphProperties>();
+        if (templateProperties is not null)
+        {
+            paragraph.AppendChild((ParagraphProperties)templateProperties.CloneNode(true));
+        }
+        return paragraph;
     }
 
     private static void ApplyCellAlignment(TableCell cell, string alignment)
@@ -1288,18 +1566,23 @@ public static class Editor
         });
     }
 
-    private static Run CreateStyledRunLike(Run? templateRun, string text)
+    private static Run CreateStyledRunLike(Run? templateRun, string text, bool preserveEmphasis = true)
     {
-        var run = new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+        var run = new Run();
         if (templateRun?.RunProperties is not null)
         {
             run.RunProperties = (RunProperties)templateRun.RunProperties.CloneNode(true);
+            if (!preserveEmphasis)
+            {
+                RemoveEmphasis(run.RunProperties);
+            }
             NormalizeRunProperties(run.RunProperties);
         }
+        AppendTextWithLineBreaks(run, text);
         return run;
     }
 
-    private static Run CreateRichRunLike(Run? templateRun, DocxRichTextSegment segment, bool forceBold = false)
+    private static Run CreateRichRunLike(Run? templateRun, DocxRichTextSegment segment, bool forceBold = false, bool preserveEmphasis = true)
     {
         var run = new Run();
         if (templateRun?.RunProperties is not null)
@@ -1309,6 +1592,10 @@ public static class Editor
 
         var properties = run.RunProperties ?? run.PrependChild(new RunProperties());
         RemoveTextFill(properties);
+        if (!preserveEmphasis)
+        {
+            RemoveEmphasis(properties);
+        }
 
         if (forceBold || segment.Bold == true)
         {
@@ -1349,6 +1636,14 @@ public static class Editor
         NormalizeRunProperties(properties);
         AppendTextWithLineBreaks(run, segment.Text);
         return run;
+    }
+
+    private static void RemoveEmphasis(RunProperties properties)
+    {
+        properties.RemoveAllChildren<Bold>();
+        properties.RemoveAllChildren<BoldComplexScript>();
+        properties.RemoveAllChildren<Italic>();
+        properties.RemoveAllChildren<ItalicComplexScript>();
     }
 
     private static void RemoveTextFill(RunProperties properties)
@@ -1618,7 +1913,11 @@ public static class Editor
             return new DocxEditAppliedOperation(operation.Type, true, $"Cell table[{operation.TableIndex}].row[{rowIndex}].cell[{cellIndex}] is not horizontally merged");
         }
 
+        var gridStart = cells.Take(cellIndex).Sum(GetCellGridSpan);
+        var splitWidths = GetUnmergedCellWidths(table, row, gridStart, span);
+
         properties.RemoveAllChildren<GridSpan>();
+        SetCellWidth(properties, splitWidths[0]);
         NormalizeTableCellProperties(properties);
 
         for (var i = 1; i < span; i++)
@@ -1631,6 +1930,7 @@ public static class Editor
             newCell.AppendChild(new Paragraph());
             var newProperties = newCell.GetFirstChild<TableCellProperties>() ?? newCell.PrependChild(new TableCellProperties());
             newProperties.RemoveAllChildren<GridSpan>();
+            SetCellWidth(newProperties, splitWidths[i]);
             NormalizeTableCellProperties(newProperties);
             row.InsertAfter(newCell, cell);
             cell = newCell;
@@ -1640,6 +1940,82 @@ public static class Editor
             operation.Type,
             true,
             $"Unmerged horizontal cell in table[{operation.TableIndex}].row[{rowIndex}].cell[{cellIndex}], expanded {span} grid columns");
+    }
+
+    private static IReadOnlyList<string> GetUnmergedCellWidths(Table table, TableRow currentRow, int startColumn, int count)
+    {
+        var visibleReference = FindVisibleCellWidthsForGridRange(table, currentRow, startColumn, count);
+        if (visibleReference is not null)
+        {
+            return visibleReference;
+        }
+
+        return GetTableGridWidths(table, startColumn, count);
+    }
+
+    private static IReadOnlyList<string>? FindVisibleCellWidthsForGridRange(Table table, TableRow currentRow, int startColumn, int count)
+    {
+        foreach (var row in table.Elements<TableRow>())
+        {
+            if (ReferenceEquals(row, currentRow))
+            {
+                continue;
+            }
+
+            var cursor = 0;
+            var widths = new List<string>();
+            foreach (var cell in row.Elements<TableCell>())
+            {
+                var span = GetCellGridSpan(cell);
+                if (cursor >= startColumn && cursor + span <= startColumn + count)
+                {
+                    if (span != 1)
+                    {
+                        widths.Clear();
+                        break;
+                    }
+
+                    var width = cell.GetFirstChild<TableCellProperties>()?.GetFirstChild<TableCellWidth>()?.Width?.Value;
+                    widths.Add(string.IsNullOrWhiteSpace(width) ? GetTableGridWidths(table, cursor, 1)[0] : width!);
+                }
+                else if (cursor < startColumn + count && cursor + span > startColumn)
+                {
+                    widths.Clear();
+                    break;
+                }
+
+                cursor += span;
+                if (cursor >= startColumn + count)
+                {
+                    break;
+                }
+            }
+
+            if (widths.Count == count)
+            {
+                return widths;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> GetTableGridWidths(Table table, int startColumn, int count)
+    {
+        var columns = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().ToList() ?? [];
+        var widths = new List<string>();
+        for (var offset = 0; offset < count; offset++)
+        {
+            var column = columns.ElementAtOrDefault(startColumn + offset);
+            widths.Add(string.IsNullOrWhiteSpace(column?.Width) ? "1200" : column.Width!);
+        }
+        return widths;
+    }
+
+    private static void SetCellWidth(TableCellProperties properties, string width)
+    {
+        properties.RemoveAllChildren<TableCellWidth>();
+        properties.PrependChild(new TableCellWidth { Width = width, Type = TableWidthUnitValues.Dxa });
     }
 
     private static DocxEditAppliedOperation UnmergeTableColumnVerticalCells(Body body, DocxEditOperation operation)
@@ -1761,4 +2137,7 @@ public static class Editor
 
         return new DocxEditAppliedOperation(operation.Type, true, $"Successfully applied semantic fills to {appliedCount} cell(s) in table[{operation.TableIndex}]");
     }
+
+    private static string GetParagraphText(Paragraph paragraph)
+        => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text));
 }

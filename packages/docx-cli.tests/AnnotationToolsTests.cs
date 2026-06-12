@@ -66,6 +66,44 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_preserves_table_cell_paragraph_properties_when_replacing_content()
+    {
+        var docPath = CreateAnnotatedFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"edited-cell-paragraph-{Guid.NewGuid():N}.docx");
+
+        using (var doc = WordprocessingDocument.Open(docPath, true))
+        {
+            var cellParagraph = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single()
+                .Elements<TableRow>().Single()
+                .Elements<TableCell>().ElementAt(1)
+                .Elements<Paragraph>().First();
+            cellParagraph.ParagraphProperties = new ParagraphProperties(
+                new Justification { Val = JustificationValues.Center },
+                new SpacingBetweenLines { Before = "0", After = "0" });
+        }
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 1, Text: "Batch HSP001-01")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var replacedParagraph = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single()
+            .Elements<TableRow>().Single()
+            .Elements<TableCell>().ElementAt(1)
+            .Elements<Paragraph>().Single();
+
+        var properties = replacedParagraph.ParagraphProperties;
+        Assert.NotNull(properties);
+        Assert.Equal(JustificationValues.Center, properties!.GetFirstChild<Justification>()!.Val!.Value);
+        var spacing = properties.GetFirstChild<SpacingBetweenLines>();
+        Assert.NotNull(spacing);
+        Assert.Equal("0", spacing!.Before!.Value);
+        Assert.Equal("0", spacing.After!.Value);
+        Assert.Contains("Batch HSP001-01", GetParagraphText(replacedParagraph));
+    }
+
+    [Fact]
     public void Edit_can_replace_table_with_formatted_rows()
     {
         var docPath = CreateAnnotatedFixture();
@@ -309,6 +347,121 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_replace_table_rows_matches_template_row_shape_and_preserves_widths()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-mixed-row-shapes-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct }),
+                    new TableGrid(
+                        new GridColumn { Width = "433" },
+                        new GridColumn { Width = "255" },
+                        new GridColumn { Width = "600" },
+                        new GridColumn { Width = "650" },
+                        new GridColumn { Width = "550" },
+                        new GridColumn { Width = "2512" }),
+                    new TableRow(
+                        CreateSizedCenteredCell("试验类型", "433"),
+                        CreateSizedCenteredCell("考察条件", "855", gridSpan: 2),
+                        CreateSizedCenteredCell("拟考察批次", "650"),
+                        CreateSizedCenteredCell("拟考察时间", "550"),
+                        CreateSizedCenteredCell("试验结果与结论", "2512")),
+                    new TableRow(
+                        CreateSizedCenteredCell("", "433"),
+                        CreateSizedCenteredCell("", "855", gridSpan: 2),
+                        CreateSizedCenteredCell("", "650"),
+                        CreateSizedCenteredCell("", "550"),
+                        CreateSizedCenteredCell("", "2512")),
+                    new TableRow(
+                        CreateSizedCenteredCell("", "433"),
+                        CreateSizedCenteredCell("", "255"),
+                        CreateSizedCenteredCell("", "600"),
+                        CreateSizedCenteredCell("", "650"),
+                        CreateSizedCenteredCell("", "550"),
+                        CreateSizedCenteredCell("", "2512")))));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"mixed-row-shapes-edited-{Guid.NewGuid():N}.docx");
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "replaceTableRows",
+                TableIndex: 0,
+                StartRowIndex: 1,
+                EndRowIndex: 2,
+                TemplateRowIndex: 1,
+                Rows: [
+                    [
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("长期试验", Color: "FF0000")]),
+                        new DocxTableCellInput(GridSpan: 2, RichText: [new DocxRichTextSegment("≤-60℃，正置", Color: "FF0000")]),
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("202401S\n202402S", Color: "FF0000")]),
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("1、3、6、9、12、18、24、36 月\n1、3、6 月", Color: "FF0000")]),
+                        new DocxTableCellInput(Text: "")
+                    ],
+                    [
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("影响因素", Color: "FF0000")]),
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("高温试验", Color: "FF0000")]),
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("25℃±2℃，60%RH±5%RH，避光，正置", Color: "FF0000")]),
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("202401S", Color: "FF0000")]),
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("1、2、3 月", Color: "FF0000")]),
+                        new DocxTableCellInput(Text: "")
+                    ]
+                ])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var rows = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ToList();
+
+        var mergedRowCells = rows[1].Elements<TableCell>().ToList();
+        Assert.Equal(5, mergedRowCells.Count);
+        Assert.Equal(2, mergedRowCells[1].GetFirstChild<TableCellProperties>()!.GetFirstChild<GridSpan>()!.Val!.Value);
+        Assert.Equal("855", mergedRowCells[1].GetFirstChild<TableCellProperties>()!.GetFirstChild<TableCellWidth>()!.Width!.Value);
+        Assert.Equal(JustificationValues.Center, mergedRowCells[3].Elements<Paragraph>().Single().ParagraphProperties!.Justification!.Val!.Value);
+        Assert.Equal(1, mergedRowCells[3].Descendants<Break>().Count());
+
+        var splitRowCells = rows[2].Elements<TableCell>().ToList();
+        Assert.Equal(6, splitRowCells.Count);
+        Assert.Equal("255", splitRowCells[1].GetFirstChild<TableCellProperties>()!.GetFirstChild<TableCellWidth>()!.Width!.Value);
+        Assert.Equal("600", splitRowCells[2].GetFirstChild<TableCellProperties>()!.GetFirstChild<TableCellWidth>()!.Width!.Value);
+        Assert.Equal(JustificationValues.Center, splitRowCells[2].Elements<Paragraph>().Single().ParagraphProperties!.Justification!.Val!.Value);
+        var validationErrors = new OpenXmlValidator().Validate(edited).Select(error => error.Description).ToList();
+        Assert.True(validationErrors.Count == 0, string.Join(Environment.NewLine, validationErrors));
+    }
+
+    [Fact]
+    public void Edit_set_table_width_preserves_existing_table_layout()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-table-layout-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(
+                        new TableWidth { Width = "4200", Type = TableWidthUnitValues.Pct },
+                        new TableLayout { Type = TableLayoutValues.Fixed }),
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("A"))))))));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"table-layout-edited-{Guid.NewGuid():N}.docx");
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("setTableWidth", TableIndex: 0, Width: "5000", WidthType: "pct")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var properties = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().GetFirstChild<TableProperties>()!;
+        Assert.Equal("5000", properties.GetFirstChild<TableWidth>()!.Width!.Value);
+        Assert.Equal(TableLayoutValues.Fixed, properties.GetFirstChild<TableLayout>()!.Type!.Value);
+    }
+
+    [Fact]
     public void Edit_can_replace_table_cell_with_rich_text_runs_and_remove_text_fill()
     {
         var path = CreateRichTextTableFixture();
@@ -367,6 +520,7 @@ public class AnnotationToolsTests
 
         var result = Editor.Apply(docPath, output, [
             new DocxEditOperation("setTableCellFontSize", TableIndex: 0, RowIndex: 0, CellIndex: 1, FontSize: "9pt"),
+            new DocxEditOperation("setTableCellNoWrap", TableIndex: 0, RowIndex: 0, CellIndex: 1),
             new DocxEditOperation("setTableRowHeight", TableIndex: 0, RowIndex: 0, Height: "240", HeightRule: "exact")
         ]);
 
@@ -374,6 +528,7 @@ public class AnnotationToolsTests
         using var doc = WordprocessingDocument.Open(output, false);
         var row = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().Single();
         var targetCell = row.Elements<TableCell>().ElementAt(1);
+        Assert.NotNull(targetCell.GetFirstChild<TableCellProperties>()!.GetFirstChild<NoWrap>());
         Assert.All(targetCell.Descendants<Run>(), run =>
         {
             var properties = run.RunProperties;
@@ -525,6 +680,52 @@ public class AnnotationToolsTests
         Assert.Contains("SN0000", headerText);
         Assert.DoesNotContain("XX（客户项目代号）（与报告中HSPTEST对应）", headerText);
         Assert.True(headerParagraph.Descendants<TabChar>().Count() >= 2);
+    }
+
+    [Fact]
+    public void Edit_can_start_landscape_section_before_anchored_paragraph()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"section-anchor-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Paragraph(new Run(new Text("缩略词表"))),
+                new Paragraph(new Run(new Text("3.2.S.7.1.1 试验样品"))),
+                new Paragraph(
+                    new ParagraphProperties(
+                        new SectionProperties(
+                            new PageSize { Width = 11906, Height = 16838 },
+                            new PageMargin { Top = 1440, Right = 1440, Bottom = 1440, Left = 1440 })),
+                    new Run(new Text("end portrait marker"))),
+                new Paragraph(new Run(new Text("after"))),
+                new SectionProperties(
+                    new PageSize { Width = 16838, Height = 11906, Orient = PageOrientationValues.Landscape },
+                    new PageMargin { Top = 1440, Right = 1440, Bottom = 1440, Left = 1440 })));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"section-anchor-edited-{Guid.NewGuid():N}.docx");
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "startSectionBeforeParagraph",
+                FindText: "3.2.S.7.1.1 试验样品",
+                Orientation: "landscape")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var bodyChildren = edited.MainDocumentPart!.Document!.Body!.ChildElements.ToList();
+        var insertedBreak = (Paragraph)bodyChildren[1];
+        var insertedPageSize = insertedBreak.ParagraphProperties!.GetFirstChild<SectionProperties>()!.GetFirstChild<PageSize>()!;
+        Assert.Equal(11906U, insertedPageSize.Width!.Value);
+        Assert.Equal(16838U, insertedPageSize.Height!.Value);
+
+        var originalSectionParagraph = bodyChildren.OfType<Paragraph>().Single(paragraph => GetParagraphText(paragraph).Contains("end portrait marker", StringComparison.Ordinal));
+        var updatedPageSize = originalSectionParagraph.ParagraphProperties!.GetFirstChild<SectionProperties>()!.GetFirstChild<PageSize>()!;
+        Assert.Equal(PageOrientationValues.Landscape, updatedPageSize.Orient!.Value);
+        Assert.Equal(16838U, updatedPageSize.Width!.Value);
+        Assert.Equal(11906U, updatedPageSize.Height!.Value);
     }
 
     [Fact]
@@ -765,6 +966,25 @@ public class AnnotationToolsTests
             new TableCellProperties(new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }),
             new Paragraph(new Run(new Text(text))));
 
+    private static TableCell CreateSizedCenteredCell(string text, string width, int? gridSpan = null)
+    {
+        var properties = new TableCellProperties(
+            new TableCellWidth { Width = width, Type = TableWidthUnitValues.Dxa },
+            new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center });
+        if (gridSpan is > 1)
+        {
+            properties.AppendChild(new GridSpan { Val = gridSpan.Value });
+        }
+
+        var paragraph = new Paragraph(new ParagraphProperties(new Justification { Val = JustificationValues.Center }));
+        if (!string.IsNullOrEmpty(text))
+        {
+            paragraph.AppendChild(new Run(new Text(text)));
+        }
+
+        return new TableCell(properties, paragraph);
+    }
+
     private static TableCell CreateCellWithComment(string commentId, string text)
         => new(
             new TableCellProperties(new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }),
@@ -931,6 +1151,42 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_can_delete_table_rows()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-delete-rows-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(),
+                    new TableGrid(new GridColumn()),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("header"))))),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("keep-1"))))),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("delete-1"))))),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("delete-2"))))),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("keep-2")))))
+                )
+            ));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"deleted-rows-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("deleteTableRows", TableIndex: 0, StartRowIndex: 2, EndRowIndex: 3)
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using (var doc = WordprocessingDocument.Open(output, false))
+        {
+            var rows = doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ToList();
+            Assert.Equal(["header", "keep-1", "keep-2"], rows.Select(row => GetCellText(row.Elements<TableCell>().Single())).ToArray());
+            Assert.Empty(new OpenXmlValidator().Validate(doc));
+        }
+    }
+
+    [Fact]
     public void Edit_can_insert_table_columns_and_expand_crossing_grid_spans()
     {
         var path = Path.Combine(Path.GetTempPath(), $"fixture-column-insert-{Guid.NewGuid():N}.docx");
@@ -1087,11 +1343,61 @@ public class AnnotationToolsTests
             var cells = table.Elements<TableRow>().Single().Elements<TableCell>().ToList();
             Assert.Equal(3, cells.Count);
             Assert.Null(cells[0].GetFirstChild<TableCellProperties>()?.GetFirstChild<GridSpan>());
+            Assert.Equal("1000", cells[0].GetFirstChild<TableCellProperties>()!.GetFirstChild<TableCellWidth>()!.Width!.Value);
+            Assert.Equal("1000", cells[1].GetFirstChild<TableCellProperties>()!.GetFirstChild<TableCellWidth>()!.Width!.Value);
+            Assert.Equal("1000", cells[2].GetFirstChild<TableCellProperties>()!.GetFirstChild<TableCellWidth>()!.Width!.Value);
             Assert.Equal("高温试验", GetCellText(cells[0]));
             Assert.Equal("", GetCellText(cells[1]));
             Assert.Equal("", GetCellText(cells[2]));
             Assert.Empty(new OpenXmlValidator().Validate(doc));
         }
+    }
+
+    [Fact]
+    public void Edit_unmerge_table_row_horizontal_cells_uses_visible_reference_widths_before_grid_widths()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-unmerge-reference-widths-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(),
+                    new TableGrid(
+                        new GridColumn { Width = "265" },
+                        new GridColumn { Width = "1841" },
+                        new GridColumn { Width = "1560" },
+                        new GridColumn { Width = "311" }
+                    ),
+                    new TableRow(
+                        CreateSizedCenteredCell("影响因素", "265"),
+                        CreateSizedCenteredCell("反复冻融试验", "1007"),
+                        CreateSizedCenteredCell("≤-60℃-室温", "853"),
+                        CreateSizedCenteredCell("放行数据", "311")
+                    ),
+                    new TableRow(
+                        CreateSizedCenteredCell("", "265"),
+                        CreateSizedCenteredCell("高温试验", "1860", gridSpan: 2),
+                        CreateSizedCenteredCell("", "311")
+                    )
+                )
+            ));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"unmerged-reference-widths-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("unmergeTableRowHorizontalCells", TableIndex: 0, RowIndex: 1, CellIndex: 1)
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var cells = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single()
+            .Elements<TableRow>().ElementAt(1)
+            .Elements<TableCell>().ToList();
+        Assert.Equal("1007", cells[1].GetFirstChild<TableCellProperties>()!.GetFirstChild<TableCellWidth>()!.Width!.Value);
+        Assert.Equal("853", cells[2].GetFirstChild<TableCellProperties>()!.GetFirstChild<TableCellWidth>()!.Width!.Value);
     }
 
     [Fact]

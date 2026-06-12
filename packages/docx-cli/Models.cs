@@ -208,9 +208,11 @@ public sealed record DocxEditOperation(
     string? Alignment = null,
     string? Width = null,
     string? WidthType = null,
+    string? Orientation = null,
     string? FontSize = null,
     string? Height = null,
     string? HeightRule = null,
+    bool? NoWrap = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null);
 
 public sealed record DocxTableCellInput(

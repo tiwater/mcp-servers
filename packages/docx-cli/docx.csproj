@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-docx</ToolCommandName>
     <PackageId>tiwater.docx.cli</PackageId>
-    <Version>0.1.38</Version>
+    <Version>0.1.48</Version>
     <Authors>Tiwater</Authors>
     <Description>Inspect, compare, export, and transform DOCX documents from the command line.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

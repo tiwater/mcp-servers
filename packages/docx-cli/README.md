@@ -82,14 +82,20 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceAnchoredText`
 - `replaceParagraphText`
 - `replaceBodyText`
+- `startSectionBeforeParagraph`
+- `replaceAllHeaderParagraphText`
+- `replaceHeaderParagraphText`
+- `replaceHeaderText`
 - `replaceTableCellText`
 - `replaceTableCellRichText`
 - `replaceTable`
 - `insertTableRows`
+- `deleteTableRows`
 - `replaceTableRows`
 - `insertTableColumns`
 - `setTableWidth`
 - `setTableCellAlignment`
+- `setTableCellNoWrap`
 - `setTableCellFontSize`
 - `setTableRowHeight`
 - `mergeTableCells`
@@ -102,12 +108,19 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `markFieldsDirty`
 
 `replaceTableCellText` accepts optional `alignment` (`left`, `center`, `right`, `both`).
+`replaceHeaderText` accepts `findText` and `text`, replacing matching text inside headers without overwriting other header content.
+`replaceHeaderParagraphText` accepts `headerIndex`, `paragraphIndex`, and `text`.
+`replaceAllHeaderParagraphText` accepts `paragraphIndex` and `text`, replacing that paragraph in every header part where it exists.
+`startSectionBeforeParagraph` accepts `findText` and `orientation` (`landscape` or `portrait`); it inserts a section break before the matching direct body paragraph and applies the requested orientation to the following section.
 `replaceTableCellRichText` accepts `richText` segments with `text`, optional `color`, `underline`, `bold`, and `fontName`.
+When the target cell is empty, the generated runs inherit font-related formatting from the nearest table run so blank template cells do not fall back to Office default font size; emphasis such as bold/italic is not inherited from fallback runs.
 `replaceTable` row cell objects may use the same `richText` segments instead of plain `text`.
 `insertTableRows` inserts `rows` before `rowIndex`; `templateRowIndex` controls which existing row supplies row/cell/run styling.
-`replaceTableRows` replaces inclusive `startRowIndex`..`endRowIndex` with `rows`, preserving the surrounding table and using `templateRowIndex` for row/cell/run styling.
+`deleteTableRows` deletes inclusive `startRowIndex`..`endRowIndex`, preserving the surrounding table.
+`replaceTableRows` replaces inclusive `startRowIndex`..`endRowIndex` with `rows`, preserving the surrounding table and using `templateRowIndex` for row/cell/run styling. When the replaced range contains multiple row shapes, replacement rows are matched to a template row with the same `gridSpan` pattern when possible, so mixed merged/unmerged rows keep their cell widths and paragraph properties.
 `insertTableColumns` inserts empty columns before a visual grid `columnIndex`; `columnCount` defaults to `1`, and `templateColumnIndex` controls which existing grid column/cell supplies width and cell styling. If the insertion point falls inside an existing horizontally merged cell, that cell's `gridSpan` is expanded instead of creating a new physical cell in that row.
-`setTableWidth` accepts `width` and `widthType` (`pct`, `dxa`, `auto`, `nil`).
+`setTableWidth` accepts `width` and `widthType` (`pct`, `dxa`, `auto`, `nil`) and preserves the template table layout (`fixed`, `autofit`, or absent) instead of changing it.
+`setTableCellNoWrap` accepts optional `noWrap`; `true` or omitted writes Word `w:noWrap`, and `false` removes it.
 `setTableCellFontSize` accepts `fontSize` as OpenXML half-points (`18`) or points (`9pt`).
 `setTableRowHeight` accepts `height` in twips and optional `heightRule` (`atLeast`, `exact`, `auto`).
 `mergeTableCells` merges a horizontal cell range when `rowIndex/startCellIndex/endCellIndex` are provided, or a vertical row range when `cellIndex/startRowIndex/endRowIndex` are provided.
@@ -127,6 +140,7 @@ Example operations file:
   "operations": [
     { "type": "replaceAnchoredText", "commentId": "12", "text": "Final narrative" },
     { "type": "replaceBodyText", "findText": "HSPXXX", "text": "HSP-PTMs" },
+    { "type": "replaceHeaderText", "findText": "XX（客户项目代号）（与报告中HSPTEST对应）", "text": "HSPTEST" },
     { "type": "replaceTableCellText", "tableIndex": 2, "rowIndex": 0, "cellIndex": 3, "text": "2026-04-15" },
     {
       "type": "replaceTableCellRichText",
@@ -163,6 +177,7 @@ Example operations file:
     { "type": "deleteComment", "commentId": "12" },
     { "type": "setTableWidth", "tableIndex": 0, "width": "5000", "widthType": "pct" },
     { "type": "setTableCellAlignment", "tableIndex": 1, "rowIndex": 2, "cellIndex": 3, "alignment": "center" },
+    { "type": "setTableCellNoWrap", "tableIndex": 1, "rowIndex": 2, "cellIndex": 3 },
     { "type": "setTableCellFontSize", "tableIndex": 1, "rowIndex": 2, "cellIndex": 3, "fontSize": "9pt" },
     { "type": "setTableRowHeight", "tableIndex": 1, "rowIndex": 2, "height": "240", "heightRule": "exact" },
     { "type": "sanitizeFields" },

@@ -140,7 +140,7 @@ const tools = [
           items: {
             type: 'object',
             properties: {
-              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceBodyText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTableCellRichText', 'replaceTable', 'insertTableRows', 'replaceTableRows', 'insertTableColumns', 'setTableWidth', 'setTableCellAlignment', 'setTableCellFontSize', 'setTableRowHeight', 'mergeTableCells', 'unmergeTableRowHorizontalCells', 'unmergeTableColumnVerticalCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty', 'sanitizeFields', 'freezeFields'] },
+              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceBodyText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTableCellRichText', 'replaceTable', 'insertTableRows', 'deleteTableRows', 'replaceTableRows', 'insertTableColumns', 'setTableWidth', 'setTableCellAlignment', 'setTableCellNoWrap', 'setTableCellFontSize', 'setTableRowHeight', 'mergeTableCells', 'unmergeTableRowHorizontalCells', 'unmergeTableColumnVerticalCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty', 'sanitizeFields', 'freezeFields'] },
               commentId: { type: 'string' },
               text: { type: 'string' },
               richText: {
@@ -174,6 +174,7 @@ const tools = [
               width: { type: 'string' },
               widthType: { type: 'string', enum: ['pct', 'dxa', 'auto', 'nil'] },
               alignment: { type: 'string', enum: ['left', 'center', 'right', 'both'] },
+              noWrap: { type: 'boolean', description: 'When true or omitted, set Word w:noWrap on the target table cell; false removes it.' },
               fontSize: { type: 'string', description: 'OpenXML half-points such as 18, or point size such as 9pt.' },
               height: { type: 'string', description: 'Table row height in twips.' },
               heightRule: { type: 'string', enum: ['atLeast', 'at-least', 'at_least', 'exact', 'auto'] },
