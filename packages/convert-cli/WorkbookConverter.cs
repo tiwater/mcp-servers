@@ -6,13 +6,62 @@ namespace Dockit.Convert;
 
 public static class WorkbookConverter
 {
-    public static void ConvertXlsToXlsx(string input, string output)
+    public sealed record ConversionResult(string Backend, string? FallbackReason = null);
+
+    public static ConversionResult ConvertXlsToXlsx(string input, string output)
     {
         if (!File.Exists(input))
         {
             throw new InvalidOperationException($"Input file not found: {input}");
         }
 
+        if (WpsSpreadsheetConverter.IsAvailable())
+        {
+            try
+            {
+                WpsSpreadsheetConverter.ConvertXlsToXlsx(input, output);
+                return new ConversionResult("wps");
+            }
+            catch (Exception ex)
+            {
+                var fallbackReason = $"WPS RPC conversion failed: {ex.Message}";
+                var fallback = ConvertXlsToXlsxWithoutWps(input, output);
+                return fallback with
+                {
+                    FallbackReason = string.IsNullOrWhiteSpace(fallback.FallbackReason)
+                        ? fallbackReason
+                        : $"{fallbackReason}; {fallback.FallbackReason}",
+                };
+            }
+        }
+
+        return ConvertXlsToXlsxWithoutWps(input, output);
+    }
+
+    private static ConversionResult ConvertXlsToXlsxWithoutWps(string input, string output)
+    {
+        var soffice = OfficeConverter.FindSofficeBinary();
+        if (!string.IsNullOrWhiteSpace(soffice))
+        {
+            try
+            {
+                OfficeConverter.ConvertXlsToXlsx(input, output, soffice);
+                return new ConversionResult("libreoffice");
+            }
+            catch (Exception ex)
+            {
+                var fallbackReason = $"LibreOffice/soffice conversion failed: {ex.Message}";
+                ConvertXlsToXlsxWithNpoi(input, output);
+                return new ConversionResult("npoi", fallbackReason);
+            }
+        }
+
+        ConvertXlsToXlsxWithNpoi(input, output);
+        return new ConversionResult("npoi", "WPS RPC and LibreOffice/soffice not found");
+    }
+
+    private static void ConvertXlsToXlsxWithNpoi(string input, string output)
+    {
         using var inputStream = File.OpenRead(input);
         HSSFWorkbook sourceWorkbook;
         try

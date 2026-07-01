@@ -18,14 +18,16 @@ internal static class Program
             switch (args[0])
             {
                 case "xls-to-xlsx":
-                    WorkbookConverter.ConvertXlsToXlsx(args[1], args[2]);
+                    var result = WorkbookConverter.ConvertXlsToXlsx(args[1], args[2]);
                     Console.WriteLine(JsonSerializer.Serialize(new
                     {
                         status = "ok",
                         input = Path.GetFullPath(args[1]),
                         output = Path.GetFullPath(args[2]),
                         source_format = "xls",
-                        target_format = "xlsx"
+                        target_format = "xlsx",
+                        backend = result.Backend,
+                        fallback_reason = result.FallbackReason,
                     }));
                     return 0;
                 default:

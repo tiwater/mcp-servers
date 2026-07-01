@@ -17,9 +17,10 @@ public class ConvertCliTests
         var input = CreateLegacyXlsFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.xlsx");
 
-        WorkbookConverter.ConvertXlsToXlsx(input, output);
+        var result = WorkbookConverter.ConvertXlsToXlsx(input, output);
 
         Assert.True(File.Exists(output));
+        Assert.Contains(result.Backend, new[] { "wps", "libreoffice", "npoi" });
         using var stream = File.OpenRead(output);
         var workbook = new XSSFWorkbook(stream);
         var sheet = workbook.GetSheetAt(0);
