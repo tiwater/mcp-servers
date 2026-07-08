@@ -1026,17 +1026,23 @@ public static class Editor
         }
 
         var properties = cell.GetFirstChild<TableCellProperties>()!;
-        properties.RemoveAllChildren<GridSpan>();
-        if (input.GridSpan is > 1)
+        if (input.GridSpan is not null)
         {
-            properties.AppendChild(new GridSpan { Val = input.GridSpan.Value });
+            properties.RemoveAllChildren<GridSpan>();
+            if (input.GridSpan is > 1)
+            {
+                properties.AppendChild(new GridSpan { Val = input.GridSpan.Value });
+            }
         }
 
-        properties.RemoveAllChildren<VerticalMerge>();
-        if (input.VMerge is { Length: > 0 } vMergeVal)
+        if (input.VMerge is not null)
         {
-            var vmVal = vMergeVal.ToLowerInvariant() == "restart" ? MergedCellValues.Restart : MergedCellValues.Continue;
-            properties.AppendChild(new VerticalMerge { Val = vmVal });
+            properties.RemoveAllChildren<VerticalMerge>();
+            if (input.VMerge is { Length: > 0 } vMergeVal)
+            {
+                var vmVal = vMergeVal.ToLowerInvariant() == "restart" ? MergedCellValues.Restart : MergedCellValues.Continue;
+                properties.AppendChild(new VerticalMerge { Val = vmVal });
+            }
         }
 
         if (input.Shading is { Length: > 0 } hexColor)

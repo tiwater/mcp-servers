@@ -433,6 +433,64 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_insert_table_rows_inherits_template_cell_merges_when_not_overridden()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-insert-row-merge-inheritance-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct }),
+                    new TableGrid(
+                        new GridColumn { Width = "1000" },
+                        new GridColumn { Width = "1000" },
+                        new GridColumn { Width = "1000" },
+                        new GridColumn { Width = "1000" },
+                        new GridColumn { Width = "1000" }),
+                    new TableRow(
+                        CreateSizedCenteredCell("检验项目", "2000", gridSpan: 2),
+                        CreateSizedCenteredCell("可接受标准", "1000"),
+                        CreateSizedCenteredCell("检验结果", "2000", gridSpan: 2)),
+                    new TableRow(
+                        CreateSizedCenteredCell("pH", "2000", gridSpan: 2),
+                        CreateSizedCenteredCell("5.5±0.3", "1000"),
+                        CreateSizedCenteredCell("待补充", "2000", gridSpan: 2)))));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"insert-row-merge-inheritance-{Guid.NewGuid():N}.docx");
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "insertTableRows",
+                TableIndex: 0,
+                RowIndex: 2,
+                TemplateRowIndex: 1,
+                Rows: [
+                    [
+                        new DocxTableCellInput("渗透压摩尔浓度"),
+                        new DocxTableCellInput("240 - 360 mOsmol/kg"),
+                        new DocxTableCellInput("待补充检测记录")
+                    ]
+                ])
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var insertedCells = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single()
+            .Elements<TableRow>().ElementAt(2)
+            .Elements<TableCell>().ToList();
+
+        Assert.Equal(3, insertedCells.Count);
+        Assert.Equal(2, insertedCells[0].GetFirstChild<TableCellProperties>()!.GetFirstChild<GridSpan>()!.Val!.Value);
+        Assert.Equal("渗透压摩尔浓度", GetCellText(insertedCells[0]));
+        Assert.Null(insertedCells[1].GetFirstChild<TableCellProperties>()!.GetFirstChild<GridSpan>());
+        Assert.Equal(2, insertedCells[2].GetFirstChild<TableCellProperties>()!.GetFirstChild<GridSpan>()!.Val!.Value);
+        var validationErrors = new OpenXmlValidator().Validate(edited).Select(error => error.Description).ToList();
+        Assert.True(validationErrors.Count == 0, string.Join(Environment.NewLine, validationErrors));
+    }
+
+    [Fact]
     public void Edit_set_table_width_preserves_existing_table_layout()
     {
         var path = Path.Combine(Path.GetTempPath(), $"fixture-table-layout-{Guid.NewGuid():N}.docx");
