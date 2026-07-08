@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tiwater_pdf.cli import _resolve_llm_config
+from tiwater_pdf.cli import _resolve_llm_config, _resolve_llm_enable_thinking
 
 
 class ResolveLlmConfigTest(unittest.TestCase):
@@ -51,6 +51,51 @@ class ResolveLlmConfigTest(unittest.TestCase):
 
         self.assertEqual(api_key, "explicit-token")
         self.assertEqual(base_url, "https://llm.example/v1")
+
+    def test_auto_disables_thinking_for_aliyun_qwen37(self):
+        value = _resolve_llm_enable_thinking(
+            "auto",
+            llm_model="qwen3.7-plus",
+            base_url="https://example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        )
+
+        self.assertIs(value, False)
+
+    def test_auto_disables_thinking_for_bare_aliyun_qwen37_behind_gateway(self):
+        value = _resolve_llm_enable_thinking(
+            "auto",
+            llm_model="qwen3.7-plus",
+            base_url="https://hub.supen.ai/api/llm/v1",
+        )
+
+        self.assertIs(value, False)
+
+    def test_auto_does_not_send_vendor_parameter_for_other_models(self):
+        value = _resolve_llm_enable_thinking(
+            "auto",
+            llm_model="gpt-4o-mini",
+            base_url="https://api.openai.com/v1",
+        )
+
+        self.assertIsNone(value)
+
+    def test_auto_does_not_treat_openrouter_owner_prefixed_qwen_as_aliyun(self):
+        value = _resolve_llm_enable_thinking(
+            "auto",
+            llm_model="qwen/qwen3.7-plus",
+            base_url="https://openrouter.ai/api/v1",
+        )
+
+        self.assertIsNone(value)
+
+    def test_explicit_enable_thinking_override(self):
+        value = _resolve_llm_enable_thinking(
+            "true",
+            llm_model="qwen3.7-plus",
+            base_url="https://example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        )
+
+        self.assertIs(value, True)
 
 
 if __name__ == "__main__":

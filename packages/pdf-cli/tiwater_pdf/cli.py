@@ -351,6 +351,44 @@ def _resolve_llm_client(api_key: str | None = None, base_url: str | None = None)
     return OpenAI(api_key=resolved_api_key, timeout=timeout)
 
 
+def _parse_optional_bool(value: str | None) -> bool | None:
+    if value is None or value == "":
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"expected boolean value, got {value!r}")
+
+
+def _resolve_llm_enable_thinking(
+    value: str | bool | None,
+    *,
+    llm_model: str,
+    base_url: str | None,
+) -> bool | None:
+    """Resolve Alibaba/Qwen thinking mode for OCR calls.
+
+    OpenAI-compatible providers ignore unknown vendor parameters poorly, so only
+    auto-disable thinking for Alibaba-hosted Qwen models whose public docs state
+    that thinking is enabled by default.
+    """
+    if isinstance(value, bool):
+        return value
+    mode = (value or os.environ.get("TIWATER_LLM_ENABLE_THINKING") or "auto").strip().lower()
+    if mode in {"auto", ""}:
+        model = (llm_model or "").lower()
+        base = (base_url or "").lower()
+        is_aliyun = "aliyuncs.com" in base or "dashscope.aliyuncs.com" in base
+        # Alibaba Model Studio model ids are bare names such as qwen3.7-plus.
+        # OpenRouter-style ids use an owner prefix such as qwen/qwen3.7-plus.
+        is_bare_aliyun_qwen = "/" not in model and model.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-"))
+        thinking_default_qwen = is_bare_aliyun_qwen or (is_aliyun and model.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-")))
+        return False if thinking_default_qwen else None
+    return _parse_optional_bool(mode)
+
+
 def _llm_extract_table(image_bytes: bytes, api_key: str | None = None, llm_model: str = "google/gemini-2.5-flash") -> tuple[list, list]:
     """Use an LLM (via OpenRouter/OpenAI API) to extract a clean JSON table from an image of a table.
     
@@ -520,17 +558,24 @@ def _extract_json_object(text: str) -> dict:
     if not text:
         raise ValueError("empty LLM response")
     if text.startswith("```"):
-        text = text.strip("`")
+        text = text.strip("`").strip()
         if text.lower().startswith("json"):
             text = text[4:].strip()
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
+        data = json.loads(text)
+    except json.JSONDecodeError as original_error:
         start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(text[start:end + 1])
-        raise
+        if start >= 0:
+            decoder = json.JSONDecoder()
+            try:
+                data, _ = decoder.raw_decode(text[start:])
+            except json.JSONDecodeError:
+                raise original_error
+        else:
+            raise original_error
+    if not isinstance(data, dict):
+        raise ValueError("LLM response JSON must be an object")
+    return data
 
 
 def llm_ocr(
@@ -540,9 +585,17 @@ def llm_ocr(
     base_url: str | None = None,
     llm_model: str = "gpt-4o-mini",
     zoom: float = 2.5,
+    max_tokens: int = 4096,
+    enable_thinking: str | bool | None = "auto",
 ) -> dict:
     """Extract page text from scanned PDFs using an OpenAI-compatible vision model."""
-    client = _resolve_llm_client(api_key, base_url)
+    resolved_api_key, resolved_base_url = _resolve_llm_config(api_key, base_url)
+    client = _resolve_llm_client(resolved_api_key, resolved_base_url)
+    resolved_enable_thinking = _resolve_llm_enable_thinking(
+        enable_thinking,
+        llm_model=llm_model,
+        base_url=resolved_base_url,
+    )
     doc = fitz.open(pdf_path)
     pages = []
 
@@ -562,9 +615,13 @@ def llm_ocr(
                 continue
             image_bytes = _render_page_image(doc, page_index, zoom=zoom)
             b64_image = base64.b64encode(image_bytes).decode("utf-8")
+            request_kwargs = {}
+            if resolved_enable_thinking is not None:
+                request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
             response = client.chat.completions.create(
                 model=llm_model,
                 response_format={"type": "json_object"},
+                max_tokens=max_tokens,
                 messages=[
                     {
                         "role": "user",
@@ -578,6 +635,7 @@ def llm_ocr(
                     }
                 ],
                 temperature=0.0,
+                **request_kwargs,
             )
             try:
                 content = response.choices[0].message.content or ""
@@ -1226,6 +1284,13 @@ def main() -> int:
     ocr_parser.add_argument("--provider", choices=["local", "llm"], default=os.getenv("TIWATER_PDF_OCR_PROVIDER", "llm"), help="OCR provider")
     ocr_parser.add_argument("--language", type=str, default=os.getenv("TIWATER_PDF_OCR_LANGUAGE", "eng"), help="Tesseract language for local OCR")
     ocr_parser.add_argument("--zoom", type=float, default=2.5, help="PDF render zoom for page images")
+    ocr_parser.add_argument("--max-tokens", type=int, default=int(os.getenv("TIWATER_PDF_OCR_MAX_TOKENS", "4096")), help="Maximum LLM output tokens per OCR page")
+    ocr_parser.add_argument(
+        "--enable-thinking",
+        choices=["auto", "true", "false"],
+        default=os.getenv("TIWATER_LLM_ENABLE_THINKING", "auto"),
+        help="Vendor thinking mode for OpenAI-compatible OCR calls",
+    )
     ocr_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()
@@ -1318,6 +1383,8 @@ def main() -> int:
                     base_url=args.base_url,
                     llm_model=args.llm_model,
                     zoom=args.zoom,
+                    max_tokens=args.max_tokens,
+                    enable_thinking=args.enable_thinking,
                 )
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))

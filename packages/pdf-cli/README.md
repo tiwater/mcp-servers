@@ -63,6 +63,9 @@ Configuration is read from explicit flags first, then environment variables:
 - `--api-key`, `SUPEN_LLM_TOKEN`, `SUPEN_LLM_API_KEY`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`
 - `--base-url`, `SUPEN_LLM_GATEWAY_URL`, `SUPEN_LLM_BASE_URL`, `TIWATER_LLM_BASE_URL`, or `OPENAI_BASE_URL`
 - `--llm-model`, `TIWATER_LLM_OCR_MODEL`, `TIWATER_LLM_VISION_MODEL`, or the built-in `gpt-4o-mini` OCR default
+- `--max-tokens` or `TIWATER_PDF_OCR_MAX_TOKENS` to cap per-page OCR output
+- `--enable-thinking auto|true|false` or `TIWATER_LLM_ENABLE_THINKING` for vendor thinking mode
 
 When only `OPENROUTER_API_KEY` is present, the default base URL is `https://openrouter.ai/api/v1`.
 When running under Supen, `SUPEN_LLM_GATEWAY_URL` should point at the gateway's OpenAI-compatible route, for example `http://127.0.0.1:2755/api/llm/v1`.
+In `auto` mode, bare Alibaba Model Studio Qwen3.5/Qwen3.6/Qwen3.7 model ids such as `qwen3.7-plus` disable thinking for OCR calls, which avoids unnecessary latency on extraction tasks. Provider-prefixed model ids such as `qwen/qwen3.7-plus` are left unchanged.
