@@ -14,6 +14,7 @@ from pathlib import Path
 import fitz
 
 DEFAULT_OCR_MODEL = "qwen3.7-plus"
+DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 
 
 def _find_tables_quiet(page):
@@ -347,7 +348,7 @@ def _resolve_llm_client(api_key: str | None = None, base_url: str | None = None)
 
     resolved_api_key, resolved_base_url = _resolve_llm_config(api_key, base_url)
 
-    timeout = float(os.environ.get("TIWATER_LLM_TIMEOUT", "60"))
+    timeout = float(os.environ.get("TIWATER_LLM_TIMEOUT", str(DEFAULT_LLM_TIMEOUT_SECONDS)))
     if resolved_base_url:
         return OpenAI(base_url=resolved_base_url, api_key=resolved_api_key, timeout=timeout)
     return OpenAI(api_key=resolved_api_key, timeout=timeout)
