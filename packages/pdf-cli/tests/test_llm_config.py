@@ -2,10 +2,14 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tiwater_pdf.cli import _resolve_llm_config, _resolve_llm_enable_thinking
+from tiwater_pdf.cli import DEFAULT_OCR_MODEL, _resolve_llm_config, _resolve_llm_enable_thinking, llm_ocr
 
 
 class ResolveLlmConfigTest(unittest.TestCase):
+    def test_builtin_ocr_default_is_qwen37_plus(self):
+        self.assertEqual(DEFAULT_OCR_MODEL, "qwen3.7-plus")
+        self.assertEqual(llm_ocr.__defaults__[3], "qwen3.7-plus")
+
     def test_uses_supen_gateway_env(self):
         env = {
             "SUPEN_LLM_TOKEN": "gateway-token",

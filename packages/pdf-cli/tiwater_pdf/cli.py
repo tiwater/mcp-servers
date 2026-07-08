@@ -13,6 +13,8 @@ from pathlib import Path
 
 import fitz
 
+DEFAULT_OCR_MODEL = "qwen3.7-plus"
+
 
 def _find_tables_quiet(page):
     buffer = io.StringIO()
@@ -583,7 +585,7 @@ def llm_ocr(
     page_numbers: list[int] | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
-    llm_model: str = "gpt-4o-mini",
+    llm_model: str = DEFAULT_OCR_MODEL,
     zoom: float = 2.5,
     max_tokens: int = 4096,
     enable_thinking: str | bool | None = "auto",
@@ -1235,7 +1237,7 @@ def main() -> int:
     default_ocr_model = (
         os.environ.get("TIWATER_LLM_OCR_MODEL")
         or os.environ.get("TIWATER_LLM_VISION_MODEL")
-        or "gpt-4o-mini"
+        or DEFAULT_OCR_MODEL
     )
 
     parser = argparse.ArgumentParser(
