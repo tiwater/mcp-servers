@@ -58,12 +58,24 @@ Extracts text from scanned or image-only PDFs using an OpenAI-compatible vision 
 tiwater-pdf ocr <scan.pdf> [--pages 1,2] [--json]
 ```
 
+Multiple PDFs can be OCRed concurrently with bounded parallelism. Batch mode
+writes one JSON result and one status file per input plus a `manifest.json`:
+
+```bash
+tiwater-pdf ocr scan-1.pdf scan-2.pdf scan-3.pdf \
+  --provider llm \
+  --output-dir outputs/ocr-llm \
+  --max-parallel 3 \
+  --json
+```
+
 Configuration is read from explicit flags first, then environment variables:
 
 - `--api-key`, `SUPEN_LLM_TOKEN`, `SUPEN_LLM_API_KEY`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`
 - `--base-url`, `SUPEN_LLM_GATEWAY_URL`, `SUPEN_LLM_BASE_URL`, `TIWATER_LLM_BASE_URL`, or `OPENAI_BASE_URL`
 - `--llm-model`, `TIWATER_LLM_OCR_MODEL`, `TIWATER_LLM_VISION_MODEL`, or the built-in `qwen3.7-plus` OCR default
 - `--max-tokens` or `TIWATER_PDF_OCR_MAX_TOKENS` to cap per-page OCR output
+- `--max-parallel` or `TIWATER_PDF_OCR_MAX_PARALLEL` to cap concurrent PDFs in batch mode
 - `--enable-thinking auto|true|false` or `TIWATER_LLM_ENABLE_THINKING` for vendor thinking mode
 
 When only `OPENROUTER_API_KEY` is present, the default base URL is `https://openrouter.ai/api/v1`.

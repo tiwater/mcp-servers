@@ -3,12 +3,14 @@
 import argparse
 import base64
 import contextlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import fitz
@@ -716,6 +718,107 @@ def local_tesseract_ocr(
     }
 
 
+def _safe_output_stem(input_path: Path, index: int, used: set[str]) -> str:
+    stem = "".join(c if c.isalnum() or c in {"-", "_"} else "-" for c in input_path.stem).strip("-_")
+    if not stem:
+        stem = "document"
+    candidate = stem
+    suffix = 2
+    while candidate in used:
+        candidate = f"{stem}-{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return f"{index:03d}-{candidate}"
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _run_ocr_batch(
+    inputs: list[Path],
+    *,
+    output_dir: Path,
+    max_parallel: int,
+    pages: list[int] | None,
+    ocr_func,
+    model: str,
+    provider: str,
+    enable_thinking: bool | None,
+) -> dict:
+    """Run OCR for multiple PDFs with bounded concurrency and per-file evidence."""
+    if not inputs:
+        raise ValueError("at least one input PDF is required")
+    if max_parallel < 1:
+        raise ValueError("--max-parallel must be >= 1")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    used_stems: set[str] = set()
+    jobs = []
+    for index, input_path in enumerate(inputs, start=1):
+        stem = _safe_output_stem(input_path, index, used_stems)
+        jobs.append({
+            "index": index,
+            "input": input_path,
+            "output": output_dir / f"{stem}.json",
+            "status_path": output_dir / f"{stem}.status.json",
+            "stderr": output_dir / f"{stem}.stderr.txt",
+        })
+
+    def run_one(job: dict) -> dict:
+        started = time.monotonic()
+        item = {
+            "input": str(job["input"]),
+            "output": str(job["output"]),
+            "status_path": str(job["status_path"]),
+            "stderr": str(job["stderr"]),
+            "status": "success",
+            "exit_code": 0,
+            "model": model,
+            "provider": provider,
+            "pages": pages,
+            "enable_thinking": enable_thinking,
+            "duration_ms": 0,
+        }
+        try:
+            result = ocr_func(job["input"], pages)
+            _write_json(job["output"], result)
+            job["stderr"].write_text("", encoding="utf-8")
+        except Exception as error:
+            item["status"] = "failed"
+            item["exit_code"] = 1
+            item["error"] = f"{type(error).__name__}: {error}"
+            job["stderr"].write_text(item["error"] + "\n", encoding="utf-8")
+        finally:
+            item["duration_ms"] = int((time.monotonic() - started) * 1000)
+            _write_json(job["status_path"], item)
+        return item
+
+    files = [None] * len(jobs)
+    with ThreadPoolExecutor(max_workers=min(max_parallel, len(jobs))) as executor:
+        future_to_index = {
+            executor.submit(run_one, job): job["index"] - 1
+            for job in jobs
+        }
+        for future in as_completed(future_to_index):
+            files[future_to_index[future]] = future.result()
+
+    manifest = {
+        "file_count": len(files),
+        "success_count": sum(1 for item in files if item["status"] == "success"),
+        "failure_count": sum(1 for item in files if item["status"] != "success"),
+        "max_parallel": max_parallel,
+        "model": model,
+        "provider": provider,
+        "pages": pages,
+        "enable_thinking": enable_thinking,
+        "files": files,
+    }
+    _write_json(output_dir / "manifest.json", manifest)
+    return manifest
+
+
 def _reextract_with_columns(doc, page_num: int, table_bbox: tuple, table_cells: list,
                             ref_cells: list, ref_col_count: int) -> list[list[str]]:
     """Re-extract table content using word positions and reference column boundaries.
@@ -1279,7 +1382,7 @@ def main() -> int:
 
     # OCR command
     ocr_parser = subparsers.add_parser("ocr", help="Extract scanned PDF text with an OpenAI-compatible vision LLM")
-    ocr_parser.add_argument("input", type=Path, help="PDF file to OCR")
+    ocr_parser.add_argument("input", type=Path, nargs="+", help="PDF file(s) to OCR")
     ocr_parser.add_argument("--pages", type=str, help="Page numbers (comma-separated, 1-indexed)")
     ocr_parser.add_argument("--api-key", type=str, default=default_api_key, help="LLM API key")
     ocr_parser.add_argument("--base-url", type=str, default=default_base_url, help="OpenAI-compatible base URL")
@@ -1293,6 +1396,13 @@ def main() -> int:
         choices=["auto", "true", "false"],
         default=os.getenv("TIWATER_LLM_ENABLE_THINKING", "auto"),
         help="Vendor thinking mode for OpenAI-compatible OCR calls",
+    )
+    ocr_parser.add_argument("--output-dir", type=Path, help="Directory for batch OCR outputs")
+    ocr_parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=int(os.getenv("TIWATER_PDF_OCR_MAX_PARALLEL", "3")),
+        help="Maximum concurrent PDFs for batch OCR",
     )
     ocr_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
@@ -1371,16 +1481,72 @@ def main() -> int:
 
         elif args.command == "ocr":
             pages = _parse_page_numbers(args.pages)
-            if args.provider == "local":
+            inputs = args.input
+            if len(inputs) > 1 or args.output_dir:
+                if not args.output_dir:
+                    raise ValueError("--output-dir is required when OCR input contains multiple PDFs")
+                if args.provider == "local":
+                    def run_ocr(input_path, selected_pages):
+                        return local_tesseract_ocr(
+                            input_path,
+                            selected_pages,
+                            zoom=args.zoom,
+                            language=args.language,
+                        )
+                    resolved_enable_thinking = None
+                    model = f"local-tesseract:{args.language}"
+                else:
+                    _, resolved_base_url = _resolve_llm_config(args.api_key, args.base_url)
+                    resolved_enable_thinking = _resolve_llm_enable_thinking(
+                        args.enable_thinking,
+                        llm_model=args.llm_model,
+                        base_url=resolved_base_url,
+                    )
+                    def run_ocr(input_path, selected_pages):
+                        return llm_ocr(
+                            input_path,
+                            selected_pages,
+                            api_key=args.api_key,
+                            base_url=args.base_url,
+                            llm_model=args.llm_model,
+                            zoom=args.zoom,
+                            max_tokens=args.max_tokens,
+                            enable_thinking=args.enable_thinking,
+                        )
+                    model = args.llm_model
+                result = _run_ocr_batch(
+                    inputs,
+                    output_dir=args.output_dir,
+                    max_parallel=args.max_parallel,
+                    pages=pages,
+                    ocr_func=run_ocr,
+                    model=model,
+                    provider=args.provider,
+                    enable_thinking=resolved_enable_thinking,
+                )
+                if args.json:
+                    print(json.dumps(result, indent=2, ensure_ascii=False))
+                else:
+                    print(f"Files: {result['file_count']}")
+                    print(f"Succeeded: {result['success_count']}")
+                    print(f"Failed: {result['failure_count']}")
+                    print(f"Manifest: {args.output_dir / 'manifest.json'}")
+                if result["failure_count"] > 0:
+                    return 1
+            elif args.provider == "local":
                 result = local_tesseract_ocr(
-                    args.input,
+                    inputs[0],
                     pages,
                     zoom=args.zoom,
                     language=args.language,
                 )
+                if args.json:
+                    print(json.dumps(result, indent=2, ensure_ascii=False))
+                else:
+                    print(result["text"])
             else:
                 result = llm_ocr(
-                    args.input,
+                    inputs[0],
                     pages,
                     api_key=args.api_key,
                     base_url=args.base_url,
@@ -1389,10 +1555,10 @@ def main() -> int:
                     max_tokens=args.max_tokens,
                     enable_thinking=args.enable_thinking,
                 )
-            if args.json:
-                print(json.dumps(result, indent=2, ensure_ascii=False))
-            else:
-                print(result["text"])
+                if args.json:
+                    print(json.dumps(result, indent=2, ensure_ascii=False))
+                else:
+                    print(result["text"])
 
         return 0
 
