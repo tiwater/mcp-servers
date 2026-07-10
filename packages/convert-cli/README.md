@@ -5,7 +5,8 @@ A generic CLI for loss-aware office format conversion.
 ## Initial scope
 
 - `.xls` -> `.xlsx`
-- Office document/workbook/presentation formats -> `.pdf` through a local LibreOffice/soffice install
+- Writer document formats -> `.pdf`, preferring WPS Writer through `pywpsrpc`
+- Other Office document/workbook/presentation formats -> `.pdf` through LibreOffice/soffice
 
 ## Usage
 
@@ -24,7 +25,14 @@ it is not installed at `~/.local/share/lucid-docs/wpsrpc-venv/bin/python`.
 available or fails, the converter falls back to LibreOffice/soffice and then to
 the built-in NPOI converter.
 
-PDF conversion requires LibreOffice. If `soffice` is not on `PATH`, set one of:
+DOC/DOCX/ODT/RTF PDF conversion prefers WPS Writer through `pywpsrpc` when
+`wps`, `xvfb-run`, and the configured WPS RPC Python are available. It falls
+back to LibreOffice and reports `backend` plus `fallback_reason` in CLI JSON.
+The WPS Python path uses the same `TIWATER_WPSRPC_PYTHON` and
+`LUCID_WPSRPC_PYTHON` variables as XLS conversion.
+
+LibreOffice remains required for PDF formats without a native WPS backend. If
+`soffice` is not on `PATH`, set one of:
 
 - `TIWATER_SOFFICE`
 - `SOFFICE`

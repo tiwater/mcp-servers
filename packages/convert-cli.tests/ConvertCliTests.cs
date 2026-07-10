@@ -53,6 +53,19 @@ public class ConvertCliTests
         Assert.Contains("LibreOffice/soffice is required", ex.Message);
     }
 
+    [Theory]
+    [InlineData("docx", true, true)]
+    [InlineData("doc", true, true)]
+    [InlineData("xlsx", true, false)]
+    [InlineData("docx", false, false)]
+    public void Pdf_conversion_uses_wps_only_for_writer_formats_when_available(
+        string sourceFormat,
+        bool wpsAvailable,
+        bool expected)
+    {
+        Assert.Equal(expected, OfficePdfConverter.ShouldUseWps(sourceFormat, wpsAvailable));
+    }
+
     [Fact]
     public void Docx_to_pdf_conversion_creates_real_pdf_when_soffice_is_available()
     {

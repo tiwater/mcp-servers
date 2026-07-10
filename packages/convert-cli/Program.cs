@@ -34,14 +34,16 @@ internal static class Program
                     if (args[0].EndsWith("-to-pdf", StringComparison.OrdinalIgnoreCase))
                     {
                         var sourceFormat = args[0][..^"-to-pdf".Length];
-                        OfficePdfConverter.ConvertToPdf(args[1], args[2], sourceFormat);
+                        var pdfResult = OfficePdfConverter.ConvertToPdf(args[1], args[2], sourceFormat);
                         Console.WriteLine(JsonSerializer.Serialize(new
                         {
                             status = "ok",
                             input = Path.GetFullPath(args[1]),
                             output = Path.GetFullPath(args[2]),
                             source_format = sourceFormat.ToLowerInvariant(),
-                            target_format = "pdf"
+                            target_format = "pdf",
+                            backend = pdfResult.Backend,
+                            fallback_reason = pdfResult.FallbackReason,
                         }));
                         return 0;
                     }
