@@ -1209,6 +1209,52 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_vertical_merge_promotes_continuation_with_owner_paragraph_properties()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-merge-properties-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableRow(
+                        new TableCell(
+                            new TableCellProperties(new VerticalMerge { Val = MergedCellValues.Restart }),
+                            new Paragraph(
+                                new ParagraphProperties(new Justification { Val = JustificationValues.Center }),
+                                new Run(new Text("owner")))),
+                        new TableCell(new Paragraph(new Run(new Text("A"))))),
+                    new TableRow(
+                        new TableCell(
+                            new TableCellProperties(new VerticalMerge { Val = MergedCellValues.Continue }),
+                            new Paragraph()),
+                        new TableCell(new Paragraph(new Run(new Text("B"))))),
+                    new TableRow(
+                        new TableCell(new Paragraph()),
+                        new TableCell(new Paragraph(new Run(new Text("C")))))
+                )));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"merged-cell-properties-{Guid.NewGuid():N}.docx");
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("mergeTableCells", TableIndex: 0, CellIndex: 0, StartRowIndex: 1, EndRowIndex: 2)
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var cell = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single()
+            .Elements<TableRow>().ElementAt(1)
+            .Elements<TableCell>().First();
+        var merge = cell.GetFirstChild<TableCellProperties>()!.GetFirstChild<VerticalMerge>();
+        Assert.Equal(MergedCellValues.Restart, merge!.Val!.Value);
+        var justification = cell.Elements<Paragraph>().Single()
+            .GetFirstChild<ParagraphProperties>()!.GetFirstChild<Justification>();
+        Assert.Equal(JustificationValues.Center, justification!.Val!.Value);
+        Assert.Empty(cell.Descendants<Text>());
+    }
+
+    [Fact]
     public void Edit_can_delete_table_rows()
     {
         var path = Path.Combine(Path.GetTempPath(), $"fixture-delete-rows-{Guid.NewGuid():N}.docx");

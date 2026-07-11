@@ -1865,6 +1865,11 @@ public static class Editor
             {
                 var cell = rows[rIdx].Elements<TableCell>().ElementAt(cellIndex);
                 var properties = cell.GetFirstChild<TableCellProperties>() ?? cell.PrependChild(new TableCellProperties());
+                if (rIdx == startRowIndex && IsVerticalMergeContinuation(properties))
+                {
+                    var ownerCell = FindPreviousVerticalMergeOwner(rows, startRowIndex, cellIndex);
+                    CopyMissingParagraphProperties(ownerCell, cell);
+                }
                 properties.RemoveAllChildren<VerticalMerge>();
                 var mergeValue = rIdx == startRowIndex ? MergedCellValues.Restart : MergedCellValues.Continue;
                 properties.AppendChild(new VerticalMerge { Val = mergeValue });
@@ -1880,6 +1885,59 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation(operation.Type, false, "Either rowIndex (horizontal) or cellIndex (vertical) must be specified for merge");
+    }
+
+    private static bool IsVerticalMergeContinuation(TableCellProperties properties)
+    {
+        var merge = properties.GetFirstChild<VerticalMerge>();
+        return merge is not null && (merge.Val is null || merge.Val.Value == MergedCellValues.Continue);
+    }
+
+    private static TableCell? FindPreviousVerticalMergeOwner(IReadOnlyList<TableRow> rows, int startRowIndex, int cellIndex)
+    {
+        for (var rowIndex = startRowIndex - 1; rowIndex >= 0; rowIndex--)
+        {
+            var cells = rows[rowIndex].Elements<TableCell>().ToList();
+            if (cellIndex >= cells.Count)
+            {
+                continue;
+            }
+
+            var cell = cells[cellIndex];
+            var properties = cell.GetFirstChild<TableCellProperties>();
+            if (!IsVerticalMergeContinuation(properties ?? new TableCellProperties()))
+            {
+                return cell;
+            }
+        }
+
+        return null;
+    }
+
+    private static void CopyMissingParagraphProperties(TableCell? sourceCell, TableCell targetCell)
+    {
+        var sourceProperties = sourceCell?.Elements<Paragraph>().FirstOrDefault()?.GetFirstChild<ParagraphProperties>();
+        if (sourceProperties is null)
+        {
+            return;
+        }
+
+        var targetParagraph = targetCell.Elements<Paragraph>().FirstOrDefault();
+        if (targetParagraph is null)
+        {
+            targetParagraph = targetCell.AppendChild(new Paragraph());
+        }
+
+        var targetProperties = targetParagraph.GetFirstChild<ParagraphProperties>() ?? targetParagraph.PrependChild(new ParagraphProperties());
+        foreach (var sourceProperty in sourceProperties.ChildElements)
+        {
+            if (targetProperties.ChildElements.Any(existing => existing.GetType() == sourceProperty.GetType()))
+            {
+                continue;
+            }
+
+            targetProperties.AppendChild(sourceProperty.CloneNode(true));
+        }
     }
 
     private static DocxEditAppliedOperation UnmergeTableRowHorizontalCells(Body body, DocxEditOperation operation)
