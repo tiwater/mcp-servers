@@ -667,6 +667,61 @@ def _extract_table_cell_lines(rows: list[dict]) -> list[dict]:
     return lines
 
 
+_MEASUREMENT_UNIT_CONTINUATION = re.compile(
+    r"^[a-zA-Z\u00b5\u03bc%]+(?:\s*(?:[./]|\s)\s*[a-zA-Z0-9\u00b5\u03bc%-]+)+$",
+    re.IGNORECASE,
+)
+
+
+def _is_measurement_unit_continuation(text: str) -> bool:
+    """Return true for a wrapped measurement unit that cannot stand alone."""
+    compact = re.sub(r"\s+", " ", text).strip()
+    first_token = compact.split(" ", 1)[0] if compact else ""
+    has_measurement_marker = any(marker in first_token for marker in ("/", "%", "µ", "μ"))
+    return bool(has_measurement_marker and _MEASUREMENT_UNIT_CONTINUATION.fullmatch(compact))
+
+
+def _extract_table_cell_units(rows: list[dict]) -> list[dict]:
+    """Expose stable semantic cell units while retaining their source line ids.
+
+    OCR markdown commonly preserves a visual wrap as ``<br>``. A measurement
+    unit placed on the next visual line belongs to the preceding value rather
+    than forming a new source item. Independent non-empty lines remain
+    independent units.
+    """
+    units: list[dict] = []
+    for row in rows:
+        for cell_index, cell in enumerate(row.get("cells", [])):
+            cell_lines = []
+            for line_index, value in enumerate(str(cell).splitlines()):
+                text = value.strip()
+                if text:
+                    cell_lines.append({
+                        "line_id": f"{row['row_id']}-cell-{cell_index}-line-{line_index}",
+                        "line_index": line_index,
+                        "text": text,
+                    })
+            grouped: list[list[dict]] = []
+            for line in cell_lines:
+                if grouped and _is_measurement_unit_continuation(line["text"]):
+                    grouped[-1].append(line)
+                else:
+                    grouped.append([line])
+            for unit_index, group in enumerate(grouped):
+                units.append({
+                    "unit_id": f"{row['row_id']}-cell-{cell_index}-unit-{unit_index}",
+                    "row_id": row["row_id"],
+                    "page": row["page"],
+                    "table_index": row["table_index"],
+                    "row_index": row["row_index"],
+                    "cell_index": cell_index,
+                    "unit_index": unit_index,
+                    "source_line_ids": [line["line_id"] for line in group],
+                    "text": " ".join(line["text"] for line in group),
+                })
+    return units
+
+
 def llm_ocr(
     pdf_path: Path,
     page_numbers: list[int] | None = None,
@@ -738,6 +793,7 @@ def llm_ocr(
                     "tables": page_tables,
                     "table_rows": page_table_rows,
                     "table_cell_lines": _extract_table_cell_lines(page_table_rows),
+                    "table_cell_units": _extract_table_cell_units(page_table_rows),
                     "warnings": page_warnings,
                 })
             except Exception as error:
@@ -747,6 +803,7 @@ def llm_ocr(
                     "tables": [],
                     "table_rows": [],
                     "table_cell_lines": [],
+                    "table_cell_units": [],
                     "warnings": [f"OCR page failed: {type(error).__name__}: {error}"],
                 })
     finally:
@@ -760,6 +817,7 @@ def llm_ocr(
         "text": "\n\n".join(page["text"] for page in pages if page.get("text")),
         "table_rows": [row for page in pages for row in page.get("table_rows", [])],
         "table_cell_lines": [line for page in pages for line in page.get("table_cell_lines", [])],
+        "table_cell_units": [unit for page in pages for unit in page.get("table_cell_units", [])],
     }
 
 

@@ -1,6 +1,6 @@
 import unittest
 
-from tiwater_pdf.cli import _extract_markdown_table_rows, _extract_table_cell_lines
+from tiwater_pdf.cli import _extract_markdown_table_rows, _extract_table_cell_lines, _extract_table_cell_units
 
 
 class OcrTableRowsTest(unittest.TestCase):
@@ -54,6 +54,49 @@ class OcrTableRowsTest(unittest.TestCase):
             "page-4-table-0-row-1-cell-1-line-2",
         ])
         self.assertEqual([line["text"] for line in lines], ["First", "Second", "Third"])
+
+    def test_keeps_independent_multiline_values_as_separate_semantic_units(self):
+        rows = _extract_markdown_table_rows([
+            """| Item | Criterion |
+|---|---|
+| One | Main value at least 98%<br>High variant at most 2%<br>Low variant at most 0.5% |"""
+        ], 4)
+
+        units = [unit for unit in _extract_table_cell_units(rows) if unit["cell_index"] == 1 and unit["row_index"] == 1]
+
+        self.assertEqual([unit["text"] for unit in units], [
+            "Main value at least 98%",
+            "High variant at most 2%",
+            "Low variant at most 0.5%",
+        ])
+        self.assertTrue(all(len(unit["source_line_ids"]) == 1 for unit in units))
+
+    def test_joins_a_wrapped_measurement_unit_to_the_preceding_value(self):
+        rows = _extract_markdown_table_rows([
+            """| Item | Criterion |
+|---|---|
+| One | Count must not exceed 3<br>cfu/30 ml |"""
+        ], 7)
+
+        units = [unit for unit in _extract_table_cell_units(rows) if unit["cell_index"] == 1 and unit["row_index"] == 1]
+
+        self.assertEqual(len(units), 1)
+        self.assertEqual(units[0]["text"], "Count must not exceed 3 cfu/30 ml")
+        self.assertEqual(units[0]["source_line_ids"], [
+            "page-7-table-0-row-1-cell-1-line-0",
+            "page-7-table-0-row-1-cell-1-line-1",
+        ])
+
+    def test_does_not_merge_a_standalone_word_with_the_previous_line(self):
+        rows = _extract_markdown_table_rows([
+            """| Item | Criterion |
+|---|---|
+| One | First criterion<br>Pending |"""
+        ], 8)
+
+        units = [unit for unit in _extract_table_cell_units(rows) if unit["cell_index"] == 1 and unit["row_index"] == 1]
+
+        self.assertEqual([unit["text"] for unit in units], ["First criterion", "Pending"])
 
 
 if __name__ == "__main__":
