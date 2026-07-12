@@ -40,7 +40,7 @@ public static class WpsWriterPdfConverter
             {
                 try
                 {
-                    RunWpsHelper(xvfb, python, helperPath, input, output);
+                    RunWpsHelper(xvfb, python, helperPath, input, output, tempRoot);
                     lastError = null;
                     break;
                 }
@@ -59,9 +59,9 @@ public static class WpsWriterPdfConverter
         }
     }
 
-    private static void RunWpsHelper(string xvfb, string python, string helperPath, string input, string output)
+    private static void RunWpsHelper(string xvfb, string python, string helperPath, string input, string output, string tempRoot)
     {
-        var startInfo = new ProcessStartInfo { FileName = xvfb, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+        var startInfo = CreateProcessStartInfo(xvfb, tempRoot);
         foreach (var arg in new[] { "-a", python, helperPath, Path.GetFullPath(input), Path.GetFullPath(output) }) startInfo.ArgumentList.Add(arg);
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start WPS Writer RPC conversion.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
@@ -79,6 +79,16 @@ public static class WpsWriterPdfConverter
             throw new InvalidOperationException($"WPS Writer RPC failed to convert {input} to PDF." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
         }
     }
+
+    internal static ProcessStartInfo CreateProcessStartInfo(string executable, string isolatedWorkingDirectory)
+        => new()
+        {
+            FileName = executable,
+            WorkingDirectory = Path.GetFullPath(isolatedWorkingDirectory),
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
 
     public static bool IsTransientStartupFailure(string message)
         => message.Contains("getWpsApplication failed", StringComparison.OrdinalIgnoreCase)

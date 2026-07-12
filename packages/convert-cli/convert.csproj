@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-convert</ToolCommandName>
     <PackageId>tiwater.convert.cli</PackageId>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Authors>Tiwater</Authors>
     <Description>Generic office format conversion CLI.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -23,6 +23,10 @@
 
   <ItemGroup>
     <PackageReference Include="NPOI" Version="2.7.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="convert-cli.tests" />
   </ItemGroup>
 
   <ItemGroup>

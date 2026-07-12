@@ -46,6 +46,7 @@ public static class WpsSpreadsheetConverter
             var startInfo = new ProcessStartInfo
             {
                 FileName = xvfb,
+                WorkingDirectory = tempRoot,
                 RedirectStandardError = true,
                 RedirectStandardOutput = true,
                 UseShellExecute = false,

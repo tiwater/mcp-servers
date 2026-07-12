@@ -110,6 +110,18 @@ public class ConvertCliTests
         Assert.True(WpsWriterPdfConverter.IsTransientStartupFailure(message));
     }
 
+    [Fact]
+    public void Wps_writer_runs_in_an_isolated_working_directory()
+    {
+        var isolated = Path.Combine(Path.GetTempPath(), $"wps-working-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(isolated);
+
+        var startInfo = WpsWriterPdfConverter.CreateProcessStartInfo("xvfb-run", isolated);
+
+        Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
+        Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
+    }
+
     private static string CreateLegacyXlsFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"legacy-convert-{Guid.NewGuid():N}.xls");
