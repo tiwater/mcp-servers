@@ -175,6 +175,7 @@ public static class Inspector
                     GridAfter: gridAfter,
                     CellCount: cells.Count,
                     GridWidth: gridWidth,
+                    CantSplit: row.TableRowProperties?.GetFirstChild<CantSplit>() is not null,
                     Cells: cellDetails));
             }
 

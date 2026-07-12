@@ -100,6 +100,7 @@ public sealed record TableRowDetail(
     int GridAfter,
     int CellCount,
     int GridWidth,
+    bool CantSplit,
     IReadOnlyList<TableCellDetail> Cells);
 
 public sealed record TableDetail(
@@ -213,6 +214,7 @@ public sealed record DocxEditOperation(
     string? Height = null,
     string? HeightRule = null,
     bool? NoWrap = null,
+    bool? CantSplit = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null);
 
 public sealed record DocxTableCellInput(

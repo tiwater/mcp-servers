@@ -98,6 +98,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `setTableCellNoWrap`
 - `setTableCellFontSize`
 - `setTableRowHeight`
+- `setTableRowCantSplit`
 - `mergeTableCells`
 - `unmergeTableRowHorizontalCells`
 - `unmergeTableColumnVerticalCells`
@@ -123,6 +124,7 @@ When the target cell is empty, the generated runs inherit font-related formattin
 `setTableCellNoWrap` accepts optional `noWrap`; `true` or omitted writes Word `w:noWrap`, and `false` removes it.
 `setTableCellFontSize` accepts `fontSize` as OpenXML half-points (`18`) or points (`9pt`).
 `setTableRowHeight` accepts `height` in twips and optional `heightRule` (`atLeast`, `exact`, `auto`).
+`setTableRowCantSplit` accepts `cantSplit: true|false` and controls the Word table-row `w:cantSplit` property. `inspect-tables` reports the row property as `CantSplit`.
 `mergeTableCells` merges a horizontal cell range when `rowIndex/startCellIndex/endCellIndex` are provided, or a vertical row range when `cellIndex/startRowIndex/endRowIndex` are provided.
 `unmergeTableRowHorizontalCells` splits one horizontally merged visible cell in `tableIndex/rowIndex/cellIndex` back into its grid columns, preserving the original text in the first cell and inserting empty styled cells for the remaining columns.
 `unmergeTableColumnVerticalCells` removes vertical merge markers in `tableIndex/cellIndex/startRowIndex/endRowIndex` and fills continuation cells from the latest visible content.

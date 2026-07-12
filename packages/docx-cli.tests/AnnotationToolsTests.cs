@@ -579,7 +579,8 @@ public class AnnotationToolsTests
         var result = Editor.Apply(docPath, output, [
             new DocxEditOperation("setTableCellFontSize", TableIndex: 0, RowIndex: 0, CellIndex: 1, FontSize: "9pt"),
             new DocxEditOperation("setTableCellNoWrap", TableIndex: 0, RowIndex: 0, CellIndex: 1),
-            new DocxEditOperation("setTableRowHeight", TableIndex: 0, RowIndex: 0, Height: "240", HeightRule: "exact")
+            new DocxEditOperation("setTableRowHeight", TableIndex: 0, RowIndex: 0, Height: "240", HeightRule: "exact"),
+            new DocxEditOperation("setTableRowCantSplit", TableIndex: 0, RowIndex: 0, CantSplit: true)
         ]);
 
         Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
@@ -599,8 +600,29 @@ public class AnnotationToolsTests
         Assert.NotNull(height);
         Assert.Equal((UInt32Value)240U, height!.Val!);
         Assert.Equal(HeightRuleValues.Exact, height.HeightType!.Value);
+        Assert.NotNull(row.GetFirstChild<TableRowProperties>()!.GetFirstChild<CantSplit>());
         var validationErrors = new OpenXmlValidator().Validate(doc).Select(error => error.Description).ToList();
         Assert.True(validationErrors.Count == 0, string.Join(Environment.NewLine, validationErrors));
+    }
+
+    [Fact]
+    public void Edit_can_remove_table_row_cant_split_and_inspector_reports_state()
+    {
+        var docPath = CreateTwoCellTableFixture();
+        var withCantSplit = Path.Combine(Path.GetTempPath(), $"table-cant-split-{Guid.NewGuid():N}.docx");
+        var withoutCantSplit = Path.Combine(Path.GetTempPath(), $"table-can-split-{Guid.NewGuid():N}.docx");
+
+        var addResult = Editor.Apply(docPath, withCantSplit, [
+            new DocxEditOperation("setTableRowCantSplit", TableIndex: 0, RowIndex: 0, CantSplit: true)
+        ]);
+        Assert.True(Assert.Single(addResult.AppliedOperations).Applied);
+        Assert.True(Assert.Single(Inspector.InspectTables(withCantSplit).Tables).Rows[0].CantSplit);
+
+        var removeResult = Editor.Apply(withCantSplit, withoutCantSplit, [
+            new DocxEditOperation("setTableRowCantSplit", TableIndex: 0, RowIndex: 0, CantSplit: false)
+        ]);
+        Assert.True(Assert.Single(removeResult.AppliedOperations).Applied);
+        Assert.False(Assert.Single(Inspector.InspectTables(withoutCantSplit).Tables).Rows[0].CantSplit);
     }
 
     [Fact]

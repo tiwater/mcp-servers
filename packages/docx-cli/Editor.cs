@@ -92,6 +92,7 @@ public static class Editor
             "setTableCellNoWrap" => SetTableCellNoWrap(body, operation),
             "setTableCellFontSize" => SetTableCellFontSize(body, operation),
             "setTableRowHeight" => SetTableRowHeight(body, operation),
+            "setTableRowCantSplit" => SetTableRowCantSplit(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
             "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
             "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
@@ -546,6 +547,28 @@ public static class Editor
         });
 
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}] height");
+    }
+
+    private static DocxEditAppliedOperation SetTableRowCantSplit(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CantSplit is null)
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, and cantSplit are required");
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value < 0 || operation.RowIndex.Value >= rows.Count)
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {operation.RowIndex} is out of range");
+
+        var properties = rows[operation.RowIndex.Value].GetFirstChild<TableRowProperties>()
+            ?? rows[operation.RowIndex.Value].PrependChild(new TableRowProperties());
+        properties.RemoveAllChildren<CantSplit>();
+        if (operation.CantSplit.Value) properties.AppendChild(new CantSplit());
+
+        return new DocxEditAppliedOperation(operation.Type, true,
+            $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}] cantSplit={operation.CantSplit.Value.ToString().ToLowerInvariant()}");
     }
 
     private static string? NormalizeFontSize(string? value)
