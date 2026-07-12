@@ -35,44 +35,54 @@ public static class WpsWriterPdfConverter
 
         try
         {
-            var startInfo = new ProcessStartInfo
+            Exception? lastError = null;
+            for (var attempt = 1; attempt <= 2; attempt++)
             {
-                FileName = xvfb,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-            };
-            startInfo.ArgumentList.Add("-a");
-            startInfo.ArgumentList.Add(python);
-            startInfo.ArgumentList.Add(helperPath);
-            startInfo.ArgumentList.Add(Path.GetFullPath(input));
-            startInfo.ArgumentList.Add(Path.GetFullPath(output));
-
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Failed to start WPS Writer RPC conversion.");
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                throw new TimeoutException("WPS Writer RPC PDF conversion timed out after 180 seconds.");
+                try
+                {
+                    RunWpsHelper(xvfb, python, helperPath, input, output);
+                    lastError = null;
+                    break;
+                }
+                catch (InvalidOperationException error) when (attempt == 1 && IsTransientStartupFailure(error.Message))
+                {
+                    lastError = error;
+                    if (File.Exists(output)) File.Delete(output);
+                    Thread.Sleep(1000);
+                }
             }
-
-            var stdout = stdoutTask.GetAwaiter().GetResult();
-            var stderr = stderrTask.GetAwaiter().GetResult();
-            if (process.ExitCode != 0 || !IsPdf(output))
-            {
-                var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static s => !string.IsNullOrWhiteSpace(s)));
-                throw new InvalidOperationException(
-                    $"WPS Writer RPC failed to convert {input} to PDF."
-                    + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
-            }
+            if (lastError is not null) throw lastError;
         }
         finally
         {
             try { Directory.Delete(tempRoot, recursive: true); } catch { }
         }
     }
+
+    private static void RunWpsHelper(string xvfb, string python, string helperPath, string input, string output)
+    {
+        var startInfo = new ProcessStartInfo { FileName = xvfb, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+        foreach (var arg in new[] { "-a", python, helperPath, Path.GetFullPath(input), Path.GetFullPath(output) }) startInfo.ArgumentList.Add(arg);
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start WPS Writer RPC conversion.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            throw new TimeoutException("WPS Writer RPC PDF conversion timed out after 180 seconds.");
+        }
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+        if (process.ExitCode != 0 || !IsPdf(output))
+        {
+            var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static s => !string.IsNullOrWhiteSpace(s)));
+            throw new InvalidOperationException($"WPS Writer RPC failed to convert {input} to PDF." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+        }
+    }
+
+    public static bool IsTransientStartupFailure(string message)
+        => message.Contains("getWpsApplication failed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Fatal IO error on X server", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPdf(string path)
     {

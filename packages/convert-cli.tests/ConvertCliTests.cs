@@ -102,6 +102,14 @@ public class ConvertCliTests
         }
     }
 
+    [Theory]
+    [InlineData("getWpsApplication failed: 0x80000008")]
+    [InlineData("Fatal IO error on X server :101")]
+    public void Wps_writer_recognizes_transient_rpc_startup_failures(string message)
+    {
+        Assert.True(WpsWriterPdfConverter.IsTransientStartupFailure(message));
+    }
+
     private static string CreateLegacyXlsFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"legacy-convert-{Guid.NewGuid():N}.xls");
