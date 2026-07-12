@@ -1,6 +1,6 @@
 import unittest
 
-from tiwater_pdf.cli import _extract_markdown_table_rows
+from tiwater_pdf.cli import _extract_markdown_table_rows, _extract_table_cell_lines
 
 
 class OcrTableRowsTest(unittest.TestCase):
@@ -38,6 +38,22 @@ class OcrTableRowsTest(unittest.TestCase):
 
     def test_ignores_non_string_table_entries(self):
         self.assertEqual(_extract_markdown_table_rows([None, {"rows": []}], 1), [])
+
+    def test_exports_each_multiline_cell_value_as_stable_line_evidence(self):
+        rows = _extract_markdown_table_rows([
+            """| Item | Criterion |
+|---|---|
+| One | First<br>Second<br>Third |"""
+        ], 4)
+
+        lines = [line for line in _extract_table_cell_lines(rows) if line["cell_index"] == 1 and line["row_index"] == 1]
+
+        self.assertEqual([line["line_id"] for line in lines], [
+            "page-4-table-0-row-1-cell-1-line-0",
+            "page-4-table-0-row-1-cell-1-line-1",
+            "page-4-table-0-row-1-cell-1-line-2",
+        ])
+        self.assertEqual([line["text"] for line in lines], ["First", "Second", "Third"])
 
 
 if __name__ == "__main__":

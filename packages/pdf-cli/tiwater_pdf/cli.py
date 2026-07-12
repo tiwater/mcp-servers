@@ -645,6 +645,28 @@ def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
     return rows
 
 
+def _extract_table_cell_lines(rows: list[dict]) -> list[dict]:
+    """Expose every non-empty normalized cell line with a stable evidence id."""
+    lines: list[dict] = []
+    for row in rows:
+        for cell_index, cell in enumerate(row.get("cells", [])):
+            for line_index, value in enumerate(str(cell).splitlines()):
+                text = value.strip()
+                if not text:
+                    continue
+                lines.append({
+                    "line_id": f"{row['row_id']}-cell-{cell_index}-line-{line_index}",
+                    "row_id": row["row_id"],
+                    "page": row["page"],
+                    "table_index": row["table_index"],
+                    "row_index": row["row_index"],
+                    "cell_index": cell_index,
+                    "line_index": line_index,
+                    "text": text,
+                })
+    return lines
+
+
 def llm_ocr(
     pdf_path: Path,
     page_numbers: list[int] | None = None,
@@ -709,11 +731,13 @@ def llm_ocr(
                 parsed = _extract_json_object(content)
                 page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
                 page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
+                page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
                 pages.append({
                     "page": page_number,
                     "text": str(parsed.get("text", "")).strip(),
                     "tables": page_tables,
-                    "table_rows": _extract_markdown_table_rows(page_tables, page_number),
+                    "table_rows": page_table_rows,
+                    "table_cell_lines": _extract_table_cell_lines(page_table_rows),
                     "warnings": page_warnings,
                 })
             except Exception as error:
@@ -722,6 +746,7 @@ def llm_ocr(
                     "text": "",
                     "tables": [],
                     "table_rows": [],
+                    "table_cell_lines": [],
                     "warnings": [f"OCR page failed: {type(error).__name__}: {error}"],
                 })
     finally:
@@ -734,6 +759,7 @@ def llm_ocr(
         "page_count": len(pages),
         "text": "\n\n".join(page["text"] for page in pages if page.get("text")),
         "table_rows": [row for page in pages for row in page.get("table_rows", [])],
+        "table_cell_lines": [line for page in pages for line in page.get("table_cell_lines", [])],
     }
 
 
