@@ -69,6 +69,14 @@ tiwater-pdf ocr scan-1.pdf scan-2.pdf scan-3.pdf \
   --json
 ```
 
+JSON OCR output preserves each model-returned markdown table and also exposes
+deterministic `table_rows` evidence. Every row has a stable
+`page-<n>-table-<n>-row-<n>` id, page/table/row coordinates, header flag, and
+normalized `cells[]`; blank continuation cells remain blank. `table_rows` is
+available both on each page and as a flattened top-level array so downstream
+inventory validation can prove row coverage without reparsing markdown or
+matching known business text.
+
 Configuration is read from explicit flags first, then environment variables:
 
 - `--api-key`, `SUPEN_LLM_TOKEN`, `SUPEN_LLM_API_KEY`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -583,6 +584,67 @@ def _extract_json_object(text: str) -> dict:
     return data
 
 
+def _split_markdown_table_row(line: str) -> list[str]:
+    """Split one pipe-table row without treating escaped pipes as delimiters."""
+    value = line.strip()
+    if value.startswith("|"):
+        value = value[1:]
+    if value.endswith("|") and not value.endswith(r"\|"):
+        value = value[:-1]
+    cells: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in value:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "|":
+            cells.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    if escaped:
+        current.append("\\")
+    cells.append("".join(current).strip())
+    return cells
+
+
+def _is_markdown_separator_row(cells: list[str]) -> bool:
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in cells)
+
+
+def _normalize_markdown_cell(cell: str) -> str:
+    return re.sub(r"\s*<br\s*/?>\s*", "\n", cell, flags=re.IGNORECASE).strip()
+
+
+def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
+    """Expose model-returned markdown table rows as stable runtime evidence."""
+    rows: list[dict] = []
+    for table_index, table in enumerate(tables):
+        if not isinstance(table, str):
+            continue
+        parsed = [_split_markdown_table_row(line) for line in table.splitlines() if "|" in line]
+        separator_index = next((index for index, cells in enumerate(parsed) if _is_markdown_separator_row(cells)), None)
+        data_index = 0
+        for raw_index, cells in enumerate(parsed):
+            if _is_markdown_separator_row(cells):
+                continue
+            normalized_cells = [_normalize_markdown_cell(cell) for cell in cells]
+            rows.append({
+                "row_id": f"page-{page_number}-table-{table_index}-row-{data_index}",
+                "page": page_number,
+                "table_index": table_index,
+                "row_index": data_index,
+                "source_line_index": raw_index,
+                "is_header": separator_index is not None and raw_index < separator_index,
+                "cells": normalized_cells,
+            })
+            data_index += 1
+    return rows
+
+
 def llm_ocr(
     pdf_path: Path,
     page_numbers: list[int] | None = None,
@@ -646,10 +708,12 @@ def llm_ocr(
                 content = response.choices[0].message.content or ""
                 parsed = _extract_json_object(content)
                 page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
+                page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
                 pages.append({
                     "page": page_number,
                     "text": str(parsed.get("text", "")).strip(),
-                    "tables": parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else [],
+                    "tables": page_tables,
+                    "table_rows": _extract_markdown_table_rows(page_tables, page_number),
                     "warnings": page_warnings,
                 })
             except Exception as error:
@@ -657,6 +721,7 @@ def llm_ocr(
                     "page": page_number,
                     "text": "",
                     "tables": [],
+                    "table_rows": [],
                     "warnings": [f"OCR page failed: {type(error).__name__}: {error}"],
                 })
     finally:
@@ -668,6 +733,7 @@ def llm_ocr(
         "pages": pages,
         "page_count": len(pages),
         "text": "\n\n".join(page["text"] for page in pages if page.get("text")),
+        "table_rows": [row for page in pages for row in page.get("table_rows", [])],
     }
 
 
