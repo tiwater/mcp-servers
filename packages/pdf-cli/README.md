@@ -76,6 +76,10 @@ normalized `cells[]`; blank continuation cells remain blank. `table_rows` is
 available both on each page and as a flattened top-level array so downstream
 inventory validation can prove row coverage without reparsing markdown or
 matching known business text.
+Top-level `table_logical_rows` additionally joins an unambiguous suffix-only
+row at the start of the next page to its owning row at the previous page end.
+It retains every contributing physical `source_row_ids` value, so downstream
+field binding can use complete cross-page cells without guessing ownership.
 The same output exposes `table_cell_lines[]`: every non-empty normalized line
 inside every cell has a stable id derived from its row/cell/line coordinates.
 This keeps source evidence stable when an OCR model represents repeated visual

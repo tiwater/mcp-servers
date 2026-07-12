@@ -722,6 +722,41 @@ def _extract_table_cell_units(rows: list[dict]) -> list[dict]:
     return units
 
 
+def _extract_table_logical_rows(pages: list[dict]) -> list[dict]:
+    """Join unambiguous page-boundary suffix rows to their owning logical row.
+
+    A table split by a page break may put only trailing cells of the last
+    logical row at the start of the next page. Physical ``table_rows`` remain
+    unchanged; this evidence adds provenance-preserving logical ownership.
+    """
+    logical: list[dict] = []
+    previous_page = None
+    for page in pages:
+        physical = page.get("table_rows", [])
+        rows = [{**row, "logical_row_id": row["row_id"], "source_row_ids": [row["row_id"]]} for row in physical]
+        if previous_page is not None and page.get("page") == previous_page.get("page", 0) + 1 and rows and logical:
+            previous_rows = previous_page.get("table_rows", [])
+            previous_last = previous_rows[-1] if previous_rows else None
+            current_first = rows[0]
+            cells = current_first.get("cells", [])
+            nonempty = [index for index, value in enumerate(cells) if str(value).strip()]
+            same_width = previous_last and len(previous_last.get("cells", [])) == len(cells)
+            suffix_only = bool(nonempty and nonempty[0] > 0 and all(not str(cells[index]).strip() for index in range(nonempty[0])))
+            if same_width and suffix_only and logical[-1].get("source_row_ids", [])[-1] == previous_last["row_id"]:
+                owner = logical[-1]
+                owner_cells = list(owner.get("cells", []))
+                for index in nonempty:
+                    addition = str(cells[index]).strip()
+                    owner_cells[index] = "\n".join(value for value in (str(owner_cells[index]).strip(), addition) if value)
+                owner["cells"] = owner_cells
+                owner["source_row_ids"].append(current_first["row_id"])
+                owner["page_end"] = current_first["page"]
+                rows = rows[1:]
+        logical.extend(rows)
+        previous_page = page
+    return logical
+
+
 def llm_ocr(
     pdf_path: Path,
     page_numbers: list[int] | None = None,
@@ -809,6 +844,7 @@ def llm_ocr(
     finally:
         doc.close()
 
+    table_logical_rows = _extract_table_logical_rows(pages)
     return {
         "file": str(pdf_path),
         "model": llm_model,
@@ -818,6 +854,7 @@ def llm_ocr(
         "table_rows": [row for page in pages for row in page.get("table_rows", [])],
         "table_cell_lines": [line for page in pages for line in page.get("table_cell_lines", [])],
         "table_cell_units": [unit for page in pages for unit in page.get("table_cell_units", [])],
+        "table_logical_rows": table_logical_rows,
     }
 
 

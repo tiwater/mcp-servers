@@ -1,6 +1,6 @@
 import unittest
 
-from tiwater_pdf.cli import _extract_markdown_table_rows, _extract_table_cell_lines, _extract_table_cell_units
+from tiwater_pdf.cli import _extract_markdown_table_rows, _extract_table_cell_lines, _extract_table_cell_units, _extract_table_logical_rows
 
 
 class OcrTableRowsTest(unittest.TestCase):
@@ -97,6 +97,30 @@ class OcrTableRowsTest(unittest.TestCase):
         units = [unit for unit in _extract_table_cell_units(rows) if unit["cell_index"] == 1 and unit["row_index"] == 1]
 
         self.assertEqual([unit["text"] for unit in units], ["First criterion", "Pending"])
+
+    def test_joins_a_suffix_only_next_page_row_to_its_logical_owner(self):
+        page_one_rows = _extract_markdown_table_rows(["""| Group | Item | Criterion | Method |
+|---|---|---|---|
+| Physical | pH | 5.5 +/- 0.3 | Pharmacopeia |"""], 3)
+        page_two_rows = _extract_markdown_table_rows(["""| | | | General rule 0631<br>SOP-2021 |
+|---|---|---|---|
+| | Osmolality | 240 - 360 | SOP-2025 |"""], 4)
+
+        rows = _extract_table_logical_rows([
+            {"page": 3, "table_rows": page_one_rows},
+            {"page": 4, "table_rows": page_two_rows},
+        ])
+
+        ph = next(row for row in rows if "pH" in row["cells"])
+        self.assertEqual(ph["cells"][3], "Pharmacopeia\nGeneral rule 0631\nSOP-2021")
+        self.assertEqual(ph["source_row_ids"], ["page-3-table-0-row-1", "page-4-table-0-row-0"])
+        self.assertFalse(any(row["row_id"] == "page-4-table-0-row-0" for row in rows))
+
+    def test_does_not_join_a_next_page_row_that_starts_a_new_item(self):
+        page_one_rows = _extract_markdown_table_rows(["| Group | Item | Criterion | Method |\n|---|---|---|---|\n| A | One | C1 | M1 |"], 1)
+        page_two_rows = _extract_markdown_table_rows(["| Group | Item | Criterion | Method |\n|---|---|---|---|\n| B | Two | C2 | M2 |"], 2)
+        rows = _extract_table_logical_rows([{"page": 1, "table_rows": page_one_rows}, {"page": 2, "table_rows": page_two_rows}])
+        self.assertEqual(len(rows), 4)
 
 
 if __name__ == "__main__":
