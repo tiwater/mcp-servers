@@ -2,10 +2,24 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tiwater_pdf.cli import DEFAULT_LLM_TIMEOUT_SECONDS, DEFAULT_OCR_MODEL, _resolve_llm_config, _resolve_llm_enable_thinking, llm_ocr
+from tiwater_pdf.cli import DEFAULT_LLM_TIMEOUT_SECONDS, DEFAULT_OCR_MODEL, _call_vision_with_retry, _resolve_llm_config, _resolve_llm_enable_thinking, llm_ocr
 
 
 class ResolveLlmConfigTest(unittest.TestCase):
+    def test_retries_transient_gateway_invalid_url_but_not_other_bad_requests(self):
+        attempts = []
+
+        def transient():
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise RuntimeError("invalid_parameter_error: provided URL does not appear to be valid")
+            return "ok"
+
+        result, count = _call_vision_with_retry(transient, sleep_fn=lambda _: None)
+        self.assertEqual((result, count), ("ok", 3))
+        with self.assertRaisesRegex(RuntimeError, "unsupported format"):
+            _call_vision_with_retry(lambda: (_ for _ in ()).throw(RuntimeError("unsupported format")), sleep_fn=lambda _: None)
+
     def test_builtin_ocr_default_is_qwen37_plus(self):
         self.assertEqual(DEFAULT_OCR_MODEL, "qwen3.7-plus")
         self.assertEqual(llm_ocr.__defaults__[3], "qwen3.7-plus")

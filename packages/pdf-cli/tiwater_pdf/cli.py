@@ -18,6 +18,26 @@ import fitz
 
 DEFAULT_OCR_MODEL = "qwen3.7-plus"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
+DEFAULT_VISION_REQUEST_ATTEMPTS = 3
+
+
+def _is_retryable_vision_error(error: Exception) -> bool:
+    status = getattr(error, "status_code", None)
+    text = str(error).lower()
+    return status == 429 or (isinstance(status, int) and status >= 500) or any(marker in text for marker in (
+        "timeout", "timed out", "connection reset", "temporarily unavailable",
+        "provided url does not appear to be valid", "invalid_parameter_error",
+    ))
+
+
+def _call_vision_with_retry(call, attempts: int = DEFAULT_VISION_REQUEST_ATTEMPTS, sleep_fn=time.sleep):
+    for attempt in range(1, attempts + 1):
+        try:
+            return call(), attempt
+        except Exception as error:
+            if attempt >= attempts or not _is_retryable_vision_error(error):
+                raise
+            sleep_fn(attempt * 2)
 
 
 def _find_tables_quiet(page):
@@ -797,25 +817,13 @@ def llm_ocr(
             request_kwargs = {}
             if resolved_enable_thinking is not None:
                 request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
-            response = client.chat.completions.create(
-                model=llm_model,
-                response_format={"type": "json_object"},
-                max_tokens=max_tokens,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{b64_image}"},
-                            },
-                        ],
-                    }
-                ],
-                temperature=0.0,
-                **request_kwargs,
-            )
+            response, request_attempts = _call_vision_with_retry(lambda: client.chat.completions.create(
+                model=llm_model, response_format={"type": "json_object"}, max_tokens=max_tokens,
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
+                ]}], temperature=0.0, **request_kwargs,
+            ))
             try:
                 content = response.choices[0].message.content or ""
                 parsed = _extract_json_object(content)
@@ -830,6 +838,7 @@ def llm_ocr(
                     "table_cell_lines": _extract_table_cell_lines(page_table_rows),
                     "table_cell_units": _extract_table_cell_units(page_table_rows),
                     "warnings": page_warnings,
+                    "request_attempts": request_attempts,
                 })
             except Exception as error:
                 pages.append({
