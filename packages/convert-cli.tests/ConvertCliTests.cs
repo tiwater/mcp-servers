@@ -65,11 +65,41 @@ public class ConvertCliTests
         var input = CreateDocxFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
 
-        OfficePdfConverter.ConvertToPdf(input, output, "docx");
+        var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
+        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "libreoffice");
+        OfficePdfConversionResult result;
+        try
+        {
+            result = OfficePdfConverter.ConvertToPdf(input, output, "docx");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", originalBackend);
+        }
 
         Assert.True(File.Exists(output));
         Assert.True(new FileInfo(output).Length > 1_000);
         Assert.Equal("%PDF", File.ReadAllText(output)[..4]);
+        Assert.Equal("libreoffice", result.Backend);
+    }
+
+    [Fact]
+    public void Required_wps_writer_backend_fails_closed_when_runtime_is_unavailable()
+    {
+        if (WpsWriterPdfConverter.IsAvailable()) return;
+        var input = CreateDocxFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
+        var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
+        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps-writer");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => OfficePdfConverter.ConvertToPdf(input, output, "docx"));
+            Assert.Contains("WPS Writer PDF backend was required", ex.Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", originalBackend);
+        }
     }
 
     private static string CreateLegacyXlsFixture()

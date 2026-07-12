@@ -3,6 +3,8 @@ using NPOI.XSSF.UserModel;
 
 namespace Dockit.Convert;
 
+public sealed record OfficePdfConversionResult(string Backend, string? FallbackReason = null);
+
 public static class OfficeConverter
 {
     public static string? FindSofficeBinary()
@@ -18,7 +20,7 @@ public static class OfficeConverter
         return null;
     }
 
-    public static void ConvertToPdf(string input, string output, string sourceFormat, string? sofficePath = null)
+    public static OfficePdfConversionResult ConvertToPdf(string input, string output, string sourceFormat, string? sofficePath = null)
     {
         if (!File.Exists(input))
         {
@@ -51,7 +53,28 @@ public static class OfficeConverter
                 $"Command source format {normalizedFormat} does not match input extension {inputExtension}: {input}");
         }
 
+        var writerFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "doc", "docx", "odt", "rtf" };
+        var requestedBackend = (Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND") ?? "auto").Trim().ToLowerInvariant();
+        if (!new[] { "auto", "wps-writer", "libreoffice" }.Contains(requestedBackend))
+        {
+            throw new InvalidOperationException($"Unsupported TIWATER_OFFICE_PDF_BACKEND: {requestedBackend}");
+        }
+
+        if (writerFormats.Contains(normalizedFormat) && requestedBackend != "libreoffice")
+        {
+            if (WpsWriterPdfConverter.IsAvailable())
+            {
+                WpsWriterPdfConverter.ConvertToPdf(input, output);
+                return new OfficePdfConversionResult("wps-writer");
+            }
+            if (requestedBackend == "wps-writer")
+            {
+                throw new InvalidOperationException("WPS Writer PDF backend was required but WPS Writer, xvfb-run, or pywpsrpc is unavailable.");
+            }
+        }
+
         ConvertWithSoffice(input, output, "pdf", sofficePath);
+        return new OfficePdfConversionResult("libreoffice", writerFormats.Contains(normalizedFormat) ? "wps-writer-unavailable" : null);
     }
 
     public static void ConvertXlsToXlsx(string input, string output, string? sofficePath = null)

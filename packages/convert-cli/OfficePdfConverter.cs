@@ -7,8 +7,8 @@ public static class OfficePdfConverter
         return OfficeConverter.FindSofficeBinary();
     }
 
-    public static void ConvertToPdf(string input, string output, string sourceFormat, string? sofficePath = null)
+    public static OfficePdfConversionResult ConvertToPdf(string input, string output, string sourceFormat, string? sofficePath = null)
     {
-        OfficeConverter.ConvertToPdf(input, output, sourceFormat, sofficePath);
+        return OfficeConverter.ConvertToPdf(input, output, sourceFormat, sofficePath);
     }
 }
