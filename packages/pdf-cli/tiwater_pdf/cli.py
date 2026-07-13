@@ -639,6 +639,30 @@ def _normalize_markdown_cell(cell: str) -> str:
     return re.sub(r"\s*<br\s*/?>\s*", "\n", cell, flags=re.IGNORECASE).strip()
 
 
+def _drop_globally_empty_markdown_columns(rows: list[list[str]]) -> list[list[str]]:
+    """Remove model-invented columns that contain no evidence in any row.
+
+    Vision models can represent one visually merged header cell as several
+    empty Markdown columns.  Those columns are not part of the source table and
+    make otherwise identical OCR runs expose different cell indexes.  A column
+    is safe to remove only when every non-separator row is empty at that index;
+    blank continuation cells in a column that contains any evidence are kept.
+    """
+    content_rows = [cells for cells in rows if not _is_markdown_separator_row(cells)]
+    width = max((len(cells) for cells in content_rows), default=0)
+    empty_indexes = {
+        index
+        for index in range(1, max(1, width - 1))
+        if all(index >= len(cells) or not _normalize_markdown_cell(cells[index]) for cells in content_rows)
+    }
+    if not empty_indexes or len(empty_indexes) == width:
+        return rows
+    return [
+        [cell for index, cell in enumerate(cells) if index not in empty_indexes]
+        for cells in rows
+    ]
+
+
 def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
     """Expose model-returned markdown table rows as stable runtime evidence."""
     rows: list[dict] = []
@@ -646,6 +670,7 @@ def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
         if not isinstance(table, str):
             continue
         parsed = [_split_markdown_table_row(line) for line in table.splitlines() if "|" in line]
+        parsed = _drop_globally_empty_markdown_columns(parsed)
         separator_index = next((index for index, cells in enumerate(parsed) if _is_markdown_separator_row(cells)), None)
         data_index = 0
         for raw_index, cells in enumerate(parsed):

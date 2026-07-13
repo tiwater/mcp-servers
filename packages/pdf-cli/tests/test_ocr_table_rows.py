@@ -4,6 +4,39 @@ from tiwater_pdf.cli import _extract_markdown_table_rows, _extract_table_cell_li
 
 
 class OcrTableRowsTest(unittest.TestCase):
+    def test_drops_columns_that_are_empty_in_every_evidence_row(self):
+        tables = [
+            """| Name | Non-Reduced | | | | | | | Meets standard | Reduced | | |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| | Result ID | LMW% | Main% | HMW% | Manual | | | | Result ID | LC% | NGHC% |
+| Sample A | 1099 | 1.9 | 98.1 | ND | No | | | Yes | 1061 | 31.2 | 0.6 |"""
+        ]
+
+        rows = _extract_markdown_table_rows(tables, 10)
+
+        self.assertEqual(len(rows[0]["cells"]), 10)
+        self.assertEqual(rows[1]["cells"], [
+            "", "Result ID", "LMW%", "Main%", "HMW%", "Manual",
+            "", "Result ID", "LC%", "NGHC%",
+        ])
+        self.assertEqual(rows[2]["cells"], [
+            "Sample A", "1099", "1.9", "98.1", "ND", "No",
+            "Yes", "1061", "31.2", "0.6",
+        ])
+
+    def test_keeps_a_column_when_any_evidence_row_has_content(self):
+        tables = [
+            """| Group | Item | Criterion |
+|---|---|---|
+| Alpha | | First value |
+| Beta | Item Two | Second value |"""
+        ]
+
+        rows = _extract_markdown_table_rows(tables, 6)
+
+        self.assertTrue(all(len(row["cells"]) == 3 for row in rows))
+        self.assertEqual(rows[1]["cells"], ["Alpha", "", "First value"])
+
     def test_exports_stable_rows_and_preserves_blank_continuation_cells(self):
         tables = [
             """| Group | Item | Criterion | Method |

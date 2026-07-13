@@ -77,6 +77,11 @@ normalized `cells[]`; blank continuation cells remain blank. `table_rows` is
 available both on each page and as a flattened top-level array so downstream
 inventory validation can prove row coverage without reparsing markdown or
 matching known business text.
+Interior Markdown columns that contain no evidence in any row are removed
+during normalization. This prevents a vision model from changing downstream
+cell indexes by splitting one visual merged cell into multiple empty columns;
+leading and trailing blank columns, and any column containing evidence in at
+least one row, remain intact.
 Top-level `table_logical_rows` additionally joins an unambiguous suffix-only
 row at the start of the next page to its owning row at the previous page end.
 It retains every contributing physical `source_row_ids` value, so downstream
