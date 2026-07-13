@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Dockit.Docx;
-using Tiwater.RuntimeContracts;
 
 namespace Dockit.Docx.Cli;
 
@@ -24,9 +23,6 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "capabilities" => Task.FromResult(RunCapabilities(args[1..])),
-                "identify" => Task.FromResult(RunIdentify(args[1..])),
-                "extract-evidence" => Task.FromResult(RunExtractEvidence(args[1..])),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -36,7 +32,6 @@ internal static class Cli
                 "fill-template" => Task.FromResult(Transforms.RunFillTemplate(args[1..])),
                 "normalize-openxml" => Task.FromResult(DocxPackageNormalizer.RunNormalize(args[1..])),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
-                "edit-evidence" => Task.FromResult(RunEditEvidence(args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -120,9 +115,6 @@ internal static class Cli
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
-        Console.WriteLine("  capabilities --json");
-        Console.WriteLine("  identify <input> --json");
-        Console.WriteLine("  extract-evidence <input> --json");
         Console.WriteLine("  inspect <input.docx> [--json]");
         Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
@@ -133,7 +125,6 @@ internal static class Cli
         Console.WriteLine("  fill-template <template.docx> <data.json> <output.docx>");
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
         Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
-        Console.WriteLine("  edit-evidence <input.docx> <operations.json> <output.docx>");
     }
 
     private static Task<int> FailUnknown(string command)
@@ -141,65 +132,6 @@ internal static class Cli
         Console.Error.WriteLine($"Unknown command: {command}");
         PrintUsage();
         return Task.FromResult(1);
-    }
-
-    private static int RunCapabilities(string[] args)
-    {
-        if (args.Length != 1 || args[0] != "--json")
-        {
-            throw new InvalidOperationException("capabilities requires --json");
-        }
-
-        WriteRuntimeJson(DocxRuntimeIdentity.Capabilities());
-        return 0;
-    }
-
-    private static int RunIdentify(string[] args)
-    {
-        if (args.Length != 2 || args[1] != "--json")
-        {
-            throw new InvalidOperationException("identify requires <input> --json");
-        }
-
-        var evidence = DocxRuntimeIdentity.Identify(args[0]);
-        WriteRuntimeJson(evidence);
-        return evidence.Status == "failed" ? 1 : 0;
-    }
-
-    private static int RunExtractEvidence(string[] args)
-    {
-        if (args.Length != 2 || args[1] != "--json")
-        {
-            throw new InvalidOperationException("extract-evidence requires <input> --json");
-        }
-
-        var identify = DocxRuntimeIdentity.Identify(args[0]);
-        var report = identify.Status == "supported"
-            ? JsonSerializer.SerializeToElement(new
-            {
-                inspection = Inspector.Inspect(args[0]),
-                tables = Inspector.InspectTables(args[0]),
-            }, Json.Options)
-            : JsonSerializer.SerializeToElement(new { }, RuntimeJson.Options);
-        WriteRuntimeJson(EvidenceEnvelope.CreateExtraction(identify, report));
-        return identify.Status == "failed" ? 1 : 0;
-    }
-
-    private static int RunEditEvidence(string[] args)
-    {
-        if (args.Length != 3)
-        {
-            throw new InvalidOperationException("edit-evidence requires <input.docx> <operations.json> <output.docx>");
-        }
-        var descriptor = DocxRuntimeIdentity.Capabilities();
-        var report = Editor.ApplyWithEvidence(args[0], args[1], args[2], descriptor.Package, descriptor.Runtime);
-        WriteRuntimeJson(report);
-        return report.Summary.Rejected > 0 || report.Summary.Failed > 0 ? 1 : 0;
-    }
-
-    private static void WriteRuntimeJson<T>(T value)
-    {
-        Console.WriteLine(JsonSerializer.Serialize(value, RuntimeJson.Options));
     }
 
     private static void WriteJson<T>(T value)

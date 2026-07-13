@@ -340,7 +340,7 @@ wheels = [
 
 [[package]]
 name = "tiwater-pdf"
-version = "0.17.0"
+version = "0.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "openai" },

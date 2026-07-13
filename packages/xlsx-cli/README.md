@@ -2,24 +2,6 @@
 
 A .NET 9 globally installed command-line tool for inspecting, editing, validating, and filling `.xlsx` workbooks.
 
-## Runtime identity
-
-The runtime publishes a versioned, non-mutating capability descriptor and a
-content-based identify probe:
-
-```bash
-tiwater-xlsx capabilities --json
-tiwater-xlsx identify <input> --json
-```
-
-Identification does not use the filename extension. XLSX support requires a
-readable ZIP package with one SpreadsheetML workbook main-part content type,
-the corresponding package part, and an openable Open XML workbook part. Legacy
-XLS support requires the OLE compound-file signature and successful opening by
-the HSSF workbook loader. Renamed valid files therefore remain supported, while
-fake extensions and other OOXML packages remain unsupported. Source read
-failures return typed failed evidence without inventing a source hash.
-
 ## Installation
 
 Install the tool from the NuGet global registry using the modern .NET CLI:

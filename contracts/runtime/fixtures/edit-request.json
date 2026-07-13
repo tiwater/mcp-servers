@@ -1,7 +1,0 @@
-{
-  "operations": [
-    { "type": "setCellValue", "sheet": "Data", "cell": "A1", "value": "42" },
-    { "type": "setCellValue", "sheet": "Data", "cell": "A2", "value": "unchanged" },
-    { "type": "setCellValue", "sheet": "Missing", "cell": "A1", "value": "x" }
-  ]
-}

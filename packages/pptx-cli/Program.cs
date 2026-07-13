@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Dockit.Pptx;
-using Tiwater.RuntimeContracts;
 
 namespace Dockit.Pptx.Cli;
 
@@ -23,9 +22,6 @@ internal static class Cli
         {
             return args[0] switch
             {
-                "capabilities" => Task.FromResult(RunCapabilities(args[1..])),
-                "identify" => Task.FromResult(RunIdentify(args[1..])),
-                "extract-evidence" => Task.FromResult(RunExtractEvidence(args[1..])),
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -102,57 +98,11 @@ internal static class Cli
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
-        Console.WriteLine("  capabilities --json");
-        Console.WriteLine("  identify <input> --json");
-        Console.WriteLine("  extract-evidence <input> --json");
         Console.WriteLine("  inspect <input.pptx> [--json]");
         Console.WriteLine("  inspect <input.pptx> --json --detail");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
         Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
-    }
-
-    private static int RunCapabilities(string[] args)
-    {
-        if (args.Length != 1 || args[0] != "--json")
-        {
-            throw new InvalidOperationException("capabilities requires --json");
-        }
-
-        WriteRuntimeJson(PptxRuntimeIdentity.Capabilities());
-        return 0;
-    }
-
-    private static int RunIdentify(string[] args)
-    {
-        if (args.Length != 2 || args[1] != "--json")
-        {
-            throw new InvalidOperationException("identify requires <input> --json");
-        }
-
-        var evidence = PptxRuntimeIdentity.Identify(args[0]);
-        WriteRuntimeJson(evidence);
-        return evidence.Status == "failed" ? 1 : 0;
-    }
-
-    private static int RunExtractEvidence(string[] args)
-    {
-        if (args.Length != 2 || args[1] != "--json")
-        {
-            throw new InvalidOperationException("extract-evidence requires <input> --json");
-        }
-
-        var identify = PptxRuntimeIdentity.Identify(args[0]);
-        var report = identify.Status == "supported"
-            ? JsonSerializer.SerializeToElement(Inspector.InspectDetail(args[0]), Json.Options)
-            : JsonSerializer.SerializeToElement(new { }, RuntimeJson.Options);
-        WriteRuntimeJson(EvidenceEnvelope.CreateExtraction(identify, report));
-        return identify.Status == "failed" ? 1 : 0;
-    }
-
-    private static void WriteRuntimeJson<T>(T value)
-    {
-        Console.WriteLine(JsonSerializer.Serialize(value, RuntimeJson.Options));
     }
 
     private static Task<int> FailUnknown(string command)

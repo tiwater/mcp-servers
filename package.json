@@ -5,8 +5,5 @@
   "scripts": {
     "office": "node servers/office/index.mjs",
     "pdf": "node servers/pdf/index.mjs"
-  },
-  "devDependencies": {
-    "ajv": "^8.20.0"
   }
 }

@@ -16,10 +16,6 @@ from pathlib import Path
 
 import fitz
 
-from .runtime_identity import capabilities as runtime_capabilities
-from .runtime_identity import extraction_evidence as build_extraction_evidence
-from .runtime_identity import identify as identify_runtime
-
 DEFAULT_OCR_MODEL = "qwen3.7-plus"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 DEFAULT_VISION_REQUEST_ATTEMPTS = 3
@@ -57,12 +53,12 @@ def _is_retryable_vision_page_error(error: Exception) -> bool:
     )
 
 
-def _find_tables_quiet(page, emit_warning: bool = True):
+def _find_tables_quiet(page):
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         tables = page.find_tables()
     warning = buffer.getvalue().strip()
-    if warning and emit_warning:
+    if warning:
         print(warning, file=sys.stderr)
     return tables
 
@@ -1368,12 +1364,7 @@ def extract_tables(pdf_path: Path, page_numbers: list[int] | None = None, auto_s
     }
 
 
-def extract_table_details(
-    pdf_path: Path,
-    page_numbers: list[int] | None = None,
-    *,
-    emit_library_warnings: bool = True,
-) -> dict:
+def extract_table_details(pdf_path: Path, page_numbers: list[int] | None = None) -> dict:
     """Extract detected PDF tables with visual cell and text-span evidence.
 
     This is intentionally lower-level than extract_tables. PDF table detection does
@@ -1388,7 +1379,7 @@ def extract_table_details(
             continue
 
         page = doc[page_num]
-        for table_index, table in enumerate(_find_tables_quiet(page, emit_library_warnings)):
+        for table_index, table in enumerate(_find_tables_quiet(page)):
             title = _detect_table_title(page, table.bbox)
             extracted_rows = table.extract()
             detail_rows = []
@@ -1612,41 +1603,6 @@ def main() -> int:
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    capabilities_parser = subparsers.add_parser(
-        "capabilities",
-        help="Describe non-mutating PDF runtime capabilities",
-    )
-    capabilities_parser.add_argument(
-        "--json",
-        action="store_true",
-        required=True,
-        help="Output as JSON",
-    )
-
-    identify_parser = subparsers.add_parser(
-        "identify",
-        help="Identify PDF bytes without OCR or network access",
-    )
-    identify_parser.add_argument("input", type=Path, help="File to identify")
-    identify_parser.add_argument(
-        "--json",
-        action="store_true",
-        required=True,
-        help="Output as JSON",
-    )
-
-    extraction_parser = subparsers.add_parser(
-        "extract-evidence",
-        help="Extract hash-bound normalized PDF evidence without network access",
-    )
-    extraction_parser.add_argument("input", type=Path, help="PDF file to extract")
-    extraction_parser.add_argument(
-        "--json",
-        action="store_true",
-        required=True,
-        help="Output as JSON",
-    )
-
     # inspect command
     inspect_parser = subparsers.add_parser("inspect", help="Inspect PDF metadata")
     inspect_parser.add_argument("input", type=Path, help="PDF file to inspect")
@@ -1717,29 +1673,7 @@ def main() -> int:
         return 1
 
     try:
-        if args.command == "capabilities":
-            print(json.dumps(runtime_capabilities(), ensure_ascii=False))
-
-        elif args.command == "identify":
-            result = identify_runtime(args.input)
-            print(json.dumps(result, ensure_ascii=False))
-            if result["status"] == "failed":
-                return 1
-
-        elif args.command == "extract-evidence":
-            identity = identify_runtime(args.input)
-            report = None
-            if identity["status"] == "supported":
-                report = {
-                    "inspection": inspect(args.input),
-                    "tableDetails": extract_table_details(args.input, emit_library_warnings=False),
-                }
-            result = build_extraction_evidence(identity, report)
-            print(json.dumps(result, ensure_ascii=False))
-            if result["status"] == "failed":
-                return 1
-
-        elif args.command == "inspect":
+        if args.command == "inspect":
             result = inspect(args.input)
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))

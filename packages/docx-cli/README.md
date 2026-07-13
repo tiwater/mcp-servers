@@ -1,21 +1,5 @@
 # tiwater-docx
 
-Runtime identity discovery:
-
-```bash
-tiwater-docx capabilities --json
-tiwater-docx identify <input> --json
-```
-
-`identify` reads and hashes the current bytes, then validates the ZIP package,
-the exact `[Content_Types].xml` item, parameter-free RFC media types, and the
-unique internal root `officeDocument` relationship to the declared Word main
-document part. Every package part, directory entry, and root relationship URI
-is validated before the Word identity is accepted. Transitional and Strict
-OOXML relationship types are supported. File extensions are not trusted.
-Supported and unsupported probes exit successfully; source-read or internal
-probe failures emit typed JSON evidence and exit nonzero.
-
 A .NET 9 globally installed command-line tool for inspecting, comparing, and transforming Word (`.docx`) documents.
 
 ## Installation

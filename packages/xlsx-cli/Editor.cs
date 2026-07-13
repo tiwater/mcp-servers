@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
-using Tiwater.RuntimeContracts;
 
 namespace Dockit.Xlsx;
 
@@ -44,55 +43,6 @@ public static class Editor
         workbookPart.Workbook.Save();
         spreadsheet.Save();
         return new XlsxEditResult(Path.GetFullPath(input), Path.GetFullPath(output), applied);
-    }
-
-    public static RuntimeEditReport ApplyWithEvidence(
-        string input,
-        string operationsPath,
-        string output,
-        PackageIdentity package,
-        RuntimeIdentity runtime)
-    {
-        var requestText = File.ReadAllText(operationsPath);
-        using var requestDocument = JsonDocument.Parse(requestText);
-        var requestRoot = requestDocument.RootElement.Clone();
-        var requestOperations = ExtractRequestOperations(requestRoot);
-        var request = LoadOperations(operationsPath);
-        var result = Apply(input, output, request.Operations);
-        var operationResults = result.AppliedOperations.Select((applied, index) =>
-        {
-            var requested = requestOperations[index];
-            return applied.Applied
-                ? EditOperationResult.ForApplied(index, applied.Type, requested, requested, [])
-                : EditOperationResult.ForRejected(
-                    index,
-                    applied.Type,
-                    requested,
-                    [],
-                    [new ContractFinding("operation-rejected", applied.Detail)]);
-        }).ToArray();
-        return EditReports.Create(
-            package,
-            runtime,
-            input,
-            output,
-            requestRoot,
-            requestOperations,
-            operationResults);
-    }
-
-    private static IReadOnlyList<JsonElement> ExtractRequestOperations(JsonElement root)
-    {
-        var operations = root.ValueKind == JsonValueKind.Array
-            ? root
-            : root.EnumerateObject()
-                .FirstOrDefault(property => property.Name.Equals("operations", StringComparison.OrdinalIgnoreCase))
-                .Value;
-        if (operations.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidOperationException("Edit request must be an array or contain an operations array.");
-        }
-        return operations.EnumerateArray().Select(item => item.Clone()).ToArray();
     }
 
     private static XlsxEditDocument LoadOperations(string path)

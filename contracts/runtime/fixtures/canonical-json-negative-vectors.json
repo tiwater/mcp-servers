@@ -1,8 +1,0 @@
-{
-  "vectors": [
-    { "name": "decimal-lexeme", "json": "{\"value\":1.0}" },
-    { "name": "exponent-lexeme", "json": "{\"value\":1e0}" },
-    { "name": "rounded-float-lexeme", "json": "{\"value\":9007199254740990.5}" },
-    { "name": "unsafe-integer-lexeme", "json": "{\"value\":9007199254740992}" }
-  ]
-}
