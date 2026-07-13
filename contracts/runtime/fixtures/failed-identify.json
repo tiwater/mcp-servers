@@ -3,6 +3,7 @@
   "envelopeType": "runtime-evidence",
   "probe": "identify",
   "status": "failed",
+  "failureStage": "signature-inspection",
   "package": { "name": "tiwater.docx.cli", "version": "0.2.0" },
   "runtime": { "family": "office", "name": "tiwater-docx", "version": "0.2.0" },
   "evidenceSchema": {

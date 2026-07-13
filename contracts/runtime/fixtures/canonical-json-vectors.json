@@ -16,14 +16,9 @@
       "canonical": "{\"text\":\"literal\\\\uABCD\"}"
     },
     {
-      "name": "mathematically-integral-number",
-      "value": { "value": 1.0 },
-      "canonical": "{\"value\":1}"
-    },
-    {
-      "name": "mathematically-integral-exponent",
-      "value": { "value": 1e0 },
-      "canonical": "{\"value\":1}"
+      "name": "literal-non-ascii-utf8",
+      "value": { "text": "separator:\u2028 next:\u0085 emoji:😀" },
+      "canonical": "{\"text\":\"separator:\u2028 next:\u0085 emoji:😀\"}"
     }
   ]
 }

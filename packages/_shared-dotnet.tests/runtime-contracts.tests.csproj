@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +20,9 @@
     <Compile Include="../_shared-dotnet/*.cs" Link="Shared/%(Filename)%(Extension)" />
     <None Include="../../contracts/runtime/fixtures/canonical-json-vectors.json"
           Link="fixtures/canonical-json-vectors.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../contracts/runtime/fixtures/canonical-json-negative-vectors.json"
+          Link="fixtures/canonical-json-negative-vectors.json"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

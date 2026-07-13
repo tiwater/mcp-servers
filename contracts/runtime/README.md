@@ -22,10 +22,9 @@ three outcomes:
 
 `unsupported` is not an error and must never be collapsed into `failed`. Failed
 results retain a source identity only when those exact bytes were successfully
-hashed; the failure must name a later probe stage and must not claim a matched
-kind or signature. A
-capability descriptor declares only its own probes and kinds. It does not declare
-the orchestrator's required probe set.
+hashed; `failureStage` must name the later probe stage and the result must not
+claim a matched kind or signature. A capability descriptor declares only its own
+probes and kinds. It does not declare the orchestrator's required probe set.
 
 ## Evidence envelope
 
@@ -52,13 +51,19 @@ size, and SHA-256 in its run registry.
 
 Canonical JSON v1 recursively sorts unique object names by ordinal UTF-16 code
 units, preserves array order, writes UTF-8 without insignificant whitespace,
-uses lowercase hexadecimal digits in `\\u` escapes, rejects duplicate keys, and accepts
-only null, booleans, strings, arrays, objects, and cross-language safe integer
-numbers from `-9007199254740991` through `9007199254740991`. Exact decimal
-business values must remain strings. Mathematically integral JSON forms such as
-`1.0` and `1e0` normalize to `1`. This deliberately narrow
+emits non-ASCII Unicode scalar values directly as UTF-8, uses only the required
+JSON escapes (with lowercase hexadecimal digits for other C0 controls), rejects
+duplicate keys, and accepts only null, booleans, strings, arrays, objects, and
+native/lossless integer values from `-9007199254740991` through
+`9007199254740991`. Exact decimal business values must remain strings. Decimal
+or exponent number lexemes such as `1.0` and `1e0` are rejected before lossy
+parsing; Python callers must not pass floats. This deliberately narrow
 number rule keeps the C#, Python, and JavaScript artifact bytes identical without
 letting language-specific floating-point rendering change an artifact id.
+
+JavaScript callers must validate numeric lexemes before `JSON.parse`; checking
+`Number.isSafeInteger` after parsing is insufficient because parsing may already
+have rounded the input. The negative lexical vectors define this pre-parse gate.
 
 ## Edit report
 

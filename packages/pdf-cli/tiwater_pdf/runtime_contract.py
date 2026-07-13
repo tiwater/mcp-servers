@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -58,16 +57,9 @@ def _canonicalize_json(value: Any) -> Any:
             raise ValueError("canonical JSON integers must fit the cross-language safe integer range")
         return value
     if isinstance(value, float):
-        if (
-            not math.isfinite(value)
-            or not value.is_integer()
-            or value < -9_007_199_254_740_991
-            or value > 9_007_199_254_740_991
-        ):
-            raise ValueError(
-                "canonical JSON v1 accepts safe integer numbers only; encode exact decimal values as strings"
-            )
-        return int(value)
+        raise ValueError(
+            "canonical JSON v1 accepts native safe integer values only; encode exact decimal values as strings"
+        )
     if isinstance(value, (list, tuple)):
         return [_canonicalize_json(item) for item in value]
     if isinstance(value, dict):

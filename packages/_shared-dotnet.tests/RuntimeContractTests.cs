@@ -53,7 +53,7 @@ public sealed class RuntimeContractTests
         foreach (var vector in fixture.RootElement.GetProperty("vectors").EnumerateArray())
         {
             var bytes = EvidenceEnvelope.CanonicalJsonBytes(vector.GetProperty("value"));
-            Assert.Equal(vector.GetProperty("canonical").GetString(), Encoding.UTF8.GetString(bytes));
+            Assert.Equal(Encoding.UTF8.GetBytes(vector.GetProperty("canonical").GetString()!), bytes);
         }
     }
 
@@ -75,6 +75,20 @@ public sealed class RuntimeContractTests
         var error = Assert.Throws<InvalidOperationException>(() => EvidenceEnvelope.CanonicalJsonBytes(payload.RootElement));
 
         Assert.Contains("integer", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Canonical_json_rejects_shared_lossy_numeric_lexemes()
+    {
+        var fixturePath = Path.Combine(AppContext.BaseDirectory, "fixtures", "canonical-json-negative-vectors.json");
+        using var fixture = JsonDocument.Parse(File.ReadAllText(fixturePath));
+
+        foreach (var vector in fixture.RootElement.GetProperty("vectors").EnumerateArray())
+        {
+            using var payload = JsonDocument.Parse(vector.GetProperty("json").GetString()!);
+            var error = Assert.Throws<InvalidOperationException>(() => EvidenceEnvelope.CanonicalJsonBytes(payload.RootElement));
+            Assert.Contains("integer", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     [Fact]

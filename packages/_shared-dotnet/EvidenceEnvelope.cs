@@ -1,4 +1,5 @@
-using System.Text.Encodings.Web;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace Tiwater.RuntimeContracts;
@@ -19,21 +20,13 @@ public static class EvidenceEnvelope
 
     public static byte[] CanonicalJsonBytes(JsonElement value)
     {
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
-        {
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            Indented = false,
-        }))
-        {
-            WriteCanonical(writer, value);
-        }
-        var bytes = stream.ToArray();
-        NormalizeUnicodeEscapeHex(bytes);
-        return bytes;
+        var builder = new StringBuilder();
+        WriteCanonical(builder, value);
+        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
+            .GetBytes(builder.ToString());
     }
 
-    private static void WriteCanonical(Utf8JsonWriter writer, JsonElement value)
+    private static void WriteCanonical(StringBuilder writer, JsonElement value)
     {
         switch (value.ValueKind)
         {
@@ -43,66 +36,83 @@ public static class EvidenceEnvelope
                 {
                     throw new InvalidOperationException("Canonical JSON objects cannot contain duplicate keys.");
                 }
-                writer.WriteStartObject();
+                writer.Append('{');
+                var propertyIndex = 0;
                 foreach (var property in properties.OrderBy(property => property.Name, StringComparer.Ordinal))
                 {
-                    writer.WritePropertyName(property.Name);
+                    if (propertyIndex > 0) writer.Append(',');
+                    WriteJsonString(writer, property.Name);
+                    writer.Append(':');
                     WriteCanonical(writer, property.Value);
+                    propertyIndex += 1;
                 }
-                writer.WriteEndObject();
+                writer.Append('}');
                 break;
             case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (var item in value.EnumerateArray()) WriteCanonical(writer, item);
-                writer.WriteEndArray();
+                writer.Append('[');
+                var itemIndex = 0;
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (itemIndex > 0) writer.Append(',');
+                    WriteCanonical(writer, item);
+                    itemIndex += 1;
+                }
+                writer.Append(']');
                 break;
             case JsonValueKind.String:
-                writer.WriteStringValue(value.GetString());
+                WriteJsonString(writer, value.GetString()!);
                 break;
             case JsonValueKind.Number:
-                if (!value.TryGetDecimal(out var number)
-                    || decimal.Truncate(number) != number
-                    || number is < -MaxSafeInteger or > MaxSafeInteger)
+                var rawNumber = value.GetRawText();
+                if (rawNumber.Contains('.') || rawNumber.Contains('e') || rawNumber.Contains('E')
+                    || !long.TryParse(rawNumber, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var integer)
+                    || integer is < -MaxSafeInteger or > MaxSafeInteger)
                 {
-                    throw new InvalidOperationException("Canonical JSON v1 accepts cross-language safe integer numbers only; encode exact decimal values as strings.");
+                    throw new InvalidOperationException("Canonical JSON v1 accepts lossless lexical safe integers only; encode exact decimal values as strings.");
                 }
-                writer.WriteNumberValue((long)number);
+                writer.Append(integer.ToString(CultureInfo.InvariantCulture));
                 break;
             case JsonValueKind.True:
-                writer.WriteBooleanValue(true);
+                writer.Append("true");
                 break;
             case JsonValueKind.False:
-                writer.WriteBooleanValue(false);
+                writer.Append("false");
                 break;
             case JsonValueKind.Null:
-                writer.WriteNullValue();
+                writer.Append("null");
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported JSON value kind: {value.ValueKind}");
         }
     }
 
-    private static void NormalizeUnicodeEscapeHex(Span<byte> bytes)
+    private static void WriteJsonString(StringBuilder writer, string value)
     {
-        var backslashRun = 0;
-        for (var index = 0; index < bytes.Length; index += 1)
+        writer.Append('"');
+        foreach (var character in value)
         {
-            if (bytes[index] == (byte)'\\')
+            switch (character)
             {
-                backslashRun += 1;
-                continue;
+                case '"': writer.Append("\\\""); break;
+                case '\\': writer.Append("\\\\"); break;
+                case '\b': writer.Append("\\b"); break;
+                case '\f': writer.Append("\\f"); break;
+                case '\n': writer.Append("\\n"); break;
+                case '\r': writer.Append("\\r"); break;
+                case '\t': writer.Append("\\t"); break;
+                default:
+                    if (character < ' ')
+                    {
+                        writer.Append("\\u");
+                        writer.Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        writer.Append(character);
+                    }
+                    break;
             }
-
-            if (bytes[index] == (byte)'u' && backslashRun % 2 == 1 && index + 4 < bytes.Length)
-            {
-                for (var digit = index + 1; digit <= index + 4; digit += 1)
-                {
-                    if (bytes[digit] is >= (byte)'A' and <= (byte)'F') bytes[digit] += 32;
-                }
-                index += 4;
-            }
-
-            backslashRun = 0;
         }
+        writer.Append('"');
     }
 }

@@ -62,7 +62,7 @@ class RuntimeContractTest(unittest.TestCase):
             / "fixtures"
             / "canonical-json-vectors.json"
         )
-        vectors = json.loads(fixture_path.read_text())["vectors"]
+        vectors = json.loads(fixture_path.read_text(encoding="utf-8"))["vectors"]
 
         for vector in vectors:
             with self.subTest(vector=vector["name"]):
@@ -74,6 +74,21 @@ class RuntimeContractTest(unittest.TestCase):
     def test_canonical_json_rejects_non_integer_numbers(self):
         with self.assertRaisesRegex(ValueError, "integer"):
             canonical_json_bytes({"value": 1.5})
+
+    def test_canonical_json_rejects_shared_lossy_numeric_vectors(self):
+        fixture_path = (
+            Path(__file__).resolve().parents[3]
+            / "contracts"
+            / "runtime"
+            / "fixtures"
+            / "canonical-json-negative-vectors.json"
+        )
+        vectors = json.loads(fixture_path.read_text(encoding="utf-8"))["vectors"]
+
+        for vector in vectors:
+            with self.subTest(vector=vector["name"]):
+                with self.assertRaisesRegex(ValueError, "integer"):
+                    canonical_json_bytes(json.loads(vector["json"]))
 
     def test_native_and_derived_identity_are_disjoint(self):
         native = native_identity("pdf-object-xref", "42")

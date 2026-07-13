@@ -10,6 +10,7 @@
     "envelopeType",
     "probe",
     "status",
+    "failureStage",
     "package",
     "runtime",
     "evidenceSchema",
@@ -26,6 +27,7 @@
     "envelopeType": { "const": "runtime-evidence" },
     "probe": { "$ref": "#/$defs/nonEmptyString" },
     "status": { "enum": ["supported", "unsupported", "failed"] },
+    "failureStage": { "oneOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }] },
     "package": { "$ref": "#/$defs/packageIdentity" },
     "runtime": { "$ref": "#/$defs/runtimeIdentity" },
     "evidenceSchema": { "$ref": "#/$defs/schemaIdentity" },
@@ -61,13 +63,19 @@
                   "signature": {
                     "allOf": [
                       { "$ref": "#/$defs/signatureEvidence" },
-                      { "properties": { "status": { "const": "matched" } } }
+                      {
+                        "properties": {
+                          "status": { "const": "matched" },
+                          "evidence": { "minItems": 1 }
+                        }
+                      }
                     ]
                   }
                 }
               }
             ]
           },
+          "failureStage": { "type": "null" },
           "errors": { "maxItems": 0 }
         }
       }
@@ -93,6 +101,7 @@
               }
             ]
           },
+          "failureStage": { "type": "null" },
           "objects": { "maxItems": 0 },
           "errors": { "maxItems": 0 }
         }
@@ -119,6 +128,7 @@
               }
             ]
           },
+          "failureStage": { "$ref": "#/$defs/nonEmptyString" },
           "objects": { "maxItems": 0 },
           "errors": { "minItems": 1 }
         }

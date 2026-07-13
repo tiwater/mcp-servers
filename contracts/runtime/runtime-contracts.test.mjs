@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import Ajv2020 from 'ajv/dist/2020.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,6 +11,16 @@ const fixturePath = (name) => path.join(here, 'fixtures', name);
 const schemaPath = (name) => path.join(here, name);
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const fixture = (name) => readJson(fixturePath(name));
+const schemaNames = [
+  'runtime-capabilities.schema.json',
+  'runtime-evidence-envelope.schema.json',
+  'edit-report.schema.json',
+];
+const schemas = Object.fromEntries(schemaNames.map((name) => [name, readJson(schemaPath(name))]));
+const ajv = new Ajv2020({ allErrors: true, strict: false });
+const schemaValidators = Object.fromEntries(
+  Object.entries(schemas).map(([name, schema]) => [name, ajv.compile(schema)]),
+);
 
 function resolvePointer(document, pointer) {
   assert.ok(pointer.startsWith('#/'), `only local schema refs are allowed: ${pointer}`);
@@ -43,6 +54,50 @@ function canonicalize(value) {
 
 function canonicalBytes(value) {
   return Buffer.from(JSON.stringify(canonicalize(value)));
+}
+
+function canonicalBytesFromRaw(rawJson) {
+  assertCanonicalNumberLexemes(rawJson);
+  return canonicalBytes(JSON.parse(rawJson));
+}
+
+function assertCanonicalNumberLexemes(rawJson) {
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < rawJson.length; index += 1) {
+    const character = rawJson[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character !== '-' && (character < '0' || character > '9')) continue;
+
+    const match = rawJson.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+    if (!match) continue;
+    const token = match[0];
+    if (/[.eE]/.test(token)) throw new Error(`canonical JSON requires a lexical integer: ${token}`);
+    const integer = BigInt(token);
+    if (integer < -9007199254740991n || integer > 9007199254740991n) {
+      throw new Error(`canonical JSON requires a safe integer: ${token}`);
+    }
+    index += token.length - 1;
+  }
+}
+
+function assertSchemaAccepts(schemaName, instance, label) {
+  const validate = schemaValidators[schemaName];
+  assert.equal(validate(instance), true, `${label}: ${ajv.errorsText(validate.errors)}`);
+}
+
+function assertSchemaRejects(schemaName, instance, label) {
+  const validate = schemaValidators[schemaName];
+  assert.equal(validate(instance), false, `${label} unexpectedly passed`);
 }
 
 function requireIdentity(value, label) {
@@ -95,17 +150,21 @@ function validateEvidence(envelope) {
   requireArtifact(envelope.artifact, envelope.payload, 'artifact');
 
   if (envelope.status === 'supported') {
+    assert.equal(envelope.failureStage, null);
     assert.ok(envelope.file.fileKind);
     assert.ok(envelope.file.mediaType);
     assert.equal(envelope.file.signature.status, 'matched');
+    assert.ok(envelope.file.signature.evidence.length > 0, 'supported signature evidence');
     assert.deepEqual(envelope.errors, []);
   } else if (envelope.status === 'unsupported') {
+    assert.equal(envelope.failureStage, null);
     assert.equal(envelope.file.fileKind, null);
     assert.equal(envelope.file.mediaType, null);
     assert.notEqual(envelope.file.signature.status, 'matched');
     assert.deepEqual(envelope.objects, []);
     assert.deepEqual(envelope.errors, []);
   } else {
+    assert.ok(envelope.failureStage, 'failed evidence requires failure stage');
     assert.equal(envelope.file.fileKind, null, 'failed file evidence cannot claim a kind');
     assert.equal(envelope.file.mediaType, null, 'failed file evidence cannot claim a media type');
     assert.notEqual(envelope.file.signature.status, 'matched', 'failed file evidence cannot claim a matched signature');
@@ -176,11 +235,7 @@ function validateEditReport(report, authoritativeRequest) {
 }
 
 test('publishes the three versioned runtime contract schemas', () => {
-  for (const name of [
-    'runtime-capabilities.schema.json',
-    'runtime-evidence-envelope.schema.json',
-    'edit-report.schema.json',
-  ]) {
+  for (const name of schemaNames) {
     assert.equal(fs.existsSync(schemaPath(name)), true, `${name} must exist`);
     const schema = readJson(schemaPath(name));
     assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema');
@@ -188,6 +243,56 @@ test('publishes the three versioned runtime contract schemas', () => {
     assert.equal(schema.additionalProperties, false);
     assertLocalRefsResolve(schema, schema);
   }
+});
+
+test('Ajv 2020 compiles schemas and validates every positive contract fixture', () => {
+  assertSchemaAccepts('runtime-capabilities.schema.json', fixture('runtime-capabilities.json'), 'capabilities');
+  for (const name of ['supported-identify.json', 'unsupported-identify.json', 'failed-identify.json']) {
+    assertSchemaAccepts('runtime-evidence-envelope.schema.json', fixture(name), name);
+  }
+  assertSchemaAccepts('edit-report.schema.json', fixture('edit-report.json'), 'edit report');
+});
+
+test('Ajv rejects nested shape, version, uniqueness, command, signature, failure, and edit violations', () => {
+  const nestedExtra = fixture('runtime-capabilities.json');
+  nestedExtra.supportedKinds[0].unexpected = true;
+  assertSchemaRejects('runtime-capabilities.schema.json', nestedExtra, 'nested additional property');
+
+  const invalidVersion = fixture('runtime-capabilities.json');
+  invalidVersion.package.version = 'release-1';
+  assertSchemaRejects('runtime-capabilities.schema.json', invalidVersion, 'version pattern');
+
+  const duplicateMediaType = fixture('runtime-capabilities.json');
+  duplicateMediaType.supportedKinds[0].mediaTypes.push(duplicateMediaType.supportedKinds[0].mediaTypes[0]);
+  assertSchemaRejects('runtime-capabilities.schema.json', duplicateMediaType, 'unique media types');
+
+  const missingIdentifyCommand = fixture('runtime-capabilities.json');
+  missingIdentifyCommand.commands = missingIdentifyCommand.commands.filter((command) => command.name !== 'identify');
+  assertSchemaRejects('runtime-capabilities.schema.json', missingIdentifyCommand, 'required identify command');
+
+  const missingCapabilitiesCommand = fixture('runtime-capabilities.json');
+  missingCapabilitiesCommand.commands = missingCapabilitiesCommand.commands.filter((command) => command.name !== 'capabilities');
+  assertSchemaRejects('runtime-capabilities.schema.json', missingCapabilitiesCommand, 'required capabilities command');
+
+  const emptySupportedSignature = fixture('supported-identify.json');
+  emptySupportedSignature.file.signature.evidence = [];
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', emptySupportedSignature, 'supported signature evidence');
+
+  const missingFailureStage = fixture('failed-identify.json');
+  delete missingFailureStage.failureStage;
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', missingFailureStage, 'failed stage');
+
+  const missingFailureError = fixture('failed-identify.json');
+  missingFailureError.errors = [];
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', missingFailureError, 'failed errors');
+
+  const nullAppliedPayload = fixture('edit-report.json');
+  nullAppliedPayload.operations[0].appliedPayload = null;
+  assertSchemaRejects('edit-report.schema.json', nullAppliedPayload, 'applied payload');
+
+  const rejectedWithoutError = fixture('edit-report.json');
+  rejectedWithoutError.operations[2].errors = [];
+  assertSchemaRejects('edit-report.schema.json', rejectedWithoutError, 'rejected errors');
 });
 
 test('capability descriptor declares the non-mutating all-outcome identify probe', () => {
@@ -209,6 +314,13 @@ test('failed evidence cannot claim a matched file kind', () => {
   };
 
   assert.throws(() => validateEvidence(envelope), /failed file evidence/);
+});
+
+test('supported evidence requires non-empty runtime signature evidence', () => {
+  const envelope = fixture('supported-identify.json');
+  envelope.file.signature.evidence = [];
+
+  assert.throws(() => validateEvidence(envelope), /signature evidence/);
 });
 
 test('derived evidence identities cannot masquerade as native ids', () => {
@@ -242,8 +354,19 @@ test('canonical evidence payloads reject language-dependent decimal numbers', ()
 
 test('canonical JSON matches the shared cross-language adversarial vectors', () => {
   for (const vector of fixture('canonical-json-vectors.json').vectors) {
-    assert.equal(canonicalBytes(vector.value).toString('utf8'), vector.canonical, vector.name);
+    assert.deepEqual(canonicalBytes(vector.value), Buffer.from(vector.canonical, 'utf8'), vector.name);
   }
+});
+
+test('canonical JSON rejects lossy numeric lexemes before JSON.parse', () => {
+  for (const vector of fixture('canonical-json-negative-vectors.json').vectors) {
+    assert.throws(() => canonicalBytesFromRaw(vector.json), /lexical integer|safe integer/, vector.name);
+  }
+});
+
+test('the shared .NET contract project is explicitly discoverable as a test project', () => {
+  const project = fs.readFileSync(path.join(here, '../../packages/_shared-dotnet.tests/runtime-contracts.tests.csproj'), 'utf8');
+  assert.match(project, /<IsTestProject>true<\/IsTestProject>/);
 });
 
 test('edit report preserves one ordered result per request and derives its summary', () => {
