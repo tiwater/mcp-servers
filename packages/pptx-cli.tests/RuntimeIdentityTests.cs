@@ -149,6 +149,65 @@ public sealed class RuntimeIdentityTests
         }
     }
 
+    [Theory]
+    [InlineData("[CONTENT_TYPES].XML")]
+    [InlineData("%5BContent_Types%5D.xml")]
+    public void Canonically_equivalent_content_types_items_are_ambiguous(string duplicateName)
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            var entries = ValidEntries();
+            entries.Add((duplicateName, Encoding.UTF8.GetBytes(ContentTypesXml())));
+            WritePackage(path, entries);
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            AssertUnsupported(evidence);
+            Assert.Equal(
+                "content-types-part-missing-or-ambiguous",
+                evidence.Payload.GetProperty("reason").GetString());
+            Assert.Contains("[Content_Types].xml:count=2", evidence.File.Signature.Evidence);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    public static TheoryData<string> StructurallyInvalidContentTypesDocuments => new()
+    {
+        $"<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types' extra='x'><Override PartName='/ppt/presentation.xml' ContentType='{PresentationContentType}' /></Types>",
+        $"<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'>unexpected<Override PartName='/ppt/presentation.xml' ContentType='{PresentationContentType}' /></Types>",
+        $"<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default Extension='rels' ContentType='application/vnd.openxmlformats-package.relationships+xml' Extra='x' /><Override PartName='/ppt/presentation.xml' ContentType='{PresentationContentType}' /></Types>",
+        $"<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default ContentType='application/xml' /><Override PartName='/ppt/presentation.xml' ContentType='{PresentationContentType}' /></Types>",
+        $"<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Override ContentType='{PresentationContentType}' /></Types>",
+        "<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Override PartName='/ppt/presentation.xml' /></Types>",
+        $"<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default Extension='rels' ContentType='application/vnd.openxmlformats-package.relationships+xml'><Override PartName='/ppt/presentation.xml' ContentType='{PresentationContentType}' /></Default></Types>",
+        $"<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Override PartName='/ppt/presentation.xml' ContentType='{PresentationContentType}'><Child /></Override></Types>",
+        $"<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Override PartName='/ppt/presentation.xml' ContentType='{PresentationContentType}'>unexpected</Override></Types>",
+    };
+
+    [Theory]
+    [MemberData(nameof(StructurallyInvalidContentTypesDocuments))]
+    public void Content_type_declarations_require_exact_attributes_and_empty_content(string contentTypes)
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            WritePackage(path, PackageEntries(contentTypes, RelationshipsXml("ppt/presentation.xml"), MainPartEntries()));
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            AssertUnsupported(evidence);
+            Assert.Equal("content-types-invalid", evidence.Payload.GetProperty("reason").GetString());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     public static TheoryData<string> InvalidRelationshipsDocuments => new()
     {
         "<Relationships",
@@ -167,6 +226,44 @@ public sealed class RuntimeIdentityTests
             WritePackage(path, PackageEntries(ContentTypesXml(), relationships, MainPartEntries()));
 
             AssertUnsupported(PptxRuntimeIdentity.Identify(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    public static TheoryData<string> StructurallyInvalidRelationshipsDocuments => new()
+    {
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships' extra='x'>{Relationship("rId1", TransitionalOfficeDocument, "ppt/presentation.xml")}</Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>unexpected{Relationship("rId1", TransitionalOfficeDocument, "ppt/presentation.xml")}</Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Type='{TransitionalOfficeDocument}' Target='ppt/presentation.xml' Extra='x' /></Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Type='{TransitionalOfficeDocument}' Target='ppt/presentation.xml' /></Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Target='ppt/presentation.xml' /></Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Type='{TransitionalOfficeDocument}' /></Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='1invalid' Type='{TransitionalOfficeDocument}' Target='ppt/presentation.xml' /></Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='invalid:id' Type='{TransitionalOfficeDocument}' Target='ppt/presentation.xml' /></Relationships>",
+        "<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Type='relative' Target='ppt/presentation.xml' /></Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Type='{TransitionalOfficeDocument}' Target='ppt/presentation.xml'><Child /></Relationship></Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Type='{TransitionalOfficeDocument}' Target='ppt/presentation.xml'>unexpected</Relationship></Relationships>",
+        $"<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Type='{TransitionalOfficeDocument}' Target='ppt/presentation.xml'>{Relationship("rId2", TransitionalOfficeDocument, "ppt/presentation.xml")}</Relationship></Relationships>",
+    };
+
+    [Theory]
+    [MemberData(nameof(StructurallyInvalidRelationshipsDocuments))]
+    public void Relationships_require_exact_attributes_ncname_ids_absolute_types_and_empty_content(string relationships)
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            WritePackage(path, PackageEntries(ContentTypesXml(), relationships, MainPartEntries()));
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            AssertUnsupported(evidence);
+            Assert.Equal(
+                "office-document-relationship-invalid",
+                evidence.Payload.GetProperty("reason").GetString());
         }
         finally
         {

@@ -125,7 +125,7 @@ public static class PptxRuntimeIdentity
             var evidence = new List<string> { "zip:central-directory-readable" };
 
             var contentTypesEntries = archive.Entries
-                .Where(entry => entry.FullName == "[Content_Types].xml")
+                .Where(entry => IsCanonicalContentTypesItem(entry.FullName))
                 .ToArray();
             if (contentTypesEntries.Length != 1)
             {
@@ -219,7 +219,7 @@ public static class PptxRuntimeIdentity
         var parts = new List<PackagePartEntry>();
         foreach (var entry in archive.Entries)
         {
-            if (entry.FullName == "[Content_Types].xml") continue;
+            if (IsCanonicalContentTypesItem(entry.FullName)) continue;
             if (IsDirectoryEntry(entry))
             {
                 if (!TryCreatePartUri(entry.FullName[..^1], requireLeadingSlash: false, out _))
@@ -251,6 +251,28 @@ public static class PptxRuntimeIdentity
 
     private static bool IsDirectoryEntry(ZipArchiveEntry entry) =>
         entry.FullName.EndsWith("/", StringComparison.Ordinal) && entry.Name.Length == 0;
+
+    private static bool IsCanonicalContentTypesItem(string itemName)
+    {
+        if (string.IsNullOrEmpty(itemName)
+            || itemName.Contains('/', StringComparison.Ordinal)
+            || itemName.Contains('\\', StringComparison.Ordinal)
+            || itemName.Any(character => char.IsControl(character) || character > 0x7f))
+        {
+            return false;
+        }
+        try
+        {
+            return string.Equals(
+                Uri.UnescapeDataString(itemName),
+                "[Content_Types].xml",
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
+    }
 
     private static bool TryLoadXml(ZipArchiveEntry entry, out XDocument? document)
     {
@@ -285,6 +307,13 @@ public static class PptxRuntimeIdentity
             reason = "invalid-root";
             return false;
         }
+        if (document.Root.Attributes().Any(attribute => !attribute.IsNamespaceDeclaration)
+            || !HasOnlyDirectElementsAndWhitespace(document.Root))
+        {
+            contentTypeMap = null;
+            reason = "invalid-root-content";
+            return false;
+        }
 
         var defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var overrides = new List<(Uri PartUri, string ContentType)>();
@@ -292,6 +321,13 @@ public static class PptxRuntimeIdentity
         {
             if (element.Name == contentTypesNamespace + "Default")
             {
+                if (!HasExactAttributes(element, "Extension", "ContentType")
+                    || !HasWhitespaceOnlyContent(element))
+                {
+                    contentTypeMap = null;
+                    reason = "invalid-default-declaration";
+                    return false;
+                }
                 var extension = (string?)element.Attribute("Extension");
                 var contentType = (string?)element.Attribute("ContentType");
                 if (string.IsNullOrWhiteSpace(extension)
@@ -309,6 +345,13 @@ public static class PptxRuntimeIdentity
 
             if (element.Name == contentTypesNamespace + "Override")
             {
+                if (!HasExactAttributes(element, "PartName", "ContentType")
+                    || !HasWhitespaceOnlyContent(element))
+                {
+                    contentTypeMap = null;
+                    reason = "invalid-override-declaration";
+                    return false;
+                }
                 var partName = (string?)element.Attribute("PartName");
                 var contentType = (string?)element.Attribute("ContentType");
                 if (!TryCreatePartUri(partName, requireLeadingSlash: true, out var partUri)
@@ -345,6 +388,13 @@ public static class PptxRuntimeIdentity
             reason = "invalid-root";
             return false;
         }
+        if (document.Root.Attributes().Any(attribute => !attribute.IsNamespaceDeclaration)
+            || !HasOnlyDirectElementsAndWhitespace(document.Root))
+        {
+            targetPartUri = null;
+            reason = "invalid-root-content";
+            return false;
+        }
 
         var relationships = document.Root.Elements().ToArray();
         if (relationships.Any(element => element.Name != relationshipsNamespace + "Relationship"))
@@ -357,13 +407,25 @@ public static class PptxRuntimeIdentity
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var relationship in relationships)
         {
+            var targetModeAttribute = relationship.Attribute("TargetMode");
+            var expectedAttributes = targetModeAttribute is null
+                ? new[] { "Id", "Type", "Target" }
+                : new[] { "Id", "Type", "Target", "TargetMode" };
+            if (!HasExactAttributes(relationship, expectedAttributes)
+                || relationship.Nodes().Any())
+            {
+                targetPartUri = null;
+                reason = "invalid-relationship-declaration";
+                return false;
+            }
             var id = (string?)relationship.Attribute("Id");
             var type = (string?)relationship.Attribute("Type");
             var target = (string?)relationship.Attribute("Target");
-            var targetModeAttribute = relationship.Attribute("TargetMode");
             if (string.IsNullOrWhiteSpace(id)
                 || string.IsNullOrWhiteSpace(type)
                 || string.IsNullOrWhiteSpace(target)
+                || !IsValidNcName(id)
+                || !Uri.TryCreate(type, UriKind.Absolute, out _)
                 || !ids.Add(id))
             {
                 targetPartUri = null;
@@ -410,6 +472,37 @@ public static class PptxRuntimeIdentity
 
         reason = "valid";
         return true;
+    }
+
+    private static bool HasExactAttributes(XElement element, params string[] expectedNames)
+    {
+        var attributes = element.Attributes().ToArray();
+        return attributes.Length == expectedNames.Length
+            && attributes.All(attribute =>
+                !attribute.IsNamespaceDeclaration
+                && string.IsNullOrEmpty(attribute.Name.NamespaceName)
+                && expectedNames.Contains(attribute.Name.LocalName, StringComparer.Ordinal))
+            && expectedNames.All(name => element.Attribute(name) is not null);
+    }
+
+    private static bool HasOnlyDirectElementsAndWhitespace(XElement root) =>
+        root.Nodes().All(node =>
+            node is XElement
+            || (node is XText text && string.IsNullOrWhiteSpace(text.Value)));
+
+    private static bool HasWhitespaceOnlyContent(XElement element) =>
+        element.Nodes().All(node => node is XText text && string.IsNullOrWhiteSpace(text.Value));
+
+    private static bool IsValidNcName(string value)
+    {
+        try
+        {
+            return string.Equals(XmlConvert.VerifyNCName(value), value, StringComparison.Ordinal);
+        }
+        catch (XmlException)
+        {
+            return false;
+        }
     }
 
     private static bool TryCreatePartUri(string? value, bool requireLeadingSlash, out Uri? partUri)
