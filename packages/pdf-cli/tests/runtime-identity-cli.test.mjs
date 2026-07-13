@@ -109,12 +109,12 @@ test('capabilities --json emits the schema-valid PDF runtime descriptor', () => 
 
   assertSchemaValid(validateCapabilities, descriptor);
   assert.equal(descriptor.package.name, 'tiwater-pdf');
-  assert.equal(descriptor.package.version, '0.16.0');
+  assert.equal(descriptor.package.version, '0.17.0');
   assert.equal(descriptor.package.version, packageVersion);
   assert.deepEqual(descriptor.runtime, {
     family: 'pdf',
     name: 'tiwater-pdf',
-    version: '0.16.0',
+    version: '0.17.0',
   });
   assert.deepEqual(descriptor.supportedKinds, [{
     fileKind: 'pdf',

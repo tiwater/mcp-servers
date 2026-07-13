@@ -26,8 +26,8 @@ public sealed class RuntimeIdentityTests
 
         Assert.Equal("1.0.0", descriptor.SchemaVersion);
         Assert.Equal("runtime-capabilities", descriptor.DescriptorType);
-        Assert.Equal(new PackageIdentity("tiwater.xlsx.cli", "0.1.35"), descriptor.Package);
-        Assert.Equal(new RuntimeIdentity("office", "tiwater-xlsx", "0.1.35"), descriptor.Runtime);
+        Assert.Equal(new PackageIdentity("tiwater.xlsx.cli", "0.2.0"), descriptor.Package);
+        Assert.Equal(new RuntimeIdentity("office", "tiwater-xlsx", "0.2.0"), descriptor.Runtime);
         Assert.Equal(
             new SchemaIdentity(
                 "https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json",
@@ -69,7 +69,7 @@ public sealed class RuntimeIdentityTests
         Assert.Equal("1.0.0", root.GetProperty("schemaVersion").GetString());
         Assert.Equal("runtime-capabilities", root.GetProperty("descriptorType").GetString());
         Assert.Equal("tiwater.xlsx.cli", root.GetProperty("package").GetProperty("name").GetString());
-        Assert.Equal("0.1.35", root.GetProperty("package").GetProperty("version").GetString());
+        Assert.Equal("0.2.0", root.GetProperty("package").GetProperty("version").GetString());
         Assert.False(root.GetProperty("descriptorCommand").GetProperty("mutates").GetBoolean());
         Assert.Equal(
             ["supported", "unsupported", "failed"],
@@ -406,8 +406,8 @@ public sealed class RuntimeIdentityTests
         }
         Assert.True(evidence.Status == "supported", diagnostic);
         Assert.Null(evidence.FailureStage);
-        Assert.Equal(new PackageIdentity("tiwater.xlsx.cli", "0.1.35"), evidence.Package);
-        Assert.Equal(new RuntimeIdentity("office", "tiwater-xlsx", "0.1.35"), evidence.Runtime);
+        Assert.Equal(new PackageIdentity("tiwater.xlsx.cli", "0.2.0"), evidence.Package);
+        Assert.Equal(new RuntimeIdentity("office", "tiwater-xlsx", "0.2.0"), evidence.Runtime);
         Assert.Equal(
             new SchemaIdentity(
                 "https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json",

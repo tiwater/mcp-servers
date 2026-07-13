@@ -19,8 +19,8 @@ public sealed class RuntimeIdentityTests
         var descriptor = DocxRuntimeIdentity.Capabilities();
 
         Assert.Equal("runtime-capabilities", descriptor.DescriptorType);
-        Assert.Equal(new PackageIdentity("tiwater.docx.cli", "0.4.0"), descriptor.Package);
-        Assert.Equal(new RuntimeIdentity("office", "tiwater-docx", "0.4.0"), descriptor.Runtime);
+        Assert.Equal(new PackageIdentity("tiwater.docx.cli", "0.5.0"), descriptor.Package);
+        Assert.Equal(new RuntimeIdentity("office", "tiwater-docx", "0.5.0"), descriptor.Runtime);
         Assert.Equal("capabilities", descriptor.DescriptorCommand.Command);
         Assert.Equal(["--json"], descriptor.DescriptorCommand.Arguments);
         Assert.False(descriptor.DescriptorCommand.Mutates);
@@ -56,8 +56,8 @@ public sealed class RuntimeIdentityTests
             Assert.Equal(sourceBytes.Length, evidence.Source.SizeBytes);
             Assert.Equal(sourceSha256, evidence.Source.Sha256);
             Assert.Equal($"sha256:{sourceSha256}", evidence.Source.ContentId);
-            Assert.Equal(new PackageIdentity("tiwater.docx.cli", "0.4.0"), evidence.Package);
-            Assert.Equal(new RuntimeIdentity("office", "tiwater-docx", "0.4.0"), evidence.Runtime);
+            Assert.Equal(new PackageIdentity("tiwater.docx.cli", "0.5.0"), evidence.Package);
+            Assert.Equal(new RuntimeIdentity("office", "tiwater-docx", "0.5.0"), evidence.Runtime);
             Assert.Equal(
                 new SchemaIdentity("https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json", "1.0.0"),
                 evidence.EvidenceSchema);

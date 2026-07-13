@@ -25,8 +25,8 @@ public sealed class RuntimeIdentityTests
         var descriptor = PptxRuntimeIdentity.Capabilities();
 
         Assert.Equal("runtime-capabilities", descriptor.DescriptorType);
-        Assert.Equal(new PackageIdentity("tiwater.pptx.cli", "0.1.2"), descriptor.Package);
-        Assert.Equal(new RuntimeIdentity("office", "tiwater-pptx", "0.1.2"), descriptor.Runtime);
+        Assert.Equal(new PackageIdentity("tiwater.pptx.cli", "0.2.0"), descriptor.Package);
+        Assert.Equal(new RuntimeIdentity("office", "tiwater-pptx", "0.2.0"), descriptor.Runtime);
         Assert.Equal("capabilities", descriptor.DescriptorCommand.Command);
         Assert.Equal(["--json"], descriptor.DescriptorCommand.Arguments);
         Assert.False(descriptor.DescriptorCommand.Mutates);
@@ -59,8 +59,8 @@ public sealed class RuntimeIdentityTests
             var sha256 = Convert.ToHexStringLower(SHA256.HashData(before));
             Assert.Equal(sha256, evidence.Source.Sha256);
             Assert.Equal($"sha256:{sha256}", evidence.Source.ContentId);
-            Assert.Equal(new PackageIdentity("tiwater.pptx.cli", "0.1.2"), evidence.Package);
-            Assert.Equal(new RuntimeIdentity("office", "tiwater-pptx", "0.1.2"), evidence.Runtime);
+            Assert.Equal(new PackageIdentity("tiwater.pptx.cli", "0.2.0"), evidence.Package);
+            Assert.Equal(new RuntimeIdentity("office", "tiwater-pptx", "0.2.0"), evidence.Runtime);
             Assert.Equal(
                 new SchemaIdentity("https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json", "1.0.0"),
                 evidence.EvidenceSchema);

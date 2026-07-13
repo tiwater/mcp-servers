@@ -14,10 +14,10 @@ class RuntimeIdentityTest(unittest.TestCase):
         descriptor = capabilities()
 
         self.assertEqual(descriptor["schemaVersion"], "1.0.0")
-        self.assertEqual(descriptor["package"], {"name": "tiwater-pdf", "version": "0.16.0"})
+        self.assertEqual(descriptor["package"], {"name": "tiwater-pdf", "version": "0.17.0"})
         self.assertEqual(
             descriptor["runtime"],
-            {"family": "pdf", "name": "tiwater-pdf", "version": "0.16.0"},
+            {"family": "pdf", "name": "tiwater-pdf", "version": "0.17.0"},
         )
         self.assertEqual(
             descriptor["supportedKinds"],
