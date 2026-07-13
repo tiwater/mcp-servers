@@ -124,12 +124,19 @@ public static class PptxRuntimeIdentity
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);
             var evidence = new List<string> { "zip:central-directory-readable" };
 
-            var contentTypesEntries = archive.Entries
-                .Where(entry => IsCanonicalContentTypesItem(entry.FullName))
+            var equivalentContentTypesEntries = archive.Entries
+                .Where(entry => IsEquivalentContentTypesItem(entry.FullName))
                 .ToArray();
-            if (contentTypesEntries.Length != 1)
+            var exactContentTypesEntries = equivalentContentTypesEntries
+                .Where(entry => string.Equals(
+                    entry.FullName,
+                    "[Content_Types].xml",
+                    StringComparison.Ordinal))
+                .ToArray();
+            if (exactContentTypesEntries.Length != 1 || equivalentContentTypesEntries.Length != 1)
             {
-                evidence.Add($"[Content_Types].xml:count={contentTypesEntries.Length}");
+                evidence.Add($"[Content_Types].xml:exact-count={exactContentTypesEntries.Length}");
+                evidence.Add($"[Content_Types].xml:equivalent-count={equivalentContentTypesEntries.Length}");
                 return Mismatch("content-types-part-missing-or-ambiguous", evidence);
             }
 
@@ -148,7 +155,7 @@ public static class PptxRuntimeIdentity
                 return Mismatch("root-relationships-part-missing-or-ambiguous", evidence);
             }
 
-            if (!TryLoadXml(contentTypesEntries[0], out var contentTypes))
+            if (!TryLoadXml(exactContentTypesEntries[0], out var contentTypes))
             {
                 evidence.Add("[Content_Types].xml:invalid-xml");
                 return Mismatch("content-types-invalid", evidence);
@@ -219,7 +226,7 @@ public static class PptxRuntimeIdentity
         var parts = new List<PackagePartEntry>();
         foreach (var entry in archive.Entries)
         {
-            if (IsCanonicalContentTypesItem(entry.FullName)) continue;
+            if (IsEquivalentContentTypesItem(entry.FullName)) continue;
             if (IsDirectoryEntry(entry))
             {
                 if (!TryCreatePartUri(entry.FullName[..^1], requireLeadingSlash: false, out _))
@@ -252,7 +259,7 @@ public static class PptxRuntimeIdentity
     private static bool IsDirectoryEntry(ZipArchiveEntry entry) =>
         entry.FullName.EndsWith("/", StringComparison.Ordinal) && entry.Name.Length == 0;
 
-    private static bool IsCanonicalContentTypesItem(string itemName)
+    private static bool IsEquivalentContentTypesItem(string itemName)
     {
         if (string.IsNullOrEmpty(itemName)
             || itemName.Contains('/', StringComparison.Ordinal)
@@ -333,8 +340,8 @@ public static class PptxRuntimeIdentity
                 if (string.IsNullOrWhiteSpace(extension)
                     || extension.Contains('.')
                     || extension.Contains('/')
-                    || string.IsNullOrWhiteSpace(contentType)
-                    || !defaults.TryAdd(extension, contentType))
+                    || !IsValidContentType(contentType)
+                    || !defaults.TryAdd(extension, contentType!))
                 {
                     contentTypeMap = null;
                     reason = "invalid-or-duplicate-default";
@@ -355,14 +362,14 @@ public static class PptxRuntimeIdentity
                 var partName = (string?)element.Attribute("PartName");
                 var contentType = (string?)element.Attribute("ContentType");
                 if (!TryCreatePartUri(partName, requireLeadingSlash: true, out var partUri)
-                    || string.IsNullOrWhiteSpace(contentType)
+                    || !IsValidContentType(contentType)
                     || overrides.Any(existing => PartUrisEquivalent(existing.PartUri, partUri!)))
                 {
                     contentTypeMap = null;
                     reason = "invalid-or-duplicate-override";
                     return false;
                 }
-                overrides.Add((partUri!, contentType));
+                overrides.Add((partUri!, contentType!));
                 continue;
             }
 
@@ -425,11 +432,16 @@ public static class PptxRuntimeIdentity
                 || string.IsNullOrWhiteSpace(type)
                 || string.IsNullOrWhiteSpace(target)
                 || !IsValidNcName(id)
-                || !Uri.TryCreate(type, UriKind.Absolute, out _)
                 || !ids.Add(id))
             {
                 targetPartUri = null;
                 reason = "invalid-required-attributes";
+                return false;
+            }
+            if (!IsValidAbsoluteUri(type))
+            {
+                targetPartUri = null;
+                reason = "invalid-relationship-type";
                 return false;
             }
             if (targetModeAttribute is not null
@@ -437,6 +449,18 @@ public static class PptxRuntimeIdentity
             {
                 targetPartUri = null;
                 reason = "invalid-target-mode";
+                return false;
+            }
+            var isExternal = string.Equals(
+                (string?)targetModeAttribute,
+                "External",
+                StringComparison.Ordinal);
+            if (isExternal
+                    ? !IsValidUriReference(target)
+                    : !TryCreatePartUri(target, requireLeadingSlash: false, out _))
+            {
+                targetPartUri = null;
+                reason = "invalid-relationship-target";
                 return false;
             }
         }
@@ -505,16 +529,78 @@ public static class PptxRuntimeIdentity
         }
     }
 
+    private static bool IsValidContentType(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        var separator = value.IndexOf('/');
+        return separator > 0
+            && separator == value.LastIndexOf('/')
+            && separator < value.Length - 1
+            && value[..separator].All(IsRfcTokenCharacter)
+            && value[(separator + 1)..].All(IsRfcTokenCharacter);
+    }
+
+    private static bool IsRfcTokenCharacter(char character) =>
+        char.IsAsciiLetterOrDigit(character)
+        || character is '!' or '#' or '$' or '%' or '&' or '\'' or '*'
+            or '+' or '-' or '.' or '^' or '_' or '`' or '|' or '~';
+
+    private static bool IsValidAbsoluteUri(string value)
+    {
+        if (!IsValidUriReference(value)) return false;
+        var separator = value.IndexOf(':');
+        if (separator <= 0
+            || !char.IsAsciiLetter(value[0])
+            || !value[1..separator].All(character =>
+                char.IsAsciiLetterOrDigit(character) || character is '+' or '-' or '.'))
+        {
+            return false;
+        }
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.IsAbsoluteUri;
+    }
+
+    private static bool IsValidUriReference(string value) =>
+        !string.IsNullOrEmpty(value)
+        && string.Equals(value, value.Trim(), StringComparison.Ordinal)
+        && HasValidPercentEncoding(value)
+        && value.All(IsRfcUriCharacter)
+        && Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out _);
+
+    private static bool IsRfcUriCharacter(char character) =>
+        char.IsAsciiLetterOrDigit(character)
+        || character is '-' or '.' or '_' or '~'
+            or ':' or '/' or '?' or '#' or '[' or ']' or '@'
+            or '!' or '$' or '&' or '\'' or '(' or ')' or '*'
+            or '+' or ',' or ';' or '=' or '%';
+
+    private static bool HasValidPercentEncoding(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] != '%') continue;
+            if (index + 2 >= value.Length
+                || !Uri.IsHexDigit(value[index + 1])
+                || !Uri.IsHexDigit(value[index + 2]))
+            {
+                return false;
+            }
+            index += 2;
+        }
+        return true;
+    }
+
     private static bool TryCreatePartUri(string? value, bool requireLeadingSlash, out Uri? partUri)
     {
         partUri = null;
         if (string.IsNullOrWhiteSpace(value)
+            || !string.Equals(value, value.Trim(), StringComparison.Ordinal)
             || (requireLeadingSlash && !value.StartsWith("/", StringComparison.Ordinal))
             || value.StartsWith("//", StringComparison.Ordinal)
             || value.Contains('\\', StringComparison.Ordinal)
             || value.Contains('?', StringComparison.Ordinal)
             || value.Contains('#', StringComparison.Ordinal)
-            || value.Any(character => char.IsControl(character) || character > 0x7f))
+            || value.Any(character => char.IsWhiteSpace(character) || character > 0x7f)
+            || !HasValidPercentEncoding(value))
         {
             return false;
         }

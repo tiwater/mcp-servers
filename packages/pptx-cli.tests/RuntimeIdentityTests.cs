@@ -167,7 +167,35 @@ public sealed class RuntimeIdentityTests
             Assert.Equal(
                 "content-types-part-missing-or-ambiguous",
                 evidence.Payload.GetProperty("reason").GetString());
-            Assert.Contains("[Content_Types].xml:count=2", evidence.File.Signature.Evidence);
+            Assert.Contains("[Content_Types].xml:exact-count=1", evidence.File.Signature.Evidence);
+            Assert.Contains("[Content_Types].xml:equivalent-count=2", evidence.File.Signature.Evidence);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("[CONTENT_TYPES].XML")]
+    [InlineData("%5BContent_Types%5D.xml")]
+    public void Lone_content_types_alias_does_not_replace_the_exact_special_item(string alias)
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            var entries = ValidEntries();
+            RenameEntry(entries, "[Content_Types].xml", alias);
+            WritePackage(path, entries);
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            AssertUnsupported(evidence);
+            Assert.Equal(
+                "content-types-part-missing-or-ambiguous",
+                evidence.Payload.GetProperty("reason").GetString());
+            Assert.Contains("[Content_Types].xml:exact-count=0", evidence.File.Signature.Evidence);
+            Assert.Contains("[Content_Types].xml:equivalent-count=1", evidence.File.Signature.Evidence);
         }
         finally
         {
@@ -196,6 +224,37 @@ public sealed class RuntimeIdentityTests
         try
         {
             WritePackage(path, PackageEntries(contentTypes, RelationshipsXml("ppt/presentation.xml"), MainPartEntries()));
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            AssertUnsupported(evidence);
+            Assert.Equal("content-types-invalid", evidence.Payload.GetProperty("reason").GetString());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("not a mime type")]
+    [InlineData("application")]
+    [InlineData("application/")]
+    [InlineData("/xml")]
+    [InlineData("application/xml; charset=utf-8")]
+    public void Every_content_type_requires_parameter_free_rfc_media_type_tokens(string contentType)
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            var contentTypes = ContentTypesXml().Replace(
+                "</Types>",
+                $"<Default Extension='probe' ContentType='{contentType}' /></Types>",
+                StringComparison.Ordinal);
+            WritePackage(path, PackageEntries(
+                contentTypes,
+                RelationshipsXml("ppt/presentation.xml"),
+                MainPartEntries()));
 
             var evidence = PptxRuntimeIdentity.Identify(path);
 
@@ -398,6 +457,145 @@ public sealed class RuntimeIdentityTests
                 MainPartEntries()));
 
             AssertUnsupported(PptxRuntimeIdentity.Identify(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("relative")]
+    [InlineData("//example.test/type")]
+    [InlineData("https://example.test/a b")]
+    [InlineData("https://example.test/%ZZ")]
+    [InlineData("https:\\example.test/type")]
+    public void Every_relationship_type_requires_a_strict_absolute_uri(string type)
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            var relationships = RelationshipsDocument(
+                Relationship("rId1", TransitionalOfficeDocument, "ppt/presentation.xml"),
+                Relationship("rId2", type, "ppt/presentation.xml", "Internal"));
+            WritePackage(path, PackageEntries(ContentTypesXml(), relationships, MainPartEntries()));
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            AssertUnsupported(evidence);
+            Assert.Equal(
+                "office-document-relationship-invalid",
+                evidence.Payload.GetProperty("reason").GetString());
+            Assert.Contains(
+                "office-document-relationship:invalid-relationship-type",
+                evidence.File.Signature.Evidence);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("https://example.test/metadata.xml")]
+    [InlineData("//example.test/metadata.xml")]
+    [InlineData("../metadata.xml")]
+    [InlineData("%2e%2e/metadata.xml")]
+    [InlineData("metadata/%ZZ.xml")]
+    [InlineData("metadata/info file.xml")]
+    [InlineData("metadata/info.xml?query=1")]
+    [InlineData("metadata/info.xml#fragment")]
+    [InlineData("metadata\\info.xml")]
+    public void Every_internal_root_relationship_target_requires_a_safe_package_part_uri(string target)
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            var relationships = RelationshipsDocument(
+                Relationship("rId1", TransitionalOfficeDocument, "ppt/presentation.xml"),
+                Relationship("rId2", "urn:example:metadata", target, "Internal"));
+            WritePackage(path, PackageEntries(ContentTypesXml(), relationships, MainPartEntries()));
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            AssertUnsupported(evidence);
+            Assert.Equal(
+                "office-document-relationship-invalid",
+                evidence.Payload.GetProperty("reason").GetString());
+            Assert.Contains(
+                "office-document-relationship:invalid-relationship-target",
+                evidence.File.Signature.Evidence);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("https://example.test/a b")]
+    [InlineData("https://example.test/%ZZ")]
+    [InlineData("https:\\example.test/resource")]
+    public void Every_external_root_relationship_target_requires_a_well_formed_uri_reference(string target)
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            var relationships = RelationshipsDocument(
+                Relationship("rId1", TransitionalOfficeDocument, "ppt/presentation.xml"),
+                Relationship("rId2", "urn:example:metadata", target, "External"));
+            WritePackage(path, PackageEntries(ContentTypesXml(), relationships, MainPartEntries()));
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            AssertUnsupported(evidence);
+            Assert.Equal(
+                "office-document-relationship-invalid",
+                evidence.Payload.GetProperty("reason").GetString());
+            Assert.Contains(
+                "office-document-relationship:invalid-relationship-target",
+                evidence.File.Signature.Evidence);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Valid_unrelated_content_type_and_internal_and_external_relationships_are_supported()
+    {
+        var path = TemporaryPath(".pptx");
+        try
+        {
+            var contentTypes = ContentTypesXml().Replace(
+                "</Types>",
+                "<Override PartName='/docProps/core.xml' ContentType='application/vnd.openxmlformats-package.core-properties+xml' /></Types>",
+                StringComparison.Ordinal);
+            var relationships = RelationshipsDocument(
+                Relationship("rId1", TransitionalOfficeDocument, "ppt/presentation.xml"),
+                Relationship(
+                    "rId2",
+                    "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+                    "docProps/core.xml",
+                    "Internal"),
+                Relationship(
+                    "rId3",
+                    "https://example.test/relationships/reference",
+                    "https://example.test/resource?query=1#fragment",
+                    "External"));
+            var parts = MainPartEntries();
+            parts.Add((
+                "docProps/core.xml",
+                Encoding.UTF8.GetBytes(
+                    "<cp:coreProperties xmlns:cp='http://schemas.openxmlformats.org/package/2006/metadata/core-properties' />")));
+            WritePackage(path, PackageEntries(contentTypes, relationships, parts));
+
+            var evidence = PptxRuntimeIdentity.Identify(path);
+
+            Assert.True(
+                evidence.Status == "supported",
+                JsonSerializer.Serialize(evidence, RuntimeJson.Options));
         }
         finally
         {
