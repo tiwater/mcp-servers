@@ -1,0 +1,164 @@
+using System.Text;
+using System.Text.Json;
+using Tiwater.RuntimeContracts;
+using Xunit;
+
+namespace Tiwater.RuntimeContracts.Tests;
+
+public sealed class RuntimeContractTests
+{
+    [Fact]
+    public void File_identity_binds_path_size_hash_and_content_id()
+    {
+        var identity = FileIdentity.IdentifyBytes("/runs/inputs/source.bin", Encoding.UTF8.GetBytes("abc"));
+
+        Assert.Equal("/runs/inputs/source.bin", identity.Path);
+        Assert.Equal(3, identity.SizeBytes);
+        Assert.Equal("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", identity.Sha256);
+        Assert.Equal($"sha256:{identity.Sha256}", identity.ContentId);
+    }
+
+    [Fact]
+    public void Canonical_artifact_identity_is_independent_of_object_key_order()
+    {
+        using var first = JsonDocument.Parse("{\"b\":2,\"a\":1}");
+        using var second = JsonDocument.Parse("{\"a\":1,\"b\":2}");
+        var schema = new SchemaIdentity("tiwater.test-payload", "1.0.0");
+
+        var firstArtifact = EvidenceEnvelope.IdentifyCanonicalJson(first.RootElement, schema);
+        var secondArtifact = EvidenceEnvelope.IdentifyCanonicalJson(second.RootElement, schema);
+
+        Assert.Equal(firstArtifact, secondArtifact);
+        Assert.Equal("canonical-json", firstArtifact.Encoding);
+        Assert.Equal($"sha256:{firstArtifact.Sha256}", firstArtifact.ArtifactId);
+    }
+
+    [Fact]
+    public void Canonical_json_matches_the_cross_language_utf8_fixture()
+    {
+        using var payload = JsonDocument.Parse("{\"text\":\"中文\",\"items\":[2,1],\"nested\":{\"b\":true,\"a\":null}}");
+
+        var bytes = EvidenceEnvelope.CanonicalJsonBytes(payload.RootElement);
+
+        Assert.Equal("{\"items\":[2,1],\"nested\":{\"a\":null,\"b\":true},\"text\":\"中文\"}", Encoding.UTF8.GetString(bytes));
+        Assert.Equal("be6d16a737da3afc2ab5eb06b725a397ab7c1a462eb5d4e221c8ecdd6b1264ec", Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)));
+    }
+
+    [Fact]
+    public void Canonical_json_matches_shared_adversarial_vectors()
+    {
+        var fixturePath = Path.Combine(AppContext.BaseDirectory, "fixtures", "canonical-json-vectors.json");
+        using var fixture = JsonDocument.Parse(File.ReadAllText(fixturePath));
+
+        foreach (var vector in fixture.RootElement.GetProperty("vectors").EnumerateArray())
+        {
+            var bytes = EvidenceEnvelope.CanonicalJsonBytes(vector.GetProperty("value"));
+            Assert.Equal(vector.GetProperty("canonical").GetString(), Encoding.UTF8.GetString(bytes));
+        }
+    }
+
+    [Fact]
+    public void Canonical_json_rejects_duplicate_object_keys()
+    {
+        using var payload = JsonDocument.Parse("{\"a\":1,\"a\":2}");
+
+        var error = Assert.Throws<InvalidOperationException>(() => EvidenceEnvelope.CanonicalJsonBytes(payload.RootElement));
+
+        Assert.Contains("duplicate", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Canonical_json_rejects_non_integer_numbers()
+    {
+        using var payload = JsonDocument.Parse("{\"value\":1.5}");
+
+        var error = Assert.Throws<InvalidOperationException>(() => EvidenceEnvelope.CanonicalJsonBytes(payload.RootElement));
+
+        Assert.Contains("integer", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Derived_identity_serialization_cannot_claim_a_native_id()
+    {
+        EvidenceIdentity identity = new DerivedEvidenceIdentity(
+            "source-version-structural-locator",
+            ["sha256:source", "table[0]"]);
+
+        var json = JsonSerializer.Serialize(identity, RuntimeJson.Options);
+
+        Assert.Contains("\"kind\":\"derived\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("nativeId", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Edit_summary_is_derived_from_the_complete_ordered_results()
+    {
+        var operations = new[]
+        {
+            EditOperationResult.ForApplied(0, "setCellValue", Json("{\"type\":\"setCellValue\"}"), Json("{\"value\":\"42\"}"), []),
+            EditOperationResult.ForNoop(1, "setCellValue", Json("{\"type\":\"setCellValue\"}"), Json("{\"value\":\"42\"}"), []),
+            EditOperationResult.ForRejected(2, "setCellValue", Json("{\"type\":\"setCellValue\"}"), [], [new ContractFinding("target-not-found", "Target was not found.")]),
+        };
+
+        var summary = EditReportSummary.FromOperations(operations);
+
+        Assert.Equal(new EditReportSummary(3, 1, 1, 1, 0), summary);
+        Assert.Equal([0, 1, 2], operations.Select(operation => operation.Index));
+        Assert.Null(operations[2].AppliedPayload);
+    }
+
+    [Fact]
+    public void Required_null_contract_fields_are_not_omitted_during_serialization()
+    {
+        var root = new EvidenceObject(
+            "document:root",
+            "document",
+            true,
+            null,
+            new NativeEvidenceIdentity("package-part", "/document.xml"));
+        var rejected = EditOperationResult.ForRejected(
+            0,
+            "setValue",
+            Json("{\"type\":\"setValue\"}"),
+            [],
+            [new ContractFinding("target-not-found", "Target was not found.")]);
+
+        var rootJson = JsonSerializer.Serialize(root, RuntimeJson.Options);
+        var rejectedJson = JsonSerializer.Serialize(rejected, RuntimeJson.Options);
+
+        Assert.Contains("\"parentObjectId\":null", rootJson, StringComparison.Ordinal);
+        Assert.Contains("\"appliedPayload\":null", rejectedJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Capability_descriptor_serializes_both_non_mutating_discovery_commands()
+    {
+        var schema = new SchemaIdentity("https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json", "1.0.0");
+        var descriptor = new RuntimeCapabilityDescriptor(
+            RuntimeContractVersions.Capabilities,
+            "runtime-capabilities",
+            new PackageIdentity("tiwater.test.cli", "1.2.3"),
+            new RuntimeIdentity("test", "tiwater-test", "1.2.3"),
+            schema,
+            new DiscoveryCommand("capabilities", ["--json"], false),
+            new IdentifyProbe("identify", ["<input>", "--json"], false, ["supported", "unsupported", "failed"]),
+            [new SupportedKind("test", ["application/x-test"], ["test-signature"])],
+            [
+                new RuntimeCommand("capabilities", false, new SchemaIdentity("https://tiwater.dev/contracts/runtime/runtime-capabilities.schema.json", "1.0.0")),
+                new RuntimeCommand("identify", false, schema),
+            ],
+            new IdentityPolicy("runtime-native-only", "deterministic-and-explicit", "parent-object-id-required-for-non-root"));
+
+        var json = JsonSerializer.Serialize(descriptor, RuntimeJson.Options);
+
+        Assert.Contains("\"descriptorCommand\":{\"command\":\"capabilities\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"identifyProbe\":{\"command\":\"identify\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("requiredProbeSet", json, StringComparison.Ordinal);
+    }
+
+    private static JsonElement Json(string value)
+    {
+        using var document = JsonDocument.Parse(value);
+        return document.RootElement.Clone();
+    }
+}

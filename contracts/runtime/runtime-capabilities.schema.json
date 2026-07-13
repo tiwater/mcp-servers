@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiwater.dev/contracts/runtime/runtime-capabilities.schema.json",
+  "title": "Tiwater Runtime Capability Descriptor",
+  "description": "Versioned, non-mutating capability metadata emitted by a published tiwater runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "descriptorType",
+    "package",
+    "runtime",
+    "evidenceSchema",
+    "descriptorCommand",
+    "identifyProbe",
+    "supportedKinds",
+    "commands",
+    "identityPolicy"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "descriptorType": { "const": "runtime-capabilities" },
+    "package": { "$ref": "#/$defs/packageIdentity" },
+    "runtime": { "$ref": "#/$defs/runtimeIdentity" },
+    "evidenceSchema": { "$ref": "#/$defs/schemaIdentity" },
+    "descriptorCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "arguments", "mutates"],
+      "properties": {
+        "command": { "const": "capabilities" },
+        "arguments": { "const": ["--json"] },
+        "mutates": { "const": false }
+      }
+    },
+    "identifyProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "arguments", "mutates", "outcomes"],
+      "properties": {
+        "command": { "const": "identify" },
+        "arguments": {
+          "const": ["<input>", "--json"]
+        },
+        "mutates": { "const": false },
+        "outcomes": {
+          "const": ["supported", "unsupported", "failed"]
+        }
+      }
+    },
+    "supportedKinds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fileKind", "mediaTypes", "signatureKinds"],
+        "properties": {
+          "fileKind": { "$ref": "#/$defs/nonEmptyString" },
+          "mediaTypes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/nonEmptyString" }
+          },
+          "signatureKinds": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "mutates", "outputSchema"],
+        "properties": {
+          "name": { "$ref": "#/$defs/nonEmptyString" },
+          "mutates": { "type": "boolean" },
+          "outputSchema": { "$ref": "#/$defs/schemaIdentity" }
+        }
+      }
+    },
+    "identityPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nativeIds", "derivedIds", "containment"],
+      "properties": {
+        "nativeIds": { "const": "runtime-native-only" },
+        "derivedIds": { "const": "deterministic-and-explicit" },
+        "containment": { "const": "parent-object-id-required-for-non-root" }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "packageIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "runtimeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "name", "version"],
+      "properties": {
+        "family": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "schemaIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    }
+  }
+}

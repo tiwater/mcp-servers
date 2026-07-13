@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0.0",
+  "descriptorType": "runtime-capabilities",
+  "package": {
+    "name": "tiwater.xlsx.cli",
+    "version": "0.2.0"
+  },
+  "runtime": {
+    "family": "office",
+    "name": "tiwater-xlsx",
+    "version": "0.2.0"
+  },
+  "evidenceSchema": {
+    "id": "https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json",
+    "version": "1.0.0"
+  },
+  "descriptorCommand": {
+    "command": "capabilities",
+    "arguments": ["--json"],
+    "mutates": false
+  },
+  "identifyProbe": {
+    "command": "identify",
+    "arguments": ["<input>", "--json"],
+    "mutates": false,
+    "outcomes": ["supported", "unsupported", "failed"]
+  },
+  "supportedKinds": [
+    {
+      "fileKind": "xlsx",
+      "mediaTypes": ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+      "signatureKinds": ["ooxml-content-type"]
+    }
+  ],
+  "commands": [
+    {
+      "name": "capabilities",
+      "mutates": false,
+      "outputSchema": {
+        "id": "https://tiwater.dev/contracts/runtime/runtime-capabilities.schema.json",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "name": "identify",
+      "mutates": false,
+      "outputSchema": {
+        "id": "https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "name": "edit",
+      "mutates": true,
+      "outputSchema": {
+        "id": "https://tiwater.dev/contracts/runtime/edit-report.schema.json",
+        "version": "1.0.0"
+      }
+    }
+  ],
+  "identityPolicy": {
+    "nativeIds": "runtime-native-only",
+    "derivedIds": "deterministic-and-explicit",
+    "containment": "parent-object-id-required-for-non-root"
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiwater.dev/contracts/runtime/edit-report.schema.json",
+  "title": "Tiwater Runtime Edit Report",
+  "description": "Complete, ordered attestation of the payload actually applied for every requested edit operation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reportType",
+    "package",
+    "runtime",
+    "evidenceSchema",
+    "source",
+    "output",
+    "requestArtifact",
+    "operations",
+    "summary",
+    "warnings",
+    "errors"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "reportType": { "const": "runtime-edit-report" },
+    "package": { "$ref": "#/$defs/packageIdentity" },
+    "runtime": { "$ref": "#/$defs/runtimeIdentity" },
+    "evidenceSchema": { "$ref": "#/$defs/schemaIdentity" },
+    "source": { "$ref": "#/$defs/fileIdentity" },
+    "output": { "$ref": "#/$defs/fileIdentity" },
+    "requestArtifact": { "$ref": "#/$defs/artifactIdentity" },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operationResult" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "applied", "noop", "rejected", "failed"],
+      "properties": {
+        "requested": { "type": "integer", "minimum": 0 },
+        "applied": { "type": "integer", "minimum": 0 },
+        "noop": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "warnings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "errors": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "contentId": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "canonicalJsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "string" },
+        { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        { "type": "array", "items": { "$ref": "#/$defs/canonicalJsonValue" } },
+        { "$ref": "#/$defs/canonicalJsonObject" }
+      ]
+    },
+    "canonicalJsonObject": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/canonicalJsonValue" }
+    },
+    "packageIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "runtimeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "name", "version"],
+      "properties": {
+        "family": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "schemaIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256", "contentId"],
+      "properties": {
+        "path": { "$ref": "#/$defs/nonEmptyString" },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "contentId": { "$ref": "#/$defs/contentId" }
+      }
+    },
+    "artifactIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "sizeBytes", "sha256", "mediaType", "encoding", "schema"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/contentId" },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "mediaType": { "$ref": "#/$defs/nonEmptyString" },
+        "encoding": { "const": "canonical-json" },
+        "schema": { "$ref": "#/$defs/schemaIdentity" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objectId"],
+      "properties": {
+        "objectId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/nonEmptyString" },
+        "message": { "$ref": "#/$defs/nonEmptyString" },
+        "details": {}
+      }
+    },
+    "operationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "type",
+        "status",
+        "requestedPayload",
+        "appliedPayload",
+        "targets",
+        "warnings",
+        "errors"
+      ],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "type": { "$ref": "#/$defs/nonEmptyString" },
+        "status": { "enum": ["applied", "noop", "rejected", "failed"] },
+        "requestedPayload": { "$ref": "#/$defs/canonicalJsonObject" },
+        "appliedPayload": { "oneOf": [{ "$ref": "#/$defs/canonicalJsonObject" }, { "type": "null" }] },
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } },
+        "warnings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+        "errors": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "enum": ["rejected", "failed"] } } },
+          "then": {
+            "properties": {
+              "appliedPayload": { "type": "null" },
+              "errors": { "minItems": 1 }
+            }
+          },
+          "else": {
+            "properties": {
+              "appliedPayload": { "$ref": "#/$defs/canonicalJsonObject" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0.0",
+  "envelopeType": "runtime-evidence",
+  "probe": "identify",
+  "status": "unsupported",
+  "package": { "name": "tiwater.docx.cli", "version": "0.2.0" },
+  "runtime": { "family": "office", "name": "tiwater-docx", "version": "0.2.0" },
+  "evidenceSchema": {
+    "id": "https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json",
+    "version": "1.0.0"
+  },
+  "source": {
+    "path": "/runs/inputs/attachment-b/source.bin",
+    "sizeBytes": 8,
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "contentId": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "file": {
+    "fileKind": null,
+    "mediaType": null,
+    "signature": {
+      "status": "mismatched",
+      "kind": "ooxml-content-type",
+      "evidence": ["ZIP package does not declare a WordprocessingML main part"]
+    }
+  },
+  "artifact": {
+    "artifactId": "sha256:cda0e99d73a9bbf8993c27d24ad7574c1484b2ae6a7f5643459ba530008315e1",
+    "sizeBytes": 50,
+    "sha256": "cda0e99d73a9bbf8993c27d24ad7574c1484b2ae6a7f5643459ba530008315e1",
+    "mediaType": "application/json",
+    "encoding": "canonical-json",
+    "schema": { "id": "tiwater.runtime.identify-payload", "version": "1.0.0" }
+  },
+  "payload": { "recognized": false, "reason": "signature-mismatch" },
+  "objects": [],
+  "warnings": [],
+  "errors": []
+}

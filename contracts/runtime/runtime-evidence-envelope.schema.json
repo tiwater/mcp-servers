@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json",
+  "title": "Tiwater Runtime Evidence Envelope",
+  "description": "Hash-bound evidence returned by one runtime probe for one exact source occurrence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "envelopeType",
+    "probe",
+    "status",
+    "package",
+    "runtime",
+    "evidenceSchema",
+    "source",
+    "file",
+    "artifact",
+    "payload",
+    "objects",
+    "warnings",
+    "errors"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "envelopeType": { "const": "runtime-evidence" },
+    "probe": { "$ref": "#/$defs/nonEmptyString" },
+    "status": { "enum": ["supported", "unsupported", "failed"] },
+    "package": { "$ref": "#/$defs/packageIdentity" },
+    "runtime": { "$ref": "#/$defs/runtimeIdentity" },
+    "evidenceSchema": { "$ref": "#/$defs/schemaIdentity" },
+    "source": { "$ref": "#/$defs/fileIdentity" },
+    "file": { "$ref": "#/$defs/fileEvidence" },
+    "artifact": { "$ref": "#/$defs/artifactIdentity" },
+    "payload": { "$ref": "#/$defs/canonicalJsonValue" },
+    "objects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceObject" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "supported" } } },
+      "then": {
+        "properties": {
+          "file": {
+            "allOf": [
+              { "$ref": "#/$defs/fileEvidence" },
+              {
+                "properties": {
+                  "fileKind": { "$ref": "#/$defs/nonEmptyString" },
+                  "mediaType": { "$ref": "#/$defs/nonEmptyString" },
+                  "signature": {
+                    "allOf": [
+                      { "$ref": "#/$defs/signatureEvidence" },
+                      { "properties": { "status": { "const": "matched" } } }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "errors": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "unsupported" } } },
+      "then": {
+        "properties": {
+          "file": {
+            "allOf": [
+              { "$ref": "#/$defs/fileEvidence" },
+              {
+                "properties": {
+                  "fileKind": { "type": "null" },
+                  "mediaType": { "type": "null" },
+                  "signature": {
+                    "allOf": [
+                      { "$ref": "#/$defs/signatureEvidence" },
+                      { "properties": { "status": { "enum": ["mismatched", "not-applicable", "unknown"] } } }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "objects": { "maxItems": 0 },
+          "errors": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } } },
+      "then": {
+        "properties": {
+          "file": {
+            "allOf": [
+              { "$ref": "#/$defs/fileEvidence" },
+              {
+                "properties": {
+                  "fileKind": { "type": "null" },
+                  "mediaType": { "type": "null" },
+                  "signature": {
+                    "allOf": [
+                      { "$ref": "#/$defs/signatureEvidence" },
+                      { "properties": { "status": { "enum": ["mismatched", "not-applicable", "unknown"] } } }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "objects": { "maxItems": 0 },
+          "errors": { "minItems": 1 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "contentId": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "canonicalJsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "string" },
+        { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        { "type": "array", "items": { "$ref": "#/$defs/canonicalJsonValue" } },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/canonicalJsonValue" }
+        }
+      ]
+    },
+    "packageIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "runtimeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "name", "version"],
+      "properties": {
+        "family": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "schemaIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256", "contentId"],
+      "properties": {
+        "path": { "$ref": "#/$defs/nonEmptyString" },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "contentId": { "$ref": "#/$defs/contentId" }
+      }
+    },
+    "artifactIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "sizeBytes", "sha256", "mediaType", "encoding", "schema"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/contentId" },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "mediaType": { "$ref": "#/$defs/nonEmptyString" },
+        "encoding": { "const": "canonical-json" },
+        "schema": { "$ref": "#/$defs/schemaIdentity" }
+      }
+    },
+    "signatureEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "kind", "evidence"],
+      "properties": {
+        "status": { "enum": ["matched", "mismatched", "not-applicable", "unknown"] },
+        "kind": { "$ref": "#/$defs/nonEmptyString" },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "fileEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileKind", "mediaType", "signature"],
+      "properties": {
+        "fileKind": { "oneOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }] },
+        "mediaType": { "oneOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }] },
+        "signature": { "$ref": "#/$defs/signatureEvidence" }
+      }
+    },
+    "nativeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "namespace", "nativeId"],
+      "properties": {
+        "kind": { "const": "native" },
+        "namespace": { "$ref": "#/$defs/nonEmptyString" },
+        "nativeId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "derivedIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "derivation", "inputs"],
+      "properties": {
+        "kind": { "const": "derived" },
+        "derivation": { "$ref": "#/$defs/nonEmptyString" },
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "evidenceObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objectId", "objectType", "root", "parentObjectId", "identity"],
+      "properties": {
+        "objectId": { "$ref": "#/$defs/nonEmptyString" },
+        "objectType": { "$ref": "#/$defs/nonEmptyString" },
+        "root": { "type": "boolean" },
+        "parentObjectId": { "oneOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }] },
+        "identity": {
+          "oneOf": [
+            { "$ref": "#/$defs/nativeIdentity" },
+            { "$ref": "#/$defs/derivedIdentity" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "root": { "const": true } } },
+          "then": { "properties": { "parentObjectId": { "type": "null" } } },
+          "else": { "properties": { "parentObjectId": { "$ref": "#/$defs/nonEmptyString" } } }
+        }
+      ]
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/nonEmptyString" },
+        "message": { "$ref": "#/$defs/nonEmptyString" },
+        "details": {}
+      }
+    }
+  }
+}
