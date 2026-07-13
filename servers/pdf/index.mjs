@@ -4,6 +4,7 @@ import { McpStdioServer } from '../_shared/mcp-stdio.mjs';
 import {
   commandCandidate,
   createToolResult,
+  redactCommandArgs,
   requireString,
   resolveRepoPath,
   runJsonCandidateChain,
@@ -13,8 +14,13 @@ const pdfPackageDir = resolveRepoPath('packages', 'pdf-cli');
 const pdfModulePath = resolveRepoPath('packages', 'pdf-cli');
 
 const pdfCandidates = [
-  commandCandidate('tiwater-pdf'),
+  commandCandidate('tiwater-pdf', [], {
+    expectedRuntimeName: 'tiwater-pdf',
+    secretOptions: ['--api-key'],
+  }),
   commandCandidate('python3', ['-m', 'tiwater_pdf.cli'], {
+    expectedRuntimeName: 'tiwater-pdf',
+    secretOptions: ['--api-key'],
     cwd: pdfPackageDir,
     env: {
       PYTHONPATH: [pdfModulePath, process.env.PYTHONPATH || ''].filter(Boolean).join(path.delimiter),
@@ -140,7 +146,13 @@ function appendPdfFlags(commandArgs, args) {
 }
 
 function commandRuntime(result) {
-  return `${result.command} ${result.args.join(' ')}`;
+  return {
+    package: result.capabilities?.package,
+    runtime: result.capabilities?.runtime,
+    command: result.command,
+    args: redactCommandArgs(result.args, ['--api-key']),
+    cwd: result.cwd || path.dirname(result.command),
+  };
 }
 
 const server = new McpStdioServer({

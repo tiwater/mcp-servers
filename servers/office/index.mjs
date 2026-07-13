@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { McpStdioServer } from '../_shared/mcp-stdio.mjs';
 import {
   commandCandidate,
@@ -18,18 +17,18 @@ const xlsxProject = resolveRepoPath('packages', 'xlsx-cli', 'xlsx.csproj');
 const pptxProject = resolveRepoPath('packages', 'pptx-cli', 'pptx.csproj');
 
 const docxCandidates = [
-  commandCandidate('tiwater-docx'),
-  commandCandidate('dotnet', ['run', '--project', docxProject, '--']),
+  commandCandidate('tiwater-docx', [], { expectedRuntimeName: 'tiwater-docx' }),
+  commandCandidate('dotnet', ['run', '--project', docxProject, '--'], { expectedRuntimeName: 'tiwater-docx' }),
 ];
 
 const xlsxCandidates = [
-  commandCandidate('tiwater-xlsx'),
-  commandCandidate('dotnet', ['run', '--project', xlsxProject, '--']),
+  commandCandidate('tiwater-xlsx', [], { expectedRuntimeName: 'tiwater-xlsx' }),
+  commandCandidate('dotnet', ['run', '--project', xlsxProject, '--'], { expectedRuntimeName: 'tiwater-xlsx' }),
 ];
 
 const pptxCandidates = [
-  commandCandidate('tiwater-pptx'),
-  commandCandidate('dotnet', ['run', '--project', pptxProject, '--']),
+  commandCandidate('tiwater-pptx', [], { expectedRuntimeName: 'tiwater-pptx' }),
+  commandCandidate('dotnet', ['run', '--project', pptxProject, '--'], { expectedRuntimeName: 'tiwater-pptx' }),
 ];
 
 const tools = [
@@ -620,7 +619,10 @@ async function pptxApplyFormatEdits(args) {
 }
 function commandRuntime(result) {
   return {
+    package: result.capabilities?.package,
+    runtime: result.capabilities?.runtime,
     command: result.command,
+    args: result.args,
     cwd: result.cwd || path.dirname(result.command),
   };
 }
@@ -646,57 +648,5 @@ async function xlsxEdit(args) {
 }
 
 async function runXlsxValidateCandidateChain(args) {
-  const errors = [];
-  for (const candidate of xlsxCandidates) {
-    try {
-      const result = await runValidationCommand(candidate, args);
-      const text = result.stdout.trim();
-      if (!text) return { ...result, json: null };
-      try {
-        return { ...result, json: JSON.parse(text) };
-      } catch {
-        if (result.code !== 0) {
-          errors.push(`${candidate.command}: validate did not return JSON`);
-          continue;
-        }
-        throw new Error(`Expected JSON output but received: ${text.slice(0, 300)}${text.length > 300 ? '…' : ''}`);
-      }
-    } catch (error) {
-      if (error?.code === 'ENOENT') {
-        errors.push(`${candidate.command}: not found`);
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error(`No runnable command candidate succeeded. ${errors.join('; ')}`);
-}
-
-async function runValidationCommand(candidate, args) {
-  const env = { ...process.env, ...(candidate.env || {}) };
-  const cwd = candidate.cwd || resolveRepoPath();
-  const commandArgs = [...(candidate.argsPrefix || []), ...args];
-
-  return await new Promise((resolve, reject) => {
-    const child = spawn(candidate.command, commandArgs, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', chunk => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on('data', chunk => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', reject);
-    child.on('close', code => {
-      if (code === 0 || code === 1) {
-        resolve({ code, stdout, stderr, command: candidate.command, args: commandArgs });
-        return;
-      }
-      reject(new Error(`${candidate.command} ${commandArgs.join(' ')} failed with exit code ${code}\n${stderr || stdout}`));
-    });
-  });
+  return runJsonCandidateChain(xlsxCandidates, args, { acceptedExitCodes: [0, 1] });
 }
