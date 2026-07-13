@@ -756,14 +756,18 @@ def _extract_table_logical_rows(pages: list[dict]) -> list[dict]:
         rows = [{**row, "logical_row_id": row["row_id"], "source_row_ids": [row["row_id"]]} for row in physical]
         if previous_page is not None and page.get("page") == previous_page.get("page", 0) + 1 and rows and logical:
             previous_rows = previous_page.get("table_rows", [])
-            previous_last = previous_rows[-1] if previous_rows else None
-            current_first = rows[0]
-            cells = current_first.get("cells", [])
+            previous_last = next((row for row in reversed(previous_rows)
+                                  if not row.get("is_header") and any(str(value).strip() for value in row.get("cells", []))), None)
+            candidate_index = next((index for index, row in enumerate(rows)
+                                    if any(str(value).strip() for value in row.get("cells", []))), None)
+            current_first = rows[candidate_index] if candidate_index is not None else None
+            cells = current_first.get("cells", []) if current_first else []
             nonempty = [index for index, value in enumerate(cells) if str(value).strip()]
             same_width = previous_last and len(previous_last.get("cells", [])) == len(cells)
             suffix_only = bool(nonempty and nonempty[0] > 0 and all(not str(cells[index]).strip() for index in range(nonempty[0])))
-            if same_width and suffix_only and logical[-1].get("source_row_ids", [])[-1] == previous_last["row_id"]:
-                owner = logical[-1]
+            owner = next((row for row in reversed(logical)
+                          if row.get("source_row_ids", []) and row["source_row_ids"][-1] == previous_last["row_id"]), None) if previous_last else None
+            if same_width and suffix_only and owner is not None:
                 owner_cells = list(owner.get("cells", []))
                 for index in nonempty:
                     addition = str(cells[index]).strip()
@@ -771,7 +775,7 @@ def _extract_table_logical_rows(pages: list[dict]) -> list[dict]:
                 owner["cells"] = owner_cells
                 owner["source_row_ids"].append(current_first["row_id"])
                 owner["page_end"] = current_first["page"]
-                rows = rows[1:]
+                rows = rows[:candidate_index] + rows[candidate_index + 1:]
         logical.extend(rows)
         previous_page = page
     return logical

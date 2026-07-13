@@ -122,6 +122,40 @@ class OcrTableRowsTest(unittest.TestCase):
         rows = _extract_table_logical_rows([{"page": 1, "table_rows": page_one_rows}, {"page": 2, "table_rows": page_two_rows}])
         self.assertEqual(len(rows), 4)
 
+    def test_joins_suffix_after_a_blank_continuation_header_row(self):
+        page_one_rows = _extract_markdown_table_rows(["""| Group | Item | Criterion | Method |
+|---|---|---|---|
+| Physical | pH | 5.5 +/- 0.3 | Pharmacopeia 2020 |"""], 3)
+        page_two_rows = _extract_markdown_table_rows(["""| | | | |
+|---|---|---|---|
+| | | | General rule 0631<br>SOP03-5-2021 |
+| | Osmolality | 240 - 360 | SOP03-5-2025 |"""], 4)
+
+        rows = _extract_table_logical_rows([
+            {"page": 3, "table_rows": page_one_rows},
+            {"page": 4, "table_rows": page_two_rows},
+        ])
+
+        ph = next(row for row in rows if "pH" in row["cells"])
+        self.assertEqual(ph["cells"][3], "Pharmacopeia 2020\nGeneral rule 0631\nSOP03-5-2021")
+        self.assertEqual(ph["source_row_ids"], ["page-3-table-0-row-1", "page-4-table-0-row-1"])
+        self.assertTrue(any(row["row_id"] == "page-4-table-0-row-0" for row in rows))
+        self.assertFalse(any(row["row_id"] == "page-4-table-0-row-1" for row in rows))
+
+    def test_does_not_skip_a_new_item_after_a_blank_continuation_header(self):
+        page_one_rows = _extract_markdown_table_rows(["| Group | Item | Criterion | Method |\n|---|---|---|---|\n| A | One | C1 | M1 |"], 1)
+        page_two_rows = _extract_markdown_table_rows(["| | | | |\n|---|---|---|---|\n| B | Two | C2 | M2 |"], 2)
+
+        rows = _extract_table_logical_rows([
+            {"page": 1, "table_rows": page_one_rows},
+            {"page": 2, "table_rows": page_two_rows},
+        ])
+
+        one = next(row for row in rows if "One" in row["cells"])
+        two = next(row for row in rows if "Two" in row["cells"])
+        self.assertEqual(one["source_row_ids"], ["page-1-table-0-row-1"])
+        self.assertEqual(two["source_row_ids"], ["page-2-table-0-row-1"])
+
 
 if __name__ == "__main__":
     unittest.main()
