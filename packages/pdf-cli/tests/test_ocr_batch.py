@@ -56,6 +56,31 @@ class OcrBatchTest(unittest.TestCase):
                 written = json.loads(Path(item["output"]).read_text())
                 self.assertEqual(written["model"], "qwen3.7-plus")
 
+    def test_batch_fails_file_when_any_page_ocr_is_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "scan.pdf"
+            source.write_bytes(b"%PDF-1.4\n")
+
+            def failed_page_ocr(_input_path, _pages):
+                raise RuntimeError("OCR page 10 failed after bounded retries")
+
+            manifest = _run_ocr_batch(
+                [source],
+                output_dir=tmp_path / "ocr",
+                max_parallel=1,
+                pages=None,
+                ocr_func=failed_page_ocr,
+                model="qwen3.7-plus",
+                provider="llm",
+                enable_thinking=False,
+            )
+
+            self.assertEqual(manifest["success_count"], 0)
+            self.assertEqual(manifest["failure_count"], 1)
+            self.assertEqual(manifest["files"][0]["status"], "failed")
+            self.assertIn("OCR page 10 failed", manifest["files"][0]["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
