@@ -2,6 +2,19 @@
 
 OpenXML-based command-line utility for PPTX inspection, text export, and placeholder filling.
 
+Runtime identity discovery reads and hashes the exact current bytes without
+mutating them. It validates the ZIP/OPC package, content-type manifest, unique
+internal root presentation relationship, declared presentation main part, and
+OpenXML readability. File extensions are not trusted.
+
+```bash
+tiwater-pptx capabilities --json
+tiwater-pptx identify <input> --json
+```
+
+Supported and unsupported probes exit successfully. Source-read or internal
+probe failures emit typed JSON evidence and exit nonzero.
+
 ## Usage
 
 ```bash
