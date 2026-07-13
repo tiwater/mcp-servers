@@ -125,6 +125,26 @@ test('capabilities --json emits the schema-valid PDF runtime descriptor', () => 
   assert.equal(descriptor.identifyProbe.mutates, false);
 });
 
+test('runtime identity commands require their declared --json invocation shape', () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-runtime-arguments-'));
+  try {
+    const sourcePath = path.join(temporary, 'source.pdf');
+    createPdf(sourcePath);
+    for (const args of [
+      ['capabilities'],
+      ['identify', sourcePath],
+      ['capabilities', '--json', 'extra'],
+      ['identify', sourcePath, '--json', 'extra'],
+    ]) {
+      const result = runPdfCli(...args);
+      assert.notEqual(result.status, 0, args.join(' '));
+      assert.equal(result.stdout, '', args.join(' '));
+    }
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
 test('identify supports renamed and encrypted PDFs from exact bytes deterministically', () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-runtime-supported-'));
   try {

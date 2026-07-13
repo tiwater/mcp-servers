@@ -1610,14 +1610,24 @@ def main() -> int:
         "capabilities",
         help="Describe non-mutating PDF runtime capabilities",
     )
-    capabilities_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    capabilities_parser.add_argument(
+        "--json",
+        action="store_true",
+        required=True,
+        help="Output as JSON",
+    )
 
     identify_parser = subparsers.add_parser(
         "identify",
         help="Identify PDF bytes without OCR or network access",
     )
     identify_parser.add_argument("input", type=Path, help="File to identify")
-    identify_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    identify_parser.add_argument(
+        "--json",
+        action="store_true",
+        required=True,
+        help="Output as JSON",
+    )
 
     # inspect command
     inspect_parser = subparsers.add_parser("inspect", help="Inspect PDF metadata")
