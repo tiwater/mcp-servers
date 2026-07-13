@@ -251,6 +251,87 @@ public sealed class RuntimeIdentityTests
         }
     }
 
+    [Theory]
+    [InlineData("[Content_Types].xml", "[content_types].xml")]
+    [InlineData("_rels/.rels", "_RELS/.RELS")]
+    [InlineData("xl/workbook.xml", "XL/WORKBOOK.XML")]
+    [InlineData("custom/part.bin", "CUSTOM/PART.BIN")]
+    [InlineData("custom/a.xml", "CUSTOM/%61.XML")]
+    public void Package_wide_opc_equivalent_entries_are_unsupported(
+        string originalName,
+        string collidingName)
+    {
+        var path = TemporaryPath(".payload");
+        try
+        {
+            CreateSpreadsheet(path);
+            AddOpcEquivalentZipEntry(path, originalName, collidingName);
+
+            var evidence = XlsxRuntimeIdentity.Identify(path);
+
+            AssertUnsupportedEvidence(evidence, path);
+            Assert.Contains(
+                evidence.File.Signature.Evidence,
+                item => item.Contains("opc-part-uri-collision", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("/absolute.xml")]
+    [InlineData("xl//invalid.xml")]
+    [InlineData("xl/../invalid.xml")]
+    [InlineData("xl\\invalid.xml")]
+    [InlineData("xl/%ZZ-invalid.xml")]
+    public void Invalid_opc_part_uri_entry_names_are_unsupported(string invalidName)
+    {
+        var path = TemporaryPath(".payload");
+        try
+        {
+            CreateSpreadsheet(path);
+            AddZipEntry(path, invalidName, "invalid package entry");
+
+            var evidence = XlsxRuntimeIdentity.Identify(path);
+
+            AssertUnsupportedEvidence(evidence, path);
+            Assert.Contains(
+                evidence.File.Signature.Evidence,
+                item => item.Contains("opc-part-uri-invalid", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Non_colliding_directory_entries_do_not_change_a_renamed_workbook_identity()
+    {
+        var path = TemporaryPath(".payload");
+        try
+        {
+            CreateSpreadsheet(path);
+            AddZipEntry(path, "custom/", string.Empty);
+            AddZipEntry(path, "custom/evidence.bin", "fixture");
+
+            var evidence = XlsxRuntimeIdentity.Identify(path);
+
+            AssertSupportedEvidence(
+                evidence,
+                path,
+                "xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "ooxml-spreadsheet-main-part");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void Missing_source_is_typed_source_read_failure_without_fake_hash()
     {
@@ -404,6 +485,36 @@ public sealed class RuntimeIdentityTests
         using var stream = entry.Open();
         using var writer = new StreamWriter(stream);
         writer.Write(value);
+    }
+
+    private static void AddOpcEquivalentZipEntry(string path, string originalName, string collidingName)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Update);
+        var original = archive.GetEntry(originalName);
+        if (original is null)
+        {
+            original = archive.CreateEntry(originalName);
+            using var originalStream = original.Open();
+            originalStream.Write([0x01, 0x02, 0x03]);
+        }
+
+        byte[] originalBytes;
+        using (var originalStream = original.Open())
+        using (var copy = new MemoryStream())
+        {
+            originalStream.CopyTo(copy);
+            originalBytes = copy.ToArray();
+        }
+
+        var collision = archive.CreateEntry(collidingName);
+        using var collisionStream = collision.Open();
+        collisionStream.Write(originalBytes);
+    }
+
+    private static void AddZipEntry(string path, string name, string value)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Update);
+        WriteZipEntry(archive, name, value);
     }
 
     private static string ReadZipEntry(string path, string name)

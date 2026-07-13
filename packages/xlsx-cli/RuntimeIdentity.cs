@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.IO.Packaging;
 using System.Reflection;
 using System.Text.Json;
 using System.Xml;
@@ -166,6 +167,13 @@ public static class XlsxRuntimeIdentity
         {
             using var archiveStream = new MemoryStream(sourceBytes.ToArray(), writable: false);
             using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read, leaveOpen: false);
+            evidence.Add("zip:central-directory-readable");
+            var packageEntryNameFailure = InspectOpcPackageEntryNames(archive, evidence);
+            if (packageEntryNameFailure is not null)
+            {
+                return packageEntryNameFailure;
+            }
+
             var contentTypesEntries = archive.Entries
                 .Where(entry => entry.FullName == "[Content_Types].xml")
                 .ToArray();
@@ -278,6 +286,120 @@ public static class XlsxRuntimeIdentity
                 evidence);
         }
     }
+
+    private static SignatureInspection? InspectOpcPackageEntryNames(
+        ZipArchive archive,
+        List<string> evidence)
+    {
+        var partNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in archive.Entries)
+        {
+            if (!TryNormalizeOpcPackageEntryName(entry.FullName, out var normalizedPartName))
+            {
+                evidence.Add("opc-part-uri-invalid");
+                return SignatureInspection.Unsupported(
+                    XlsxSignatureKind,
+                    "opc-part-uri-invalid",
+                    evidence);
+            }
+
+            if (normalizedPartName is null)
+            {
+                continue;
+            }
+
+            var equivalenceKey = FoldAsciiCase(normalizedPartName);
+            if (!partNames.Add(equivalenceKey))
+            {
+                evidence.Add($"opc-part-uri-collision:{equivalenceKey}");
+                return SignatureInspection.Unsupported(
+                    XlsxSignatureKind,
+                    "opc-part-uri-collision",
+                    evidence);
+            }
+        }
+
+        evidence.Add("opc-part-uri-set:unambiguous");
+        return null;
+    }
+
+    private static bool TryNormalizeOpcPackageEntryName(
+        string entryName,
+        out string? normalizedPartName)
+    {
+        normalizedPartName = null;
+        if (string.IsNullOrEmpty(entryName)
+            || entryName[0] == '/'
+            || entryName.Contains('\\')
+            || entryName.Contains('?')
+            || entryName.Contains('#')
+            || entryName.Any(char.IsControl)
+            || !HasValidPercentEscapes(entryName))
+        {
+            return false;
+        }
+
+        var isDirectory = entryName.EndsWith('/');
+        var path = isDirectory ? entryName[..^1] : entryName;
+        var segments = path.Split('/');
+        if (segments.Length == 0
+            || segments.Any(segment =>
+                string.IsNullOrEmpty(segment)
+                || segment == "."
+                || segment == ".."))
+        {
+            return false;
+        }
+
+        try
+        {
+            var candidatePartName = isDirectory ? path + "/.directory" : entryName;
+            var partUri = PackUriHelper.CreatePartUri(
+                new Uri("/" + candidatePartName, UriKind.Relative));
+            if (!isDirectory)
+            {
+                normalizedPartName = PackUriHelper.GetNormalizedPartUri(partUri).OriginalString;
+            }
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or UriFormatException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasValidPercentEscapes(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] != '%')
+            {
+                continue;
+            }
+            if (index + 2 >= value.Length
+                || !Uri.IsHexDigit(value[index + 1])
+                || !Uri.IsHexDigit(value[index + 2]))
+            {
+                return false;
+            }
+            index += 2;
+        }
+        return true;
+    }
+
+    private static string FoldAsciiCase(string value) =>
+        string.Create(value.Length, value, static (characters, source) =>
+        {
+            for (var index = 0; index < source.Length; index++)
+            {
+                var character = source[index];
+                characters[index] = character is >= 'A' and <= 'Z'
+                    ? (char)(character + ('a' - 'A'))
+                    : character;
+            }
+        });
 
     private static SignatureInspection InspectLegacySpreadsheet(ReadOnlyMemory<byte> sourceBytes)
     {
