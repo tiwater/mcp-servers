@@ -32,6 +32,7 @@ test('capabilities --json emits a schema-valid non-mutating descriptor', () => {
   assertSchemaValid('runtime-capabilities.schema.json', descriptor);
   assert.deepEqual(descriptor.descriptorCommand, { command: 'capabilities', arguments: ['--json'], mutates: false });
   assert.deepEqual(descriptor.identifyProbe.outcomes, ['supported', 'unsupported', 'failed']);
+  assert.ok(descriptor.commands.some(command => command.name === 'extract-evidence'));
 });
 
 test('identify missing source returns typed JSON failure and nonzero exit', () => {
@@ -60,6 +61,22 @@ test('identify fake docx returns unsupported JSON with a successful exit', () =>
     assert.equal(evidence.source.path, path.resolve(fake));
     assert.equal(evidence.file.fileKind, null);
     assert.deepEqual(evidence.errors, []);
+  } finally {
+    fs.rmSync(fake, { force: true });
+  }
+});
+
+test('extract-evidence retains unsupported sources without parsing them', () => {
+  const fake = path.join(os.tmpdir(), `fake-extract-${process.pid}-${Date.now()}.docx`);
+  fs.writeFileSync(fake, 'not a zip package');
+  try {
+    const result = runCli(['extract-evidence', fake, '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const evidence = JSON.parse(result.stdout);
+    assertSchemaValid('runtime-evidence-envelope.schema.json', evidence);
+    assert.equal(evidence.probe, 'extract-evidence');
+    assert.equal(evidence.status, 'unsupported');
+    assert.deepEqual(evidence.objects, []);
   } finally {
     fs.rmSync(fake, { force: true });
   }

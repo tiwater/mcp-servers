@@ -26,6 +26,7 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "capabilities" => Task.FromResult(RunCapabilities(args[1..])),
                 "identify" => Task.FromResult(RunIdentify(args[1..])),
+                "extract-evidence" => Task.FromResult(RunExtractEvidence(args[1..])),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -120,6 +121,7 @@ internal static class Cli
         Console.WriteLine("Usage:");
         Console.WriteLine("  capabilities --json");
         Console.WriteLine("  identify <input> --json");
+        Console.WriteLine("  extract-evidence <input> --json");
         Console.WriteLine("  inspect <input.docx> [--json]");
         Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
@@ -160,6 +162,25 @@ internal static class Cli
         var evidence = DocxRuntimeIdentity.Identify(args[0]);
         WriteRuntimeJson(evidence);
         return evidence.Status == "failed" ? 1 : 0;
+    }
+
+    private static int RunExtractEvidence(string[] args)
+    {
+        if (args.Length != 2 || args[1] != "--json")
+        {
+            throw new InvalidOperationException("extract-evidence requires <input> --json");
+        }
+
+        var identify = DocxRuntimeIdentity.Identify(args[0]);
+        var report = identify.Status == "supported"
+            ? JsonSerializer.SerializeToElement(new
+            {
+                inspection = Inspector.Inspect(args[0]),
+                tables = Inspector.InspectTables(args[0]),
+            }, Json.Options)
+            : JsonSerializer.SerializeToElement(new { }, RuntimeJson.Options);
+        WriteRuntimeJson(EvidenceEnvelope.CreateExtraction(identify, report));
+        return identify.Status == "failed" ? 1 : 0;
     }
 
     private static void WriteRuntimeJson<T>(T value)

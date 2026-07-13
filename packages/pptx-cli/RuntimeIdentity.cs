@@ -48,6 +48,7 @@ public static class PptxRuntimeIdentity
                 false,
                 new SchemaIdentity(CapabilitiesSchemaId, RuntimeContractVersions.Capabilities)),
             new RuntimeCommand("identify", false, EvidenceSchema),
+            new RuntimeCommand("extract-evidence", false, EvidenceSchema),
         ],
         new IdentityPolicy(
             "runtime-native-only",

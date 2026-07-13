@@ -200,9 +200,75 @@ public sealed class RuntimeContractTests
         Assert.DoesNotContain("requiredProbeSet", json, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Normalized_extraction_nodes_are_stable_contained_and_canonical()
+    {
+        using var report = JsonDocument.Parse("""
+            {
+              "file":"/renamed/source.docx",
+              "tables":[{"rows":[{"cells":[{"text":"结果","confidence":0.95}]}]}]
+            }
+            """);
+
+        var extraction = NormalizedEvidence.Build(report.RootElement);
+        var nodes = extraction.Payload.GetProperty("nodes").EnumerateArray().ToArray();
+        var text = nodes.Single(node => node.GetProperty("runtimeNodeId").GetString() == "/tables/0/rows/0/cells/0/text");
+        var decimalNode = nodes.Single(node => node.GetProperty("runtimeNodeId").GetString() == "/tables/0/rows/0/cells/0/confidence");
+
+        Assert.Equal("text", text.GetProperty("kind").GetString());
+        Assert.Equal("结果", text.GetProperty("value").GetString());
+        Assert.Equal("/tables/0/rows/0/cells/0", text.GetProperty("containedBy").GetString());
+        Assert.Equal("0.95", decimalNode.GetProperty("value").GetString());
+        Assert.DoesNotContain(nodes, node => node.GetProperty("runtimeNodeId").GetString() == "/file");
+        Assert.Equal(extraction.Objects.Count, extraction.Objects.Select(node => node.ObjectId).Distinct().Count());
+        Assert.All(extraction.Objects.Where(node => !node.Root), node =>
+            Assert.Contains(extraction.Objects, parent => parent.ObjectId == node.ParentObjectId));
+        _ = EvidenceEnvelope.IdentifyCanonicalJson(
+            extraction.Payload,
+            new SchemaIdentity("tiwater.runtime.normalized-evidence", "1.0.0"));
+    }
+
+    [Fact]
+    public void Extraction_envelope_reuses_exact_source_identity_and_hashes_normalized_payload()
+    {
+        var identify = SupportedIdentify();
+        using var report = JsonDocument.Parse("{\"rows\":[{\"text\":\"value\"}]}");
+
+        var extraction = EvidenceEnvelope.CreateExtraction(identify, report.RootElement);
+
+        Assert.Equal("extract-evidence", extraction.Probe);
+        Assert.Equal(identify.Source, extraction.Source);
+        Assert.Equal(identify.Runtime, extraction.Runtime);
+        Assert.NotEmpty(extraction.Objects);
+        Assert.Equal(
+            EvidenceEnvelope.IdentifyCanonicalJson(extraction.Payload, extraction.Artifact.Schema),
+            extraction.Artifact);
+    }
+
     private static JsonElement Json(string value)
     {
         using var document = JsonDocument.Parse(value);
         return document.RootElement.Clone();
+    }
+
+    private static RuntimeEvidenceEnvelope SupportedIdentify()
+    {
+        var payload = Json("{\"recognized\":true}");
+        return new RuntimeEvidenceEnvelope(
+            "1.0.0",
+            "runtime-evidence",
+            "identify",
+            "supported",
+            null,
+            new PackageIdentity("tiwater.test.cli", "1.0.0"),
+            new RuntimeIdentity("test", "tiwater-test", "1.0.0"),
+            new SchemaIdentity("https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json", "1.0.0"),
+            FileIdentity.IdentifyBytes("/source", Encoding.UTF8.GetBytes("source")),
+            new RuntimeFileEvidence("test", "application/x-test", new SignatureEvidence("matched", "test", ["matched"])),
+            EvidenceEnvelope.IdentifyCanonicalJson(payload, new SchemaIdentity("tiwater.runtime.identify-payload", "1.0.0")),
+            payload,
+            [],
+            [],
+            []);
     }
 }

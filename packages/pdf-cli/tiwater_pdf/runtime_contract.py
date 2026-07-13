@@ -114,3 +114,89 @@ def derived_identity(derivation: str, inputs: Iterable[str]) -> dict[str, Any]:
         "derivation": derivation,
         "inputs": normalized_inputs,
     }
+
+
+def normalize_evidence(report: Any) -> dict[str, Any]:
+    """Project a runtime-owned JSON report into stable generic evidence nodes."""
+
+    nodes: list[dict[str, Any]] = []
+    objects: list[dict[str, Any]] = []
+
+    def visit(value: Any, node_id: str, parent_id: str | None, kind: str, depth: int) -> None:
+        nodes.append(
+            {
+                "runtimeNodeId": node_id,
+                "kind": kind,
+                "valueType": _evidence_value_type(value),
+                "value": _evidence_scalar(value),
+                "locator": node_id,
+                "derivedFrom": [],
+                "containedBy": parent_id,
+            }
+        )
+        objects.append(
+            {
+                "objectId": node_id,
+                "objectType": kind,
+                "root": parent_id is None,
+                "parentObjectId": parent_id,
+                "identity": derived_identity("normalized-json-pointer-v1", [node_id]),
+            }
+        )
+
+        if isinstance(value, dict):
+            for key in sorted(value, key=lambda item: item.encode("utf-16-be", "surrogatepass")):
+                if depth == 0 and key.lower() in {"file", "input", "output"}:
+                    continue
+                child_id = f"/{_json_pointer_escape(key)}" if node_id == "$" else f"{node_id}/{_json_pointer_escape(key)}"
+                visit(value[key], child_id, node_id, key, depth + 1)
+        elif isinstance(value, (list, tuple)):
+            item_kind = _singular(kind)
+            for index, item in enumerate(value):
+                visit(item, f"{node_id}/{index}", node_id, item_kind, depth + 1)
+
+    visit(report, "$", None, "document", 0)
+    return {
+        "payload": {"schemaVersion": "1.0.0", "nodes": nodes},
+        "objects": objects,
+    }
+
+
+def _evidence_scalar(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, str, int)):
+        return value
+    if isinstance(value, float):
+        return repr(value)
+    return None
+
+
+def _evidence_value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "decimal-string"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, (list, tuple)):
+        return "array"
+    raise ValueError(f"unsupported evidence value: {type(value).__name__}")
+
+
+def _json_pointer_escape(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _singular(value: str) -> str:
+    if value == "children":
+        return "child"
+    if value.endswith("ies"):
+        return f"{value[:-3]}y"
+    if value.endswith("s") and len(value) > 1:
+        return value[:-1]
+    return "item"

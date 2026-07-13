@@ -38,6 +38,7 @@ test('capabilities --json emits the schema-valid non-mutating XLS/XLSX descripto
     outcomes: ['supported', 'unsupported', 'failed'],
   });
   assert.deepEqual(descriptor.supportedKinds.map(({ fileKind }) => fileKind), ['xlsx', 'xls']);
+  assert.ok(descriptor.commands.some(command => command.name === 'extract-evidence'));
 });
 
 test('identify missing source emits a schema-valid source-read failure', () => {
@@ -68,6 +69,22 @@ test('identify fake extension emits schema-valid unsupported evidence', () => {
     assert.equal(evidence.file.fileKind, null);
     assert.equal(evidence.file.mediaType, null);
     assert.deepEqual(evidence.errors, []);
+  } finally {
+    fs.rmSync(fake, { force: true });
+  }
+});
+
+test('extract-evidence retains unsupported sources without parsing them', () => {
+  const fake = path.join(os.tmpdir(), `fake-extract-${process.pid}-${Date.now()}.xlsx`);
+  fs.writeFileSync(fake, 'not a spreadsheet package');
+  try {
+    const result = runCli(['extract-evidence', fake, '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const evidence = JSON.parse(result.stdout);
+    assertSchemaValid('runtime-evidence-envelope.schema.json', evidence);
+    assert.equal(evidence.probe, 'extract-evidence');
+    assert.equal(evidence.status, 'unsupported');
+    assert.deepEqual(evidence.objects, []);
   } finally {
     fs.rmSync(fake, { force: true });
   }

@@ -10,7 +10,7 @@ from typing import Any
 import fitz
 
 from . import __version__
-from .runtime_contract import identify_canonical_json_artifact
+from .runtime_contract import identify_canonical_json_artifact, normalize_evidence
 
 
 CONTRACT_VERSION = "1.0.0"
@@ -63,6 +63,11 @@ def capabilities() -> dict[str, Any]:
             },
             {
                 "name": "identify",
+                "mutates": False,
+                "outputSchema": _schema_identity(EVIDENCE_SCHEMA_ID),
+            },
+            {
+                "name": "extract-evidence",
                 "mutates": False,
                 "outputSchema": _schema_identity(EVIDENCE_SCHEMA_ID),
             },
@@ -153,6 +158,37 @@ def identify(file_path: str | Path) -> dict[str, Any]:
     )
 
 
+def extraction_evidence(
+    identify_evidence: dict[str, Any],
+    report: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Bind normalized extraction nodes to a previously computed identity probe."""
+
+    if identify_evidence["status"] == "supported":
+        normalized = normalize_evidence(report or {})
+        payload = normalized["payload"]
+        objects = normalized["objects"]
+    else:
+        payload = {
+            "identifyStatus": identify_evidence["status"],
+            "reason": "source-not-supported-for-extraction",
+            "nodes": [],
+        }
+        objects = []
+
+    return _evidence_envelope(
+        status=identify_evidence["status"],
+        failure_stage=identify_evidence["failureStage"],
+        source=identify_evidence["source"],
+        file_evidence=identify_evidence["file"],
+        payload=payload,
+        errors=identify_evidence["errors"],
+        probe="extract-evidence",
+        objects=objects,
+        payload_schema_id="tiwater.runtime.normalized-evidence",
+    )
+
+
 def _unsupported(
     source: dict[str, Any],
     *,
@@ -180,11 +216,14 @@ def _evidence_envelope(
     file_evidence: dict[str, Any],
     payload: dict[str, Any],
     errors: list[dict[str, Any]],
+    probe: str = "identify",
+    objects: list[dict[str, Any]] | None = None,
+    payload_schema_id: str = IDENTIFY_PAYLOAD_SCHEMA_ID,
 ) -> dict[str, Any]:
     return {
         "schemaVersion": CONTRACT_VERSION,
         "envelopeType": "runtime-evidence",
-        "probe": "identify",
+        "probe": probe,
         "status": status,
         "failureStage": failure_stage,
         "package": _package_identity(),
@@ -194,11 +233,11 @@ def _evidence_envelope(
         "file": file_evidence,
         "artifact": identify_canonical_json_artifact(
             payload,
-            schema_id=IDENTIFY_PAYLOAD_SCHEMA_ID,
+            schema_id=payload_schema_id,
             schema_version=CONTRACT_VERSION,
         ),
         "payload": payload,
-        "objects": [],
+        "objects": objects or [],
         "warnings": [],
         "errors": errors,
     }

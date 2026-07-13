@@ -7,6 +7,40 @@ namespace Tiwater.RuntimeContracts;
 public static class EvidenceEnvelope
 {
     private const long MaxSafeInteger = 9_007_199_254_740_991;
+    private static readonly SchemaIdentity NormalizedEvidenceSchema = new(
+        "tiwater.runtime.normalized-evidence",
+        RuntimeContractVersions.EvidenceEnvelope);
+
+    public static RuntimeEvidenceEnvelope CreateExtraction(
+        RuntimeEvidenceEnvelope identify,
+        JsonElement report)
+    {
+        if (identify.Status == "supported")
+        {
+            var normalized = NormalizedEvidence.Build(report);
+            return identify with
+            {
+                Probe = "extract-evidence",
+                Artifact = IdentifyCanonicalJson(normalized.Payload, NormalizedEvidenceSchema),
+                Payload = normalized.Payload,
+                Objects = normalized.Objects,
+            };
+        }
+
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            identifyStatus = identify.Status,
+            reason = "source-not-supported-for-extraction",
+            nodes = Array.Empty<object>(),
+        }, RuntimeJson.Options);
+        return identify with
+        {
+            Probe = "extract-evidence",
+            Artifact = IdentifyCanonicalJson(payload, NormalizedEvidenceSchema),
+            Payload = payload,
+            Objects = [],
+        };
+    }
 
     public static ArtifactIdentity IdentifyCanonicalJson(JsonElement payload, SchemaIdentity schema)
     {

@@ -9,6 +9,7 @@ from tiwater_pdf.runtime_contract import (
     identify_canonical_json_artifact,
     identify_file,
     native_identity,
+    normalize_evidence,
 )
 
 
@@ -109,6 +110,27 @@ class RuntimeContractTest(unittest.TestCase):
             native_identity("", "42")
         with self.assertRaisesRegex(ValueError, "inputs"):
             derived_identity("source-version-structural-locator", [])
+
+    def test_normalized_evidence_has_stable_nodes_and_containment(self):
+        result = normalize_evidence(
+            {
+                "file": "/renamed/source.pdf",
+                "tables": [{"rows": [{"cells": [{"text": "结果", "confidence": 0.95}]}]}],
+            }
+        )
+
+        nodes = {node["runtimeNodeId"]: node for node in result["payload"]["nodes"]}
+        self.assertEqual(nodes["/tables/0/rows/0/cells/0/text"]["value"], "结果")
+        self.assertEqual(nodes["/tables/0/rows/0/cells/0/confidence"]["value"], "0.95")
+        self.assertEqual(
+            nodes["/tables/0/rows/0/cells/0/text"]["containedBy"],
+            "/tables/0/rows/0/cells/0",
+        )
+        self.assertNotIn("/file", nodes)
+        object_ids = {item["objectId"] for item in result["objects"]}
+        self.assertEqual(len(object_ids), len(result["objects"]))
+        self.assertTrue(all(item["root"] or item["parentObjectId"] in object_ids for item in result["objects"]))
+        canonical_json_bytes(result["payload"])
 
 
 if __name__ == "__main__":

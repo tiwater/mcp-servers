@@ -123,6 +123,26 @@ test('capabilities --json emits the schema-valid PDF runtime descriptor', () => 
   }]);
   assert.equal(descriptor.descriptorCommand.mutates, false);
   assert.equal(descriptor.identifyProbe.mutates, false);
+  assert.ok(descriptor.commands.some(command => command.name === 'extract-evidence'));
+});
+
+test('extract-evidence publishes hash-bound normalized page nodes', () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-runtime-extraction-'));
+  try {
+    const sourcePath = path.join(temporary, 'renamed.payload');
+    createPdf(sourcePath);
+    const evidence = assertJsonOnly(runPdfCli('extract-evidence', sourcePath, '--json'), 0);
+
+    assertSchemaValid(validateEvidence, evidence);
+    assert.equal(evidence.probe, 'extract-evidence');
+    assert.equal(evidence.status, 'supported');
+    assert.ok(evidence.objects.length > 0);
+    assert.ok(evidence.payload.nodes.some(node => node.runtimeNodeId === '/inspection/page_sizes/0/page'));
+    const bytes = Buffer.from(JSON.stringify(canonicalize(evidence.payload)));
+    assert.equal(evidence.artifact.sha256, crypto.createHash('sha256').update(bytes).digest('hex'));
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 });
 
 test('runtime identity commands require their declared --json invocation shape', () => {
@@ -133,6 +153,7 @@ test('runtime identity commands require their declared --json invocation shape',
     for (const args of [
       ['capabilities'],
       ['identify', sourcePath],
+      ['extract-evidence', sourcePath],
       ['capabilities', '--json', 'extra'],
       ['identify', sourcePath, '--json', 'extra'],
     ]) {

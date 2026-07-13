@@ -37,6 +37,7 @@ test('capabilities --json emits a schema-valid non-mutating descriptor', () => {
     mutates: false,
     outcomes: ['supported', 'unsupported', 'failed'],
   });
+  assert.ok(descriptor.commands.some(command => command.name === 'extract-evidence'));
 });
 
 test('identify missing source returns schema-valid typed failure and nonzero exit', () => {
@@ -65,6 +66,22 @@ test('identify fake pptx returns schema-valid unsupported evidence and successfu
     assert.equal(evidence.source.path, path.resolve(fake));
     assert.equal(evidence.file.fileKind, null);
     assert.deepEqual(evidence.errors, []);
+  } finally {
+    fs.rmSync(fake, { force: true });
+  }
+});
+
+test('extract-evidence retains unsupported sources without parsing them', () => {
+  const fake = path.join(os.tmpdir(), `fake-extract-${process.pid}-${Date.now()}.pptx`);
+  fs.writeFileSync(fake, 'not a presentation package');
+  try {
+    const result = runCli(['extract-evidence', fake, '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const evidence = JSON.parse(result.stdout);
+    assertSchemaValid('runtime-evidence-envelope.schema.json', evidence);
+    assert.equal(evidence.probe, 'extract-evidence');
+    assert.equal(evidence.status, 'unsupported');
+    assert.deepEqual(evidence.objects, []);
   } finally {
     fs.rmSync(fake, { force: true });
   }
