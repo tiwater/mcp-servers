@@ -66,6 +66,7 @@ tiwater-pdf ocr scan-1.pdf scan-2.pdf scan-3.pdf \
   --provider llm \
   --output-dir outputs/ocr-llm \
   --max-parallel 3 \
+  --max-page-parallel 12 \
   --json
 ```
 
@@ -93,6 +94,7 @@ Configuration is read from explicit flags first, then environment variables:
 - `--llm-model`, `TIWATER_LLM_OCR_MODEL`, `TIWATER_LLM_VISION_MODEL`, or the built-in `qwen3.7-plus` OCR default
 - `--max-tokens` or `TIWATER_PDF_OCR_MAX_TOKENS` to cap per-page OCR output
 - `--max-parallel` or `TIWATER_PDF_OCR_MAX_PARALLEL` to cap concurrent PDFs in batch mode
+- `--max-page-parallel` or `TIWATER_PDF_OCR_MAX_PAGE_PARALLEL` to cap concurrent pages within each PDF; page results are sorted before cross-page table normalization
 - `--enable-thinking auto|true|false` or `TIWATER_LLM_ENABLE_THINKING` for vendor thinking mode
 
 When only `OPENROUTER_API_KEY` is present, the default base URL is `https://openrouter.ai/api/v1`.

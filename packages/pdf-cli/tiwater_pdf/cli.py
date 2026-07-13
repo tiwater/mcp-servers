@@ -786,6 +786,7 @@ def llm_ocr(
     zoom: float = 2.5,
     max_tokens: int = 4096,
     enable_thinking: str | bool | None = "auto",
+    max_page_parallel: int = 12,
 ) -> dict:
     """Extract page text from scanned PDFs using an OpenAI-compatible vision model."""
     resolved_api_key, resolved_base_url = _resolve_llm_config(api_key, base_url)
@@ -795,8 +796,14 @@ def llm_ocr(
         llm_model=llm_model,
         base_url=resolved_base_url,
     )
-    doc = fitz.open(pdf_path)
-    pages = []
+    if max_page_parallel < 1:
+        raise ValueError("--max-page-parallel must be >= 1")
+
+    with fitz.open(pdf_path) as doc:
+        selected_page_indexes = [
+            page_index for page_index in range(len(doc))
+            if not page_numbers or page_index + 1 in page_numbers
+        ]
 
     prompt = (
         "Extract the visible text from this PDF page image with high fidelity. "
@@ -807,56 +814,59 @@ def llm_ocr(
         "tables should be an array of markdown table strings or empty if no table is visible."
     )
 
-    try:
-        for page_index in range(len(doc)):
-            page_number = page_index + 1
-            if page_numbers and page_number not in page_numbers:
-                continue
-            image_bytes = _render_page_image(doc, page_index, zoom=zoom)
-            b64_image = base64.b64encode(image_bytes).decode("utf-8")
-            request_kwargs = {}
-            if resolved_enable_thinking is not None:
-                request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
-            response, request_attempts = _call_vision_with_retry(lambda: client.chat.completions.create(
-                model=llm_model, response_format={"type": "json_object"}, max_tokens=max_tokens,
-                messages=[{"role": "user", "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
-                ]}], temperature=0.0, **request_kwargs,
-            ))
-            try:
-                content = response.choices[0].message.content or ""
-                parsed = _extract_json_object(content)
-                page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
-                page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
-                page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
-                pages.append({
-                    "page": page_number,
-                    "text": str(parsed.get("text", "")).strip(),
-                    "tables": page_tables,
-                    "table_rows": page_table_rows,
-                    "table_cell_lines": _extract_table_cell_lines(page_table_rows),
-                    "table_cell_units": _extract_table_cell_units(page_table_rows),
-                    "warnings": page_warnings,
-                    "request_attempts": request_attempts,
-                })
-            except Exception as error:
-                pages.append({
-                    "page": page_number,
-                    "text": "",
-                    "tables": [],
-                    "table_rows": [],
-                    "table_cell_lines": [],
-                    "table_cell_units": [],
-                    "warnings": [f"OCR page failed: {type(error).__name__}: {error}"],
-                })
-    finally:
-        doc.close()
+    def ocr_page(page_index: int) -> dict:
+        page_number = page_index + 1
+        # Each worker opens its own document because PyMuPDF document/page
+        # objects are not safe to share across threads.
+        with fitz.open(pdf_path) as page_doc:
+            image_bytes = _render_page_image(page_doc, page_index, zoom=zoom)
+        b64_image = base64.b64encode(image_bytes).decode("utf-8")
+        request_kwargs = {}
+        if resolved_enable_thinking is not None:
+            request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
+        response, request_attempts = _call_vision_with_retry(lambda: client.chat.completions.create(
+            model=llm_model, response_format={"type": "json_object"}, max_tokens=max_tokens,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
+            ]}], temperature=0.0, **request_kwargs,
+        ))
+        try:
+            content = response.choices[0].message.content or ""
+            parsed = _extract_json_object(content)
+            page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
+            page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
+            page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
+            return {
+                "page": page_number,
+                "text": str(parsed.get("text", "")).strip(),
+                "tables": page_tables,
+                "table_rows": page_table_rows,
+                "table_cell_lines": _extract_table_cell_lines(page_table_rows),
+                "table_cell_units": _extract_table_cell_units(page_table_rows),
+                "warnings": page_warnings,
+                "request_attempts": request_attempts,
+            }
+        except Exception as error:
+            return {
+                "page": page_number,
+                "text": "",
+                "tables": [],
+                "table_rows": [],
+                "table_cell_lines": [],
+                "table_cell_units": [],
+                "warnings": [f"OCR page failed: {type(error).__name__}: {error}"],
+            }
+
+    with ThreadPoolExecutor(max_workers=min(max_page_parallel, len(selected_page_indexes) or 1)) as executor:
+        pages = list(executor.map(ocr_page, selected_page_indexes))
+    pages.sort(key=lambda page: page["page"])
 
     table_logical_rows = _extract_table_logical_rows(pages)
     return {
         "file": str(pdf_path),
         "model": llm_model,
+        "max_page_parallel": max_page_parallel,
         "pages": pages,
         "page_count": len(pages),
         "text": "\n\n".join(page["text"] for page in pages if page.get("text")),
@@ -1600,6 +1610,12 @@ def main() -> int:
         default=int(os.getenv("TIWATER_PDF_OCR_MAX_PARALLEL", "3")),
         help="Maximum concurrent PDFs for batch OCR",
     )
+    ocr_parser.add_argument(
+        "--max-page-parallel",
+        type=int,
+        default=int(os.getenv("TIWATER_PDF_OCR_MAX_PAGE_PARALLEL", "12")),
+        help="Maximum concurrent pages within each PDF for LLM OCR",
+    )
     ocr_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()
@@ -1708,6 +1724,7 @@ def main() -> int:
                             zoom=args.zoom,
                             max_tokens=args.max_tokens,
                             enable_thinking=args.enable_thinking,
+                            max_page_parallel=args.max_page_parallel,
                         )
                     model = args.llm_model
                 result = _run_ocr_batch(
@@ -1750,6 +1767,7 @@ def main() -> int:
                     zoom=args.zoom,
                     max_tokens=args.max_tokens,
                     enable_thinking=args.enable_thinking,
+                    max_page_parallel=args.max_page_parallel,
                 )
                 if args.json:
                     print(json.dumps(result, indent=2, ensure_ascii=False))
