@@ -30,14 +30,27 @@ def _is_retryable_vision_error(error: Exception) -> bool:
     ))
 
 
-def _call_vision_with_retry(call, attempts: int = DEFAULT_VISION_REQUEST_ATTEMPTS, sleep_fn=time.sleep):
+def _call_vision_with_retry(
+    call,
+    attempts: int = DEFAULT_VISION_REQUEST_ATTEMPTS,
+    sleep_fn=time.sleep,
+    retryable=_is_retryable_vision_error,
+):
     for attempt in range(1, attempts + 1):
         try:
             return call(), attempt
         except Exception as error:
-            if attempt >= attempts or not _is_retryable_vision_error(error):
+            if attempt >= attempts or not retryable(error):
                 raise
             sleep_fn(attempt * 2)
+
+
+def _is_retryable_vision_page_error(error: Exception) -> bool:
+    """Retry transient transport failures and malformed vision responses."""
+    return _is_retryable_vision_error(error) or isinstance(
+        error,
+        (AttributeError, IndexError, KeyError, TypeError, ValueError),
+    )
 
 
 def _find_tables_quiet(page):
@@ -806,6 +819,24 @@ def _extract_table_logical_rows(pages: list[dict]) -> list[dict]:
     return logical
 
 
+def _parse_vision_page_response(response, page_number: int) -> dict:
+    """Parse one model response into complete page-level runtime evidence."""
+    content = response.choices[0].message.content or ""
+    parsed = _extract_json_object(content)
+    page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
+    page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
+    page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
+    return {
+        "page": page_number,
+        "text": str(parsed.get("text", "")).strip(),
+        "tables": page_tables,
+        "table_rows": page_table_rows,
+        "table_cell_lines": _extract_table_cell_lines(page_table_rows),
+        "table_cell_units": _extract_table_cell_units(page_table_rows),
+        "warnings": page_warnings,
+    }
+
+
 def llm_ocr(
     pdf_path: Path,
     page_numbers: list[int] | None = None,
@@ -853,39 +884,27 @@ def llm_ocr(
         request_kwargs = {}
         if resolved_enable_thinking is not None:
             request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
-        response, request_attempts = _call_vision_with_retry(lambda: client.chat.completions.create(
-            model=llm_model, response_format={"type": "json_object"}, max_tokens=max_tokens,
-            messages=[{"role": "user", "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
-            ]}], temperature=0.0, **request_kwargs,
-        ))
+        def request_and_parse_page():
+            response = client.chat.completions.create(
+                model=llm_model, response_format={"type": "json_object"}, max_tokens=max_tokens,
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
+                ]}], temperature=0.0, **request_kwargs,
+            )
+            return _parse_vision_page_response(response, page_number)
+
         try:
-            content = response.choices[0].message.content or ""
-            parsed = _extract_json_object(content)
-            page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
-            page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
-            page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
-            return {
-                "page": page_number,
-                "text": str(parsed.get("text", "")).strip(),
-                "tables": page_tables,
-                "table_rows": page_table_rows,
-                "table_cell_lines": _extract_table_cell_lines(page_table_rows),
-                "table_cell_units": _extract_table_cell_units(page_table_rows),
-                "warnings": page_warnings,
-                "request_attempts": request_attempts,
-            }
+            page_result, request_attempts = _call_vision_with_retry(
+                request_and_parse_page,
+                retryable=_is_retryable_vision_page_error,
+            )
         except Exception as error:
-            return {
-                "page": page_number,
-                "text": "",
-                "tables": [],
-                "table_rows": [],
-                "table_cell_lines": [],
-                "table_cell_units": [],
-                "warnings": [f"OCR page failed: {type(error).__name__}: {error}"],
-            }
+            raise RuntimeError(
+                f"OCR page {page_number} failed: {type(error).__name__}: {error}"
+            ) from error
+        page_result["request_attempts"] = request_attempts
+        return page_result
 
     with ThreadPoolExecutor(max_workers=min(max_page_parallel, len(selected_page_indexes) or 1)) as executor:
         pages = list(executor.map(ocr_page, selected_page_indexes))

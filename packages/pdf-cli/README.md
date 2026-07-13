@@ -106,5 +106,9 @@ When only `OPENROUTER_API_KEY` is present, the default base URL is `https://open
 When running under Supen, `SUPEN_LLM_GATEWAY_URL` should point at the gateway's OpenAI-compatible route, for example `http://127.0.0.1:2755/api/llm/v1`.
 In `auto` mode, bare Alibaba Model Studio Qwen3.5/Qwen3.6/Qwen3.7 model ids such as `qwen3.7-plus` disable thinking for OCR calls, which avoids unnecessary latency on extraction tasks. Provider-prefixed model ids such as `qwen/qwen3.7-plus` are left unchanged.
 Each vision page request retries a bounded three times for transient gateway
-timeouts, throttling, server errors, and the gateway's intermittent invalid-URL
-response; successful page JSON records `request_attempts` for auditability.
+timeouts, throttling, server errors, the gateway's intermittent invalid-URL
+response, and malformed or incomplete model response objects. Parsing and
+table normalization happen inside the retry boundary. If any selected page
+still fails, the PDF and its batch status fail instead of returning a partial
+document marked successful. Successful page JSON records `request_attempts`
+for auditability.
