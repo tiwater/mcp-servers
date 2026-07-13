@@ -16,6 +16,9 @@ from pathlib import Path
 
 import fitz
 
+from .runtime_identity import capabilities as runtime_capabilities
+from .runtime_identity import identify as identify_runtime
+
 DEFAULT_OCR_MODEL = "qwen3.7-plus"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 DEFAULT_VISION_REQUEST_ATTEMPTS = 3
@@ -1603,6 +1606,19 @@ def main() -> int:
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
+    capabilities_parser = subparsers.add_parser(
+        "capabilities",
+        help="Describe non-mutating PDF runtime capabilities",
+    )
+    capabilities_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    identify_parser = subparsers.add_parser(
+        "identify",
+        help="Identify PDF bytes without OCR or network access",
+    )
+    identify_parser.add_argument("input", type=Path, help="File to identify")
+    identify_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
     # inspect command
     inspect_parser = subparsers.add_parser("inspect", help="Inspect PDF metadata")
     inspect_parser.add_argument("input", type=Path, help="PDF file to inspect")
@@ -1673,7 +1689,16 @@ def main() -> int:
         return 1
 
     try:
-        if args.command == "inspect":
+        if args.command == "capabilities":
+            print(json.dumps(runtime_capabilities(), ensure_ascii=False))
+
+        elif args.command == "identify":
+            result = identify_runtime(args.input)
+            print(json.dumps(result, ensure_ascii=False))
+            if result["status"] == "failed":
+                return 1
+
+        elif args.command == "inspect":
             result = inspect(args.input)
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))

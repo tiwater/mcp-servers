@@ -19,7 +19,24 @@ pip install tiwater-pdf
 
 ## Commands Reference
 
-The CLI provides four major functionalities:
+The CLI provides runtime identity probes plus four document-processing functionalities:
+
+### Runtime identity
+
+These non-mutating commands require no API key and perform no OCR or network
+requests. `identify` reads the source once and requires a byte-zero PDF 1.0–1.7
+or 2.0 header terminated by a line break, plus a non-repaired PyMuPDF open of
+those exact bytes; the filename extension is not used. Structurally openable
+encrypted PDFs are identified as supported without attempting authentication or
+content extraction.
+
+```bash
+tiwater-pdf capabilities --json
+tiwater-pdf identify <input> --json
+```
+
+Both supported and unsupported identity outcomes exit with status 0. A source
+read failure emits a schema-valid JSON envelope and exits with status 1.
 
 ### 1. Find a Specific Table
 Searches the document for a table matching a specific heading or name and attempts to extract it.
