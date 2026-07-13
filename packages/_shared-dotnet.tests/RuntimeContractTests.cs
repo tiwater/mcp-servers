@@ -145,6 +145,36 @@ public sealed class RuntimeContractTests
     }
 
     [Fact]
+    public void Source_read_failure_serializes_without_inventing_source_identity()
+    {
+        using var payload = JsonDocument.Parse("{\"failureClass\":\"source-read-error\"}");
+        var payloadSchema = new SchemaIdentity("tiwater.runtime.identify-payload", "1.0.0");
+        var envelope = new RuntimeEvidenceEnvelope(
+            "1.0.0",
+            "runtime-evidence",
+            "identify",
+            "failed",
+            "source-read",
+            new PackageIdentity("tiwater.docx.cli", "0.4.0"),
+            new RuntimeIdentity("office", "tiwater-docx", "0.4.0"),
+            new SchemaIdentity("https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json", "1.0.0"),
+            null,
+            new RuntimeFileEvidence(null, null, new SignatureEvidence("not-checked", "ooxml-content-type", [])),
+            EvidenceEnvelope.IdentifyCanonicalJson(payload.RootElement, payloadSchema),
+            payload.RootElement.Clone(),
+            [],
+            [],
+            [new ContractFinding("source-read-failed", "The source bytes could not be read.")]);
+
+        var json = JsonSerializer.Serialize(envelope, RuntimeJson.Options);
+
+        Assert.Contains("\"source\":null", json, StringComparison.Ordinal);
+        Assert.Contains("\"failureStage\":\"source-read\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"status\":\"not-checked\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("contentId", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Capability_descriptor_serializes_both_non_mutating_discovery_commands()
     {
         var schema = new SchemaIdentity("https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json", "1.0.0");

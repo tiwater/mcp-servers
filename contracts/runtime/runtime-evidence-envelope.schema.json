@@ -31,7 +31,7 @@
     "package": { "$ref": "#/$defs/packageIdentity" },
     "runtime": { "$ref": "#/$defs/runtimeIdentity" },
     "evidenceSchema": { "$ref": "#/$defs/schemaIdentity" },
-    "source": { "$ref": "#/$defs/fileIdentity" },
+    "source": { "oneOf": [{ "$ref": "#/$defs/fileIdentity" }, { "type": "null" }] },
     "file": { "$ref": "#/$defs/fileEvidence" },
     "artifact": { "$ref": "#/$defs/artifactIdentity" },
     "payload": { "$ref": "#/$defs/canonicalJsonValue" },
@@ -75,6 +75,7 @@
               }
             ]
           },
+          "source": { "$ref": "#/$defs/fileIdentity" },
           "failureStage": { "type": "null" },
           "errors": { "maxItems": 0 }
         }
@@ -101,6 +102,7 @@
               }
             ]
           },
+          "source": { "$ref": "#/$defs/fileIdentity" },
           "failureStage": { "type": "null" },
           "objects": { "maxItems": 0 },
           "errors": { "maxItems": 0 }
@@ -117,7 +119,67 @@
               {
                 "properties": {
                   "fileKind": { "type": "null" },
-                  "mediaType": { "type": "null" },
+                  "mediaType": { "type": "null" }
+                }
+              }
+            ]
+          },
+          "failureStage": { "$ref": "#/$defs/nonEmptyString" },
+          "objects": { "maxItems": 0 },
+          "errors": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["status", "failureStage"],
+        "properties": {
+          "status": { "const": "failed" },
+          "failureStage": { "const": "source-read" }
+        }
+      },
+      "then": {
+        "properties": {
+          "source": { "type": "null" },
+          "file": {
+            "allOf": [
+              { "$ref": "#/$defs/fileEvidence" },
+              {
+                "properties": {
+                  "signature": {
+                    "allOf": [
+                      { "$ref": "#/$defs/signatureEvidence" },
+                      {
+                        "properties": {
+                          "status": { "const": "not-checked" },
+                          "evidence": { "maxItems": 0 }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["status", "failureStage"],
+        "properties": {
+          "status": { "const": "failed" },
+          "failureStage": { "not": { "const": "source-read" } }
+        }
+      },
+      "then": {
+        "properties": {
+          "source": { "$ref": "#/$defs/fileIdentity" },
+          "file": {
+            "allOf": [
+              { "$ref": "#/$defs/fileEvidence" },
+              {
+                "properties": {
                   "signature": {
                     "allOf": [
                       { "$ref": "#/$defs/signatureEvidence" },
@@ -127,10 +189,7 @@
                 }
               }
             ]
-          },
-          "failureStage": { "$ref": "#/$defs/nonEmptyString" },
-          "objects": { "maxItems": 0 },
-          "errors": { "minItems": 1 }
+          }
         }
       }
     }
@@ -213,7 +272,7 @@
       "additionalProperties": false,
       "required": ["status", "kind", "evidence"],
       "properties": {
-        "status": { "enum": ["matched", "mismatched", "not-applicable", "unknown"] },
+        "status": { "enum": ["matched", "mismatched", "not-applicable", "unknown", "not-checked"] },
         "kind": { "$ref": "#/$defs/nonEmptyString" },
         "evidence": {
           "type": "array",

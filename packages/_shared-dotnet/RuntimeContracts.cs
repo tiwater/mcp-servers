@@ -32,6 +32,33 @@ public sealed record ArtifactIdentity(
     string Encoding,
     SchemaIdentity Schema);
 
+public sealed record SignatureEvidence(
+    string Status,
+    string Kind,
+    IReadOnlyList<string> Evidence);
+
+public sealed record RuntimeFileEvidence(
+    string? FileKind,
+    string? MediaType,
+    SignatureEvidence Signature);
+
+public sealed record RuntimeEvidenceEnvelope(
+    string SchemaVersion,
+    string EnvelopeType,
+    string Probe,
+    string Status,
+    string? FailureStage,
+    PackageIdentity Package,
+    RuntimeIdentity Runtime,
+    SchemaIdentity EvidenceSchema,
+    FileContentIdentity? Source,
+    RuntimeFileEvidence File,
+    ArtifactIdentity Artifact,
+    JsonElement Payload,
+    IReadOnlyList<EvidenceObject> Objects,
+    IReadOnlyList<ContractFinding> Warnings,
+    IReadOnlyList<ContractFinding> Errors);
+
 public sealed record DiscoveryCommand(
     string Command,
     IReadOnlyList<string> Arguments,

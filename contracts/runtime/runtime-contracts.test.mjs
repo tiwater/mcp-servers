@@ -146,7 +146,9 @@ function validateEvidence(envelope) {
   assert.equal(envelope.schemaVersion, '1.0.0');
   assert.equal(envelope.envelopeType, 'runtime-evidence');
   assert.ok(['supported', 'unsupported', 'failed'].includes(envelope.status));
-  requireIdentity(envelope.source, 'source');
+  const sourceReadFailure = envelope.status === 'failed' && envelope.failureStage === 'source-read';
+  if (sourceReadFailure) assert.equal(envelope.source, null, 'source-read failure must not invent source identity');
+  else requireIdentity(envelope.source, 'source');
   requireArtifact(envelope.artifact, envelope.payload, 'artifact');
 
   if (envelope.status === 'supported') {
@@ -170,6 +172,10 @@ function validateEvidence(envelope) {
     assert.notEqual(envelope.file.signature.status, 'matched', 'failed file evidence cannot claim a matched signature');
     assert.ok(envelope.errors.length > 0);
     assert.deepEqual(envelope.objects, []);
+    if (sourceReadFailure) {
+      assert.equal(envelope.file.signature.status, 'not-checked');
+      assert.deepEqual(envelope.file.signature.evidence, []);
+    }
   }
 
   const ids = new Set(envelope.objects.map((object) => object.objectId));
@@ -247,7 +253,12 @@ test('publishes the three versioned runtime contract schemas', () => {
 
 test('Ajv 2020 compiles schemas and validates every positive contract fixture', () => {
   assertSchemaAccepts('runtime-capabilities.schema.json', fixture('runtime-capabilities.json'), 'capabilities');
-  for (const name of ['supported-identify.json', 'unsupported-identify.json', 'failed-identify.json']) {
+  for (const name of [
+    'supported-identify.json',
+    'unsupported-identify.json',
+    'failed-identify.json',
+    'failed-source-read-identify.json',
+  ]) {
     assertSchemaAccepts('runtime-evidence-envelope.schema.json', fixture(name), name);
   }
   assertSchemaAccepts('edit-report.schema.json', fixture('edit-report.json'), 'edit report');
@@ -286,6 +297,26 @@ test('Ajv rejects nested shape, version, uniqueness, command, signature, failure
   missingFailureError.errors = [];
   assertSchemaRejects('runtime-evidence-envelope.schema.json', missingFailureError, 'failed errors');
 
+  const supportedWithoutSource = fixture('supported-identify.json');
+  supportedWithoutSource.source = null;
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', supportedWithoutSource, 'supported source');
+
+  const unsupportedWithoutSource = fixture('unsupported-identify.json');
+  unsupportedWithoutSource.source = null;
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', unsupportedWithoutSource, 'unsupported source');
+
+  const laterFailureWithoutSource = fixture('failed-identify.json');
+  laterFailureWithoutSource.source = null;
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', laterFailureWithoutSource, 'later failure source');
+
+  const sourceReadWithInventedSource = fixture('failed-source-read-identify.json');
+  sourceReadWithInventedSource.source = fixture('failed-identify.json').source;
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', sourceReadWithInventedSource, 'source-read invented source');
+
+  const sourceReadWithCheckedSignature = fixture('failed-source-read-identify.json');
+  sourceReadWithCheckedSignature.file.signature.status = 'unknown';
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', sourceReadWithCheckedSignature, 'source-read signature');
+
   const nullAppliedPayload = fixture('edit-report.json');
   nullAppliedPayload.operations[0].appliedPayload = null;
   assertSchemaRejects('edit-report.schema.json', nullAppliedPayload, 'applied payload');
@@ -300,7 +331,12 @@ test('capability descriptor declares the non-mutating all-outcome identify probe
 });
 
 test('evidence fixtures distinguish supported, unsupported, and failed probes', () => {
-  for (const name of ['supported-identify.json', 'unsupported-identify.json', 'failed-identify.json']) {
+  for (const name of [
+    'supported-identify.json',
+    'unsupported-identify.json',
+    'failed-identify.json',
+    'failed-source-read-identify.json',
+  ]) {
     validateEvidence(fixture(name));
   }
 });

@@ -26,6 +26,12 @@ hashed; `failureStage` must name the later probe stage and the result must not
 claim a matched kind or signature. A capability descriptor declares only its own
 probes and kinds. It does not declare the orchestrator's required probe set.
 
+The sole pre-hash exception is `status: failed` with
+`failureStage: source-read`. That envelope uses `source: null`, a `not-checked`
+signature with empty evidence, null file kind/media type, an empty object list,
+and a canonical failure payload with at least one error. Any later failure stage
+still requires the exact source identity.
+
 ## Evidence envelope
 
 `runtime-evidence-envelope.schema.json` binds one probe result to the exact
