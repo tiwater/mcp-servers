@@ -15,6 +15,7 @@ public static class DocxRuntimeIdentity
     private const string RuntimeName = "tiwater-docx";
     private const string EvidenceSchemaId = "https://tiwater.dev/contracts/runtime/runtime-evidence-envelope.schema.json";
     private const string CapabilitiesSchemaId = "https://tiwater.dev/contracts/runtime/runtime-capabilities.schema.json";
+    private const string EditReportSchemaId = "https://tiwater.dev/contracts/runtime/edit-report.schema.json";
     private const string PayloadSchemaId = "tiwater.runtime.identify-payload";
     private const string DocxMediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     private const string WordMainPartContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
@@ -42,6 +43,7 @@ public static class DocxRuntimeIdentity
                 new SchemaIdentity(CapabilitiesSchemaId, RuntimeContractVersions.Capabilities)),
             new RuntimeCommand("identify", false, EvidenceSchema),
             new RuntimeCommand("extract-evidence", false, EvidenceSchema),
+            new RuntimeCommand("edit-evidence", true, new SchemaIdentity(EditReportSchemaId, RuntimeContractVersions.EditReport)),
         ],
         new IdentityPolicy(
             "runtime-native-only",

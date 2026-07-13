@@ -220,6 +220,80 @@ public sealed record EditReportSummary(
     }
 }
 
+public sealed record RuntimeEditReport(
+    string SchemaVersion,
+    string ReportType,
+    PackageIdentity Package,
+    RuntimeIdentity Runtime,
+    SchemaIdentity EvidenceSchema,
+    FileContentIdentity Source,
+    FileContentIdentity Output,
+    ArtifactIdentity RequestArtifact,
+    IReadOnlyList<EditOperationResult> Operations,
+    EditReportSummary Summary,
+    IReadOnlyList<ContractFinding> Warnings,
+    IReadOnlyList<ContractFinding> Errors);
+
+public static class EditReports
+{
+    private static readonly SchemaIdentity ReportSchema = new(
+        "https://tiwater.dev/contracts/runtime/edit-report.schema.json",
+        RuntimeContractVersions.EditReport);
+    private static readonly SchemaIdentity RequestSchema = new(
+        "tiwater.runtime.edit-request",
+        RuntimeContractVersions.EditReport);
+
+    public static RuntimeEditReport Create(
+        PackageIdentity package,
+        RuntimeIdentity runtime,
+        string sourcePath,
+        string outputPath,
+        JsonElement requestDocument,
+        IReadOnlyList<JsonElement> requestOperations,
+        IReadOnlyList<EditOperationResult> operations)
+    {
+        if (requestOperations.Count != operations.Count)
+        {
+            throw new InvalidOperationException("Edit report operation count must match the authoritative request.");
+        }
+
+        for (var index = 0; index < operations.Count; index += 1)
+        {
+            var result = operations[index];
+            var request = requestOperations[index];
+            if (result.Index != index)
+            {
+                throw new InvalidOperationException("Edit report operations must preserve request order.");
+            }
+            if (request.ValueKind != JsonValueKind.Object
+                || !request.TryGetProperty("type", out var type)
+                || type.GetString() != result.Type)
+            {
+                throw new InvalidOperationException($"Edit report operation {index} type does not match the authoritative request.");
+            }
+            if (!EvidenceEnvelope.CanonicalJsonBytes(request).SequenceEqual(
+                    EvidenceEnvelope.CanonicalJsonBytes(result.RequestedPayload)))
+            {
+                throw new InvalidOperationException($"Edit report operation {index} payload does not match the authoritative request.");
+            }
+        }
+
+        return new RuntimeEditReport(
+            RuntimeContractVersions.EditReport,
+            "runtime-edit-report",
+            package,
+            runtime,
+            ReportSchema,
+            FileIdentity.IdentifyFile(sourcePath),
+            FileIdentity.IdentifyFile(outputPath),
+            EvidenceEnvelope.IdentifyCanonicalJson(requestDocument, RequestSchema),
+            operations,
+            EditReportSummary.FromOperations(operations),
+            [],
+            []);
+    }
+}
+
 public static class RuntimeJson
 {
     public static JsonSerializerOptions Options { get; } = new()

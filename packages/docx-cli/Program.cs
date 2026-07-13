@@ -36,6 +36,7 @@ internal static class Cli
                 "fill-template" => Task.FromResult(Transforms.RunFillTemplate(args[1..])),
                 "normalize-openxml" => Task.FromResult(DocxPackageNormalizer.RunNormalize(args[1..])),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
+                "edit-evidence" => Task.FromResult(RunEditEvidence(args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -132,6 +133,7 @@ internal static class Cli
         Console.WriteLine("  fill-template <template.docx> <data.json> <output.docx>");
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
         Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
+        Console.WriteLine("  edit-evidence <input.docx> <operations.json> <output.docx>");
     }
 
     private static Task<int> FailUnknown(string command)
@@ -181,6 +183,18 @@ internal static class Cli
             : JsonSerializer.SerializeToElement(new { }, RuntimeJson.Options);
         WriteRuntimeJson(EvidenceEnvelope.CreateExtraction(identify, report));
         return identify.Status == "failed" ? 1 : 0;
+    }
+
+    private static int RunEditEvidence(string[] args)
+    {
+        if (args.Length != 3)
+        {
+            throw new InvalidOperationException("edit-evidence requires <input.docx> <operations.json> <output.docx>");
+        }
+        var descriptor = DocxRuntimeIdentity.Capabilities();
+        var report = Editor.ApplyWithEvidence(args[0], args[1], args[2], descriptor.Package, descriptor.Runtime);
+        WriteRuntimeJson(report);
+        return report.Summary.Rejected > 0 || report.Summary.Failed > 0 ? 1 : 0;
     }
 
     private static void WriteRuntimeJson<T>(T value)

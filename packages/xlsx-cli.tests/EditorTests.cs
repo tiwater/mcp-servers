@@ -3,11 +3,35 @@ using Dockit.Xlsx;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using System.Text.Json;
+using Tiwater.RuntimeContracts;
 
 namespace Dockit.Xlsx.Tests;
 
 public class EditorTests
 {
+    [Fact]
+    public void Edit_evidence_retains_the_complete_applied_payload()
+    {
+        var input = CreateWorkbookFixture();
+        var request = Path.Combine(Path.GetTempPath(), $"xlsx-edit-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edit-{Guid.NewGuid():N}.xlsx");
+        File.WriteAllText(request, "{\"operations\":[{\"type\":\"setCellValue\",\"sheet\":\"Sheet1\",\"cell\":\"D2\",\"value\":\"42\"}]}");
+
+        var report = Editor.ApplyWithEvidence(
+            input,
+            request,
+            output,
+            new PackageIdentity("tiwater.xlsx.cli", "0.2.0"),
+            new RuntimeIdentity("office", "tiwater-xlsx", "0.2.0"));
+
+        var operation = Assert.Single(report.Operations);
+        Assert.Equal("applied", operation.Status);
+        Assert.True(JsonElement.DeepEquals(operation.RequestedPayload, operation.AppliedPayload!.Value));
+        Assert.Equal("42", operation.AppliedPayload.Value.GetProperty("value").GetString());
+        Assert.Equal(FileIdentity.IdentifyFile(output), report.Output);
+    }
+
     [Fact]
     public void Inspect_reports_no_placeholders_for_fixed_layout_fixture()
     {

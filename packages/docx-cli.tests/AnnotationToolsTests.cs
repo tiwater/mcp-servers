@@ -1,16 +1,40 @@
 using Xunit;
 using System.IO.Compression;
+using System.Text.Json;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Dockit.Docx;
+using Tiwater.RuntimeContracts;
 using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx.Tests;
 
 public class AnnotationToolsTests
 {
+    [Fact]
+    public void Edit_evidence_retains_the_complete_applied_payload()
+    {
+        var input = CreateAnnotatedFixture();
+        var request = Path.Combine(Path.GetTempPath(), $"docx-edit-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"docx-edit-{Guid.NewGuid():N}.docx");
+        File.WriteAllText(request, "{\"operations\":[{\"type\":\"replaceParagraphText\",\"paragraphIndex\":1,\"text\":\"Updated\"}]}");
+
+        var report = Editor.ApplyWithEvidence(
+            input,
+            request,
+            output,
+            new PackageIdentity("tiwater.docx.cli", "0.5.0"),
+            new RuntimeIdentity("office", "tiwater-docx", "0.5.0"));
+
+        var operation = Assert.Single(report.Operations);
+        Assert.Equal("applied", operation.Status);
+        Assert.True(JsonElement.DeepEquals(operation.RequestedPayload, operation.AppliedPayload!.Value));
+        Assert.Equal("Updated", operation.AppliedPayload.Value.GetProperty("text").GetString());
+        Assert.Equal(FileIdentity.IdentifyFile(output), report.Output);
+    }
+
     [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
