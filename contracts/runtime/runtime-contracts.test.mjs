@@ -326,6 +326,65 @@ test('Ajv rejects nested shape, version, uniqueness, command, signature, failure
   assertSchemaRejects('edit-report.schema.json', rejectedWithoutError, 'rejected errors');
 });
 
+test('Ajv confines source-read failures to the exact pre-hash failure shape', () => {
+  const sourceReadFixture = () => fixture('failed-source-read-identify.json');
+
+  const sourceReadWithFileKind = sourceReadFixture();
+  sourceReadWithFileKind.file.fileKind = 'docx';
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', sourceReadWithFileKind, 'source-read file kind');
+
+  const sourceReadWithMediaType = sourceReadFixture();
+  sourceReadWithMediaType.file.mediaType = 'application/octet-stream';
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', sourceReadWithMediaType, 'source-read media type');
+
+  const sourceReadWithSignatureEvidence = sourceReadFixture();
+  sourceReadWithSignatureEvidence.file.signature.evidence = ['bytes were inspected'];
+  assertSchemaRejects(
+    'runtime-evidence-envelope.schema.json',
+    sourceReadWithSignatureEvidence,
+    'source-read signature evidence',
+  );
+
+  const sourceReadWithObjects = sourceReadFixture();
+  sourceReadWithObjects.objects = fixture('supported-identify.json').objects;
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', sourceReadWithObjects, 'source-read objects');
+
+  const sourceReadWithoutErrors = sourceReadFixture();
+  sourceReadWithoutErrors.errors = [];
+  assertSchemaRejects('runtime-evidence-envelope.schema.json', sourceReadWithoutErrors, 'source-read errors');
+
+  for (const identity of ['package', 'runtime', 'evidenceSchema', 'artifact']) {
+    const sourceReadWithoutIdentity = sourceReadFixture();
+    delete sourceReadWithoutIdentity[identity];
+    assertSchemaRejects(
+      'runtime-evidence-envelope.schema.json',
+      sourceReadWithoutIdentity,
+      `source-read ${identity}`,
+    );
+  }
+
+  for (const name of ['supported-identify.json', 'unsupported-identify.json', 'failed-identify.json']) {
+    const nonSourceReadWithUncheckedSignature = fixture(name);
+    nonSourceReadWithUncheckedSignature.file.signature.status = 'not-checked';
+    nonSourceReadWithUncheckedSignature.file.signature.evidence = [];
+    assertSchemaRejects(
+      'runtime-evidence-envelope.schema.json',
+      nonSourceReadWithUncheckedSignature,
+      `${name} not-checked signature`,
+    );
+  }
+
+  for (const name of ['supported-identify.json', 'unsupported-identify.json']) {
+    const nonFailureClaimingSourceRead = fixture(name);
+    nonFailureClaimingSourceRead.failureStage = 'source-read';
+    assertSchemaRejects(
+      'runtime-evidence-envelope.schema.json',
+      nonFailureClaimingSourceRead,
+      `${name} source-read stage`,
+    );
+  }
+});
+
 test('capability descriptor declares the non-mutating all-outcome identify probe', () => {
   validateCapabilities(fixture('runtime-capabilities.json'));
 });
