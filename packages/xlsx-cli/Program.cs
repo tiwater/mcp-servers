@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Dockit.Xlsx;
+using Tiwater.RuntimeContracts;
 
 namespace Dockit.Xlsx.Cli;
 
@@ -22,6 +23,8 @@ internal static class Cli
         {
             return args[0] switch
             {
+                "capabilities" => Task.FromResult(RunCapabilities(args[1..])),
+                "identify" => Task.FromResult(RunIdentify(args[1..])),
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -101,6 +104,8 @@ internal static class Cli
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
+        Console.WriteLine("  capabilities --json");
+        Console.WriteLine("  identify <input> --json");
         Console.WriteLine("  inspect <input.xlsx> [--json]");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");
@@ -113,6 +118,34 @@ internal static class Cli
         Console.Error.WriteLine($"Unknown command: {command}");
         PrintUsage();
         return Task.FromResult(1);
+    }
+
+    private static int RunCapabilities(string[] args)
+    {
+        if (args.Length != 1 || args[0] != "--json")
+        {
+            throw new InvalidOperationException("capabilities requires --json");
+        }
+
+        WriteRuntimeJson(XlsxRuntimeIdentity.Capabilities());
+        return 0;
+    }
+
+    private static int RunIdentify(string[] args)
+    {
+        if (args.Length != 2 || args[1] != "--json")
+        {
+            throw new InvalidOperationException("identify requires <input> --json");
+        }
+
+        var evidence = XlsxRuntimeIdentity.Identify(args[0]);
+        WriteRuntimeJson(evidence);
+        return evidence.Status == "failed" ? 1 : 0;
+    }
+
+    private static void WriteRuntimeJson<T>(T value)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(value, RuntimeJson.Options));
     }
 
     private static void WriteJson<T>(T value)
