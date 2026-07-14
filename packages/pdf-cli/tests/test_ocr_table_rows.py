@@ -58,6 +58,16 @@ class OcrTableRowsTest(unittest.TestCase):
         self.assertFalse(rows[1]["is_header"])
         self.assertEqual(rows[2]["cells"], ["", "", "Second value", ""])
 
+    def test_drops_short_suffix_fragment_from_a_merged_cell_continuation(self):
+        rows = _extract_markdown_table_rows([
+            """| Group | Item | Criterion | Method |
+|---|---|---|---|
+| Purity | 非还原毛细管凝胶电泳 | Main peak at least 95% | M-1 |
+| | 泳 | Low-molecular-weight variant: report result | |"""
+        ], 4)
+
+        self.assertEqual(rows[2]["cells"], ["", "", "Low-molecular-weight variant: report result", ""])
+
     def test_handles_escaped_pipes_and_br_markup(self):
         tables = [
             """| Name | Value |

@@ -700,6 +700,37 @@ def _drop_globally_empty_markdown_columns(rows: list[list[str]]) -> list[list[st
     ]
 
 
+def _drop_merged_cell_suffix_fragments(rows: list[list[str]]) -> list[list[str]]:
+    """Treat a short suffix repeated below its full cell text as continuation noise.
+
+    Vision OCR occasionally emits the final glyph or word of a visually merged
+    cell in the next physical row.  A value is removed only when it is a strict
+    suffix of the nearest preceding non-empty value in the same column and is
+    no more than one third of that owner value.  The blank then preserves the
+    runtime's normal merged-cell continuation semantics.
+    """
+    normalized = [list(cells) for cells in rows]
+    previous_by_column: dict[int, str] = {}
+    for cells in normalized:
+        if _is_markdown_separator_row(cells):
+            continue
+        for index, raw_cell in enumerate(cells):
+            value = _normalize_markdown_cell(raw_cell)
+            if not value:
+                continue
+            previous = previous_by_column.get(index, "")
+            if (
+                previous
+                and value != previous
+                and previous.endswith(value)
+                and len(value) <= max(1, len(previous) // 3)
+            ):
+                cells[index] = ""
+                continue
+            previous_by_column[index] = value
+    return normalized
+
+
 def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
     """Expose model-returned markdown table rows as stable runtime evidence."""
     rows: list[dict] = []
@@ -708,6 +739,7 @@ def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
             continue
         parsed = [_split_markdown_table_row(line) for line in table.splitlines() if "|" in line]
         parsed = _drop_globally_empty_markdown_columns(parsed)
+        parsed = _drop_merged_cell_suffix_fragments(parsed)
         separator_index = next((index for index, cells in enumerate(parsed) if _is_markdown_separator_row(cells)), None)
         data_index = 0
         for raw_index, cells in enumerate(parsed):
