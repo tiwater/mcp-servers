@@ -6,6 +6,7 @@ using Xunit;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using System.Reflection;
 
 namespace Dockit.Convert.Tests;
 
@@ -120,6 +121,18 @@ public class ConvertCliTests
 
         Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
         Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
+    }
+
+    [Fact]
+    public void Wps_writer_uses_the_supported_SaveAs2_pdf_api()
+    {
+        var helperScript = typeof(WpsWriterPdfConverter)
+            .GetField("WpsHelperScript", BindingFlags.NonPublic | BindingFlags.Static)
+            ?.GetRawConstantValue() as string;
+
+        Assert.NotNull(helperScript);
+        Assert.Contains("document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatPDF)", helperScript);
+        Assert.DoesNotContain("ExportAsFixedFormat", helperScript);
     }
 
     private static string CreateLegacyXlsFixture()

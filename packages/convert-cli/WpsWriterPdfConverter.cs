@@ -154,9 +154,9 @@ try:
     if hr != S_OK:
         raise SystemExit(f"Documents.Open failed: {hex(hr & 0xffffffff)}")
     try:
-        hr = document.ExportAsFixedFormat(output_path, wpsapi.WdExportFormat.wdExportFormatPDF, OpenAfterExport=False)
+        hr = document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatPDF)
         if hr != S_OK:
-            raise SystemExit(f"Document.ExportAsFixedFormat failed: {hex(hr & 0xffffffff)}")
+            raise SystemExit(f"Document.SaveAs2 PDF failed: {hex(hr & 0xffffffff)}")
     finally:
         document.Close(False)
 finally:
