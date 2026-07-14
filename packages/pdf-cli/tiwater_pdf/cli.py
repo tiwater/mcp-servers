@@ -971,6 +971,24 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
     }
 
 
+def _run_with_orientation_correction(run_orientation, max_passes: int = 4):
+    """Repeat OCR from the original page at cumulative declared rotations."""
+    cumulative_rotation = 0
+    request_attempts = []
+    last_orientation = None
+    for _pass_index in range(max_passes):
+        page_result, attempts = run_orientation(cumulative_rotation)
+        request_attempts.append(attempts)
+        last_orientation = page_result["orientation_degrees"]
+        if last_orientation == 0:
+            return page_result, cumulative_rotation, request_attempts
+        cumulative_rotation = (cumulative_rotation + last_orientation) % 360
+    raise ValueError(
+        "orientation correction did not produce upright text after "
+        f"{max_passes} passes: cumulative={cumulative_rotation}, remaining={last_orientation}"
+    )
+
+
 def llm_ocr(
     pdf_path: Path,
     page_numbers: list[int] | None = None,
@@ -1032,24 +1050,18 @@ def llm_ocr(
             )
 
         try:
-            page_result, detection_attempts = run_orientation(0)
-            correction_degrees = page_result["orientation_degrees"]
-            correction_attempts = 0
-            if correction_degrees:
-                page_result, correction_attempts = run_orientation(correction_degrees)
-                if page_result["orientation_degrees"] != 0:
-                    raise ValueError(
-                        "orientation correction did not produce upright text: "
-                        f"requested={correction_degrees}, remaining={page_result['orientation_degrees']}"
-                    )
+            page_result, correction_degrees, orientation_attempts = (
+                _run_with_orientation_correction(run_orientation)
+            )
         except Exception as error:
             raise RuntimeError(
                 f"OCR page {page_number} failed: {type(error).__name__}: {error}"
             ) from error
         page_result["orientation_correction_degrees"] = correction_degrees
-        page_result["orientation_detection_request_attempts"] = detection_attempts
-        page_result["orientation_correction_request_attempts"] = correction_attempts
-        page_result["request_attempts"] = detection_attempts + correction_attempts
+        page_result["orientation_detection_request_attempts"] = orientation_attempts[0]
+        page_result["orientation_correction_request_attempts"] = sum(orientation_attempts[1:])
+        page_result["orientation_correction_passes"] = len(orientation_attempts) - 1
+        page_result["request_attempts"] = sum(orientation_attempts)
         return page_result
 
     with ThreadPoolExecutor(max_workers=min(max_page_parallel, len(selected_page_indexes) or 1)) as executor:

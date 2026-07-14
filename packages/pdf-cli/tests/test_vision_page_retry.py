@@ -8,6 +8,7 @@ from tiwater_pdf.cli import (
     _call_vision_with_retry,
     _is_retryable_vision_page_error,
     _parse_vision_page_response,
+    _run_with_orientation_correction,
 )
 
 
@@ -148,6 +149,23 @@ class VisionPageRetryTest(unittest.TestCase):
                 "orientation_degrees": 45,
                 "warnings": [],
             })), 1)
+
+    def test_accumulates_bounded_orientation_corrections_until_upright(self):
+        rotations = []
+        responses = iter([90, 180, 0])
+
+        def run_orientation(rotation_degrees):
+            rotations.append(rotation_degrees)
+            return {"orientation_degrees": next(responses)}, 1
+
+        page, correction_degrees, attempts = _run_with_orientation_correction(
+            run_orientation,
+        )
+
+        self.assertEqual(rotations, [0, 90, 270])
+        self.assertEqual(page["orientation_degrees"], 0)
+        self.assertEqual(correction_degrees, 270)
+        self.assertEqual(attempts, [1, 1, 1])
 
     def test_persistently_malformed_page_response_fails_after_bound(self):
         calls = 0
