@@ -92,6 +92,15 @@ This keeps source evidence stable when an OCR model represents repeated visual
 rows either as separate markdown rows or as `<br>`-separated values in one
 cell.
 
+Non-tabular labeled values and checkbox conclusions are exposed as
+`form_fields[]`. Each field retains a stable page-local `field_id`, label,
+value, raw visible text, every declared option, selected options, and a
+`selection_status`. Exactly one visibly selected option is `selected`; zero is
+`unselected`; multiple selected options are `ambiguous`. The runtime does not
+rewrite an ambiguous choice or infer a missing selection. Identifiers are
+requested character-by-character and uncertain transcription remains a warning;
+downstream exact-identity validation still owns acceptance.
+
 Configuration is read from explicit flags first, then environment variables:
 
 - `--api-key`, `SUPEN_LLM_TOKEN`, `SUPEN_LLM_API_KEY`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`

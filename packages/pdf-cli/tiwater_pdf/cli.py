@@ -20,6 +20,18 @@ DEFAULT_OCR_MODEL = "qwen3.7-plus"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 DEFAULT_VISION_REQUEST_ATTEMPTS = 3
 
+OCR_PAGE_PROMPT = (
+    "Extract the visible text from this PDF page image with high fidelity. "
+    "Preserve Chinese and English text, numbers, units, tables, row labels, form fields, checkbox marks, and reading order. "
+    "Transcribe identifiers character by character exactly as visible; never repair an uncertain digit from context, and add a warning when uncertain. "
+    "Use markdown tables when the page contains clear tables. "
+    "For labeled values or checkbox conclusions outside a clear table, return fields as an array of objects with label, value, raw_text, and options. "
+    "Each option must have label and a boolean selected that reflects only its visible mark; retain every option and never infer a selection. "
+    "Do not summarize and do not infer missing values. "
+    "Return one JSON object with keys text, tables, fields, warnings. "
+    "tables should be an array of markdown table strings or empty if no table is visible; fields should be an array or empty."
+)
+
 
 class _VisionResponseFormatError(ValueError):
     """The gateway rejected or aborted structured JSON response generation."""
@@ -875,6 +887,47 @@ def _extract_table_logical_rows(pages: list[dict]) -> list[dict]:
     return logical
 
 
+def _normalize_form_fields(fields: list, page_number: int) -> list[dict]:
+    """Preserve model-extracted non-tabular fields with stable page provenance."""
+    normalized: list[dict] = []
+    for source in fields:
+        if not isinstance(source, dict):
+            continue
+        label = str(source.get("label", "")).strip()
+        value = str(source.get("value", "")).strip()
+        raw_text = str(source.get("raw_text", "")).strip()
+        if not any((label, value, raw_text)):
+            continue
+        options = []
+        for option in source.get("options", []) if isinstance(source.get("options", []), list) else []:
+            if not isinstance(option, dict):
+                continue
+            option_label = str(option.get("label", "")).strip()
+            if not option_label or not isinstance(option.get("selected"), bool):
+                continue
+            options.append({"label": option_label, "selected": option["selected"]})
+        selected_options = [option["label"] for option in options if option["selected"]]
+        selection_status = (
+            "not-applicable" if not options
+            else "selected" if len(selected_options) == 1
+            else "unselected" if not selected_options
+            else "ambiguous"
+        )
+        field_index = len(normalized)
+        normalized.append({
+            "field_id": f"page-{page_number}-field-{field_index}",
+            "page": page_number,
+            "field_index": field_index,
+            "label": label,
+            "value": value,
+            "options": options,
+            "selected_options": selected_options,
+            "selection_status": selection_status,
+            "raw_text": raw_text,
+        })
+    return normalized
+
+
 def _parse_vision_page_response(response, page_number: int) -> dict:
     """Parse one model response into complete page-level runtime evidence."""
     choices = getattr(response, "choices", None)
@@ -892,6 +945,7 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
     parsed = _extract_json_object(content)
     page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
     page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
+    page_fields = parsed.get("fields", []) if isinstance(parsed.get("fields", []), list) else []
     page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
     return {
         "page": page_number,
@@ -900,6 +954,7 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
         "table_rows": page_table_rows,
         "table_cell_lines": _extract_table_cell_lines(page_table_rows),
         "table_cell_units": _extract_table_cell_units(page_table_rows),
+        "form_fields": _normalize_form_fields(page_fields, page_number),
         "warnings": page_warnings,
     }
 
@@ -932,15 +987,6 @@ def llm_ocr(
             if not page_numbers or page_index + 1 in page_numbers
         ]
 
-    prompt = (
-        "Extract the visible text from this PDF page image with high fidelity. "
-        "Preserve Chinese and English text, numbers, units, tables, row labels, and reading order. "
-        "Use markdown tables when the page contains clear tables. "
-        "Do not summarize and do not infer missing values. "
-        "Return one JSON object with keys text, tables, warnings. "
-        "tables should be an array of markdown table strings or empty if no table is visible."
-    )
-
     def ocr_page(page_index: int) -> dict:
         page_number = page_index + 1
         # Each worker opens its own document because PyMuPDF document/page
@@ -958,7 +1004,7 @@ def llm_ocr(
             return client.chat.completions.create(
                 model=llm_model, max_tokens=max_tokens,
                 messages=[{"role": "user", "content": [
-                    {"type": "text", "text": prompt},
+                    {"type": "text", "text": OCR_PAGE_PROMPT},
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
                 ]}], temperature=0.0, **request_kwargs, **completion_kwargs,
             )
@@ -991,6 +1037,7 @@ def llm_ocr(
         "table_cell_lines": [line for page in pages for line in page.get("table_cell_lines", [])],
         "table_cell_units": [unit for page in pages for unit in page.get("table_cell_units", [])],
         "table_logical_rows": table_logical_rows,
+        "form_fields": [field for page in pages for field in page.get("form_fields", [])],
     }
 
 
