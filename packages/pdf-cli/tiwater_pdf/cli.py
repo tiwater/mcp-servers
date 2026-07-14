@@ -21,6 +21,10 @@ DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 DEFAULT_VISION_REQUEST_ATTEMPTS = 3
 
 
+class _VisionResponseFormatError(ValueError):
+    """The gateway rejected or aborted structured JSON response generation."""
+
+
 def _is_retryable_vision_error(error: Exception) -> bool:
     status = getattr(error, "status_code", None)
     text = str(error).lower()
@@ -50,6 +54,26 @@ def _is_retryable_vision_page_error(error: Exception) -> bool:
     return _is_retryable_vision_error(error) or isinstance(
         error,
         (AttributeError, IndexError, KeyError, TypeError, ValueError),
+    )
+
+
+def _call_vision_page_with_retry(request, parse, attempts: int = DEFAULT_VISION_REQUEST_ATTEMPTS, sleep_fn=time.sleep):
+    """Retry one page and fall back from provider-side response_format failures."""
+    use_response_format = True
+
+    def request_and_parse():
+        nonlocal use_response_format
+        try:
+            return parse(request(use_response_format))
+        except _VisionResponseFormatError:
+            use_response_format = False
+            raise
+
+    return _call_vision_with_retry(
+        request_and_parse,
+        attempts=attempts,
+        sleep_fn=sleep_fn,
+        retryable=_is_retryable_vision_page_error,
     )
 
 
@@ -821,7 +845,18 @@ def _extract_table_logical_rows(pages: list[dict]) -> list[dict]:
 
 def _parse_vision_page_response(response, page_number: int) -> dict:
     """Parse one model response into complete page-level runtime evidence."""
-    content = response.choices[0].message.content or ""
+    choices = getattr(response, "choices", None)
+    if not isinstance(choices, list) or not choices:
+        error = getattr(response, "error", None)
+        if not isinstance(error, dict):
+            error = (getattr(response, "model_extra", None) or {}).get("error")
+        code = str((error or {}).get("code", "")) if isinstance(error, dict) else ""
+        message = str((error or {}).get("message", "")) if isinstance(error, dict) else ""
+        if code == "invalid_parameter_error" and "response_format" in message.lower():
+            raise _VisionResponseFormatError(message)
+        raise ValueError("vision response contains no choices")
+    message = getattr(choices[0], "message", None)
+    content = getattr(message, "content", None) or ""
     parsed = _extract_json_object(content)
     page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
     page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
@@ -884,20 +919,22 @@ def llm_ocr(
         request_kwargs = {}
         if resolved_enable_thinking is not None:
             request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
-        def request_and_parse_page():
-            response = client.chat.completions.create(
-                model=llm_model, response_format={"type": "json_object"}, max_tokens=max_tokens,
+        def request_page(use_response_format: bool):
+            completion_kwargs = {}
+            if use_response_format:
+                completion_kwargs["response_format"] = {"type": "json_object"}
+            return client.chat.completions.create(
+                model=llm_model, max_tokens=max_tokens,
                 messages=[{"role": "user", "content": [
                     {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
-                ]}], temperature=0.0, **request_kwargs,
+                ]}], temperature=0.0, **request_kwargs, **completion_kwargs,
             )
-            return _parse_vision_page_response(response, page_number)
 
         try:
-            page_result, request_attempts = _call_vision_with_retry(
-                request_and_parse_page,
-                retryable=_is_retryable_vision_page_error,
+            page_result, request_attempts = _call_vision_page_with_retry(
+                request_page,
+                lambda response: _parse_vision_page_response(response, page_number),
             )
         except Exception as error:
             raise RuntimeError(
