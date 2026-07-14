@@ -178,6 +178,18 @@ public class ConvertCliTests
         Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
     }
 
+    [Fact]
+    public void Wps_writer_uses_the_supported_SaveAs2_pdf_api()
+    {
+        var helperScript = typeof(WpsWriterPdfConverter)
+            .GetField("WpsHelperScript", BindingFlags.NonPublic | BindingFlags.Static)
+            ?.GetRawConstantValue() as string;
+
+        Assert.NotNull(helperScript);
+        Assert.Contains("document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatPDF)", helperScript);
+        Assert.DoesNotContain("ExportAsFixedFormat", helperScript);
+    }
+
     private static string CreateLegacyXlsFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"legacy-convert-{Guid.NewGuid():N}.xls");
