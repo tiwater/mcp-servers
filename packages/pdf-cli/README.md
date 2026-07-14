@@ -101,6 +101,15 @@ rewrite an ambiguous choice or infer a missing selection. Identifiers are
 requested character-by-character and uncertain transcription remains a warning;
 downstream exact-identity validation still owns acceptance.
 
+Vision OCR also detects pages whose rendered text is sideways or inverted. The
+model may declare the clockwise correction as `orientation_degrees` (0, 90,
+180, or 270); the runtime then re-renders that page at the declared rotation
+and repeats OCR. A corrected page must report orientation 0 or the page fails.
+Successful page evidence records the applied
+`orientation_correction_degrees` and request-attempt counts for both detection
+and correction, so downstream workflows can audit the extra pass without
+guessing from the extracted text.
+
 Configuration is read from explicit flags first, then environment variables:
 
 - `--api-key`, `SUPEN_LLM_TOKEN`, `SUPEN_LLM_API_KEY`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`

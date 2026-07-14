@@ -27,8 +27,9 @@ OCR_PAGE_PROMPT = (
     "Use markdown tables when the page contains clear tables. "
     "For labeled values or checkbox conclusions outside a clear table, return fields as an array of objects with label, value, raw_text, and options. "
     "Each option must have label and a boolean selected that reflects only its visible mark; retain every option and never infer a selection. "
+    "Set orientation_degrees to the clockwise rotation required to make the supplied image text upright: exactly 0, 90, 180, or 270. "
     "Do not summarize and do not infer missing values. "
-    "Return one JSON object with keys text, tables, fields, warnings. "
+    "Return one JSON object with keys text, tables, fields, orientation_degrees, warnings. "
     "tables should be an array of markdown table strings or empty if no table is visible; fields should be an array or empty."
 )
 
@@ -515,9 +516,10 @@ def _llm_extract_table(image_bytes: bytes, api_key: str | None = None, llm_model
         return [], []
 
 
-def _render_page_image(doc, page_num: int, zoom: float = 2.5) -> bytes:
+def _render_page_image(doc, page_num: int, zoom: float = 2.5, rotation_degrees: int = 0) -> bytes:
     page = doc[page_num]
-    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+    matrix = fitz.Matrix(zoom, zoom).prerotate(rotation_degrees)
+    pix = page.get_pixmap(matrix=matrix, alpha=False)
     return pix.tobytes("png")
 
 
@@ -946,6 +948,15 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
     page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
     page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
     page_fields = parsed.get("fields", []) if isinstance(parsed.get("fields", []), list) else []
+    raw_orientation = parsed.get("orientation_degrees", 0)
+    if isinstance(raw_orientation, bool):
+        raise ValueError("orientation_degrees must be one of 0, 90, 180, 270")
+    try:
+        orientation_degrees = int(raw_orientation)
+    except (TypeError, ValueError) as error:
+        raise ValueError("orientation_degrees must be one of 0, 90, 180, 270") from error
+    if orientation_degrees not in {0, 90, 180, 270}:
+        raise ValueError("orientation_degrees must be one of 0, 90, 180, 270")
     page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
     return {
         "page": page_number,
@@ -955,6 +966,7 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
         "table_cell_lines": _extract_table_cell_lines(page_table_rows),
         "table_cell_units": _extract_table_cell_units(page_table_rows),
         "form_fields": _normalize_form_fields(page_fields, page_number),
+        "orientation_degrees": orientation_degrees,
         "warnings": page_warnings,
     }
 
@@ -989,36 +1001,55 @@ def llm_ocr(
 
     def ocr_page(page_index: int) -> dict:
         page_number = page_index + 1
-        # Each worker opens its own document because PyMuPDF document/page
-        # objects are not safe to share across threads.
-        with fitz.open(pdf_path) as page_doc:
-            image_bytes = _render_page_image(page_doc, page_index, zoom=zoom)
-        b64_image = base64.b64encode(image_bytes).decode("utf-8")
         request_kwargs = {}
         if resolved_enable_thinking is not None:
             request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
-        def request_page(use_response_format: bool):
-            completion_kwargs = {}
-            if use_response_format:
-                completion_kwargs["response_format"] = {"type": "json_object"}
-            return client.chat.completions.create(
-                model=llm_model, max_tokens=max_tokens,
-                messages=[{"role": "user", "content": [
-                    {"type": "text", "text": OCR_PAGE_PROMPT},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
-                ]}], temperature=0.0, **request_kwargs, **completion_kwargs,
-            )
 
-        try:
-            page_result, request_attempts = _call_vision_page_with_retry(
+        def run_orientation(rotation_degrees: int):
+            # Each worker opens its own document because PyMuPDF document/page
+            # objects are not safe to share across threads.
+            with fitz.open(pdf_path) as page_doc:
+                image_bytes = _render_page_image(
+                    page_doc, page_index, zoom=zoom, rotation_degrees=rotation_degrees,
+                )
+            b64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+            def request_page(use_response_format: bool):
+                completion_kwargs = {}
+                if use_response_format:
+                    completion_kwargs["response_format"] = {"type": "json_object"}
+                return client.chat.completions.create(
+                    model=llm_model, max_tokens=max_tokens,
+                    messages=[{"role": "user", "content": [
+                        {"type": "text", "text": OCR_PAGE_PROMPT},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
+                    ]}], temperature=0.0, **request_kwargs, **completion_kwargs,
+                )
+
+            return _call_vision_page_with_retry(
                 request_page,
                 lambda response: _parse_vision_page_response(response, page_number),
             )
+
+        try:
+            page_result, detection_attempts = run_orientation(0)
+            correction_degrees = page_result["orientation_degrees"]
+            correction_attempts = 0
+            if correction_degrees:
+                page_result, correction_attempts = run_orientation(correction_degrees)
+                if page_result["orientation_degrees"] != 0:
+                    raise ValueError(
+                        "orientation correction did not produce upright text: "
+                        f"requested={correction_degrees}, remaining={page_result['orientation_degrees']}"
+                    )
         except Exception as error:
             raise RuntimeError(
                 f"OCR page {page_number} failed: {type(error).__name__}: {error}"
             ) from error
-        page_result["request_attempts"] = request_attempts
+        page_result["orientation_correction_degrees"] = correction_degrees
+        page_result["orientation_detection_request_attempts"] = detection_attempts
+        page_result["orientation_correction_request_attempts"] = correction_attempts
+        page_result["request_attempts"] = detection_attempts + correction_attempts
         return page_result
 
     with ThreadPoolExecutor(max_workers=min(max_page_parallel, len(selected_page_indexes) or 1)) as executor:

@@ -128,6 +128,27 @@ class VisionPageRetryTest(unittest.TestCase):
         self.assertEqual(page["form_fields"][0]["selection_status"], "ambiguous")
         self.assertEqual(page["form_fields"][0]["selected_options"], ["Yes", "No"])
 
+    def test_preserves_declared_clockwise_orientation_correction(self):
+        page = _parse_vision_page_response(response_with(json.dumps({
+            "text": "sideways page",
+            "tables": [],
+            "fields": [],
+            "orientation_degrees": 90,
+            "warnings": [],
+        })), 10)
+
+        self.assertEqual(page["orientation_degrees"], 90)
+
+    def test_rejects_an_unsupported_orientation_value(self):
+        with self.assertRaisesRegex(ValueError, "orientation_degrees"):
+            _parse_vision_page_response(response_with(json.dumps({
+                "text": "page",
+                "tables": [],
+                "fields": [],
+                "orientation_degrees": 45,
+                "warnings": [],
+            })), 1)
+
     def test_persistently_malformed_page_response_fails_after_bound(self):
         calls = 0
 
