@@ -105,6 +105,32 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Evidence_bound_header_format_resolves_one_part_bound_to_multiple_header_types()
+    {
+        var path = CreateLinkedHeaderFixture(bindSamePartToMultipleTypes: true);
+        var report = Inspector.Inspect(path);
+        Assert.Equal(2, report.Structure.Sections[0].Headers.Count);
+        Assert.All(report.Structure.Sections[0].Headers, binding => Assert.Equal("header-0", binding.PartId));
+        string expectedHash;
+        using (var doc = WordprocessingDocument.Open(path, false))
+        {
+            expectedHash = FormatHash(doc.MainDocumentPart!.HeaderParts.Single().Header!.Elements<Paragraph>().Single().ParagraphProperties);
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-multi-role-header-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "setHeaderFooterParagraphFormat",
+                FormatTarget: new DocxFormatTarget("headerFooterParagraph", ParagraphText: "Shared header", ParagraphOccurrence: 0, SectionId: "section-0", PartId: "header-0", ParagraphId: "header-0-p0"),
+                ExpectedCurrentFormatHash: expectedHash,
+                FormatProperties: Props("alignment", "center"))
+        ]);
+
+        Assert.True(Assert.Single(result.AppliedOperations).Applied);
+        AssertValidOpenXml(output);
+    }
+
+    [Fact]
     public void Drawing_evidence_is_empty_when_document_has_no_drawings()
     {
         var fixture = CreateLinkedHeaderFixture();
@@ -2143,6 +2169,128 @@ public class AnnotationToolsTests
         AssertValidOpenXml(output);
     }
 
+    [Theory]
+    [InlineData("{\"operations\":[],\"unknownDocumentField\":true}")]
+    [InlineData("{\"operations\":[{\"type\":\"setParagraphFormat\",\"unknownOperationField\":true}]}")]
+    [InlineData("{\"operations\":[{\"type\":\"setParagraphFormat\",\"bodyParagraphIndex\":0}]}")]
+    [InlineData("{\"operations\":[{\"type\":\"setParagraphFormat\",\"replacementText\":\"changed\"}]}")]
+    [InlineData("{\"operations\":[{\"type\":\"setParagraphFormat\",\"formatTarget\":{\"kind\":\"paragraph\",\"paragraphText\":\"same\",\"paragraphOccurrence\":0,\"unknownTargetField\":true}}]}")]
+    public void Evidence_bound_format_operation_cli_json_rejects_unmapped_members_before_output_mutation(string json)
+    {
+        var input = CreateEvidenceBoundFormattingFixture();
+        var operations = Path.Combine(Path.GetTempPath(), $"evidence-format-unmapped-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-unmapped-output-{Guid.NewGuid():N}.docx");
+        File.WriteAllText(operations, json);
+
+        var error = Assert.Throws<System.Text.Json.JsonException>(() => Editor.RunEdit([input, operations, output]));
+
+        Assert.Contains("could not be mapped", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(output));
+    }
+
+    [Theory]
+    [InlineData("{\"operations\":[{\"type\":\"setParagraphFormat\",\"paragraphIndex\":null,\"formatTarget\":{\"kind\":\"paragraph\",\"paragraphText\":\"same\",\"paragraphOccurrence\":0},\"expectedCurrentFormatHash\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"formatProperties\":{\"alignment\":\"center\"}}]}")]
+    [InlineData("{\"operations\":[{\"type\":\"setParagraphFormat\",\"formatTarget\":{\"kind\":\"paragraph\",\"paragraphText\":\"same\",\"paragraphOccurrence\":0,\"runText\":null},\"expectedCurrentFormatHash\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"formatProperties\":{\"alignment\":\"center\"}}]}")]
+    public void Evidence_bound_format_operation_cli_json_rejects_irrelevant_explicit_null_fields(string json)
+    {
+        var input = CreateEvidenceBoundFormattingFixture();
+        var operations = Path.Combine(Path.GetTempPath(), $"evidence-format-null-shape-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-null-shape-output-{Guid.NewGuid():N}.docx");
+        File.WriteAllText(operations, json);
+
+        var error = Assert.Throws<System.Text.Json.JsonException>(() => Editor.RunEdit([input, operations, output]));
+
+        Assert.Contains("not allowed", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void Evidence_bound_format_operation_json_fail_closed_attributes_do_not_break_serialization()
+    {
+        var request = new DocxEditDocument([
+            new DocxEditOperation(
+                "setParagraphFormat",
+                FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 0),
+                ExpectedCurrentFormatHash: new string('A', 64),
+                FormatProperties: Props("alignment", "center"))
+        ]);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(request, Json.Options);
+
+        Assert.Contains("setParagraphFormat", json);
+        Assert.NotNull(System.Text.Json.JsonSerializer.Deserialize<DocxEditDocument>(json, Json.Options));
+    }
+
+    [Fact]
+    public void Evidence_bound_format_operations_reject_fields_irrelevant_to_each_target_kind()
+    {
+        var path = CreateEvidenceBoundFormattingFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-target-shape-{Guid.NewGuid():N}.docx");
+        string paragraphHash;
+        string runHash;
+        string sectionHash;
+        string headerHash;
+        using (var doc = WordprocessingDocument.Open(path, false))
+        {
+            var body = doc.MainDocumentPart!.Document!.Body!;
+            paragraphHash = FormatHash(body.Elements<Paragraph>().First().ParagraphProperties);
+            runHash = FormatHash(body.Elements<Paragraph>().ElementAt(2).Elements<Run>().First().RunProperties);
+            sectionHash = FormatHash(body.Elements<Paragraph>().ElementAt(3).ParagraphProperties!.SectionProperties);
+            headerHash = FormatHash(doc.MainDocumentPart.HeaderParts.Single().Header!.Elements<Paragraph>().Single().ParagraphProperties);
+        }
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("setParagraphFormat", FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 0, RunText: "same"), ExpectedCurrentFormatHash: paragraphHash, FormatProperties: Props("alignment", "center")),
+            new DocxEditOperation("setParagraphFormat", FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 0, RunOccurrence: 0), ExpectedCurrentFormatHash: paragraphHash, FormatProperties: Props("alignment", "center")),
+            new DocxEditOperation("setRunFormat", FormatTarget: new DocxFormatTarget("run", ParagraphText: "AlphaBeta", ParagraphOccurrence: 0, RunText: "Alpha", RunOccurrence: 0, SectionId: "section-0"), ExpectedCurrentFormatHash: runHash, FormatProperties: Props("fontAscii", "Aptos")),
+            new DocxEditOperation("setSectionFormat", FormatTarget: new DocxFormatTarget("section", ParagraphText: "Section one end", ParagraphOccurrence: 0, SectionId: "section-0", PartId: "header-0"), ExpectedCurrentFormatHash: sectionHash, FormatProperties: Props("marginLeftTwips", "1000")),
+            new DocxEditOperation("setHeaderFooterParagraphFormat", FormatTarget: new DocxFormatTarget("headerFooterParagraph", ParagraphText: "Shared header", ParagraphOccurrence: 0, RunText: "Shared header", RunOccurrence: 0, SectionId: "section-0", PartId: "header-0", ParagraphId: "header-0-p0"), ExpectedCurrentFormatHash: headerHash, FormatProperties: Props("alignment", "right"))
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.False(operation.Applied, operation.Detail));
+        Assert.All(result.AppliedOperations, operation => Assert.Contains("not allowed", operation.Detail, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(File.ReadAllBytes(path), File.ReadAllBytes(output));
+    }
+
+    [Theory]
+    [InlineData("section-00")]
+    [InlineData("section-01")]
+    [InlineData("section-+0")]
+    public void Evidence_bound_format_operations_reject_noncanonical_section_ids(string sectionId)
+    {
+        var path = CreateEvidenceBoundFormattingFixture();
+        var sectionOutput = Path.Combine(Path.GetTempPath(), $"evidence-format-section-id-{Guid.NewGuid():N}.docx");
+        var headerOutput = Path.Combine(Path.GetTempPath(), $"evidence-format-header-section-id-{Guid.NewGuid():N}.docx");
+        string sectionHash;
+        string headerHash;
+        using (var doc = WordprocessingDocument.Open(path, false))
+        {
+            var body = doc.MainDocumentPart!.Document!.Body!;
+            sectionHash = FormatHash(body.Elements<Paragraph>().ElementAt(3).ParagraphProperties!.SectionProperties);
+            headerHash = FormatHash(doc.MainDocumentPart.HeaderParts.Single().Header!.Elements<Paragraph>().Single().ParagraphProperties);
+        }
+
+        var sectionResult = Editor.Apply(path, sectionOutput, [
+            new DocxEditOperation(
+                "setSectionFormat",
+                FormatTarget: new DocxFormatTarget("section", ParagraphText: "Section one end", ParagraphOccurrence: 0, SectionId: sectionId),
+                ExpectedCurrentFormatHash: sectionHash,
+                FormatProperties: Props("marginLeftTwips", "1000"))
+        ]);
+        var headerResult = Editor.Apply(path, headerOutput, [
+            new DocxEditOperation(
+                "setHeaderFooterParagraphFormat",
+                FormatTarget: new DocxFormatTarget("headerFooterParagraph", ParagraphText: "Shared header", ParagraphOccurrence: 0, SectionId: sectionId, PartId: "header-0", ParagraphId: "header-0-p0"),
+                ExpectedCurrentFormatHash: headerHash,
+                FormatProperties: Props("alignment", "right"))
+        ]);
+
+        Assert.False(Assert.Single(sectionResult.AppliedOperations).Applied);
+        Assert.False(Assert.Single(headerResult.AppliedOperations).Applied);
+        Assert.Equal(File.ReadAllBytes(path), File.ReadAllBytes(sectionOutput));
+        Assert.Equal(File.ReadAllBytes(path), File.ReadAllBytes(headerOutput));
+    }
+
     [Fact]
     public void Evidence_bound_format_operations_resolve_semantic_targets_after_document_order_changes()
     {
@@ -2452,7 +2600,7 @@ public class AnnotationToolsTests
         return new DetailedStructureFixture(path, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(imageBytes)));
     }
 
-    private static string CreateLinkedHeaderFixture()
+    private static string CreateLinkedHeaderFixture(bool bindSamePartToMultipleTypes = false)
     {
         var path = Path.Combine(Path.GetTempPath(), $"fixture-linked-header-{Guid.NewGuid():N}.docx");
         using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
@@ -2462,6 +2610,10 @@ public class AnnotationToolsTests
             var header = AddHeader(mainPart, "Shared header");
             var firstSection = new SectionProperties(
                 new HeaderReference { Type = HeaderFooterValues.Default, Id = mainPart.GetIdOfPart(header) });
+            if (bindSamePartToMultipleTypes)
+            {
+                firstSection.Append(new HeaderReference { Type = HeaderFooterValues.First, Id = mainPart.GetIdOfPart(header) });
+            }
             mainPart.Document.Body!.Append(
                 new Paragraph(new ParagraphProperties(firstSection), new Run(new Text("same"))),
                 new Paragraph(new Run(new Text("same"))),

@@ -179,6 +179,18 @@ updated; format-only batches do not invoke package-wide property normalization,
 and other property children and package parts are preserved. A format-only
 batch in which every operation is rejected restores the original package bytes.
 
+Edit request JSON is fail-closed for `DocxEditDocument`, each operation, and
+each format target: an unknown member is a deserialization error before an
+output package is opened or copied. Format target fields are also closed by
+kind. `paragraph` accepts paragraph text/occurrence and an optional corroborating
+paragraph id; `run` additionally accepts run text/occurrence; `section` accepts
+paragraph text/occurrence plus section id; and `headerFooterParagraph` accepts
+paragraph text/occurrence plus section, part, and paragraph ids. Supplying a
+modeled field that belongs to another target kind is rejected rather than
+ignored. Modeled legacy operation fields, including physical indexes and text
+payloads, continue to deserialize for compatibility but are rejected by the
+format-operation validator before mutation.
+
 ```bash
 tiwater-docx edit <input.docx> <operations.json> <output.docx>
 ```

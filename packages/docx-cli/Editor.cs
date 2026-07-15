@@ -82,6 +82,7 @@ public static class Editor
         }
 
         using var doc = JsonDocument.Parse(json);
+        ValidateOperationJsonShape(doc.RootElement);
         if (doc.RootElement.ValueKind == JsonValueKind.Array)
         {
             var ops = JsonSerializer.Deserialize<List<DocxEditOperation>>(json, Json.Options) ?? [];
@@ -89,6 +90,106 @@ public static class Editor
         }
 
         return JsonSerializer.Deserialize<DocxEditDocument>(json, Json.Options) ?? new DocxEditDocument([]);
+    }
+
+    private static void ValidateOperationJsonShape(JsonElement root)
+    {
+        JsonElement operations;
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            operations = root;
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            ValidateExactJsonProperties(root, new HashSet<string>(["operations"], StringComparer.OrdinalIgnoreCase), "edit document");
+            if (!TryGetUniqueJsonProperty(root, "operations", out operations) || operations.ValueKind != JsonValueKind.Array)
+            {
+                throw new JsonException("edit document.operations must be an array");
+            }
+        }
+        else
+        {
+            throw new JsonException("edit document must be an object or operation array");
+        }
+
+        foreach (var operation in operations.EnumerateArray())
+        {
+            if (operation.ValueKind != JsonValueKind.Object)
+            {
+                throw new JsonException("each edit operation must be an object");
+            }
+            if (!TryGetUniqueJsonProperty(operation, "type", out var typeElement)
+                || typeElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var type = typeElement.GetString();
+            if (type is not ("setParagraphFormat" or "setRunFormat" or "setSectionFormat" or "setHeaderFooterParagraphFormat"))
+            {
+                continue;
+            }
+
+            ValidateExactJsonProperties(
+                operation,
+                new HashSet<string>(["type", "formatTarget", "expectedCurrentFormatHash", "formatProperties"], StringComparer.OrdinalIgnoreCase),
+                $"format operation '{type}'");
+            if (!TryGetUniqueJsonProperty(operation, "formatTarget", out var target) || target.ValueKind != JsonValueKind.Object)
+            {
+                throw new JsonException($"format operation '{type}'.formatTarget must be an object");
+            }
+            if (!TryGetUniqueJsonProperty(target, "kind", out var kindElement) || kindElement.ValueKind != JsonValueKind.String)
+            {
+                throw new JsonException($"format operation '{type}'.formatTarget.kind must be a string");
+            }
+
+            var kind = kindElement.GetString();
+            IReadOnlySet<string> allowedTargetProperties = kind switch
+            {
+                "paragraph" => new HashSet<string>(["kind", "paragraphText", "paragraphOccurrence", "paragraphId"], StringComparer.OrdinalIgnoreCase),
+                "run" => new HashSet<string>(["kind", "paragraphText", "paragraphOccurrence", "runText", "runOccurrence", "paragraphId"], StringComparer.OrdinalIgnoreCase),
+                "section" => new HashSet<string>(["kind", "paragraphText", "paragraphOccurrence", "sectionId"], StringComparer.OrdinalIgnoreCase),
+                "headerFooterParagraph" => new HashSet<string>(["kind", "paragraphText", "paragraphOccurrence", "sectionId", "partId", "paragraphId"], StringComparer.OrdinalIgnoreCase),
+                _ => new HashSet<string>(["kind"], StringComparer.OrdinalIgnoreCase)
+            };
+            ValidateExactJsonProperties(target, allowedTargetProperties, $"formatTarget kind '{kind}'");
+        }
+    }
+
+    private static void ValidateExactJsonProperties(JsonElement value, IReadOnlySet<string> allowed, string description)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in value.EnumerateObject())
+        {
+            if (!seen.Add(property.Name))
+            {
+                throw new JsonException($"Duplicate property '{property.Name}' is not allowed in {description}");
+            }
+            if (!allowed.Contains(property.Name))
+            {
+                throw new JsonException($"Property '{property.Name}' could not be mapped because it is not allowed in {description}");
+            }
+        }
+    }
+
+    private static bool TryGetUniqueJsonProperty(JsonElement value, string name, out JsonElement result)
+    {
+        var found = false;
+        result = default;
+        foreach (var property in value.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (found)
+            {
+                throw new JsonException($"Duplicate property '{name}' is not allowed");
+            }
+            found = true;
+            result = property.Value;
+        }
+        return found;
     }
 
     private static DocxEditAppliedOperation ApplyOperation(WordprocessingDocument doc, Body body, DocxEditOperation operation)
@@ -121,7 +222,7 @@ public static class Editor
             "fillTableSemantically" => FillTableSemantically(body, operation),
             "setParagraphFormat" => SetParagraphFormat(body, operation),
             "setRunFormat" => SetRunFormat(body, operation),
-            "setSectionFormat" => SetSectionFormat(body, operation),
+            "setSectionFormat" => SetSectionFormat(doc, body, operation),
             "setHeaderFooterParagraphFormat" => SetHeaderFooterParagraphFormat(doc, body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
@@ -227,7 +328,7 @@ public static class Editor
         return ApplyResolvedFormat(operation, resolved, properties => ApplyRunProperties(run, properties));
     }
 
-    private static DocxEditAppliedOperation SetSectionFormat(Body body, DocxEditOperation operation)
+    private static DocxEditAppliedOperation SetSectionFormat(WordprocessingDocument doc, Body body, DocxEditOperation operation)
     {
         var error = ValidateFormatOperation(operation, "section", SectionFormatProperties);
         if (error is not null)
@@ -235,7 +336,7 @@ public static class Editor
             return FormatFailure(operation, error);
         }
 
-        var resolved = ResolveSection(body, operation.FormatTarget!);
+        var resolved = ResolveSection(doc.MainDocumentPart!, body, operation.FormatTarget!);
         if (resolved.Error is not null)
         {
             return FormatFailure(operation, resolved.Error);
@@ -282,6 +383,11 @@ public static class Editor
         {
             return $"formatTarget.kind must be '{expectedKind}'";
         }
+        var targetError = ValidateFormatTargetFields(operation.FormatTarget);
+        if (targetError is not null)
+        {
+            return targetError;
+        }
         if (string.IsNullOrWhiteSpace(operation.ExpectedCurrentFormatHash)
             || operation.ExpectedCurrentFormatHash.Length != 64
             || !operation.ExpectedCurrentFormatHash.All(Uri.IsHexDigit))
@@ -316,6 +422,30 @@ public static class Editor
         }
 
         return ValidateFormatPropertyValues(operation.Type, operation.FormatProperties);
+    }
+
+    private static string? ValidateFormatTargetFields(DocxFormatTarget target)
+    {
+        var supplied = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["paragraphText"] = target.ParagraphText is not null,
+            ["paragraphOccurrence"] = target.ParagraphOccurrence is not null,
+            ["runText"] = target.RunText is not null,
+            ["runOccurrence"] = target.RunOccurrence is not null,
+            ["sectionId"] = target.SectionId is not null,
+            ["partId"] = target.PartId is not null,
+            ["paragraphId"] = target.ParagraphId is not null
+        };
+        IReadOnlySet<string> allowed = target.Kind switch
+        {
+            "paragraph" => new HashSet<string>(["paragraphText", "paragraphOccurrence", "paragraphId"], StringComparer.Ordinal),
+            "run" => new HashSet<string>(["paragraphText", "paragraphOccurrence", "runText", "runOccurrence", "paragraphId"], StringComparer.Ordinal),
+            "section" => new HashSet<string>(["paragraphText", "paragraphOccurrence", "sectionId"], StringComparer.Ordinal),
+            "headerFooterParagraph" => new HashSet<string>(["paragraphText", "paragraphOccurrence", "sectionId", "partId", "paragraphId"], StringComparer.Ordinal),
+            _ => new HashSet<string>(StringComparer.Ordinal)
+        };
+        var disallowed = supplied.FirstOrDefault(pair => pair.Value && !allowed.Contains(pair.Key)).Key;
+        return disallowed is null ? null : $"formatTarget.{disallowed} is not allowed for kind '{target.Kind}'";
     }
 
     private static string? ValidateFormatPropertyValues(string operationType, IReadOnlyDictionary<string, string> properties)
@@ -409,7 +539,7 @@ public static class Editor
             null);
     }
 
-    private static Resolution ResolveSection(Body body, DocxFormatTarget target)
+    private static Resolution ResolveSection(MainDocumentPart mainPart, Body body, DocxFormatTarget target)
     {
         if (string.IsNullOrEmpty(target.SectionId)
             || string.IsNullOrEmpty(target.ParagraphText)
@@ -418,27 +548,18 @@ public static class Editor
         {
             return new Resolution(null, "sectionId, paragraphText, and non-negative paragraphOccurrence are required semantic section selectors");
         }
-        if (!TryParseStableId(target.SectionId, "section", out var requestedSection))
-        {
-            return new Resolution(null, $"Invalid section identity '{target.SectionId}'");
-        }
-
         var paragraphs = body.Elements<Paragraph>().ToList();
-        var sections = body.Elements<Paragraph>()
-            .Select(paragraph => (Properties: paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>(), Paragraph: paragraph))
-            .Where(item => item.Properties is not null)
-            .Select(item => (item.Properties!, (Paragraph?)item.Paragraph))
-            .Concat(body.Elements<SectionProperties>().Select(properties => (properties, (Paragraph?)null)))
-            .ToList();
-        if (requestedSection < 0 || requestedSection >= sections.Count)
+        var identity = DocumentStructureIdentityResolver.Resolve(mainPart, body);
+        var requestedSection = identity.Sections.ToList().FindIndex(section => string.Equals(section.Id, target.SectionId, StringComparison.Ordinal));
+        if (requestedSection < 0)
         {
             return new Resolution(null, $"Section target '{target.SectionId}' was not found");
         }
 
         var start = requestedSection == 0
             ? 0
-            : sections[requestedSection - 1].Item2 is Paragraph previousEnd ? paragraphs.IndexOf(previousEnd) + 1 : paragraphs.Count;
-        var end = sections[requestedSection].Item2 is Paragraph currentEnd ? paragraphs.IndexOf(currentEnd) : paragraphs.Count - 1;
+            : identity.Sections[requestedSection - 1].EndingParagraph is Paragraph previousEnd ? paragraphs.IndexOf(previousEnd) + 1 : paragraphs.Count;
+        var end = identity.Sections[requestedSection].EndingParagraph is Paragraph currentEnd ? paragraphs.IndexOf(currentEnd) : paragraphs.Count - 1;
         var matches = paragraphs.Skip(start).Take(Math.Max(0, end - start + 1))
             .Where(paragraph => string.Equals(GetNormalizedParagraphText(paragraph), target.ParagraphText, StringComparison.Ordinal))
             .ToList();
@@ -447,12 +568,13 @@ public static class Editor
             return new Resolution(null, $"Semantic paragraph '{target.ParagraphText}' occurrence {target.ParagraphOccurrence} does not belong to {target.SectionId}");
         }
 
-        var section = sections[requestedSection].Item1;
+        var sectionIdentity = identity.Sections[requestedSection];
+        var section = sectionIdentity.Properties;
         return new Resolution(
             new ResolvedFormatElement(
                 section,
                 section,
-                new DocxResolvedFormatTarget("section", target.SectionId, SectionId: target.SectionId)),
+                new DocxResolvedFormatTarget("section", sectionIdentity.Id, SectionId: sectionIdentity.Id)),
             null);
     }
 
@@ -464,58 +586,23 @@ public static class Editor
         {
             return new Resolution(null, "sectionId, partId, paragraphId, paragraphText, and non-negative paragraphOccurrence are required header/footer selectors");
         }
-        if (!TryParseStableId(target.SectionId, "section", out var requestedSection))
-        {
-            return new Resolution(null, $"Invalid section identity '{target.SectionId}'");
-        }
-
         var mainPart = doc.MainDocumentPart!;
-        var sectionProperties = body.Elements<Paragraph>()
-            .Select(paragraph => paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>())
-            .Where(properties => properties is not null)
-            .Cast<SectionProperties>()
-            .Concat(body.Elements<SectionProperties>())
-            .ToList();
-        if (requestedSection < 0 || requestedSection >= sectionProperties.Count)
+        var identity = DocumentStructureIdentityResolver.Resolve(mainPart, body);
+        var requestedSection = identity.Sections.ToList().FindIndex(section => string.Equals(section.Id, target.SectionId, StringComparison.Ordinal));
+        if (requestedSection < 0)
         {
             return new Resolution(null, $"Section target '{target.SectionId}' was not found");
         }
 
-        var headerIds = new Dictionary<HeaderPart, string>();
-        var footerIds = new Dictionary<FooterPart, string>();
-        var currentHeaders = new Dictionary<string, HeaderPart>(StringComparer.Ordinal);
-        var currentFooters = new Dictionary<string, FooterPart>(StringComparer.Ordinal);
-        for (var sectionIndex = 0; sectionIndex <= requestedSection; sectionIndex++)
+        var section = identity.Sections[requestedSection];
+        var binding = section.Headers.Concat(section.Footers)
+            .FirstOrDefault(item => string.Equals(item.PartId, target.PartId, StringComparison.Ordinal));
+        OpenXmlPartRootElement? root = binding?.Part switch
         {
-            foreach (var reference in sectionProperties[sectionIndex].Elements<HeaderReference>())
-            {
-                var type = reference.Type?.Value.ToString() ?? "default";
-                var part = (HeaderPart)mainPart.GetPartById(reference.Id!.Value!);
-                if (!headerIds.ContainsKey(part)) headerIds.Add(part, $"header-{headerIds.Count}");
-                currentHeaders[type] = part;
-            }
-            foreach (var reference in sectionProperties[sectionIndex].Elements<FooterReference>())
-            {
-                var type = reference.Type?.Value.ToString() ?? "default";
-                var part = (FooterPart)mainPart.GetPartById(reference.Id!.Value!);
-                if (!footerIds.ContainsKey(part)) footerIds.Add(part, $"footer-{footerIds.Count}");
-                currentFooters[type] = part;
-            }
-        }
-
-        OpenXmlPartRootElement? root = null;
-        if (target.PartId.StartsWith("header-", StringComparison.Ordinal))
-        {
-            var pair = currentHeaders.Values.Distinct().Select(part => (Part: part, Id: headerIds[part]))
-                .SingleOrDefault(item => string.Equals(item.Id, target.PartId, StringComparison.Ordinal));
-            root = pair.Part?.Header;
-        }
-        else if (target.PartId.StartsWith("footer-", StringComparison.Ordinal))
-        {
-            var pair = currentFooters.Values.Distinct().Select(part => (Part: part, Id: footerIds[part]))
-                .SingleOrDefault(item => string.Equals(item.Id, target.PartId, StringComparison.Ordinal));
-            root = pair.Part?.Footer;
-        }
+            HeaderPart header => header.Header,
+            FooterPart footer => footer.Footer,
+            _ => null
+        };
         if (root is null)
         {
             return new Resolution(null, $"Part {target.PartId} is not bound to {target.SectionId}");
@@ -538,16 +625,8 @@ public static class Editor
             new ResolvedFormatElement(
                 paragraph,
                 paragraph.ParagraphProperties,
-                new DocxResolvedFormatTarget("headerFooterParagraph", paragraphId, paragraphId, SectionId: target.SectionId, PartId: target.PartId)),
+                new DocxResolvedFormatTarget("headerFooterParagraph", paragraphId, paragraphId, SectionId: section.Id, PartId: target.PartId)),
             null);
-    }
-
-    private static bool TryParseStableId(string value, string prefix, out int index)
-    {
-        index = -1;
-        return value.StartsWith(prefix + "-", StringComparison.Ordinal)
-            && value.Length > prefix.Length + 1
-            && int.TryParse(value.AsSpan(prefix.Length + 1), NumberStyles.None, CultureInfo.InvariantCulture, out index);
     }
 
     private static DocxEditAppliedOperation ApplyResolvedFormat(

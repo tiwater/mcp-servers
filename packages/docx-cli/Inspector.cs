@@ -354,113 +354,29 @@ public static class Inspector
             }
         }
 
-        var sectionProperties = new List<(SectionProperties Properties, Paragraph? Paragraph)>();
-        sectionProperties.AddRange(body.Elements<Paragraph>()
-            .Select(paragraph => (Properties: paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>(), Paragraph: paragraph))
-            .Where(item => item.Properties is not null)
-            .Select(item => (item.Properties!, (Paragraph?)item.Paragraph)));
-        sectionProperties.AddRange(body.Elements<SectionProperties>().Select(properties => (properties, (Paragraph?)null)));
-
-        var headerIds = new Dictionary<HeaderPart, string>();
-        var footerIds = new Dictionary<FooterPart, string>();
-        var currentHeaders = new Dictionary<string, SectionPartBinding>(StringComparer.Ordinal);
-        var currentFooters = new Dictionary<string, SectionPartBinding>(StringComparer.Ordinal);
-        var sections = new List<SectionDetail>(sectionProperties.Count);
-
-        for (var sectionIndex = 0; sectionIndex < sectionProperties.Count; sectionIndex++)
+        var identity = DocumentStructureIdentityResolver.Resolve(mainPart, body);
+        var sections = identity.Sections.Select(section =>
         {
-            var section = sectionProperties[sectionIndex];
-            var headerBindings = ResolveSectionBindings(
-                mainPart,
-                section.Properties.Elements<HeaderReference>(),
-                currentHeaders,
-                headerIds,
-                "header",
-                index => $"header-{index}");
-            var footerBindings = ResolveSectionBindings(
-                mainPart,
-                section.Properties.Elements<FooterReference>(),
-                currentFooters,
-                footerIds,
-                "footer",
-                index => $"footer-{index}");
-            var endingParagraphId = section.Paragraph is null
+            var endingParagraphId = section.EndingParagraph is null
                 ? null
-                : $"body-p{GetRequiredIndex(bodyParagraphs, section.Paragraph, "section paragraph")}";
-            sections.Add(new SectionDetail($"section-{sectionIndex}", sectionIndex, endingParagraphId, headerBindings, footerBindings));
-        }
+                : $"body-p{GetRequiredIndex(bodyParagraphs, section.EndingParagraph, "section paragraph")}";
+            return new SectionDetail(
+                section.Id,
+                section.SectionIndex,
+                endingParagraphId,
+                section.Headers.Select(binding => binding.ToEvidence()).ToList(),
+                section.Footers.Select(binding => binding.ToEvidence()).ToList());
+        }).ToList();
 
-        foreach (var pair in mainPart.Parts)
-        {
-            if (pair.OpenXmlPart is HeaderPart header && !headerIds.ContainsKey(header))
-            {
-                headerIds.Add(header, $"header-{headerIds.Count}");
-            }
-            else if (pair.OpenXmlPart is FooterPart footer && !footerIds.ContainsKey(footer))
-            {
-                footerIds.Add(footer, $"footer-{footerIds.Count}");
-            }
-        }
-
-        var headers = headerIds
-            .OrderBy(pair => ParseStableIndex(pair.Value))
-            .Select(pair => BuildHeaderFooterPartDetail(mainPart, pair.Key, pair.Value, "header", pair.Key.Header))
+        var headers = identity.Headers
+            .Select(item => BuildHeaderFooterPartDetail(mainPart, item.Part, item.Id, item.Kind, ((HeaderPart)item.Part).Header))
             .ToList();
-        var footers = footerIds
-            .OrderBy(pair => ParseStableIndex(pair.Value))
-            .Select(pair => BuildHeaderFooterPartDetail(mainPart, pair.Key, pair.Value, "footer", pair.Key.Footer))
+        var footers = identity.Footers
+            .Select(item => BuildHeaderFooterPartDetail(mainPart, item.Part, item.Id, item.Kind, ((FooterPart)item.Part).Footer))
             .ToList();
         var drawings = BuildDrawingDetails(doc, body, sections, headers, footers);
 
         return new DetailedEvidence(bodyNodes, sections, headers, footers, drawings);
-    }
-
-    private static IReadOnlyList<SectionPartBinding> ResolveSectionBindings<TReference, TPart>(
-        MainDocumentPart mainPart,
-        IEnumerable<TReference> references,
-        Dictionary<string, SectionPartBinding> current,
-        Dictionary<TPart, string> stableIds,
-        string kind,
-        Func<int, string> makeId)
-        where TReference : OpenXmlElement
-        where TPart : OpenXmlPart
-    {
-        var explicitlyBoundTypes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var reference in references)
-        {
-            var type = GetAttribute(reference, "type") ?? "default";
-            var relationshipId = GetAttribute(reference, "id")
-                ?? throw new InvalidDataException($"{kind} reference is missing a relationship id.");
-            OpenXmlPart relatedPart;
-            try
-            {
-                relatedPart = mainPart.GetPartById(relationshipId);
-            }
-            catch (Exception ex) when (ex is ArgumentOutOfRangeException or KeyNotFoundException)
-            {
-                throw new InvalidDataException($"{kind} relationship '{relationshipId}' was not found.", ex);
-            }
-
-            if (relatedPart is not TPart typedPart)
-            {
-                throw new InvalidDataException($"Relationship '{relationshipId}' does not target a {kind} part.");
-            }
-
-            if (!stableIds.TryGetValue(typedPart, out var partId))
-            {
-                partId = makeId(stableIds.Count);
-                stableIds.Add(typedPart, partId);
-            }
-
-            current[type] = new SectionPartBinding(kind, type, partId, relationshipId, false);
-            explicitlyBoundTypes.Add(type);
-        }
-
-        return current.Values
-            .Select(binding => explicitlyBoundTypes.Contains(binding.Type)
-                ? binding
-                : binding with { LinkedToPrevious = true })
-            .ToList();
     }
 
     private static HeaderFooterPartDetail BuildHeaderFooterPartDetail(
@@ -820,9 +736,6 @@ public static class Inspector
     private static int GetRequiredIndex<T>(IReadOnlyList<T> list, T value, string description) where T : class
         => GetIndexWithinParent(list, value)
             ?? throw new InvalidDataException($"Unable to resolve stable {description} identity.");
-
-    private static int ParseStableIndex(string id)
-        => int.Parse(id[(id.LastIndexOf('-') + 1)..], CultureInfo.InvariantCulture);
 
     private static IReadOnlyList<TableParagraphDetail> BuildTableParagraphDetails(TableCell cell)
     {

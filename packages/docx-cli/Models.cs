@@ -329,6 +329,7 @@ public sealed record DocxSemanticFillRule(
     IReadOnlyList<string> ColPatterns,
     string Text);
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record DocxFormatTarget(
     string Kind,
     string? ParagraphText = null,
@@ -347,6 +348,7 @@ public sealed record DocxResolvedFormatTarget(
     string? SectionId = null,
     string? PartId = null);
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record DocxEditOperation(
     string Type,
     string? CommentId = null,
@@ -399,6 +401,7 @@ public sealed record DocxRichTextSegment(
     bool? Bold = null,
     string? FontName = null);
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record DocxEditDocument(
     IReadOnlyList<DocxEditOperation> Operations);
 
