@@ -26,7 +26,10 @@ available or fails, the converter falls back to LibreOffice/soffice and then to
 the built-in NPOI converter.
 
 DOC, DOCX, ODT, and RTF PDF conversion prefers WPS Writer through `pywpsrpc`
-when `wps`, `xvfb-run`, and the configured WPS RPC Python are available. The
+when `wps`, `xvfb-run`, `dbus-run-session`, and the configured WPS RPC Python
+are available. The converter launches WPS with an isolated D-Bus session and
+writable per-conversion XDG cache/runtime directories so it remains usable from
+restricted automation sandboxes. The
 JSON result records `backend: "wps-writer"` or `backend: "libreoffice"` and a
 fallback reason. Set `TIWATER_OFFICE_PDF_BACKEND=wps-writer` to require the
 native WPS backend and fail closed when it is unavailable; use `libreoffice` to
