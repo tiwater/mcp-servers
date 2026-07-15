@@ -49,14 +49,28 @@ public sealed record PresentationDetailReport(
     string File,
     int SlideCount,
     SlideSizeInfo SlideSize,
+    IReadOnlyList<MasterDetail> Masters,
     IReadOnlyList<SlideDetailReport> Slides
 );
+
+public sealed record MasterDetail(
+    string Path,
+    string Name,
+    string XmlSha256,
+    string? ThemePath,
+    string? ThemeSha256,
+    IReadOnlyList<LayoutDetail> Layouts
+);
+
+public sealed record LayoutDetail(string Path, string Name, string? Type, string XmlSha256);
 
 public sealed record SlideSizeInfo(long Cx, long Cy);
 
 public sealed record SlideDetailReport(
     int SlideNumber,
     string Path,
+    string? MasterPath,
+    string? LayoutPath,
     IReadOnlyList<ShapeDetail> Shapes
 );
 
@@ -64,6 +78,10 @@ public sealed record ShapeDetail(
     uint ShapeId,
     string Name,
     string Kind,
+    int ZOrder,
+    string? PlaceholderType,
+    string? MediaPartPath,
+    string? MediaSha256,
     string Text,
     TransformInfo? Transform,
     IReadOnlyList<ParagraphDetail> Paragraphs,
@@ -123,6 +141,23 @@ public sealed record FormatEditIssue(
     int RunIndex,
     string Message
 );
+
+public sealed record TemplateApplicationPlan(
+    string TargetMasterPath,
+    IReadOnlyList<SlideLayoutAssignment> Slides
+);
+
+public sealed record SlideLayoutAssignment(int SlideNumber, string TargetLayoutPath);
+
+public sealed record TemplateApplicationResult(
+    string Input,
+    string Template,
+    string Output,
+    int ChangedSlideCount,
+    IReadOnlyList<TemplateApplicationIssue> Issues
+);
+
+public sealed record TemplateApplicationIssue(int? SlideNumber, string Message);
 
 internal static class Json
 {

@@ -68,12 +68,26 @@ public static class Editor
         return operation.Type switch
         {
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
+            "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
             "insertRows" => InsertRowsOperation(workbookPart, operation),
             "copyRow" => CopyRowOperation(workbookPart, operation),
             "expandSectionRows" => ExpandSectionRowsOperation(workbookPart, operation),
             _ => new XlsxEditAppliedOperation(operation.Type, false, $"Unknown operation type: {operation.Type}"),
         };
+    }
+
+    private static XlsxEditAppliedOperation SetRichTextCellValueOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || string.IsNullOrWhiteSpace(operation.Cell) || operation.Value is null || operation.Bold is null)
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet, cell, value, and bold are required");
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        var cell = GetOrCreateCell(worksheetPart, operation.Cell);
+        cell.CellFormula = null; cell.CellValue = null; cell.DataType = CellValues.InlineString;
+        cell.InlineString = new InlineString(new Run(new RunProperties(new Bold { Val = operation.Bold.Value }), new Text(operation.Value)));
+        worksheetPart.Worksheet.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Updated rich text {operation.Sheet}!{operation.Cell}");
     }
 
     private static XlsxEditAppliedOperation SetCellValueOperation(WorkbookPart workbookPart, XlsxEditOperation operation)

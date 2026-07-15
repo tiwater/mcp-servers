@@ -118,6 +118,38 @@ public class PptxCliTests
         Assert.Equal(16d, run.FontSize);
         Assert.Equal("287341", run.Color);
         Assert.True(run.Bold);
+        Assert.Single(report.Masters);
+        Assert.Equal("ppt/slideMasters/slideMaster1.xml", report.Masters[0].Path);
+        Assert.Equal("ppt/slideLayouts/slideLayout1.xml", report.Masters[0].Layouts[0].Path);
+        Assert.Equal(report.Masters[0].Path, report.Slides[0].MasterPath);
+        Assert.Equal(report.Masters[0].Layouts[0].Path, report.Slides[0].LayoutPath);
+        Assert.Equal(0, firstShape.ZOrder);
+    }
+
+    [Fact]
+    public void ApplyTemplate_preserves_slide_content_and_switches_every_slide_to_target_master()
+    {
+        var source = CreateFixture();
+        var template = CreateFixture();
+        using (var target = PresentationDocument.Open(template, true))
+        {
+            target.PresentationPart!.SlideMasterParts.Single().SlideMaster.CommonSlideData!.Name = "Approved Master";
+            target.PresentationPart.SlideMasterParts.Single().SlideMaster.Save();
+        }
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var before = Inspector.InspectDetail(source).Slides.SelectMany(slide => slide.Shapes).Select(shape => shape.Text).ToList();
+
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)]), output);
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(2, result.ChangedSlideCount);
+        var after = Inspector.InspectDetail(output);
+        Assert.All(after.Slides, slide => Assert.Equal("Approved Master", after.Masters.Single(master => master.Path == slide.MasterPath).Name));
+        Assert.Equal(before, after.Slides.SelectMany(slide => slide.Shapes).Select(shape => shape.Text).ToList());
     }
 
     [Fact]
@@ -175,6 +207,7 @@ public class PptxCliTests
             new P.SlideLayoutIdList(new P.SlideLayoutId { Id = 1U, RelationshipId = "rIdLayout1" }),
             new P.TextStyles());
         slideMasterPart.SlideMaster.Save();
+        slideLayoutPart.AddPart(slideMasterPart, "rIdMaster");
 
         var slidePart1 = presentationPart.AddNewPart<SlidePart>("rIdSlide1");
         slidePart1.Slide = CreateSlide("Project {{title}} 峰面积");

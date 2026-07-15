@@ -25,7 +25,7 @@ Outputs sheet-level metrics, placeholders, used ranges, formula counts, and merg
 tiwater-xlsx inspect <template.xlsx> [--json]
 ```
 *   `--json` returns structured output suitable for parsers.
-*   Text cells that use XLSX rich text expose `richTextRuns` with per-run text, font name, color, underline, bold, and italic fields.
+*   Every addressed cell exposes style identity, number-format id/code, font/fill/border ids, horizontal/vertical alignment, and wrap state. Rich text cells also expose per-run text and formatting.
 
 ### 2. Fill a Template
 Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
@@ -58,6 +58,7 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 ### 3. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType` and `bold`
+- `setRichTextCellValue` with required `sheet`, `cell`, `value`, and `bold`; writes one explicit rich-text run so value and all-run bold state are one operation
 - `setRangeValues` with required `sheet`, `startCell`, and `values`; optional `valueType`
 - `insertRows` with required `sheet`, `startRow`, and `count`
 - `copyRow` with required `sheet`, `sourceRow`, and `targetRow`; optional `translateFormulas`
@@ -108,4 +109,4 @@ tiwater-xlsx validate <input.xlsx>
 ```
 
 Scenario-specific fixed-layout planning workflows now live in Lucid skills and scripts. This CLI remains the generic workbook runtime for inspection, export, template filling, explicit edit application, and package validation.
-`export-json` also includes each cell's `richTextRuns` when the Open XML workbook stores inline or shared-string rich text, so downstream document generators can preserve source text markings without parsing package XML directly.
+`export-json` also includes each cell's complete `style` evidence and `richTextRuns`, so downstream planners and independent validators can prove formats without parsing package XML directly.

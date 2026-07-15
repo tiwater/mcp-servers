@@ -26,6 +26,7 @@ internal static class Cli
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
+                "apply-template" => RunApplyTemplateAsync(args[1..]),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -79,6 +80,14 @@ internal static class Cli
         return Task.FromResult(0);
     }
 
+    private static Task<int> RunApplyTemplateAsync(string[] args)
+    {
+        if (args.Length < 4)
+            throw new InvalidOperationException("apply-template requires <input.pptx> <template.pptx> <plan.json> <output.pptx>");
+        WriteJson(TemplateApplicator.Apply(args[0], args[1], args[2], args[3]));
+        return Task.FromResult(0);
+    }
+
     private static Task<int> RunFillTemplateAsync(string[] args)
     {
         if (args.Length < 3)
@@ -103,6 +112,7 @@ internal static class Cli
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
         Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
+        Console.WriteLine("  apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>");
     }
 
     private static Task<int> FailUnknown(string command)
