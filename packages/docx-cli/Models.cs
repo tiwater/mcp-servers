@@ -92,7 +92,8 @@ public sealed record TableCellDetail(
     string? VerticalAlignment,
     string? ShadingFill,
     string Text,
-    IReadOnlyList<TableParagraphDetail> Paragraphs);
+    IReadOnlyList<TableParagraphDetail> Paragraphs,
+    bool NoWrap = false);
 
 public sealed record TableRowDetail(
     int RowIndex,
@@ -101,13 +102,18 @@ public sealed record TableRowDetail(
     int CellCount,
     int GridWidth,
     bool CantSplit,
-    IReadOnlyList<TableCellDetail> Cells);
+    IReadOnlyList<TableCellDetail> Cells,
+    string? Height = null,
+    string? HeightRule = null);
 
 public sealed record TableDetail(
     int TableIndex,
     int RowCount,
     int ColumnCount,
-    IReadOnlyList<TableRowDetail> Rows);
+    IReadOnlyList<TableRowDetail> Rows,
+    string? Width = null,
+    string? WidthType = null,
+    string? Layout = null);
 
 public sealed record TableInspectionReport(
     string File,

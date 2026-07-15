@@ -22,7 +22,7 @@ tiwater-docx inspect <input.docx> [--json]
 ```
 
 ### 1a. Inspect Table Details
-Exports body table rows, cells, grid spans, vertical merges, paragraph alignment, run font, color, underline, and text-fill details. Use this for template-fidelity validation where row/cell merge structure and run-level formatting matter.
+Exports body table formatting from each property's owning OpenXML element: table width/type/layout, row height/rule and split behavior, cell width/type/no-wrap/alignment/shading, grid spans and vertical merges, paragraph style/alignment, and per-run style, font, size, color, bold, italic, underline, and text-fill details. Missing optional properties are reported as `null` (or `false` for on/off flags). Use this for template-fidelity validation where table shape and direct formatting matter.
 
 ```bash
 tiwater-docx inspect-tables <input.docx> [--json]

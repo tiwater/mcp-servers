@@ -146,7 +146,7 @@ public static class Inspector
                         ? null
                         : GetValAttribute(properties.VerticalMerge) ?? "continue";
                     var width = properties?.TableCellWidth?.Width?.Value;
-                    var widthType = GetValAttribute(properties?.TableCellWidth);
+                    var widthType = GetAttribute(properties?.TableCellWidth, "type");
                     var verticalAlignment = GetValAttribute(properties?.TableCellVerticalAlignment);
                     var shadingFill = properties?.Shading?.Fill?.Value;
                     var text = string.Concat(cell.Descendants<Text>().Select(node => node.Text)).Trim();
@@ -162,13 +162,15 @@ public static class Inspector
                         VerticalAlignment: verticalAlignment,
                         ShadingFill: shadingFill,
                         Text: text,
-                        Paragraphs: paragraphDetails));
+                        Paragraphs: paragraphDetails,
+                        NoWrap: IsOn(properties?.NoWrap)));
 
                     gridColumn += gridSpan;
                 }
 
                 var gridWidth = gridColumn + gridAfter;
                 columnCount = Math.Max(columnCount, gridWidth);
+                var rowHeight = row.TableRowProperties?.GetFirstChild<TableRowHeight>();
                 rowDetails.Add(new TableRowDetail(
                     RowIndex: rowIndex,
                     GridBefore: gridBefore,
@@ -176,14 +178,20 @@ public static class Inspector
                     CellCount: cells.Count,
                     GridWidth: gridWidth,
                     CantSplit: row.TableRowProperties?.GetFirstChild<CantSplit>() is not null,
-                    Cells: cellDetails));
+                    Cells: cellDetails,
+                    Height: GetValAttribute(rowHeight),
+                    HeightRule: GetAttribute(rowHeight, "hRule")));
             }
 
+            var tableProperties = table.GetFirstChild<TableProperties>();
             details.Add(new TableDetail(
                 TableIndex: tableIndex,
                 RowCount: rows.Count,
                 ColumnCount: columnCount,
-                Rows: rowDetails));
+                Rows: rowDetails,
+                Width: tableProperties?.TableWidth?.Width?.Value,
+                WidthType: GetAttribute(tableProperties?.TableWidth, "type"),
+                Layout: GetAttribute(tableProperties?.TableLayout, "type")));
         }
 
         return new TableInspectionReport(path, details);
@@ -355,7 +363,7 @@ public static class Inspector
             HasTextFill: properties?.Descendants<W14.FillTextEffect>().Any() == true);
     }
 
-    private static bool IsOn(OnOffType? value)
+    private static bool IsOn(OpenXmlElement? value)
     {
         if (value is null)
         {
@@ -363,11 +371,17 @@ public static class Inspector
         }
 
         var raw = GetValAttribute(value);
-        return raw is null || !raw.Equals("false", StringComparison.OrdinalIgnoreCase) && raw != "0" && !raw.Equals("off", StringComparison.OrdinalIgnoreCase);
+        return raw is null ||
+            (!raw.Equals("false", StringComparison.OrdinalIgnoreCase) &&
+             raw != "0" &&
+             !raw.Equals("off", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? GetValAttribute(OpenXmlElement? element)
         => element?.GetAttributes().FirstOrDefault(attribute => attribute.LocalName == "val").Value;
+
+    private static string? GetAttribute(OpenXmlElement? element, string localName)
+        => element?.GetAttributes().FirstOrDefault(attribute => attribute.LocalName == localName).Value;
 
     public static int? GetIndexWithinParent<T>(IReadOnlyList<T>? list, T value) where T : class
     {

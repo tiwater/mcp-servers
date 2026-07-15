@@ -689,6 +689,49 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void InspectTables_exposes_complete_format_evidence()
+    {
+        var table = Assert.Single(Inspector.InspectTables(CreateDetailedFormattingFixture()).Tables);
+        Assert.Equal("5000", table.Width);
+        Assert.Equal("pct", table.WidthType);
+        Assert.Equal("fixed", table.Layout);
+        Assert.Equal("240", table.Rows[0].Height);
+        Assert.Equal("exact", table.Rows[0].HeightRule);
+        Assert.True(table.Rows[0].Cells[0].NoWrap);
+        Assert.Equal("1200", table.Rows[0].Cells[0].Width);
+        var paragraph = Assert.Single(table.Rows[0].Cells[0].Paragraphs);
+        Assert.Equal("DetailStyle", paragraph.Style);
+        Assert.Equal("center", paragraph.Justification);
+        var run = Assert.Single(paragraph.Runs);
+        Assert.Equal("24", run.FontSize);
+        Assert.Equal("FF0000", run.Color);
+        Assert.True(run.Bold);
+    }
+
+    [Fact]
+    public void InspectTables_exposes_alternate_and_missing_format_evidence()
+    {
+        var tables = Inspector.InspectTables(CreateAlternateAndMissingFormattingFixture()).Tables;
+
+        var formatted = tables[0];
+        Assert.Equal("3600", formatted.Width);
+        Assert.Equal("dxa", formatted.WidthType);
+        Assert.Equal("autofit", formatted.Layout);
+        Assert.Equal("180", formatted.Rows[0].Height);
+        Assert.Equal("atLeast", formatted.Rows[0].HeightRule);
+        Assert.False(formatted.Rows[0].Cells[0].NoWrap);
+        Assert.Equal(2, formatted.Rows[0].Cells[0].Paragraphs[0].Runs.Count);
+
+        var missing = tables[1];
+        Assert.Null(missing.Width);
+        Assert.Null(missing.WidthType);
+        Assert.Null(missing.Layout);
+        Assert.Null(missing.Rows[0].Height);
+        Assert.Null(missing.Rows[0].HeightRule);
+        Assert.False(missing.Rows[0].Cells[0].NoWrap);
+    }
+
+    [Fact]
     public void NormalizeOpenXml_canonicalizes_prefixes_and_property_order()
     {
         var docPath = CreateAnnotatedFixture();
@@ -1603,6 +1646,69 @@ public class AnnotationToolsTests
             ));
             mainPart.Document.Save();
         }
+        return path;
+    }
+
+    private static string CreateDetailedFormattingFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-detailed-formatting-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(
+                        new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct },
+                        new TableLayout { Type = TableLayoutValues.Fixed }),
+                    new TableGrid(new GridColumn { Width = "1200" }),
+                    new TableRow(
+                        new TableRowProperties(
+                            new TableRowHeight { Val = 240U, HeightType = HeightRuleValues.Exact }),
+                        new TableCell(
+                            new TableCellProperties(
+                                new TableCellWidth { Width = "1200", Type = TableWidthUnitValues.Dxa },
+                                new NoWrap()),
+                            new Paragraph(
+                                new ParagraphProperties(
+                                    new ParagraphStyleId { Val = "DetailStyle" },
+                                    new Justification { Val = JustificationValues.Center }),
+                                new Run(
+                                    new RunProperties(
+                                        new Bold(),
+                                        new Color { Val = "FF0000" },
+                                        new FontSize { Val = "24" }),
+                                    new Text("formatted"))))))));
+            mainPart.Document.Save();
+        }
+
+        return path;
+    }
+
+    private static string CreateAlternateAndMissingFormattingFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-alternate-formatting-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(
+                        new TableWidth { Width = "3600", Type = TableWidthUnitValues.Dxa },
+                        new TableLayout { Type = TableLayoutValues.Autofit }),
+                    new TableRow(
+                        new TableRowProperties(
+                            new TableRowHeight { Val = 180U, HeightType = HeightRuleValues.AtLeast }),
+                        new TableCell(
+                            new TableCellProperties(new NoWrap { Val = OnOffOnlyValues.Off }),
+                            new Paragraph(
+                                new Run(new Text("first")),
+                                new Run(new RunProperties(new Italic()), new Text("second")))))),
+                new Table(
+                    new TableRow(
+                        new TableCell(new Paragraph(new Run(new Text("plain"))))))));
+            mainPart.Document.Save();
+        }
+
         return path;
     }
 
