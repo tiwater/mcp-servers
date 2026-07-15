@@ -1370,55 +1370,67 @@ public static class Editor
 
     private static bool ReplaceTextInParagraph(Paragraph paragraph, string findText, string replacementText)
     {
-        var texts = paragraph.Descendants<Text>().ToList();
-        if (texts.Count == 0)
+        if (findText.Length == 0)
         {
             return false;
         }
 
-        var textSpans = new List<(Text Text, int Start, int End)>();
-        var cursor = 0;
-        foreach (var text in texts)
+        var replaced = false;
+        var searchStart = 0;
+        while (true)
         {
-            var value = text.Text ?? string.Empty;
-            textSpans.Add((text, cursor, cursor + value.Length));
-            cursor += value.Length;
+            var texts = paragraph.Descendants<Text>().ToList();
+            if (texts.Count == 0)
+            {
+                return replaced;
+            }
+
+            var textSpans = new List<(Text Text, int Start, int End)>();
+            var cursor = 0;
+            foreach (var text in texts)
+            {
+                var value = text.Text ?? string.Empty;
+                textSpans.Add((text, cursor, cursor + value.Length));
+                cursor += value.Length;
+            }
+
+            var fullText = string.Concat(texts.Select(text => text.Text ?? string.Empty));
+            var index = fullText.IndexOf(findText, searchStart, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return replaced;
+            }
+
+            var endIndex = index + findText.Length;
+            var startSpanIndex = textSpans.FindIndex(span => index >= span.Start && index < span.End);
+            var endSpanIndex = textSpans.FindIndex(span => endIndex > span.Start && endIndex <= span.End);
+            if (startSpanIndex < 0 || endSpanIndex < 0)
+            {
+                return replaced;
+            }
+
+            var startSpan = textSpans[startSpanIndex];
+            var endSpan = textSpans[endSpanIndex];
+            var prefix = (startSpan.Text.Text ?? string.Empty)[..(index - startSpan.Start)];
+            var suffix = (endSpan.Text.Text ?? string.Empty)[(endIndex - endSpan.Start)..];
+
+            if (startSpanIndex == endSpanIndex)
+            {
+                startSpan.Text.Text = prefix + replacementText + suffix;
+            }
+            else
+            {
+                startSpan.Text.Text = prefix + replacementText;
+                for (var i = startSpanIndex + 1; i < endSpanIndex; i++)
+                {
+                    textSpans[i].Text.Text = string.Empty;
+                }
+                endSpan.Text.Text = suffix;
+            }
+
+            replaced = true;
+            searchStart = index + replacementText.Length;
         }
-
-        var fullText = string.Concat(texts.Select(text => text.Text ?? string.Empty));
-        var index = fullText.IndexOf(findText, StringComparison.Ordinal);
-        if (index < 0)
-        {
-            return false;
-        }
-
-        var endIndex = index + findText.Length;
-        var startSpanIndex = textSpans.FindIndex(span => index >= span.Start && index < span.End);
-        var endSpanIndex = textSpans.FindIndex(span => endIndex > span.Start && endIndex <= span.End);
-        if (startSpanIndex < 0 || endSpanIndex < 0)
-        {
-            return false;
-        }
-
-        var startSpan = textSpans[startSpanIndex];
-        var endSpan = textSpans[endSpanIndex];
-        var prefix = (startSpan.Text.Text ?? string.Empty)[..(index - startSpan.Start)];
-        var suffix = (endSpan.Text.Text ?? string.Empty)[(endIndex - endSpan.Start)..];
-
-        if (startSpanIndex == endSpanIndex)
-        {
-            startSpan.Text.Text = prefix + replacementText + suffix;
-            return true;
-        }
-
-        startSpan.Text.Text = prefix + replacementText;
-        for (var i = startSpanIndex + 1; i < endSpanIndex; i++)
-        {
-            textSpans[i].Text.Text = string.Empty;
-        }
-        endSpan.Text.Text = suffix;
-
-        return true;
     }
 
     private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null, Run? fallbackRun = null)
