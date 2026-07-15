@@ -21,14 +21,26 @@ internal static class WpsRpcSession
         string output,
         string isolatedWorkingDirectory)
     {
+        var workingDirectory = Path.GetFullPath(isolatedWorkingDirectory);
+        var cacheDirectory = Path.Combine(workingDirectory, "cache");
+        var runtimeDirectory = Path.Combine(workingDirectory, "runtime");
+        Directory.CreateDirectory(cacheDirectory);
+        Directory.CreateDirectory(runtimeDirectory);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(runtimeDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
         var startInfo = new ProcessStartInfo
         {
             FileName = dbusRunSession,
-            WorkingDirectory = Path.GetFullPath(isolatedWorkingDirectory),
+            WorkingDirectory = workingDirectory,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
             UseShellExecute = false,
         };
+        startInfo.Environment["XDG_CACHE_HOME"] = cacheDirectory;
+        startInfo.Environment["XDG_RUNTIME_DIR"] = runtimeDirectory;
         foreach (var arg in new[]
         {
             "--",

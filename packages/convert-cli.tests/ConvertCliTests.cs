@@ -133,6 +133,10 @@ public class ConvertCliTests
         Assert.Equal("/usr/bin/dbus-run-session", startInfo.FileName);
         Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
         Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
+        Assert.Equal(Path.Combine(Path.GetFullPath(isolated), "cache"), startInfo.Environment["XDG_CACHE_HOME"]);
+        Assert.Equal(Path.Combine(Path.GetFullPath(isolated), "runtime"), startInfo.Environment["XDG_RUNTIME_DIR"]);
+        Assert.True(Directory.Exists(startInfo.Environment["XDG_CACHE_HOME"]));
+        Assert.True(Directory.Exists(startInfo.Environment["XDG_RUNTIME_DIR"]));
         Assert.Equal(new[]
         {
             "--",

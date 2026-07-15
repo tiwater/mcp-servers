@@ -32,7 +32,9 @@ are available. The
 JSON result records `backend: "wps-writer"` or `backend: "libreoffice"` and a
 fallback reason. Set `TIWATER_OFFICE_PDF_BACKEND=wps-writer` to require the
 native WPS backend and fail closed when it is unavailable; use `libreoffice` to
-request the auxiliary backend explicitly.
+request the auxiliary backend explicitly. Each WPS RPC session also receives
+writable per-conversion `XDG_CACHE_HOME` and `XDG_RUNTIME_DIR` directories so
+restricted automation sandboxes never write WPS/dconf state under the user's home.
 
 LibreOffice-backed PDF conversion requires `soffice`. If it is not on `PATH`, set one of:
 
