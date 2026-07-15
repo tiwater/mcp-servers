@@ -75,7 +75,7 @@ public static class OfficeConverter
             }
             if (requestedBackend == "wps-writer")
             {
-                throw new InvalidOperationException("WPS Writer PDF backend was required but WPS Writer, xvfb-run, or pywpsrpc is unavailable.");
+                throw new InvalidOperationException("WPS Writer PDF backend was required but WPS Writer, xvfb-run, dbus-run-session, or pywpsrpc is unavailable.");
             }
         }
 
