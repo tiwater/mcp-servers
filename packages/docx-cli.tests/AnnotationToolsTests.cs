@@ -830,6 +830,29 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_replaces_every_body_text_occurrence_in_the_same_paragraph()
+    {
+        var docPath = Path.Combine(Path.GetTempPath(), $"body-text-all-{Guid.NewGuid():N}.docx");
+        using (var fixture = WordprocessingDocument.Create(docPath, WordprocessingDocumentType.Document))
+        {
+            var mainPart = fixture.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Paragraph(new Run(new Text("项目：TOKEN；复核项目：TOKEN")))));
+            mainPart.Document.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"body-text-all-edited-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(docPath, output, [
+            new DocxEditOperation("replaceBodyText", FindText: "TOKEN", Text: "HSPTEST")
+        ]);
+
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var doc = WordprocessingDocument.Open(output, false);
+        var paragraph = doc.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single();
+        Assert.Equal("项目：HSPTEST；复核项目：HSPTEST", GetParagraphText(paragraph));
+    }
+
+    [Fact]
     public void Edit_can_freeze_fields_to_current_display_text()
     {
         var docPath = CreateFieldFixture();
