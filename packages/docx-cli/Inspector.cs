@@ -699,6 +699,7 @@ public static class Inspector
         if (inline is not null)
         {
             var extent = inline.GetFirstChild<DW.Extent>();
+            var effectExtent = inline.GetFirstChild<DW.EffectExtent>();
             return new DrawingPlacementDetail(
                 "inline",
                 extent?.Cx?.Value,
@@ -706,12 +707,14 @@ public static class Inspector
                 DistanceFromTop: inline.DistanceFromTop?.Value,
                 DistanceFromBottom: inline.DistanceFromBottom?.Value,
                 DistanceFromLeft: inline.DistanceFromLeft?.Value,
-                DistanceFromRight: inline.DistanceFromRight?.Value);
+                DistanceFromRight: inline.DistanceFromRight?.Value,
+                EffectExtent: BuildEffectExtent(effectExtent));
         }
 
         var anchor = drawing.GetFirstChild<DW.Anchor>()
             ?? throw new InvalidDataException("Drawing is neither inline nor anchored.");
         var anchorExtent = anchor.GetFirstChild<DW.Extent>();
+        var anchorEffectExtent = anchor.GetFirstChild<DW.EffectExtent>();
         var horizontal = anchor.GetFirstChild<DW.HorizontalPosition>();
         var vertical = anchor.GetFirstChild<DW.VerticalPosition>();
         var simplePosition = anchor.GetFirstChild<DW.SimplePosition>();
@@ -737,7 +740,8 @@ public static class Inspector
             anchor.Locked?.Value,
             anchor.LayoutInCell?.Value,
             anchor.AllowOverlap?.Value,
-            BuildDrawingWrap(anchor));
+            BuildDrawingWrap(anchor),
+            BuildEffectExtent(anchorEffectExtent));
     }
 
     private static DrawingWrapDetail BuildDrawingWrap(DW.Anchor anchor)
@@ -754,14 +758,58 @@ public static class Inspector
             DW.WrapTopBottom => "topBottom",
             _ => throw new InvalidDataException($"Unsupported drawing wrap element '{wrap.LocalName}'.")
         };
+        var polygon = kind is "tight" or "through" ? BuildWrapPolygon(wrap, kind) : null;
         return new DrawingWrapDetail(
             kind,
             GetAttribute(wrap, "wrapText"),
             GetUIntAttribute(wrap, "distT"),
             GetUIntAttribute(wrap, "distB"),
             GetUIntAttribute(wrap, "distL"),
-            GetUIntAttribute(wrap, "distR"));
+            GetUIntAttribute(wrap, "distR"),
+            polygon);
     }
+
+    private static DrawingEffectExtentDetail? BuildEffectExtent(DW.EffectExtent? extent)
+    {
+        if (extent is null)
+        {
+            return null;
+        }
+
+        return new DrawingEffectExtentDetail(
+            GetRequiredCoordinate(extent.LeftEdge?.Value, "effect extent left"),
+            GetRequiredCoordinate(extent.TopEdge?.Value, "effect extent top"),
+            GetRequiredCoordinate(extent.RightEdge?.Value, "effect extent right"),
+            GetRequiredCoordinate(extent.BottomEdge?.Value, "effect extent bottom"));
+    }
+
+    private static DrawingWrapPolygonDetail BuildWrapPolygon(OpenXmlElement wrap, string kind)
+    {
+        var polygon = wrap.GetFirstChild<DW.WrapPolygon>()
+            ?? throw new InvalidDataException($"Drawing {kind} wrap is missing its required polygon.");
+        var edited = polygon.Edited?.Value
+            ?? throw new InvalidDataException($"Drawing {kind} wrap polygon is missing its edited flag.");
+        var start = polygon.GetFirstChild<DW.StartPoint>()
+            ?? throw new InvalidDataException($"Drawing {kind} wrap polygon is missing its start point.");
+        var lines = polygon.Elements<DW.LineTo>().ToList();
+        if (lines.Count < 2)
+        {
+            throw new InvalidDataException($"Drawing {kind} wrap polygon must contain at least two line points.");
+        }
+
+        return new DrawingWrapPolygonDetail(
+            edited,
+            BuildDrawingPoint(start, $"{kind} wrap polygon start"),
+            lines.Select((line, index) => BuildDrawingPoint(line, $"{kind} wrap polygon line {index}")).ToList());
+    }
+
+    private static DrawingPointDetail BuildDrawingPoint(DW.Point2DType point, string description)
+        => new(
+            GetRequiredCoordinate(point.X?.Value, $"{description} x"),
+            GetRequiredCoordinate(point.Y?.Value, $"{description} y"));
+
+    private static long GetRequiredCoordinate(long? value, string description)
+        => value ?? throw new InvalidDataException($"Drawing {description} coordinate is missing.");
 
     private static uint? GetUIntAttribute(OpenXmlElement element, string localName)
     {

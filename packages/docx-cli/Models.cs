@@ -177,7 +177,21 @@ public sealed record DrawingPlacementDetail(
     bool? Locked = null,
     bool? LayoutInCell = null,
     bool? AllowOverlap = null,
-    DrawingWrapDetail? Wrap = null);
+    DrawingWrapDetail? Wrap = null,
+    DrawingEffectExtentDetail? EffectExtent = null);
+
+public sealed record DrawingEffectExtentDetail(
+    long Left,
+    long Top,
+    long Right,
+    long Bottom);
+
+public sealed record DrawingPointDetail(long X, long Y);
+
+public sealed record DrawingWrapPolygonDetail(
+    bool Edited,
+    DrawingPointDetail StartPoint,
+    IReadOnlyList<DrawingPointDetail> LineToPoints);
 
 public sealed record DrawingWrapDetail(
     string Kind,
@@ -185,7 +199,8 @@ public sealed record DrawingWrapDetail(
     uint? DistanceFromTop = null,
     uint? DistanceFromBottom = null,
     uint? DistanceFromLeft = null,
-    uint? DistanceFromRight = null);
+    uint? DistanceFromRight = null,
+    DrawingWrapPolygonDetail? Polygon = null);
 
 [method: JsonConstructor]
 public sealed record DrawingDetail(

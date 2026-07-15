@@ -213,6 +213,57 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Drawing_evidence_preserves_effect_extents_and_ordered_tight_through_polygons()
+    {
+        var fixture = CreatePolygonDrawingFixture();
+
+        var drawings = Inspector.Inspect(fixture).Structure.Drawings;
+
+        var inlineExtent = Assert.IsType<DrawingEffectExtentDetail>(drawings[0].Placement.EffectExtent);
+        Assert.Equal(new DrawingEffectExtentDetail(1L, 2L, 3L, 4L), inlineExtent);
+
+        var tightPlacement = drawings[1].Placement;
+        Assert.Equal(new DrawingEffectExtentDetail(10L, 20L, 30L, 40L), tightPlacement.EffectExtent);
+        var tightWrap = Assert.IsType<DrawingWrapDetail>(tightPlacement.Wrap);
+        Assert.Equal("tight", tightWrap.Kind);
+        Assert.Equal("left", tightWrap.TextFlow);
+        Assert.Equal(51U, tightWrap.DistanceFromLeft);
+        Assert.Equal(52U, tightWrap.DistanceFromRight);
+        var tightPolygon = Assert.IsType<DrawingWrapPolygonDetail>(tightWrap.Polygon);
+        Assert.True(tightPolygon.Edited);
+        Assert.Equal(new DrawingPointDetail(0L, 10L), tightPolygon.StartPoint);
+        Assert.Equal(
+            [new DrawingPointDetail(100L, 10L), new DrawingPointDetail(100L, 110L), new DrawingPointDetail(0L, 10L)],
+            tightPolygon.LineToPoints);
+
+        var throughPlacement = drawings[2].Placement;
+        Assert.Equal(new DrawingEffectExtentDetail(100L, 200L, 300L, 400L), throughPlacement.EffectExtent);
+        var throughWrap = Assert.IsType<DrawingWrapDetail>(throughPlacement.Wrap);
+        Assert.Equal("through", throughWrap.Kind);
+        Assert.Equal("right", throughWrap.TextFlow);
+        Assert.Equal(61U, throughWrap.DistanceFromLeft);
+        Assert.Equal(62U, throughWrap.DistanceFromRight);
+        var throughPolygon = Assert.IsType<DrawingWrapPolygonDetail>(throughWrap.Polygon);
+        Assert.False(throughPolygon.Edited);
+        Assert.Equal(new DrawingPointDetail(20L, 30L), throughPolygon.StartPoint);
+        Assert.Equal(
+            [new DrawingPointDetail(220L, 30L), new DrawingPointDetail(120L, 230L), new DrawingPointDetail(20L, 30L)],
+            throughPolygon.LineToPoints);
+        Assert.NotEqual(tightPolygon, throughPolygon);
+    }
+
+    [Fact]
+    public void Drawing_evidence_rejects_tight_or_through_wrap_without_required_polygon()
+    {
+        var fixture = CreatePolygonDrawingFixture(missingTightPolygon: true);
+
+        var error = Assert.Throws<InvalidDataException>(() => Inspector.Inspect(fixture));
+
+        Assert.Contains("tight", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("polygon", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
         var docPath = CreateAnnotatedFixture();
@@ -2297,6 +2348,114 @@ public class AnnotationToolsTests
             DistanceFromRight = 8U,
             SimplePos = false,
             RelativeHeight = 8U,
+            BehindDoc = false,
+            Locked = false,
+            LayoutInCell = true,
+            AllowOverlap = true
+        };
+        return new Drawing(anchor);
+    }
+
+    private static string CreatePolygonDrawingFixture(bool missingTightPolygon = false)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-polygon-drawings-{Guid.NewGuid():N}.docx");
+        var imageBytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            var imagePart = mainPart.AddImagePart(ImagePartType.Png);
+            WritePartBytes(imagePart, imageBytes);
+            var relationshipId = mainPart.GetIdOfPart(imagePart);
+            mainPart.Document = new Document(new Body(
+                new Paragraph(new Run(new Text("inline effect"), CreateEffectInlineDrawing(41U, relationshipId))),
+                new Paragraph(new Run(new Text("tight contour"), CreatePolygonAnchorDrawing(42U, relationshipId, false, missingTightPolygon))),
+                new Paragraph(new Run(new Text("through contour"), CreatePolygonAnchorDrawing(43U, relationshipId, true, false))),
+                new SectionProperties()));
+            mainPart.Document.Save();
+        }
+
+        if (!missingTightPolygon)
+        {
+            AssertValidOpenXml(path);
+        }
+        return path;
+    }
+
+    private static Drawing CreateEffectInlineDrawing(uint id, string relationshipId)
+        => new(
+            new DW.Inline(
+                new DW.Extent { Cx = 914400L, Cy = 457200L },
+                new DW.EffectExtent { LeftEdge = 1L, TopEdge = 2L, RightEdge = 3L, BottomEdge = 4L },
+                new DW.DocProperties { Id = id, Name = $"Inline effect {id}" },
+                new DW.NonVisualGraphicFrameDrawingProperties(
+                    new A.GraphicFrameLocks { NoChangeAspect = true }),
+                BuildPictureGraphic(relationshipId)));
+
+    private static Drawing CreatePolygonAnchorDrawing(
+        uint id,
+        string relationshipId,
+        bool through,
+        bool missingPolygon)
+    {
+        var polygon = through
+            ? new DW.WrapPolygon(
+                new DW.StartPoint { X = 20L, Y = 30L },
+                new DW.LineTo { X = 220L, Y = 30L },
+                new DW.LineTo { X = 120L, Y = 230L },
+                new DW.LineTo { X = 20L, Y = 30L }) { Edited = false }
+            : new DW.WrapPolygon(
+                new DW.StartPoint { X = 0L, Y = 10L },
+                new DW.LineTo { X = 100L, Y = 10L },
+                new DW.LineTo { X = 100L, Y = 110L },
+                new DW.LineTo { X = 0L, Y = 10L }) { Edited = true };
+        OpenXmlElement wrap = through
+            ? new DW.WrapThrough(polygon)
+            {
+                WrapText = DW.WrapTextValues.Right,
+                DistanceFromLeft = 61U,
+                DistanceFromRight = 62U
+            }
+            : missingPolygon
+                ? new DW.WrapTight
+                {
+                    WrapText = DW.WrapTextValues.Left,
+                    DistanceFromLeft = 51U,
+                    DistanceFromRight = 52U
+                }
+                : new DW.WrapTight(polygon)
+                {
+                    WrapText = DW.WrapTextValues.Left,
+                    DistanceFromLeft = 51U,
+                    DistanceFromRight = 52U
+                };
+        var effect = through
+            ? new DW.EffectExtent { LeftEdge = 100L, TopEdge = 200L, RightEdge = 300L, BottomEdge = 400L }
+            : new DW.EffectExtent { LeftEdge = 10L, TopEdge = 20L, RightEdge = 30L, BottomEdge = 40L };
+        var anchor = new DW.Anchor(
+            new DW.SimplePosition { X = 0L, Y = 0L },
+            new DW.HorizontalPosition(new DW.PositionOffset("1000"))
+            {
+                RelativeFrom = DW.HorizontalRelativePositionValues.Page
+            },
+            new DW.VerticalPosition(new DW.PositionOffset("2000"))
+            {
+                RelativeFrom = DW.VerticalRelativePositionValues.Paragraph
+            },
+            new DW.Extent { Cx = 914400L, Cy = 457200L },
+            effect,
+            wrap,
+            new DW.DocProperties { Id = id, Name = $"Polygon {id}" },
+            new DW.NonVisualGraphicFrameDrawingProperties(
+                new A.GraphicFrameLocks { NoChangeAspect = true }),
+            BuildPictureGraphic(relationshipId))
+        {
+            DistanceFromTop = 0U,
+            DistanceFromBottom = 0U,
+            DistanceFromLeft = 0U,
+            DistanceFromRight = 0U,
+            SimplePos = false,
+            RelativeHeight = id,
             BehindDoc = false,
             Locked = false,
             LayoutInCell = true,
