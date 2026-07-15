@@ -106,21 +106,43 @@ public class ConvertCliTests
     [Theory]
     [InlineData("getWpsApplication failed: 0x80000008")]
     [InlineData("Fatal IO error on X server :101")]
+    [InlineData("X server has exited")]
     public void Wps_writer_recognizes_transient_rpc_startup_failures(string message)
     {
         Assert.True(WpsWriterPdfConverter.IsTransientStartupFailure(message));
     }
 
     [Fact]
-    public void Wps_writer_runs_in_an_isolated_working_directory()
+    public void Wps_rpc_runs_in_a_fresh_dbus_session_around_isolated_xvfb()
     {
         var isolated = Path.Combine(Path.GetTempPath(), $"wps-working-{Guid.NewGuid():N}");
         Directory.CreateDirectory(isolated);
+        var helper = Path.Combine(isolated, "helper.py");
+        var input = Path.Combine(isolated, "input.docx");
+        var output = Path.Combine(isolated, "output.pdf");
 
-        var startInfo = WpsWriterPdfConverter.CreateProcessStartInfo("xvfb-run", isolated);
+        var startInfo = WpsRpcSession.CreateProcessStartInfo(
+            "/usr/bin/dbus-run-session",
+            "/usr/bin/xvfb-run",
+            "/venv/bin/python",
+            helper,
+            input,
+            output,
+            isolated);
 
+        Assert.Equal("/usr/bin/dbus-run-session", startInfo.FileName);
         Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
         Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
+        Assert.Equal(new[]
+        {
+            "--",
+            "/usr/bin/xvfb-run",
+            "-a",
+            "/venv/bin/python",
+            helper,
+            Path.GetFullPath(input),
+            Path.GetFullPath(output),
+        }, startInfo.ArgumentList);
     }
 
     [Fact]

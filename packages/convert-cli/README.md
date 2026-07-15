@@ -21,12 +21,14 @@ XLS conversion prefers WPS Spreadsheets through `pywpsrpc` when available,
 because WPS generally preserves legacy workbook formatting better on Linux. Set
 `TIWATER_WPSRPC_PYTHON` or `LUCID_WPSRPC_PYTHON` to the pywpsrpc venv Python if
 it is not installed at `~/.local/share/lucid-docs/wpsrpc-venv/bin/python`.
-`xvfb-run` and the WPS `et` command must be available. If WPS conversion is not
-available or fails, the converter falls back to LibreOffice/soffice and then to
-the built-in NPOI converter.
+`dbus-run-session`, `xvfb-run`, and the WPS `et` command must be available. Each
+WPS RPC conversion runs in a fresh D-Bus session around its isolated Xvfb
+display. If WPS conversion is not available or fails, the converter falls back
+to LibreOffice/soffice and then to the built-in NPOI converter.
 
 DOC, DOCX, ODT, and RTF PDF conversion prefers WPS Writer through `pywpsrpc`
-when `wps`, `xvfb-run`, and the configured WPS RPC Python are available. The
+when `wps`, `dbus-run-session`, `xvfb-run`, and the configured WPS RPC Python
+are available. The
 JSON result records `backend: "wps-writer"` or `backend: "libreoffice"` and a
 fallback reason. Set `TIWATER_OFFICE_PDF_BACKEND=wps-writer` to require the
 native WPS backend and fail closed when it is unavailable; use `libreoffice` to
