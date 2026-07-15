@@ -121,6 +121,30 @@ public class ConvertCliTests
 
         Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
         Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
+        Assert.Equal(Path.Combine(Path.GetFullPath(isolated), "cache"), startInfo.Environment["XDG_CACHE_HOME"]);
+        Assert.Equal(Path.Combine(Path.GetFullPath(isolated), "runtime"), startInfo.Environment["XDG_RUNTIME_DIR"]);
+    }
+
+    [Fact]
+    public void Wps_writer_starts_an_isolated_dbus_session()
+    {
+        var arguments = WpsWriterPdfConverter.CreateHelperArguments(
+            "dbus-run-session",
+            "/tmp/wpsrpc-python",
+            "/tmp/writer_to_pdf_wps.py",
+            "/tmp/input.docx",
+            "/tmp/output.pdf");
+
+        Assert.Equal(new[]
+        {
+            "-a",
+            "dbus-run-session",
+            "--",
+            "/tmp/wpsrpc-python",
+            "/tmp/writer_to_pdf_wps.py",
+            "/tmp/input.docx",
+            "/tmp/output.pdf",
+        }, arguments);
     }
 
     [Fact]
