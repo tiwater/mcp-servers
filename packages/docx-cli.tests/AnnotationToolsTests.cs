@@ -691,7 +691,9 @@ public class AnnotationToolsTests
     [Fact]
     public void InspectTables_exposes_complete_format_evidence()
     {
-        var table = Assert.Single(Inspector.InspectTables(CreateDetailedFormattingFixture()).Tables);
+        var path = CreateDetailedFormattingFixture();
+        AssertValidOpenXml(path);
+        var table = Assert.Single(Inspector.InspectTables(path).Tables);
         Assert.Equal("5000", table.Width);
         Assert.Equal("pct", table.WidthType);
         Assert.Equal("fixed", table.Layout);
@@ -711,7 +713,9 @@ public class AnnotationToolsTests
     [Fact]
     public void InspectTables_exposes_alternate_and_missing_format_evidence()
     {
-        var tables = Inspector.InspectTables(CreateAlternateAndMissingFormattingFixture()).Tables;
+        var path = CreateAlternateAndMissingFormattingFixture();
+        AssertValidOpenXml(path);
+        var tables = Inspector.InspectTables(path).Tables;
 
         var formatted = tables[0];
         Assert.Equal("3600", formatted.Width);
@@ -729,6 +733,21 @@ public class AnnotationToolsTests
         Assert.Null(missing.Rows[0].Height);
         Assert.Null(missing.Rows[0].HeightRule);
         Assert.False(missing.Rows[0].Cells[0].NoWrap);
+    }
+
+    [Fact]
+    public void InspectTables_does_not_fallback_to_cell_width_when_table_width_is_absent()
+    {
+        var path = CreateCellWidthOnlyFormattingFixture();
+        AssertValidOpenXml(path);
+
+        var table = Assert.Single(Inspector.InspectTables(path).Tables);
+
+        Assert.Null(table.Width);
+        Assert.Null(table.WidthType);
+        var cell = Assert.Single(Assert.Single(table.Rows).Cells);
+        Assert.Equal("2400", cell.Width);
+        Assert.Equal("dxa", cell.WidthType);
     }
 
     [Fact]
@@ -1695,6 +1714,7 @@ public class AnnotationToolsTests
                     new TableProperties(
                         new TableWidth { Width = "3600", Type = TableWidthUnitValues.Dxa },
                         new TableLayout { Type = TableLayoutValues.Autofit }),
+                    new TableGrid(new GridColumn { Width = "3600" }),
                     new TableRow(
                         new TableRowProperties(
                             new TableRowHeight { Val = 180U, HeightType = HeightRuleValues.AtLeast }),
@@ -1704,8 +1724,31 @@ public class AnnotationToolsTests
                                 new Run(new Text("first")),
                                 new Run(new RunProperties(new Italic()), new Text("second")))))),
                 new Table(
+                    new TableProperties(),
+                    new TableGrid(new GridColumn { Width = "2400" }),
                     new TableRow(
                         new TableCell(new Paragraph(new Run(new Text("plain"))))))));
+            mainPart.Document.Save();
+        }
+
+        return path;
+    }
+
+    private static string CreateCellWidthOnlyFormattingFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-cell-width-only-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(),
+                    new TableGrid(new GridColumn { Width = "2400" }),
+                    new TableRow(
+                        new TableCell(
+                            new TableCellProperties(
+                                new TableCellWidth { Width = "2400", Type = TableWidthUnitValues.Dxa }),
+                            new Paragraph(new Run(new Text("cell width only"))))))));
             mainPart.Document.Save();
         }
 
@@ -1730,6 +1773,13 @@ public class AnnotationToolsTests
 
     private static string GetCellText(TableCell cell)
         => string.Concat(cell.Descendants<Text>().Select(text => text.Text));
+
+    private static void AssertValidOpenXml(string path)
+    {
+        using var doc = WordprocessingDocument.Open(path, false);
+        var validationErrors = new OpenXmlValidator().Validate(doc).Select(error => error.Description).ToList();
+        Assert.True(validationErrors.Count == 0, string.Join(Environment.NewLine, validationErrors));
+    }
 
     private static void AssertChildOrder(OpenXmlElement parent, string beforeTypeName, string afterTypeName)
     {
