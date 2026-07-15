@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -37,17 +40,36 @@ public static class Editor
             applied.Add(ApplyOperation(doc, body, operation));
         }
 
-        NormalizeGeneratedOpenXml(doc);
-        mainPart.Document.Save();
-        foreach (var headerPart in mainPart.HeaderParts)
+        var formatOperationTypes = new HashSet<string>(StringComparer.Ordinal)
         {
-            headerPart.Header?.Save();
-        }
-        foreach (var footerPart in mainPart.FooterParts)
+            "setParagraphFormat",
+            "setRunFormat",
+            "setSectionFormat",
+            "setHeaderFooterParagraphFormat"
+        };
+        if (operations.Any(operation => !formatOperationTypes.Contains(operation.Type)))
         {
-            footerPart.Footer?.Save();
+            NormalizeGeneratedOpenXml(doc);
+            mainPart.Document.Save();
+            foreach (var headerPart in mainPart.HeaderParts)
+            {
+                headerPart.Header?.Save();
+            }
+            foreach (var footerPart in mainPart.FooterParts)
+            {
+                footerPart.Footer?.Save();
+            }
+            mainPart.DocumentSettingsPart?.Settings?.Save();
         }
-        mainPart.DocumentSettingsPart?.Settings?.Save();
+        else if (applied.Any(operation => operation.Applied && operation.Type is not "setHeaderFooterParagraphFormat"))
+        {
+            mainPart.Document.Save();
+        }
+        else if (!applied.Any(operation => operation.Applied))
+        {
+            doc.Dispose();
+            File.Copy(input, output, overwrite: true);
+        }
         return new DocxEditResult(Path.GetFullPath(input), Path.GetFullPath(output), applied);
     }
 
@@ -97,6 +119,10 @@ public static class Editor
             "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
             "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
             "fillTableSemantically" => FillTableSemantically(body, operation),
+            "setParagraphFormat" => SetParagraphFormat(body, operation),
+            "setRunFormat" => SetRunFormat(body, operation),
+            "setSectionFormat" => SetSectionFormat(body, operation),
+            "setHeaderFooterParagraphFormat" => SetHeaderFooterParagraphFormat(doc, body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
             "markFieldsDirty" => MarkFieldsDirty(doc),
@@ -105,6 +131,594 @@ public static class Editor
             _ => new DocxEditAppliedOperation(operation.Type, false, $"Unknown operation type: {operation.Type}"),
         };
     }
+
+    private sealed record ResolvedFormatElement(OpenXmlElement Owner, OpenXmlElement? Properties, DocxResolvedFormatTarget Target);
+
+    private static readonly IReadOnlySet<string> ParagraphFormatProperties = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "alignment",
+        "spacingBeforeTwips",
+        "spacingAfterTwips",
+        "lineSpacingTwips",
+        "lineSpacingRule",
+        "keepWithNext",
+        "keepLines",
+        "pageBreakBefore",
+        "widowControl"
+    };
+
+    private static readonly IReadOnlySet<string> RunFormatProperties = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "fontAscii",
+        "fontHighAnsi",
+        "fontEastAsia",
+        "fontComplexScript",
+        "fontSizeHalfPoints",
+        "bold",
+        "italic",
+        "underline"
+    };
+
+    private static readonly IReadOnlySet<string> SectionFormatProperties = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "orientation",
+        "marginTopTwips",
+        "marginRightTwips",
+        "marginBottomTwips",
+        "marginLeftTwips",
+        "headerDistanceTwips",
+        "footerDistanceTwips",
+        "gutterTwips"
+    };
+
+    private static DocxEditAppliedOperation SetParagraphFormat(Body body, DocxEditOperation operation)
+    {
+        var error = ValidateFormatOperation(operation, "paragraph", ParagraphFormatProperties);
+        if (error is not null)
+        {
+            return FormatFailure(operation, error);
+        }
+
+        var resolved = ResolveBodyParagraph(body, operation.FormatTarget!);
+        if (resolved.Error is not null)
+        {
+            return FormatFailure(operation, resolved.Error);
+        }
+
+        return ApplyResolvedFormat(operation, resolved.Value!, properties =>
+            ApplyParagraphProperties((Paragraph)resolved.Value!.Owner, properties));
+    }
+
+    private static DocxEditAppliedOperation SetRunFormat(Body body, DocxEditOperation operation)
+    {
+        var error = ValidateFormatOperation(operation, "run", RunFormatProperties);
+        if (error is not null)
+        {
+            return FormatFailure(operation, error);
+        }
+
+        var target = operation.FormatTarget!;
+        var paragraph = ResolveBodyParagraph(body, target);
+        if (paragraph.Error is not null)
+        {
+            return FormatFailure(operation, paragraph.Error);
+        }
+        if (string.IsNullOrEmpty(target.RunText) || target.RunOccurrence is null || target.RunOccurrence < 0)
+        {
+            return FormatFailure(operation, "runText and non-negative runOccurrence are required semantic run selectors");
+        }
+
+        var runs = ((Paragraph)paragraph.Value!.Owner).Descendants<Run>()
+            .Where(run => string.Equals(GetRunText(run), target.RunText, StringComparison.Ordinal))
+            .ToList();
+        if (target.RunOccurrence.Value >= runs.Count)
+        {
+            return FormatFailure(operation, $"Run target '{target.RunText}' occurrence {target.RunOccurrence} was not found");
+        }
+
+        var run = runs[target.RunOccurrence.Value];
+        var allRuns = ((Paragraph)paragraph.Value.Owner).Descendants<Run>().ToList();
+        var runIndex = allRuns.IndexOf(run);
+        var exactId = $"{paragraph.Value.Target.ExactId}:r{runIndex}";
+        var resolved = new ResolvedFormatElement(
+            run,
+            run.RunProperties,
+            new DocxResolvedFormatTarget("run", exactId, paragraph.Value.Target.ParagraphId, runIndex));
+        return ApplyResolvedFormat(operation, resolved, properties => ApplyRunProperties(run, properties));
+    }
+
+    private static DocxEditAppliedOperation SetSectionFormat(Body body, DocxEditOperation operation)
+    {
+        var error = ValidateFormatOperation(operation, "section", SectionFormatProperties);
+        if (error is not null)
+        {
+            return FormatFailure(operation, error);
+        }
+
+        var resolved = ResolveSection(body, operation.FormatTarget!);
+        if (resolved.Error is not null)
+        {
+            return FormatFailure(operation, resolved.Error);
+        }
+
+        return ApplyResolvedFormat(operation, resolved.Value!, properties =>
+            ApplySectionProperties((SectionProperties)resolved.Value!.Owner, properties));
+    }
+
+    private static DocxEditAppliedOperation SetHeaderFooterParagraphFormat(
+        WordprocessingDocument doc,
+        Body body,
+        DocxEditOperation operation)
+    {
+        var error = ValidateFormatOperation(operation, "headerFooterParagraph", ParagraphFormatProperties);
+        if (error is not null)
+        {
+            return FormatFailure(operation, error);
+        }
+
+        var resolved = ResolveHeaderFooterParagraph(doc, body, operation.FormatTarget!);
+        if (resolved.Error is not null)
+        {
+            return FormatFailure(operation, resolved.Error);
+        }
+
+        var result = ApplyResolvedFormat(operation, resolved.Value!, properties =>
+            ApplyParagraphProperties((Paragraph)resolved.Value!.Owner, properties));
+        if (result.Applied)
+        {
+            var paragraph = (Paragraph)resolved.Value!.Owner;
+            paragraph.Ancestors<Header>().FirstOrDefault()?.Save();
+            paragraph.Ancestors<Footer>().FirstOrDefault()?.Save();
+        }
+        return result;
+    }
+
+    private static string? ValidateFormatOperation(
+        DocxEditOperation operation,
+        string expectedKind,
+        IReadOnlySet<string> allowlist)
+    {
+        if (operation.FormatTarget is null || !string.Equals(operation.FormatTarget.Kind, expectedKind, StringComparison.Ordinal))
+        {
+            return $"formatTarget.kind must be '{expectedKind}'";
+        }
+        if (string.IsNullOrWhiteSpace(operation.ExpectedCurrentFormatHash)
+            || operation.ExpectedCurrentFormatHash.Length != 64
+            || !operation.ExpectedCurrentFormatHash.All(Uri.IsHexDigit))
+        {
+            return "expectedCurrentFormatHash must be a 64-character SHA-256 hex digest";
+        }
+        if (operation.FormatProperties is null || operation.FormatProperties.Count == 0)
+        {
+            return "formatProperties must declare at least one property";
+        }
+        if (operation.Text is not null || operation.FindText is not null || operation.RichText is not null
+            || operation.Rows is not null || operation.Cells is not null)
+        {
+            return "format operations must not contain replacement text payloads";
+        }
+        if (operation.CommentId is not null || operation.HeaderIndex is not null || operation.ParagraphIndex is not null
+            || operation.TableIndex is not null || operation.RowIndex is not null || operation.CellIndex is not null
+            || operation.CommentIds is not null || operation.StartCellIndex is not null || operation.EndCellIndex is not null
+            || operation.StartRowIndex is not null || operation.EndRowIndex is not null || operation.TemplateRowIndex is not null
+            || operation.ColumnIndex is not null || operation.ColumnCount is not null || operation.TemplateColumnIndex is not null
+            || operation.Alignment is not null || operation.Width is not null || operation.WidthType is not null
+            || operation.Orientation is not null || operation.FontSize is not null || operation.Height is not null
+            || operation.HeightRule is not null || operation.NoWrap is not null || operation.CantSplit is not null)
+        {
+            return "format operations must not contain legacy physical selectors or undeclared edit fields";
+        }
+
+        var unknown = operation.FormatProperties.Keys.FirstOrDefault(key => !allowlist.Contains(key));
+        if (unknown is not null)
+        {
+            return $"Unknown format property '{unknown}' for {operation.Type}";
+        }
+
+        return ValidateFormatPropertyValues(operation.Type, operation.FormatProperties);
+    }
+
+    private static string? ValidateFormatPropertyValues(string operationType, IReadOnlyDictionary<string, string> properties)
+    {
+        foreach (var (name, value) in properties)
+        {
+            switch (name)
+            {
+                case "alignment" when value is not ("left" or "center" or "right" or "both" or "distribute"):
+                    return $"Invalid alignment '{value}'";
+                case "spacingBeforeTwips":
+                case "spacingAfterTwips":
+                case "lineSpacingTwips":
+                case "fontSizeHalfPoints":
+                case "marginTopTwips":
+                case "marginRightTwips":
+                case "marginBottomTwips":
+                case "marginLeftTwips":
+                case "headerDistanceTwips":
+                case "footerDistanceTwips":
+                case "gutterTwips":
+                    if (!uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var numeric) || numeric > 31680U)
+                    {
+                        return $"Invalid unsigned twip/half-point value '{value}' for {name}";
+                    }
+                    if (name == "fontSizeHalfPoints" && numeric == 0U)
+                    {
+                        return "fontSizeHalfPoints must be greater than zero";
+                    }
+                    break;
+                case "keepWithNext":
+                case "keepLines":
+                case "pageBreakBefore":
+                case "widowControl":
+                case "bold":
+                case "italic":
+                    if (!bool.TryParse(value, out _))
+                    {
+                        return $"Invalid boolean value '{value}' for {name}";
+                    }
+                    break;
+                case "lineSpacingRule" when value is not ("auto" or "atLeast" or "exact"):
+                    return $"Invalid lineSpacingRule '{value}'";
+                case "underline" when value is not ("none" or "single" or "double" or "words"):
+                    return $"Invalid underline '{value}'";
+                case "orientation" when value is not ("portrait" or "landscape"):
+                    return $"Invalid orientation '{value}'";
+                case "fontAscii":
+                case "fontHighAnsi":
+                case "fontEastAsia":
+                case "fontComplexScript":
+                    if (string.IsNullOrWhiteSpace(value) || value.Length > 255)
+                    {
+                        return $"Invalid font name for {name}";
+                    }
+                    break;
+            }
+        }
+
+        return null;
+    }
+
+    private sealed record Resolution(ResolvedFormatElement? Value, string? Error);
+
+    private static Resolution ResolveBodyParagraph(Body body, DocxFormatTarget target)
+    {
+        if (string.IsNullOrEmpty(target.ParagraphText) || target.ParagraphOccurrence is null || target.ParagraphOccurrence < 0)
+        {
+            return new Resolution(null, "paragraphText and non-negative paragraphOccurrence are required semantic selectors; physical ids alone are not accepted");
+        }
+
+        var allParagraphs = body.Descendants<Paragraph>().ToList();
+        var matches = allParagraphs.Where(paragraph => string.Equals(GetNormalizedParagraphText(paragraph), target.ParagraphText, StringComparison.Ordinal)).ToList();
+        if (target.ParagraphOccurrence.Value >= matches.Count)
+        {
+            return new Resolution(null, $"Paragraph target '{target.ParagraphText}' occurrence {target.ParagraphOccurrence} was not found");
+        }
+
+        var paragraph = matches[target.ParagraphOccurrence.Value];
+        var paragraphId = $"body-p{allParagraphs.IndexOf(paragraph)}";
+        if (target.ParagraphId is not null && !string.Equals(target.ParagraphId, paragraphId, StringComparison.Ordinal))
+        {
+            return new Resolution(null, $"Paragraph identity mismatch: resolved {paragraphId}, requested {target.ParagraphId}");
+        }
+
+        return new Resolution(
+            new ResolvedFormatElement(
+                paragraph,
+                paragraph.ParagraphProperties,
+                new DocxResolvedFormatTarget("paragraph", paragraphId, paragraphId)),
+            null);
+    }
+
+    private static Resolution ResolveSection(Body body, DocxFormatTarget target)
+    {
+        if (string.IsNullOrEmpty(target.SectionId)
+            || string.IsNullOrEmpty(target.ParagraphText)
+            || target.ParagraphOccurrence is null
+            || target.ParagraphOccurrence < 0)
+        {
+            return new Resolution(null, "sectionId, paragraphText, and non-negative paragraphOccurrence are required semantic section selectors");
+        }
+        if (!TryParseStableId(target.SectionId, "section", out var requestedSection))
+        {
+            return new Resolution(null, $"Invalid section identity '{target.SectionId}'");
+        }
+
+        var paragraphs = body.Elements<Paragraph>().ToList();
+        var sections = body.Elements<Paragraph>()
+            .Select(paragraph => (Properties: paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>(), Paragraph: paragraph))
+            .Where(item => item.Properties is not null)
+            .Select(item => (item.Properties!, (Paragraph?)item.Paragraph))
+            .Concat(body.Elements<SectionProperties>().Select(properties => (properties, (Paragraph?)null)))
+            .ToList();
+        if (requestedSection < 0 || requestedSection >= sections.Count)
+        {
+            return new Resolution(null, $"Section target '{target.SectionId}' was not found");
+        }
+
+        var start = requestedSection == 0
+            ? 0
+            : sections[requestedSection - 1].Item2 is Paragraph previousEnd ? paragraphs.IndexOf(previousEnd) + 1 : paragraphs.Count;
+        var end = sections[requestedSection].Item2 is Paragraph currentEnd ? paragraphs.IndexOf(currentEnd) : paragraphs.Count - 1;
+        var matches = paragraphs.Skip(start).Take(Math.Max(0, end - start + 1))
+            .Where(paragraph => string.Equals(GetNormalizedParagraphText(paragraph), target.ParagraphText, StringComparison.Ordinal))
+            .ToList();
+        if (target.ParagraphOccurrence.Value >= matches.Count)
+        {
+            return new Resolution(null, $"Semantic paragraph '{target.ParagraphText}' occurrence {target.ParagraphOccurrence} does not belong to {target.SectionId}");
+        }
+
+        var section = sections[requestedSection].Item1;
+        return new Resolution(
+            new ResolvedFormatElement(
+                section,
+                section,
+                new DocxResolvedFormatTarget("section", target.SectionId, SectionId: target.SectionId)),
+            null);
+    }
+
+    private static Resolution ResolveHeaderFooterParagraph(WordprocessingDocument doc, Body body, DocxFormatTarget target)
+    {
+        if (string.IsNullOrEmpty(target.SectionId) || string.IsNullOrEmpty(target.PartId)
+            || string.IsNullOrEmpty(target.ParagraphId) || string.IsNullOrEmpty(target.ParagraphText)
+            || target.ParagraphOccurrence is null || target.ParagraphOccurrence < 0)
+        {
+            return new Resolution(null, "sectionId, partId, paragraphId, paragraphText, and non-negative paragraphOccurrence are required header/footer selectors");
+        }
+        if (!TryParseStableId(target.SectionId, "section", out var requestedSection))
+        {
+            return new Resolution(null, $"Invalid section identity '{target.SectionId}'");
+        }
+
+        var mainPart = doc.MainDocumentPart!;
+        var sectionProperties = body.Elements<Paragraph>()
+            .Select(paragraph => paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>())
+            .Where(properties => properties is not null)
+            .Cast<SectionProperties>()
+            .Concat(body.Elements<SectionProperties>())
+            .ToList();
+        if (requestedSection < 0 || requestedSection >= sectionProperties.Count)
+        {
+            return new Resolution(null, $"Section target '{target.SectionId}' was not found");
+        }
+
+        var headerIds = new Dictionary<HeaderPart, string>();
+        var footerIds = new Dictionary<FooterPart, string>();
+        var currentHeaders = new Dictionary<string, HeaderPart>(StringComparer.Ordinal);
+        var currentFooters = new Dictionary<string, FooterPart>(StringComparer.Ordinal);
+        for (var sectionIndex = 0; sectionIndex <= requestedSection; sectionIndex++)
+        {
+            foreach (var reference in sectionProperties[sectionIndex].Elements<HeaderReference>())
+            {
+                var type = reference.Type?.Value.ToString() ?? "default";
+                var part = (HeaderPart)mainPart.GetPartById(reference.Id!.Value!);
+                if (!headerIds.ContainsKey(part)) headerIds.Add(part, $"header-{headerIds.Count}");
+                currentHeaders[type] = part;
+            }
+            foreach (var reference in sectionProperties[sectionIndex].Elements<FooterReference>())
+            {
+                var type = reference.Type?.Value.ToString() ?? "default";
+                var part = (FooterPart)mainPart.GetPartById(reference.Id!.Value!);
+                if (!footerIds.ContainsKey(part)) footerIds.Add(part, $"footer-{footerIds.Count}");
+                currentFooters[type] = part;
+            }
+        }
+
+        OpenXmlPartRootElement? root = null;
+        if (target.PartId.StartsWith("header-", StringComparison.Ordinal))
+        {
+            var pair = currentHeaders.Values.Distinct().Select(part => (Part: part, Id: headerIds[part]))
+                .SingleOrDefault(item => string.Equals(item.Id, target.PartId, StringComparison.Ordinal));
+            root = pair.Part?.Header;
+        }
+        else if (target.PartId.StartsWith("footer-", StringComparison.Ordinal))
+        {
+            var pair = currentFooters.Values.Distinct().Select(part => (Part: part, Id: footerIds[part]))
+                .SingleOrDefault(item => string.Equals(item.Id, target.PartId, StringComparison.Ordinal));
+            root = pair.Part?.Footer;
+        }
+        if (root is null)
+        {
+            return new Resolution(null, $"Part {target.PartId} is not bound to {target.SectionId}");
+        }
+
+        var allParagraphs = root.Descendants<Paragraph>().ToList();
+        var matches = allParagraphs.Where(paragraph => string.Equals(GetNormalizedParagraphText(paragraph), target.ParagraphText, StringComparison.Ordinal)).ToList();
+        if (target.ParagraphOccurrence.Value >= matches.Count)
+        {
+            return new Resolution(null, $"Paragraph target '{target.ParagraphText}' occurrence {target.ParagraphOccurrence} was not found in {target.PartId}");
+        }
+        var paragraph = matches[target.ParagraphOccurrence.Value];
+        var paragraphId = $"{target.PartId}-p{allParagraphs.IndexOf(paragraph)}";
+        if (!string.Equals(target.ParagraphId, paragraphId, StringComparison.Ordinal))
+        {
+            return new Resolution(null, $"Paragraph identity mismatch: resolved {paragraphId}, requested {target.ParagraphId}");
+        }
+
+        return new Resolution(
+            new ResolvedFormatElement(
+                paragraph,
+                paragraph.ParagraphProperties,
+                new DocxResolvedFormatTarget("headerFooterParagraph", paragraphId, paragraphId, SectionId: target.SectionId, PartId: target.PartId)),
+            null);
+    }
+
+    private static bool TryParseStableId(string value, string prefix, out int index)
+    {
+        index = -1;
+        return value.StartsWith(prefix + "-", StringComparison.Ordinal)
+            && value.Length > prefix.Length + 1
+            && int.TryParse(value.AsSpan(prefix.Length + 1), NumberStyles.None, CultureInfo.InvariantCulture, out index);
+    }
+
+    private static DocxEditAppliedOperation ApplyResolvedFormat(
+        DocxEditOperation operation,
+        ResolvedFormatElement resolved,
+        Action<IReadOnlyDictionary<string, string>> apply)
+    {
+        var priorHash = ComputeFormatHash(resolved.Properties);
+        if (!string.Equals(priorHash, operation.ExpectedCurrentFormatHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return FormatFailure(operation, $"Stale format hash for {resolved.Target.ExactId}", resolved.Target, priorHash);
+        }
+
+        apply(operation.FormatProperties!);
+        OpenXmlElement? newProperties = resolved.Owner switch
+        {
+            Paragraph paragraph => paragraph.ParagraphProperties,
+            Run run => run.RunProperties,
+            SectionProperties section => section,
+            _ => throw new InvalidOperationException($"Unsupported format owner {resolved.Owner.GetType().Name}")
+        };
+        var newHash = ComputeFormatHash(newProperties);
+        return new DocxEditAppliedOperation(
+            operation.Type,
+            true,
+            $"Updated format for {resolved.Target.ExactId}",
+            resolved.Target,
+            priorHash,
+            newHash);
+    }
+
+    private static DocxEditAppliedOperation FormatFailure(
+        DocxEditOperation operation,
+        string detail,
+        DocxResolvedFormatTarget? target = null,
+        string? priorHash = null)
+        => new(operation.Type, false, detail, target, priorHash);
+
+    private static string ComputeFormatHash(OpenXmlElement? properties)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(properties?.OuterXml ?? "<absent/>")));
+
+    private static void ApplyParagraphProperties(Paragraph paragraph, IReadOnlyDictionary<string, string> values)
+    {
+        var properties = paragraph.ParagraphProperties ?? paragraph.PrependChild(new ParagraphProperties());
+        foreach (var (name, value) in values)
+        {
+            switch (name)
+            {
+                case "alignment":
+                    properties.Justification = new Justification { Val = ParseJustification(value) };
+                    break;
+                case "spacingBeforeTwips":
+                    (properties.SpacingBetweenLines ??= new SpacingBetweenLines()).Before = value;
+                    break;
+                case "spacingAfterTwips":
+                    (properties.SpacingBetweenLines ??= new SpacingBetweenLines()).After = value;
+                    break;
+                case "lineSpacingTwips":
+                    (properties.SpacingBetweenLines ??= new SpacingBetweenLines()).Line = value;
+                    break;
+                case "lineSpacingRule":
+                    (properties.SpacingBetweenLines ??= new SpacingBetweenLines()).LineRule = value switch
+                    {
+                        "auto" => LineSpacingRuleValues.Auto,
+                        "atLeast" => LineSpacingRuleValues.AtLeast,
+                        _ => LineSpacingRuleValues.Exact
+                    };
+                    break;
+                case "keepWithNext": properties.KeepNext = new KeepNext { Val = bool.Parse(value) }; break;
+                case "keepLines": properties.KeepLines = new KeepLines { Val = bool.Parse(value) }; break;
+                case "pageBreakBefore": properties.PageBreakBefore = new PageBreakBefore { Val = bool.Parse(value) }; break;
+                case "widowControl": properties.WidowControl = new WidowControl { Val = bool.Parse(value) }; break;
+            }
+        }
+    }
+
+    private static JustificationValues ParseJustification(string value) => value switch
+    {
+        "left" => JustificationValues.Left,
+        "center" => JustificationValues.Center,
+        "right" => JustificationValues.Right,
+        "both" => JustificationValues.Both,
+        _ => JustificationValues.Distribute
+    };
+
+    private static void ApplyRunProperties(Run run, IReadOnlyDictionary<string, string> values)
+    {
+        var properties = run.RunProperties ?? run.PrependChild(new RunProperties());
+        foreach (var (name, value) in values)
+        {
+            switch (name)
+            {
+                case "fontAscii": (properties.RunFonts ??= new RunFonts()).Ascii = value; break;
+                case "fontHighAnsi": (properties.RunFonts ??= new RunFonts()).HighAnsi = value; break;
+                case "fontEastAsia": (properties.RunFonts ??= new RunFonts()).EastAsia = value; break;
+                case "fontComplexScript": (properties.RunFonts ??= new RunFonts()).ComplexScript = value; break;
+                case "fontSizeHalfPoints": properties.FontSize = new FontSize { Val = value }; break;
+                case "bold": properties.Bold = new Bold { Val = bool.Parse(value) }; break;
+                case "italic": properties.Italic = new Italic { Val = bool.Parse(value) }; break;
+                case "underline":
+                    properties.Underline = new Underline
+                    {
+                        Val = value switch
+                        {
+                            "none" => UnderlineValues.None,
+                            "double" => UnderlineValues.Double,
+                            "words" => UnderlineValues.Words,
+                            _ => UnderlineValues.Single
+                        }
+                    };
+                    break;
+            }
+        }
+    }
+
+    private static void ApplySectionProperties(SectionProperties section, IReadOnlyDictionary<string, string> values)
+    {
+        var pageSize = section.GetFirstChild<PageSize>();
+        var pageMargin = section.GetFirstChild<PageMargin>();
+        foreach (var (name, value) in values)
+        {
+            var numeric = uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0U;
+            switch (name)
+            {
+                case "orientation":
+                    pageSize ??= EnsurePageSize(section);
+                    var width = pageSize.Width?.Value ?? 11906U;
+                    var height = pageSize.Height?.Value ?? 16838U;
+                    var shortSide = Math.Min(width, height);
+                    var longSide = Math.Max(width, height);
+                    pageSize.Width = value == "landscape" ? longSide : shortSide;
+                    pageSize.Height = value == "landscape" ? shortSide : longSide;
+                    pageSize.Orient = value == "landscape" ? PageOrientationValues.Landscape : null;
+                    break;
+                case "marginTopTwips": (pageMargin ??= EnsurePageMargin(section, pageSize)).Top = (int)numeric; break;
+                case "marginRightTwips": (pageMargin ??= EnsurePageMargin(section, pageSize)).Right = numeric; break;
+                case "marginBottomTwips": (pageMargin ??= EnsurePageMargin(section, pageSize)).Bottom = (int)numeric; break;
+                case "marginLeftTwips": (pageMargin ??= EnsurePageMargin(section, pageSize)).Left = numeric; break;
+                case "headerDistanceTwips": (pageMargin ??= EnsurePageMargin(section, pageSize)).Header = numeric; break;
+                case "footerDistanceTwips": (pageMargin ??= EnsurePageMargin(section, pageSize)).Footer = numeric; break;
+                case "gutterTwips": (pageMargin ??= EnsurePageMargin(section, pageSize)).Gutter = numeric; break;
+            }
+        }
+    }
+
+    private static PageMargin EnsurePageMargin(SectionProperties section, PageSize? pageSize)
+    {
+        var margin = new PageMargin { Top = 1440, Right = 1440U, Bottom = 1440, Left = 1440U, Header = 720U, Footer = 720U, Gutter = 0U };
+        var anchor = pageSize as OpenXmlElement ?? FindLastSectionChildBeforePageSize(section);
+        return anchor is null ? section.PrependChild(margin) : section.InsertAfter(margin, anchor);
+    }
+
+    private static PageSize EnsurePageSize(SectionProperties section)
+    {
+        var pageSize = new PageSize { Width = 11906U, Height = 16838U };
+        var anchor = FindLastSectionChildBeforePageSize(section);
+        return anchor is null ? section.PrependChild(pageSize) : section.InsertAfter(pageSize, anchor);
+    }
+
+    private static OpenXmlElement? FindLastSectionChildBeforePageSize(SectionProperties section)
+        => section.ChildElements.LastOrDefault(child => child is HeaderReference
+            or FooterReference
+            or FootnoteProperties
+            or EndnoteProperties
+            or SectionType);
+
+    private static string GetRunText(Run run)
+        => string.Concat(run.Descendants<Text>().Select(text => text.Text));
+
+    private static string GetNormalizedParagraphText(Paragraph paragraph)
+        => GetParagraphText(paragraph).Trim();
 
     private static DocxEditAppliedOperation ReplaceAnchoredText(Body body, DocxEditOperation operation)
     {

@@ -103,6 +103,10 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `setTableCellFontSize`
 - `setTableRowHeight`
 - `setTableRowCantSplit`
+- `setParagraphFormat`
+- `setRunFormat`
+- `setSectionFormat`
+- `setHeaderFooterParagraphFormat`
 - `mergeTableCells`
 - `unmergeTableRowHorizontalCells`
 - `unmergeTableColumnVerticalCells`
@@ -134,6 +138,46 @@ When the target cell is empty, the generated runs inherit font-related formattin
 `unmergeTableColumnVerticalCells` removes vertical merge markers in `tableIndex/cellIndex/startRowIndex/endRowIndex` and fills continuation cells from the latest visible content.
 `sanitizeFields` removes update-field prompts and dirty field markers from the package.
 `freezeFields` converts visible field results into ordinary content so converters cannot recalculate cross-references or sequence numbers.
+
+The four document-format operations are evidence-bound and fail closed. Each
+requires a semantic `formatTarget`, an `expectedCurrentFormatHash`, and a
+non-empty `formatProperties` object. Body paragraph and run targets use exact
+inspector-normalized paragraph text (trimmed exactly as `inspect` reports it)
+plus a zero-based occurrence; run targets additionally use exact
+run text plus its occurrence. Section targets combine `sectionId` with a
+semantic paragraph inside that section. Header/footer paragraph targets combine
+the owning `sectionId`, stable `partId`, stable `paragraphId`, and exact text plus
+occurrence, so linked-to-previous parts resolve to the shared part without
+formatting every header or footer. Physical ids without semantic corroboration
+are rejected.
+
+`expectedCurrentFormatHash` is uppercase or lowercase SHA-256 hex over the UTF-8
+bytes of the target formatting element's `OuterXml`; an absent paragraph or run
+properties element hashes the literal `<absent/>`. A stale hash rejects the
+operation before mutation. Successful applied-operation evidence reports the
+resolved exact target and both the prior and new format hashes.
+
+The property names are closed by operation:
+
+- paragraph and header/footer paragraph: `alignment`,
+  `spacingBeforeTwips`, `spacingAfterTwips`, `lineSpacingTwips`,
+  `lineSpacingRule`, `keepWithNext`, `keepLines`, `pageBreakBefore`, and
+  `widowControl`
+- run: `fontAscii`, `fontHighAnsi`, `fontEastAsia`, `fontComplexScript`,
+  `fontSizeHalfPoints`, `bold`, `italic`, and `underline`
+- section: `orientation`, `marginTopTwips`, `marginRightTwips`,
+  `marginBottomTwips`, `marginLeftTwips`, `headerDistanceTwips`,
+  `footerDistanceTwips`, and `gutterTwips`
+
+Twip and half-point values are unsigned decimal strings. Supported alignment is
+`left`, `center`, `right`, `both`, or `distribute`; line spacing rules are
+`auto`, `atLeast`, or `exact`; underline is `none`, `single`, `double`, or
+`words`; orientation is `portrait` or `landscape`. Unknown properties,
+unsupported values/units, replacement-text payloads, ambiguous targets, and
+identity mismatches are rejected. Only the named OpenXML property children are
+updated; format-only batches do not invoke package-wide property normalization,
+and other property children and package parts are preserved. A format-only
+batch in which every operation is rejected restores the original package bytes.
 
 ```bash
 tiwater-docx edit <input.docx> <operations.json> <output.docx>

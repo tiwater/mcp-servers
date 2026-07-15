@@ -1,5 +1,7 @@
 using Xunit;
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
@@ -1885,6 +1887,365 @@ public class AnnotationToolsTests
             Assert.Equal("5.3", string.Concat(gridMap.Grid[1, 3]!.Descendants<Text>().Select(t => t.Text)).Trim());
             Assert.Equal("98.6", string.Concat(gridMap.Grid[2, 3]!.Descendants<Text>().Select(t => t.Text)).Trim());
         }
+    }
+
+    [Fact]
+    public void Evidence_bound_format_operations_apply_only_declared_properties_and_report_exact_hashes_and_targets()
+    {
+        var path = CreateEvidenceBoundFormattingFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-{Guid.NewGuid():N}.docx");
+        string paragraphHash;
+        string runHash;
+        string sectionHash;
+        string headerHash;
+        byte[] customPartBytes;
+        using (var doc = WordprocessingDocument.Open(path, false))
+        {
+            var body = doc.MainDocumentPart!.Document!.Body!;
+            paragraphHash = FormatHash(body.Elements<Paragraph>().ElementAt(1).ParagraphProperties);
+            runHash = FormatHash(body.Elements<Paragraph>().ElementAt(2).Elements<Run>().First().RunProperties);
+            sectionHash = FormatHash(body.Elements<Paragraph>().ElementAt(3).ParagraphProperties!.SectionProperties);
+            var header = doc.MainDocumentPart.HeaderParts.Single().Header!;
+            headerHash = FormatHash(header.Elements<Paragraph>().Single().ParagraphProperties);
+            using var customStream = doc.MainDocumentPart.CustomXmlParts.Single().GetStream();
+            using var memory = new MemoryStream();
+            customStream.CopyTo(memory);
+            customPartBytes = memory.ToArray();
+        }
+
+        var paragraphTarget = new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 1);
+        var runTarget = new DocxFormatTarget(
+            "run",
+            ParagraphText: "AlphaBeta",
+            ParagraphOccurrence: 0,
+            RunText: "Alpha",
+            RunOccurrence: 0);
+        var sectionTarget = new DocxFormatTarget(
+            "section",
+            ParagraphText: "Section one end",
+            ParagraphOccurrence: 0,
+            SectionId: "section-0");
+        var headerTarget = new DocxFormatTarget(
+            "headerFooterParagraph",
+            ParagraphText: "Shared header",
+            ParagraphOccurrence: 0,
+            SectionId: "section-1",
+            PartId: "header-0",
+            ParagraphId: "header-0-p0");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "setParagraphFormat",
+                FormatTarget: paragraphTarget,
+                ExpectedCurrentFormatHash: paragraphHash,
+                FormatProperties: new Dictionary<string, string>
+                {
+                    ["alignment"] = "center",
+                    ["spacingBeforeTwips"] = "120",
+                    ["spacingAfterTwips"] = "240",
+                    ["keepWithNext"] = "true",
+                    ["pageBreakBefore"] = "true"
+                }),
+            new DocxEditOperation(
+                "setRunFormat",
+                FormatTarget: runTarget,
+                ExpectedCurrentFormatHash: runHash,
+                FormatProperties: new Dictionary<string, string>
+                {
+                    ["fontAscii"] = "Aptos",
+                    ["fontHighAnsi"] = "Aptos",
+                    ["fontEastAsia"] = "等线",
+                    ["fontComplexScript"] = "Arial",
+                    ["fontSizeHalfPoints"] = "22"
+                }),
+            new DocxEditOperation(
+                "setSectionFormat",
+                FormatTarget: sectionTarget,
+                ExpectedCurrentFormatHash: sectionHash,
+                FormatProperties: new Dictionary<string, string>
+                {
+                    ["orientation"] = "landscape",
+                    ["marginTopTwips"] = "900",
+                    ["marginRightTwips"] = "1000",
+                    ["marginBottomTwips"] = "1100",
+                    ["marginLeftTwips"] = "1200"
+                }),
+            new DocxEditOperation(
+                "setHeaderFooterParagraphFormat",
+                FormatTarget: headerTarget,
+                ExpectedCurrentFormatHash: headerHash,
+                FormatProperties: new Dictionary<string, string>
+                {
+                    ["alignment"] = "right",
+                    ["spacingAfterTwips"] = "80"
+                })
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        Assert.Equal(
+            ["body-p1", "body-p2:r0", "section-0", "header-0-p0"],
+            result.AppliedOperations.Select(operation => operation.Target!.ExactId));
+        Assert.Equal([paragraphHash, runHash, sectionHash, headerHash], result.AppliedOperations.Select(operation => operation.PriorFormatHash));
+        Assert.All(result.AppliedOperations, operation => Assert.NotEqual(operation.PriorFormatHash, operation.NewFormatHash));
+
+        using var edited = WordprocessingDocument.Open(output, false);
+        Assert.Empty(new OpenXmlValidator().Validate(edited));
+        var editedBody = edited.MainDocumentPart!.Document!.Body!;
+        Assert.Equal(["same", "same", "AlphaBeta", "Section one end", "Second section"], editedBody.Elements<Paragraph>().Select(GetParagraphText));
+        var paragraphProperties = editedBody.Elements<Paragraph>().ElementAt(1).ParagraphProperties!;
+        Assert.Equal("EvidenceStyle", paragraphProperties.ParagraphStyleId!.Val!.Value);
+        Assert.NotNull(paragraphProperties.KeepLines);
+        Assert.Equal(JustificationValues.Center, paragraphProperties.Justification!.Val!.Value);
+        Assert.Equal("120", paragraphProperties.SpacingBetweenLines!.Before!.Value);
+        Assert.Equal("240", paragraphProperties.SpacingBetweenLines.After!.Value);
+        Assert.NotNull(paragraphProperties.KeepNext);
+        Assert.NotNull(paragraphProperties.PageBreakBefore);
+
+        var runs = editedBody.Elements<Paragraph>().ElementAt(2).Elements<Run>().ToList();
+        Assert.Equal(["Alpha", "Beta"], runs.Select(run => GetParagraphText(new Paragraph((Run)run.CloneNode(true)))));
+        var firstRunProperties = runs[0].RunProperties!;
+        Assert.Equal("336699", firstRunProperties.Color!.Val!.Value);
+        Assert.NotNull(firstRunProperties.Italic);
+        Assert.Equal("Aptos", firstRunProperties.RunFonts!.Ascii!.Value);
+        Assert.Equal("Times New Roman", runs[1].RunProperties!.RunFonts!.Ascii!.Value);
+
+        var sectionProperties = editedBody.Elements<Paragraph>().ElementAt(3).ParagraphProperties!.SectionProperties!;
+        Assert.Single(sectionProperties.Elements<HeaderReference>());
+        Assert.NotNull(sectionProperties.GetFirstChild<DocGrid>());
+        Assert.Equal(PageOrientationValues.Landscape, sectionProperties.GetFirstChild<PageSize>()!.Orient!.Value);
+        Assert.Equal(16838U, sectionProperties.GetFirstChild<PageSize>()!.Width!.Value);
+        Assert.Equal(11906U, sectionProperties.GetFirstChild<PageSize>()!.Height!.Value);
+        var margins = sectionProperties.GetFirstChild<PageMargin>()!;
+        Assert.Equal(900, margins.Top!.Value);
+        Assert.Equal(1000U, margins.Right!.Value);
+        Assert.Equal(1100, margins.Bottom!.Value);
+        Assert.Equal(1200U, margins.Left!.Value);
+
+        var headerParagraph = edited.MainDocumentPart.HeaderParts.Single().Header!.Elements<Paragraph>().Single();
+        Assert.Equal("Shared header", GetParagraphText(headerParagraph));
+        Assert.Equal("HeaderStyle", headerParagraph.ParagraphProperties!.ParagraphStyleId!.Val!.Value);
+        Assert.Equal(JustificationValues.Right, headerParagraph.ParagraphProperties.Justification!.Val!.Value);
+        using var editedCustomStream = edited.MainDocumentPart.CustomXmlParts.Single().GetStream();
+        using var editedCustom = new MemoryStream();
+        editedCustomStream.CopyTo(editedCustom);
+        Assert.Equal(customPartBytes, editedCustom.ToArray());
+        Assert.Equal(result.AppliedOperations[0].NewFormatHash, FormatHash(paragraphProperties));
+        Assert.Equal(result.AppliedOperations[1].NewFormatHash, FormatHash(runs[0].RunProperties));
+        Assert.Equal(result.AppliedOperations[2].NewFormatHash, FormatHash(sectionProperties));
+        Assert.Equal(result.AppliedOperations[3].NewFormatHash, FormatHash(headerParagraph.ParagraphProperties));
+    }
+
+    [Fact]
+    public void Evidence_bound_format_operations_fail_closed_for_ambiguous_stale_physical_unknown_text_and_invalid_values()
+    {
+        var path = CreateEvidenceBoundFormattingFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-rejected-{Guid.NewGuid():N}.docx");
+        string paragraphHash;
+        string runHash;
+        string sectionHash;
+        string headerHash;
+        using (var doc = WordprocessingDocument.Open(path, false))
+        {
+            var body = doc.MainDocumentPart!.Document!.Body!;
+            paragraphHash = FormatHash(body.Elements<Paragraph>().First().ParagraphProperties);
+            runHash = FormatHash(body.Elements<Paragraph>().ElementAt(2).Elements<Run>().First().RunProperties);
+            sectionHash = FormatHash(body.Elements<Paragraph>().ElementAt(3).ParagraphProperties!.SectionProperties);
+            headerHash = FormatHash(doc.MainDocumentPart.HeaderParts.Single().Header!.Elements<Paragraph>().Single().ParagraphProperties);
+        }
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("setParagraphFormat", FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same"), ExpectedCurrentFormatHash: paragraphHash, FormatProperties: Props("alignment", "center")),
+            new DocxEditOperation("setParagraphFormat", FormatTarget: new DocxFormatTarget("paragraph", ParagraphId: "body-p0"), ExpectedCurrentFormatHash: paragraphHash, FormatProperties: Props("alignment", "center")),
+            new DocxEditOperation("setParagraphFormat", FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 0), ExpectedCurrentFormatHash: new string('0', 64), FormatProperties: Props("alignment", "center")),
+            new DocxEditOperation("setParagraphFormat", FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 0), ExpectedCurrentFormatHash: paragraphHash, FormatProperties: Props("madeUpProperty", "x")),
+            new DocxEditOperation("setParagraphFormat", Text: "replacement", FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 0), ExpectedCurrentFormatHash: paragraphHash, FormatProperties: Props("alignment", "center")),
+            new DocxEditOperation("setParagraphFormat", FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 0), ExpectedCurrentFormatHash: paragraphHash, FormatProperties: Props("spacingBeforeTwips", "-1")),
+            new DocxEditOperation("setRunFormat", FormatTarget: new DocxFormatTarget("run", ParagraphText: "AlphaBeta", ParagraphOccurrence: 0, RunText: "Alpha", RunOccurrence: 0), ExpectedCurrentFormatHash: runHash, FormatProperties: Props("fontSizeHalfPoints", "11pt")),
+            new DocxEditOperation("setSectionFormat", FormatTarget: new DocxFormatTarget("section", ParagraphText: "Section one end", ParagraphOccurrence: 0, SectionId: "section-0"), ExpectedCurrentFormatHash: sectionHash, FormatProperties: Props("marginLeftTwips", "-20")),
+            new DocxEditOperation("setSectionFormat", FormatTarget: new DocxFormatTarget("section", ParagraphText: "Section one end", ParagraphOccurrence: 0, SectionId: "section-0"), ExpectedCurrentFormatHash: sectionHash, FormatProperties: Props("orientation", "diagonal")),
+            new DocxEditOperation("setHeaderFooterParagraphFormat", FormatTarget: new DocxFormatTarget("headerFooterParagraph", ParagraphText: "Shared header", ParagraphOccurrence: 0, SectionId: "section-0", PartId: "header-0", ParagraphId: "header-0-p0"), ExpectedCurrentFormatHash: headerHash, FormatProperties: Props("alignment", "middle")),
+            new DocxEditOperation("setSectionFormat", FormatTarget: new DocxFormatTarget("section", ParagraphText: "Section one end", ParagraphOccurrence: 0, SectionId: "x"), ExpectedCurrentFormatHash: sectionHash, FormatProperties: Props("marginLeftTwips", "100")),
+            new DocxEditOperation("setParagraphFormat", ParagraphIndex: 0, FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "same", ParagraphOccurrence: 0), ExpectedCurrentFormatHash: paragraphHash, FormatProperties: Props("alignment", "center"))
+        ]);
+
+        Assert.Equal(12, result.AppliedOperations.Count);
+        Assert.All(result.AppliedOperations, operation => Assert.False(operation.Applied, operation.Detail));
+        Assert.All(result.AppliedOperations, operation => Assert.Null(operation.NewFormatHash));
+        AssertValidOpenXml(output);
+        using var original = WordprocessingDocument.Open(path, false);
+        using var rejected = WordprocessingDocument.Open(output, false);
+        Assert.Equal(original.MainDocumentPart!.Document!.OuterXml, rejected.MainDocumentPart!.Document!.OuterXml);
+        Assert.Equal(original.MainDocumentPart.HeaderParts.Single().Header!.OuterXml, rejected.MainDocumentPart.HeaderParts.Single().Header!.OuterXml);
+        Assert.Equal(File.ReadAllBytes(path), File.ReadAllBytes(output));
+    }
+
+    [Fact]
+    public void Evidence_bound_format_operations_insert_missing_section_properties_in_schema_order()
+    {
+        var path = CreateEvidenceBoundFormattingFixture(omitSectionPageProperties: true);
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-missing-section-properties-{Guid.NewGuid():N}.docx");
+        string expectedHash;
+        using (var doc = WordprocessingDocument.Open(path, false))
+        {
+            expectedHash = FormatHash(doc.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ElementAt(3).ParagraphProperties!.SectionProperties);
+        }
+        AssertValidOpenXml(path);
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "setSectionFormat",
+                FormatTarget: new DocxFormatTarget("section", ParagraphText: "Section one end", ParagraphOccurrence: 0, SectionId: "section-0"),
+                ExpectedCurrentFormatHash: expectedHash,
+                FormatProperties: Props("marginLeftTwips", "1000"))
+        ]);
+
+        Assert.True(Assert.Single(result.AppliedOperations).Applied);
+        AssertValidOpenXml(output);
+    }
+
+    [Fact]
+    public void Evidence_bound_format_operations_use_inspector_normalized_text_for_semantic_targets()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"evidence-format-whitespace-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(
+                new Paragraph(
+                    new ParagraphProperties(new Justification { Val = JustificationValues.Left }),
+                    new Run(new Text("  Heading  ") { Space = SpaceProcessingModeValues.Preserve })),
+                new SectionProperties()));
+            mainPart.Document.Save();
+        }
+        AssertValidOpenXml(path);
+        var evidence = Assert.Single(Inspector.Inspect(path).Structure.BodyNodes).Paragraph!;
+        Assert.Equal("Heading", evidence.Text);
+        string expectedHash;
+        using (var doc = WordprocessingDocument.Open(path, false))
+        {
+            expectedHash = FormatHash(doc.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().ParagraphProperties);
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-whitespace-output-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "setParagraphFormat",
+                FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: evidence.Text, ParagraphOccurrence: 0),
+                ExpectedCurrentFormatHash: expectedHash,
+                FormatProperties: Props("alignment", "center"))
+        ]);
+
+        Assert.True(Assert.Single(result.AppliedOperations).Applied);
+        using var edited = WordprocessingDocument.Open(output, false);
+        var paragraph = edited.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single();
+        Assert.Equal("  Heading  ", GetParagraphText(paragraph));
+        Assert.Equal(JustificationValues.Center, paragraph.ParagraphProperties!.Justification!.Val!.Value);
+        AssertValidOpenXml(output);
+    }
+
+    [Fact]
+    public void Evidence_bound_format_operations_resolve_semantic_targets_after_document_order_changes()
+    {
+        var path = CreateEvidenceBoundFormattingFixture(targetFirst: true);
+        var output = Path.Combine(Path.GetTempPath(), $"evidence-format-order-{Guid.NewGuid():N}.docx");
+        string expectedHash;
+        using (var doc = WordprocessingDocument.Open(path, false))
+        {
+            expectedHash = FormatHash(doc.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ElementAt(1).ParagraphProperties);
+        }
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "setParagraphFormat",
+                FormatTarget: new DocxFormatTarget("paragraph", ParagraphText: "AlphaBeta", ParagraphOccurrence: 0),
+                ExpectedCurrentFormatHash: expectedHash,
+                FormatProperties: Props("alignment", "right"))
+        ]);
+
+        var applied = Assert.Single(result.AppliedOperations);
+        Assert.True(applied.Applied, applied.Detail);
+        Assert.Equal("body-p1", applied.Target!.ExactId);
+        using var edited = WordprocessingDocument.Open(output, false);
+        Assert.Equal(JustificationValues.Right, edited.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ElementAt(1).ParagraphProperties!.Justification!.Val!.Value);
+        Assert.Equal("AlphaBeta", GetParagraphText(edited.MainDocumentPart.Document.Body.Elements<Paragraph>().ElementAt(1)));
+        AssertValidOpenXml(output);
+    }
+
+    private static IReadOnlyDictionary<string, string> Props(string name, string value)
+        => new Dictionary<string, string> { [name] = value };
+
+    private static string FormatHash(OpenXmlElement? properties)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(properties?.OuterXml ?? "<absent/>")));
+
+    private static string CreateEvidenceBoundFormattingFixture(bool targetFirst = false, bool omitSectionPageProperties = false)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"evidence-bound-format-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        mainPart.Document = new Document(new Body());
+        var headerPart = mainPart.AddNewPart<HeaderPart>();
+        headerPart.Header = new Header(new Paragraph(
+            new ParagraphProperties(
+                new ParagraphStyleId { Val = "HeaderStyle" },
+                new KeepLines(),
+                new Justification { Val = JustificationValues.Left }),
+            new Run(new Text("Shared header"))));
+        var headerId = mainPart.GetIdOfPart(headerPart);
+        var customPart = mainPart.AddCustomXmlPart(CustomXmlPartType.CustomXml);
+        WritePartBytes(customPart, Encoding.UTF8.GetBytes("<evidence untouched=\"true\"/>"));
+
+        Paragraph Repeated() => new(
+            new ParagraphProperties(
+                new ParagraphStyleId { Val = "EvidenceStyle" },
+                new KeepNext(),
+                new KeepLines(),
+                new SpacingBetweenLines { Before = "20", After = "40" },
+                new Justification { Val = JustificationValues.Left }),
+            new Run(new Text("same")));
+        var firstRepeated = Repeated();
+        var secondRepeated = Repeated();
+        var mixed = new Paragraph(
+            new ParagraphProperties(new ParagraphStyleId { Val = "MixedStyle" }),
+            new Run(
+                new RunProperties(
+                    new RunFonts { Ascii = "Calibri", HighAnsi = "Calibri", EastAsia = "宋体", ComplexScript = "Arial" },
+                    new Italic(),
+                    new Color { Val = "336699" },
+                    new FontSize { Val = "20" }),
+                new Text("Alpha")),
+            new Run(new RunProperties(new RunFonts { Ascii = "Times New Roman" }), new Text("Beta")));
+        var firstSectionProperties = new SectionProperties(
+            new HeaderReference { Type = HeaderFooterValues.Default, Id = headerId });
+        if (!omitSectionPageProperties)
+        {
+            firstSectionProperties.Append(
+                new PageSize { Width = 11906U, Height = 16838U },
+                new PageMargin { Top = 1440, Right = 1440U, Bottom = 1440, Left = 1440U, Header = 720U, Footer = 720U, Gutter = 0U });
+        }
+        else
+        {
+            firstSectionProperties.Append(
+                new SectionType { Val = SectionMarkValues.NextPage });
+        }
+        firstSectionProperties.Append(new DocGrid { LinePitch = 360 });
+        var sectionEnd = new Paragraph(
+            new ParagraphProperties(new KeepNext(), firstSectionProperties),
+            new Run(new Text("Section one end")));
+        var bodySectionProperties = new SectionProperties(
+            new PageSize { Width = 11906U, Height = 16838U },
+            new PageMargin { Top = 1440, Right = 1440U, Bottom = 1440, Left = 1440U, Header = 720U, Footer = 720U, Gutter = 0U });
+        var body = mainPart.Document.Body!;
+        if (targetFirst)
+        {
+            body.Append(firstRepeated, mixed, secondRepeated, sectionEnd, new Paragraph(new Run(new Text("Second section"))), bodySectionProperties);
+        }
+        else
+        {
+            body.Append(firstRepeated, secondRepeated, mixed, sectionEnd, new Paragraph(new Run(new Text("Second section"))), bodySectionProperties);
+        }
+        mainPart.Document.Save();
+        headerPart.Header.Save();
+        return path;
     }
 
     private static string CreateSemanticTableFixture()

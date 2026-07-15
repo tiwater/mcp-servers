@@ -329,6 +329,24 @@ public sealed record DocxSemanticFillRule(
     IReadOnlyList<string> ColPatterns,
     string Text);
 
+public sealed record DocxFormatTarget(
+    string Kind,
+    string? ParagraphText = null,
+    int? ParagraphOccurrence = null,
+    string? RunText = null,
+    int? RunOccurrence = null,
+    string? SectionId = null,
+    string? PartId = null,
+    string? ParagraphId = null);
+
+public sealed record DocxResolvedFormatTarget(
+    string Kind,
+    string ExactId,
+    string? ParagraphId = null,
+    int? RunIndex = null,
+    string? SectionId = null,
+    string? PartId = null);
+
 public sealed record DocxEditOperation(
     string Type,
     string? CommentId = null,
@@ -359,7 +377,10 @@ public sealed record DocxEditOperation(
     string? HeightRule = null,
     bool? NoWrap = null,
     bool? CantSplit = null,
-    IReadOnlyList<DocxRichTextSegment>? RichText = null);
+    IReadOnlyList<DocxRichTextSegment>? RichText = null,
+    DocxFormatTarget? FormatTarget = null,
+    string? ExpectedCurrentFormatHash = null,
+    IReadOnlyDictionary<string, string>? FormatProperties = null);
 
 public sealed record DocxTableCellInput(
     string? Text = null,
@@ -384,7 +405,10 @@ public sealed record DocxEditDocument(
 public sealed record DocxEditAppliedOperation(
     string Type,
     bool Applied,
-    string Detail);
+    string Detail,
+    DocxResolvedFormatTarget? Target = null,
+    string? PriorFormatHash = null,
+    string? NewFormatHash = null);
 
 public sealed record DocxEditResult(
     string Input,
