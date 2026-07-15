@@ -157,6 +157,11 @@ internal static class Cli
         Console.WriteLine($"Fields: {report.Structure.FieldCount}");
         Console.WriteLine($"Content controls: {report.Structure.ContentControlCount}");
         Console.WriteLine($"Drawings: {report.Structure.DrawingCount}");
+        Console.WriteLine($"Detailed body nodes: {report.Structure.BodyNodes.Count}");
+        Console.WriteLine($"Detailed sections: {report.Structure.Sections.Count}");
+        Console.WriteLine($"Detailed headers: {report.Structure.Headers.Count}");
+        Console.WriteLine($"Detailed footers: {report.Structure.Footers.Count}");
+        Console.WriteLine($"Detailed drawing records: {report.Structure.Drawings.Count}");
         Console.WriteLine($"Annotation anchors: {report.Structure.AnnotationAnchors.Count}");
         Console.WriteLine($"Direct formatting paragraphs: {report.Formatting.ParagraphsWithDirectFormatting}");
         Console.WriteLine($"Direct formatting runs: {report.Formatting.RunsWithDirectFormatting}");

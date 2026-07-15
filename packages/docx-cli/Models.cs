@@ -119,6 +119,70 @@ public sealed record TableInspectionReport(
     string File,
     IReadOnlyList<TableDetail> Tables);
 
+public sealed record DocumentParagraphDetail(
+    string Id,
+    int ParagraphIndex,
+    string Text,
+    string? Style,
+    string? Justification,
+    IReadOnlyList<TableRunDetail> Runs);
+
+public sealed record BodyNodeDetail(
+    string Id,
+    int NodeIndex,
+    string Kind,
+    DocumentParagraphDetail? Paragraph = null,
+    int? TableIndex = null);
+
+public sealed record HeaderFooterPartDetail(
+    string Id,
+    string Kind,
+    string RelationshipId,
+    string PartUri,
+    IReadOnlyList<DocumentParagraphDetail> Paragraphs);
+
+public sealed record SectionPartBinding(
+    string Kind,
+    string Type,
+    string PartId,
+    string RelationshipId,
+    bool LinkedToPrevious);
+
+public sealed record SectionDetail(
+    string Id,
+    int SectionIndex,
+    string? EndingParagraphId,
+    IReadOnlyList<SectionPartBinding> Headers,
+    IReadOnlyList<SectionPartBinding> Footers);
+
+public sealed record DrawingPlacementDetail(
+    string Kind,
+    long? WidthEmu,
+    long? HeightEmu,
+    string? HorizontalRelativeFrom = null,
+    string? VerticalRelativeFrom = null,
+    string? HorizontalOffset = null,
+    string? VerticalOffset = null,
+    uint? DistanceFromTop = null,
+    uint? DistanceFromBottom = null,
+    uint? DistanceFromLeft = null,
+    uint? DistanceFromRight = null);
+
+public sealed record DrawingDetail(
+    string Id,
+    string Name,
+    string RelationshipId,
+    string PartUri,
+    string ContentSha256,
+    string AnchorKind,
+    string AnchorText,
+    string ParagraphId,
+    string? SectionId,
+    string? TableId,
+    int? RowIndex,
+    int? CellIndex,
+    DrawingPlacementDetail Placement);
+
 public sealed record StructureSummary(
     int BookmarkCount,
     int HyperlinkCount,
@@ -126,7 +190,12 @@ public sealed record StructureSummary(
     int ContentControlCount,
     int DrawingCount,
     IReadOnlyList<TableMetadata> Tables,
-    IReadOnlyList<AnnotationAnchor> AnnotationAnchors);
+    IReadOnlyList<AnnotationAnchor> AnnotationAnchors,
+    IReadOnlyList<BodyNodeDetail> BodyNodes,
+    IReadOnlyList<SectionDetail> Sections,
+    IReadOnlyList<HeaderFooterPartDetail> Headers,
+    IReadOnlyList<HeaderFooterPartDetail> Footers,
+    IReadOnlyList<DrawingDetail> Drawings);
 
 public sealed record FormattingSummary(
     int ParagraphsWithDirectFormatting,

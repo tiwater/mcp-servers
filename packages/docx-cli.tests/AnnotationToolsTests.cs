@@ -5,12 +5,128 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Dockit.Docx;
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx.Tests;
 
 public class AnnotationToolsTests
 {
+    [Fact]
+    public void Detailed_structure_preserves_body_section_and_part_order_with_complete_formatting()
+    {
+        var fixture = CreateDetailedStructureFixture();
+
+        var report = Inspector.Inspect(fixture.Path);
+
+        Assert.Equal(["paragraph", "table", "paragraph"], report.Structure.BodyNodes.Select(node => node.Kind));
+        Assert.Equal(["body-p0", "body-t0", "body-p2"], report.Structure.BodyNodes.Select(node => node.Id));
+        Assert.Equal(["section-0", "section-1"], report.Structure.Sections.Select(section => section.Id));
+        Assert.Equal(["header-0", "header-1"], report.Structure.Headers.Select(part => part.Id));
+        Assert.Equal(["footer-0", "footer-1"], report.Structure.Footers.Select(part => part.Id));
+        Assert.Equal(["First header", "Second header"], report.Structure.Headers.Select(part => part.Paragraphs.Single().Text));
+        Assert.Equal(["First footer", "Second footer"], report.Structure.Footers.Select(part => part.Paragraphs.Single().Text));
+        Assert.Equal("header-0", Assert.Single(report.Structure.Sections[0].Headers).PartId);
+        Assert.Equal("footer-0", Assert.Single(report.Structure.Sections[0].Footers).PartId);
+        Assert.Equal("header-1", Assert.Single(report.Structure.Sections[1].Headers).PartId);
+        Assert.Equal("footer-1", Assert.Single(report.Structure.Sections[1].Footers).PartId);
+
+        var firstParagraph = report.Structure.BodyNodes[0].Paragraph!;
+        Assert.Equal("Repeated owner", firstParagraph.Text);
+        Assert.Equal("BodyStyle", firstParagraph.Style);
+        Assert.Equal("center", firstParagraph.Justification);
+        var run = Assert.Single(firstParagraph.Runs);
+        Assert.Equal("BodyRunStyle", run.Style);
+        Assert.Equal("336699", run.Color);
+        Assert.Equal("double", run.Underline);
+        Assert.True(run.Bold);
+        Assert.True(run.Italic);
+        Assert.Equal("Arial", run.FontAscii);
+        Assert.Equal("Calibri", run.FontHighAnsi);
+        Assert.Equal("宋体", run.FontEastAsia);
+        Assert.Equal("Arial", run.FontComplexScript);
+        Assert.Equal("24", run.FontSize);
+    }
+
+    [Fact]
+    public void Drawing_evidence_hashes_bytes_and_uses_direct_owner_anchors_and_stable_bindings()
+    {
+        var fixture = CreateDetailedStructureFixture();
+
+        var drawings = Inspector.Inspect(fixture.Path).Structure.Drawings;
+
+        Assert.Equal(["1", "2"], drawings.Select(drawing => drawing.Id));
+        var inline = drawings[0];
+        Assert.Equal("inline", inline.Placement.Kind);
+        Assert.Equal("Repeated owner", inline.AnchorText);
+        Assert.Equal("paragraph", inline.AnchorKind);
+        Assert.Equal("body-p0", inline.ParagraphId);
+        Assert.Equal("section-0", inline.SectionId);
+        Assert.Equal(fixture.ImageSha256, inline.ContentSha256);
+        Assert.Null(inline.TableId);
+
+        var anchored = drawings[1];
+        Assert.Equal("anchor", anchored.Placement.Kind);
+        Assert.Equal("Cell owner", anchored.AnchorText);
+        Assert.Equal("tableCell", anchored.AnchorKind);
+        Assert.Equal("body-t0-r0-c0-p0", anchored.ParagraphId);
+        Assert.Equal("body-t0", anchored.TableId);
+        Assert.Equal(0, anchored.RowIndex);
+        Assert.Equal(0, anchored.CellIndex);
+        Assert.Equal("section-1", anchored.SectionId);
+        Assert.Equal(914400L, anchored.Placement.WidthEmu);
+        Assert.Equal(457200L, anchored.Placement.HeightEmu);
+        Assert.Equal("page", anchored.Placement.HorizontalRelativeFrom);
+        Assert.Equal("paragraph", anchored.Placement.VerticalRelativeFrom);
+        Assert.Equal("1200", anchored.Placement.HorizontalOffset);
+        Assert.Equal("2400", anchored.Placement.VerticalOffset);
+    }
+
+    [Fact]
+    public void Detailed_structure_gives_repeated_text_distinct_paragraph_identities_and_resolves_linked_parts()
+    {
+        var fixture = CreateLinkedHeaderFixture();
+
+        var structure = Inspector.Inspect(fixture).Structure;
+
+        Assert.Equal(["body-p0", "body-p1"], structure.BodyNodes.Select(node => node.Paragraph!.Id));
+        Assert.All(structure.BodyNodes, node => Assert.Equal("same", node.Paragraph!.Text));
+        Assert.Equal("header-0", Assert.Single(structure.Sections[0].Headers).PartId);
+        var linked = Assert.Single(structure.Sections[1].Headers);
+        Assert.Equal("header-0", linked.PartId);
+        Assert.True(linked.LinkedToPrevious);
+    }
+
+    [Fact]
+    public void Drawing_evidence_is_empty_when_document_has_no_drawings()
+    {
+        var fixture = CreateLinkedHeaderFixture();
+
+        Assert.Empty(Inspector.Inspect(fixture).Structure.Drawings);
+    }
+
+    [Fact]
+    public void Drawing_evidence_rejects_duplicate_drawing_ids()
+    {
+        var fixture = CreateDetailedStructureFixture(duplicateDrawingId: true);
+
+        var error = Assert.Throws<InvalidDataException>(() => Inspector.Inspect(fixture.Path));
+
+        Assert.Contains("Duplicate drawing id '1'", error.Message);
+    }
+
+    [Fact]
+    public void Drawing_evidence_rejects_missing_image_relationships()
+    {
+        var fixture = CreateDetailedStructureFixture(missingImageRelationship: true);
+
+        var error = Assert.Throws<InvalidDataException>(() => Inspector.Inspect(fixture.Path));
+
+        Assert.Contains("missing image relationship", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
@@ -1754,6 +1870,187 @@ public class AnnotationToolsTests
 
         return path;
     }
+
+    private sealed record DetailedStructureFixture(string Path, string ImageSha256);
+
+    private static DetailedStructureFixture CreateDetailedStructureFixture(
+        bool duplicateDrawingId = false,
+        bool missingImageRelationship = false)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-detailed-structure-{Guid.NewGuid():N}.docx");
+        var imageBytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body());
+
+            var firstHeader = AddHeader(mainPart, "First header");
+            var secondHeader = AddHeader(mainPart, "Second header");
+            var firstFooter = AddFooter(mainPart, "First footer");
+            var secondFooter = AddFooter(mainPart, "Second footer");
+
+            var imagePart = mainPart.AddImagePart(ImagePartType.Png);
+            using (var stream = imagePart.GetStream(FileMode.Create, FileAccess.Write))
+            {
+                stream.Write(imageBytes);
+            }
+
+            var imageRelationshipId = mainPart.GetIdOfPart(imagePart);
+            var firstSection = new SectionProperties(
+                new HeaderReference { Type = HeaderFooterValues.Default, Id = mainPart.GetIdOfPart(firstHeader) },
+                new FooterReference { Type = HeaderFooterValues.Default, Id = mainPart.GetIdOfPart(firstFooter) });
+            var secondSection = new SectionProperties(
+                new HeaderReference { Type = HeaderFooterValues.Default, Id = mainPart.GetIdOfPart(secondHeader) },
+                new FooterReference { Type = HeaderFooterValues.Default, Id = mainPart.GetIdOfPart(secondFooter) });
+
+            var firstParagraph = new Paragraph(
+                new ParagraphProperties(
+                    new ParagraphStyleId { Val = "BodyStyle" },
+                    new Justification { Val = JustificationValues.Center },
+                    firstSection),
+                new Run(
+                    new RunProperties(
+                        new RunStyle { Val = "BodyRunStyle" },
+                        new RunFonts
+                        {
+                            Ascii = "Arial",
+                            HighAnsi = "Calibri",
+                            EastAsia = "宋体",
+                            ComplexScript = "Arial"
+                        },
+                        new Bold(),
+                        new Italic(),
+                        new Color { Val = "336699" },
+                        new FontSize { Val = "24" },
+                        new Underline { Val = UnderlineValues.Double }),
+                    new Text("Repeated owner"),
+                    CreateInlineDrawing(1U, imageRelationshipId)));
+
+            var anchorRelationshipId = missingImageRelationship ? "rId-missing-image" : imageRelationshipId;
+            var table = new Table(
+                new TableProperties(),
+                new TableGrid(new GridColumn { Width = "2400" }),
+                new TableRow(
+                    new TableCell(
+                        new Paragraph(
+                            new Run(
+                                new Text("Cell owner"),
+                                CreateAnchoredDrawing(duplicateDrawingId ? 1U : 2U, anchorRelationshipId))))));
+            var finalParagraph = new Paragraph(new Run(new Text("Repeated owner")));
+
+            mainPart.Document.Body!.Append(firstParagraph, table, finalParagraph, secondSection);
+            mainPart.Document.Save();
+            firstHeader.Header!.Save();
+            secondHeader.Header!.Save();
+            firstFooter.Footer!.Save();
+            secondFooter.Footer!.Save();
+        }
+
+        if (!duplicateDrawingId && !missingImageRelationship)
+        {
+            AssertValidOpenXml(path);
+        }
+        return new DetailedStructureFixture(path, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(imageBytes)));
+    }
+
+    private static string CreateLinkedHeaderFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-linked-header-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body());
+            var header = AddHeader(mainPart, "Shared header");
+            var firstSection = new SectionProperties(
+                new HeaderReference { Type = HeaderFooterValues.Default, Id = mainPart.GetIdOfPart(header) });
+            mainPart.Document.Body!.Append(
+                new Paragraph(new ParagraphProperties(firstSection), new Run(new Text("same"))),
+                new Paragraph(new Run(new Text("same"))),
+                new SectionProperties());
+            mainPart.Document.Save();
+            header.Header!.Save();
+        }
+
+        AssertValidOpenXml(path);
+        return path;
+    }
+
+    private static HeaderPart AddHeader(MainDocumentPart mainPart, string text)
+    {
+        var part = mainPart.AddNewPart<HeaderPart>();
+        part.Header = new Header(new Paragraph(new Run(new Text(text))));
+        return part;
+    }
+
+    private static FooterPart AddFooter(MainDocumentPart mainPart, string text)
+    {
+        var part = mainPart.AddNewPart<FooterPart>();
+        part.Footer = new Footer(new Paragraph(new Run(new Text(text))));
+        return part;
+    }
+
+    private static Drawing CreateInlineDrawing(uint id, string relationshipId)
+        => new(
+            new DW.Inline(
+                new DW.Extent { Cx = 914400L, Cy = 457200L },
+                new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+                new DW.DocProperties { Id = id, Name = $"Inline {id}" },
+                new DW.NonVisualGraphicFrameDrawingProperties(
+                    new A.GraphicFrameLocks { NoChangeAspect = true }),
+                BuildPictureGraphic(relationshipId)));
+
+    private static Drawing CreateAnchoredDrawing(uint id, string relationshipId)
+    {
+        var anchor = new DW.Anchor(
+            new DW.SimplePosition { X = 0L, Y = 0L },
+            new DW.HorizontalPosition(new DW.PositionOffset("1200"))
+            {
+                RelativeFrom = DW.HorizontalRelativePositionValues.Page
+            },
+            new DW.VerticalPosition(new DW.PositionOffset("2400"))
+            {
+                RelativeFrom = DW.VerticalRelativePositionValues.Paragraph
+            },
+            new DW.Extent { Cx = 914400L, Cy = 457200L },
+            new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+            new DW.WrapNone(),
+            new DW.DocProperties { Id = id, Name = $"Anchor {id}" },
+            new DW.NonVisualGraphicFrameDrawingProperties(
+                new A.GraphicFrameLocks { NoChangeAspect = true }),
+            BuildPictureGraphic(relationshipId))
+        {
+            DistanceFromTop = 0U,
+            DistanceFromBottom = 0U,
+            DistanceFromLeft = 0U,
+            DistanceFromRight = 0U,
+            SimplePos = false,
+            RelativeHeight = 0U,
+            BehindDoc = false,
+            Locked = false,
+            LayoutInCell = true,
+            AllowOverlap = true
+        };
+        return new Drawing(anchor);
+    }
+
+    private static A.Graphic BuildPictureGraphic(string relationshipId)
+        => new(
+            new A.GraphicData(
+                new PIC.Picture(
+                    new PIC.NonVisualPictureProperties(
+                        new PIC.NonVisualDrawingProperties { Id = 0U, Name = "image.png" },
+                        new PIC.NonVisualPictureDrawingProperties()),
+                    new PIC.BlipFill(
+                        new A.Blip { Embed = relationshipId },
+                        new A.Stretch(new A.FillRectangle())),
+                    new PIC.ShapeProperties(
+                        new A.Transform2D(
+                            new A.Offset { X = 0L, Y = 0L },
+                            new A.Extents { Cx = 914400L, Cy = 457200L }),
+                        new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle })))
+            { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" });
 
     private static Comment CreateComment(string id, string author, string text)
     {

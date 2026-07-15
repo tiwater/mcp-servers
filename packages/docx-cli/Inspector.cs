@@ -6,6 +6,8 @@ using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx;
@@ -75,6 +77,7 @@ public static class Inspector
             + root.Descendants<Deleted>().Count());
 
         var annotationAnchors = BuildAnnotationAnchors(body, mainPart, bodyParagraphs, bodyParagraphTexts, bodyTables, tableMetadata);
+        var detailed = BuildDetailedEvidence(doc, mainPart, body);
 
         return new InspectionReport(
             File: path,
@@ -105,7 +108,12 @@ public static class Inspector
                 ContentControlCount: allRoots.Sum(root => root.Descendants<SdtElement>().Count()),
                 DrawingCount: allRoots.Sum(root => root.Descendants<Drawing>().Count()),
                 Tables: tableMetadata,
-                AnnotationAnchors: annotationAnchors),
+                AnnotationAnchors: annotationAnchors,
+                BodyNodes: detailed.BodyNodes,
+                Sections: detailed.Sections,
+                Headers: detailed.Headers,
+                Footers: detailed.Footers,
+                Drawings: detailed.Drawings),
             Formatting: new FormattingSummary(
                 ParagraphsWithDirectFormatting: allParagraphs.Count(HasParagraphDirectFormatting),
                 RunsWithDirectFormatting: allRoots.SelectMany(root => root.Descendants<Run>()).Count(HasRunDirectFormatting)));
@@ -317,6 +325,384 @@ public static class Inspector
 
     public static string GetParagraphText(Paragraph paragraph)
         => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text)).Trim();
+
+    private sealed record DetailedEvidence(
+        IReadOnlyList<BodyNodeDetail> BodyNodes,
+        IReadOnlyList<SectionDetail> Sections,
+        IReadOnlyList<HeaderFooterPartDetail> Headers,
+        IReadOnlyList<HeaderFooterPartDetail> Footers,
+        IReadOnlyList<DrawingDetail> Drawings);
+
+    private static DetailedEvidence BuildDetailedEvidence(WordprocessingDocument doc, MainDocumentPart mainPart, Body body)
+    {
+        var bodyParagraphs = body.Descendants<Paragraph>().ToList();
+        var bodyTables = body.Elements<Table>().ToList();
+        var bodyNodes = new List<BodyNodeDetail>();
+        var nodeIndex = 0;
+        foreach (var child in body.ChildElements)
+        {
+            if (child is Paragraph paragraph)
+            {
+                var paragraphIndex = GetRequiredIndex(bodyParagraphs, paragraph, "body paragraph");
+                var id = $"body-p{paragraphIndex}";
+                bodyNodes.Add(new BodyNodeDetail(id, nodeIndex++, "paragraph", BuildParagraphDetail(paragraph, id, paragraphIndex)));
+            }
+            else if (child is Table table)
+            {
+                var tableIndex = GetRequiredIndex(bodyTables, table, "body table");
+                bodyNodes.Add(new BodyNodeDetail($"body-t{tableIndex}", nodeIndex++, "table", TableIndex: tableIndex));
+            }
+        }
+
+        var sectionProperties = new List<(SectionProperties Properties, Paragraph? Paragraph)>();
+        sectionProperties.AddRange(body.Elements<Paragraph>()
+            .Select(paragraph => (Properties: paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>(), Paragraph: paragraph))
+            .Where(item => item.Properties is not null)
+            .Select(item => (item.Properties!, (Paragraph?)item.Paragraph)));
+        sectionProperties.AddRange(body.Elements<SectionProperties>().Select(properties => (properties, (Paragraph?)null)));
+
+        var headerIds = new Dictionary<HeaderPart, string>();
+        var footerIds = new Dictionary<FooterPart, string>();
+        var currentHeaders = new Dictionary<string, SectionPartBinding>(StringComparer.Ordinal);
+        var currentFooters = new Dictionary<string, SectionPartBinding>(StringComparer.Ordinal);
+        var sections = new List<SectionDetail>(sectionProperties.Count);
+
+        for (var sectionIndex = 0; sectionIndex < sectionProperties.Count; sectionIndex++)
+        {
+            var section = sectionProperties[sectionIndex];
+            var headerBindings = ResolveSectionBindings(
+                mainPart,
+                section.Properties.Elements<HeaderReference>(),
+                currentHeaders,
+                headerIds,
+                "header",
+                index => $"header-{index}");
+            var footerBindings = ResolveSectionBindings(
+                mainPart,
+                section.Properties.Elements<FooterReference>(),
+                currentFooters,
+                footerIds,
+                "footer",
+                index => $"footer-{index}");
+            var endingParagraphId = section.Paragraph is null
+                ? null
+                : $"body-p{GetRequiredIndex(bodyParagraphs, section.Paragraph, "section paragraph")}";
+            sections.Add(new SectionDetail($"section-{sectionIndex}", sectionIndex, endingParagraphId, headerBindings, footerBindings));
+        }
+
+        foreach (var pair in mainPart.Parts)
+        {
+            if (pair.OpenXmlPart is HeaderPart header && !headerIds.ContainsKey(header))
+            {
+                headerIds.Add(header, $"header-{headerIds.Count}");
+            }
+            else if (pair.OpenXmlPart is FooterPart footer && !footerIds.ContainsKey(footer))
+            {
+                footerIds.Add(footer, $"footer-{footerIds.Count}");
+            }
+        }
+
+        var headers = headerIds
+            .OrderBy(pair => ParseStableIndex(pair.Value))
+            .Select(pair => BuildHeaderFooterPartDetail(mainPart, pair.Key, pair.Value, "header", pair.Key.Header))
+            .ToList();
+        var footers = footerIds
+            .OrderBy(pair => ParseStableIndex(pair.Value))
+            .Select(pair => BuildHeaderFooterPartDetail(mainPart, pair.Key, pair.Value, "footer", pair.Key.Footer))
+            .ToList();
+        var drawings = BuildDrawingDetails(doc, body, sections, headers, footers);
+
+        return new DetailedEvidence(bodyNodes, sections, headers, footers, drawings);
+    }
+
+    private static IReadOnlyList<SectionPartBinding> ResolveSectionBindings<TReference, TPart>(
+        MainDocumentPart mainPart,
+        IEnumerable<TReference> references,
+        Dictionary<string, SectionPartBinding> current,
+        Dictionary<TPart, string> stableIds,
+        string kind,
+        Func<int, string> makeId)
+        where TReference : OpenXmlElement
+        where TPart : OpenXmlPart
+    {
+        var explicitlyBoundTypes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var reference in references)
+        {
+            var type = GetAttribute(reference, "type") ?? "default";
+            var relationshipId = GetAttribute(reference, "id")
+                ?? throw new InvalidDataException($"{kind} reference is missing a relationship id.");
+            OpenXmlPart relatedPart;
+            try
+            {
+                relatedPart = mainPart.GetPartById(relationshipId);
+            }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or KeyNotFoundException)
+            {
+                throw new InvalidDataException($"{kind} relationship '{relationshipId}' was not found.", ex);
+            }
+
+            if (relatedPart is not TPart typedPart)
+            {
+                throw new InvalidDataException($"Relationship '{relationshipId}' does not target a {kind} part.");
+            }
+
+            if (!stableIds.TryGetValue(typedPart, out var partId))
+            {
+                partId = makeId(stableIds.Count);
+                stableIds.Add(typedPart, partId);
+            }
+
+            current[type] = new SectionPartBinding(kind, type, partId, relationshipId, false);
+            explicitlyBoundTypes.Add(type);
+        }
+
+        return current.Values
+            .Select(binding => explicitlyBoundTypes.Contains(binding.Type)
+                ? binding
+                : binding with { LinkedToPrevious = true })
+            .ToList();
+    }
+
+    private static HeaderFooterPartDetail BuildHeaderFooterPartDetail(
+        MainDocumentPart mainPart,
+        OpenXmlPart part,
+        string id,
+        string kind,
+        OpenXmlPartRootElement? root)
+    {
+        if (root is null)
+        {
+            throw new InvalidDataException($"{kind} part '{part.Uri}' has no root element.");
+        }
+
+        var paragraphs = root.Descendants<Paragraph>().ToList();
+        return new HeaderFooterPartDetail(
+            id,
+            kind,
+            mainPart.GetIdOfPart(part),
+            part.Uri.ToString(),
+            paragraphs.Select((paragraph, index) => BuildParagraphDetail(paragraph, $"{id}-p{index}", index)).ToList());
+    }
+
+    private static DocumentParagraphDetail BuildParagraphDetail(Paragraph paragraph, string id, int paragraphIndex)
+    {
+        var runs = paragraph.Elements<Run>().ToList();
+        return new DocumentParagraphDetail(
+            id,
+            paragraphIndex,
+            GetParagraphText(paragraph),
+            paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
+            GetValAttribute(paragraph.ParagraphProperties?.Justification),
+            runs.Select((run, index) => BuildTableRunDetail(run, index)).ToList());
+    }
+
+    private static IReadOnlyList<DrawingDetail> BuildDrawingDetails(
+        WordprocessingDocument doc,
+        Body body,
+        IReadOnlyList<SectionDetail> sections,
+        IReadOnlyList<HeaderFooterPartDetail> headers,
+        IReadOnlyList<HeaderFooterPartDetail> footers)
+    {
+        var roots = GetRoots(doc).ToList();
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        var drawings = new List<DrawingDetail>();
+
+        foreach (var root in roots)
+        {
+            var rootParagraphs = root.Descendants<Paragraph>().ToList();
+            foreach (var drawing in root.Descendants<Drawing>())
+            {
+                var properties = drawing.Descendants<DW.DocProperties>().SingleOrDefault()
+                    ?? throw new InvalidDataException("Drawing is missing document properties.");
+                var id = properties.Id?.Value.ToString(CultureInfo.InvariantCulture)
+                    ?? throw new InvalidDataException("Drawing document properties are missing an id.");
+                if (!seenIds.Add(id))
+                {
+                    throw new InvalidDataException($"Duplicate drawing id '{id}'.");
+                }
+
+                var paragraph = drawing.Ancestors<Paragraph>().FirstOrDefault()
+                    ?? throw new InvalidDataException($"Drawing '{id}' has no direct paragraph owner.");
+                var rootPart = root.OpenXmlPart
+                    ?? throw new InvalidDataException($"Drawing '{id}' is not attached to an OpenXML part.");
+                var blips = drawing.Descendants<A.Blip>().ToList();
+                if (blips.Count != 1 || string.IsNullOrWhiteSpace(blips[0].Embed?.Value))
+                {
+                    throw new InvalidDataException($"Drawing '{id}' must have exactly one embedded image relationship.");
+                }
+
+                var relationshipId = blips[0].Embed!.Value!;
+                OpenXmlPart relatedPart;
+                try
+                {
+                    relatedPart = rootPart.GetPartById(relationshipId);
+                }
+                catch (Exception ex) when (ex is ArgumentOutOfRangeException or KeyNotFoundException)
+                {
+                    throw new InvalidDataException(
+                        $"Drawing '{id}' has a missing image relationship '{relationshipId}'.",
+                        ex);
+                }
+
+                if (relatedPart is not ImagePart imagePart)
+                {
+                    throw new InvalidDataException($"Drawing '{id}' relationship '{relationshipId}' does not target an image part.");
+                }
+
+                string hash;
+                using (var imageStream = imagePart.GetStream(FileMode.Open, FileAccess.Read))
+                {
+                    hash = Convert.ToHexString(SHA256.HashData(imageStream));
+                }
+
+                var identity = ResolveParagraphIdentity(paragraph, root, body, rootParagraphs, sections, headers, footers);
+                drawings.Add(new DrawingDetail(
+                    id,
+                    properties.Name?.Value ?? string.Empty,
+                    relationshipId,
+                    imagePart.Uri.ToString(),
+                    hash,
+                    identity.CellIndex is null ? "paragraph" : "tableCell",
+                    GetParagraphText(paragraph),
+                    identity.ParagraphId,
+                    identity.SectionId,
+                    identity.TableId,
+                    identity.RowIndex,
+                    identity.CellIndex,
+                    BuildDrawingPlacement(drawing)));
+            }
+        }
+
+        return drawings;
+    }
+
+    private sealed record ParagraphIdentity(
+        string ParagraphId,
+        string? SectionId,
+        string? TableId,
+        int? RowIndex,
+        int? CellIndex);
+
+    private static ParagraphIdentity ResolveParagraphIdentity(
+        Paragraph paragraph,
+        OpenXmlPartRootElement root,
+        Body body,
+        IReadOnlyList<Paragraph> rootParagraphs,
+        IReadOnlyList<SectionDetail> sections,
+        IReadOnlyList<HeaderFooterPartDetail> headers,
+        IReadOnlyList<HeaderFooterPartDetail> footers)
+    {
+        var cell = paragraph.Ancestors<TableCell>().FirstOrDefault();
+        var row = cell?.Ancestors<TableRow>().FirstOrDefault();
+        var table = paragraph.Ancestors<Table>().FirstOrDefault();
+
+        if (root is Document)
+        {
+            var sectionId = ResolveBodySectionId(paragraph, body, sections);
+            if (table is not null && row is not null && cell is not null)
+            {
+                var bodyTables = body.Elements<Table>().ToList();
+                var tableIndex = GetRequiredIndex(bodyTables, table, "drawing table");
+                var rowIndex = GetRequiredIndex(table.Elements<TableRow>().ToList(), row, "drawing row");
+                var cellIndex = GetRequiredIndex(row.Elements<TableCell>().ToList(), cell, "drawing cell");
+                var paragraphIndex = GetRequiredIndex(cell.Elements<Paragraph>().ToList(), paragraph, "drawing paragraph");
+                var tableId = $"body-t{tableIndex}";
+                return new ParagraphIdentity($"{tableId}-r{rowIndex}-c{cellIndex}-p{paragraphIndex}", sectionId, tableId, rowIndex, cellIndex);
+            }
+
+            var bodyParagraphs = body.Descendants<Paragraph>().ToList();
+            var index = GetRequiredIndex(bodyParagraphs, paragraph, "drawing paragraph");
+            return new ParagraphIdentity($"body-p{index}", sectionId, null, null, null);
+        }
+
+        var partUri = root.OpenXmlPart?.Uri.ToString();
+        var part = headers.Cast<HeaderFooterPartDetail>().Concat(footers).SingleOrDefault(item => item.PartUri == partUri);
+        var prefix = part?.Id ?? $"{GetPartSource(paragraph)}";
+        var partSection = sections.FirstOrDefault(section =>
+            section.Headers.Concat(section.Footers).Any(binding => binding.PartId == part?.Id))?.Id;
+        var rootParagraphIndex = GetRequiredIndex(rootParagraphs, paragraph, "part paragraph");
+        if (table is not null && row is not null && cell is not null)
+        {
+            var tableIndex = GetRequiredIndex(root.Descendants<Table>().ToList(), table, "part table");
+            var rowIndex = GetRequiredIndex(table.Elements<TableRow>().ToList(), row, "part row");
+            var cellIndex = GetRequiredIndex(row.Elements<TableCell>().ToList(), cell, "part cell");
+            var paragraphIndex = GetRequiredIndex(cell.Elements<Paragraph>().ToList(), paragraph, "part cell paragraph");
+            var tableId = $"{prefix}-t{tableIndex}";
+            return new ParagraphIdentity($"{tableId}-r{rowIndex}-c{cellIndex}-p{paragraphIndex}", partSection, tableId, rowIndex, cellIndex);
+        }
+
+        return new ParagraphIdentity($"{prefix}-p{rootParagraphIndex}", partSection, null, null, null);
+    }
+
+    private static string? ResolveBodySectionId(
+        Paragraph paragraph,
+        Body body,
+        IReadOnlyList<SectionDetail> sections)
+    {
+        var owner = paragraph.Ancestors<Body>().Any()
+            ? paragraph.Ancestors<Body>().First()
+            : body;
+        OpenXmlElement? topLevel = ReferenceEquals(paragraph.Parent, owner)
+            ? paragraph
+            : paragraph.Ancestors<OpenXmlElement>().FirstOrDefault(element => ReferenceEquals(element.Parent, owner));
+        var sectionIndex = 0;
+        foreach (var child in body.ChildElements)
+        {
+            if (ReferenceEquals(child, topLevel))
+            {
+                break;
+            }
+
+            if (child is Paragraph prior && prior.ParagraphProperties?.GetFirstChild<SectionProperties>() is not null)
+            {
+                sectionIndex++;
+            }
+        }
+
+        return sectionIndex < sections.Count ? sections[sectionIndex].Id : null;
+    }
+
+    private static DrawingPlacementDetail BuildDrawingPlacement(Drawing drawing)
+    {
+        var inline = drawing.GetFirstChild<DW.Inline>();
+        if (inline is not null)
+        {
+            var extent = inline.GetFirstChild<DW.Extent>();
+            return new DrawingPlacementDetail(
+                "inline",
+                extent?.Cx?.Value,
+                extent?.Cy?.Value,
+                DistanceFromTop: inline.DistanceFromTop?.Value,
+                DistanceFromBottom: inline.DistanceFromBottom?.Value,
+                DistanceFromLeft: inline.DistanceFromLeft?.Value,
+                DistanceFromRight: inline.DistanceFromRight?.Value);
+        }
+
+        var anchor = drawing.GetFirstChild<DW.Anchor>()
+            ?? throw new InvalidDataException("Drawing is neither inline nor anchored.");
+        var anchorExtent = anchor.GetFirstChild<DW.Extent>();
+        var horizontal = anchor.GetFirstChild<DW.HorizontalPosition>();
+        var vertical = anchor.GetFirstChild<DW.VerticalPosition>();
+        return new DrawingPlacementDetail(
+            "anchor",
+            anchorExtent?.Cx?.Value,
+            anchorExtent?.Cy?.Value,
+            GetAttribute(horizontal, "relativeFrom"),
+            GetAttribute(vertical, "relativeFrom"),
+            horizontal?.GetFirstChild<DW.PositionOffset>()?.Text,
+            vertical?.GetFirstChild<DW.PositionOffset>()?.Text,
+            anchor.DistanceFromTop?.Value,
+            anchor.DistanceFromBottom?.Value,
+            anchor.DistanceFromLeft?.Value,
+            anchor.DistanceFromRight?.Value);
+    }
+
+    private static int GetRequiredIndex<T>(IReadOnlyList<T> list, T value, string description) where T : class
+        => GetIndexWithinParent(list, value)
+            ?? throw new InvalidDataException($"Unable to resolve stable {description} identity.");
+
+    private static int ParseStableIndex(string id)
+        => int.Parse(id[(id.LastIndexOf('-') + 1)..], CultureInfo.InvariantCulture);
 
     private static IReadOnlyList<TableParagraphDetail> BuildTableParagraphDetails(TableCell cell)
     {
