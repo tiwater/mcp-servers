@@ -166,8 +166,28 @@ public sealed record DrawingPlacementDetail(
     uint? DistanceFromTop = null,
     uint? DistanceFromBottom = null,
     uint? DistanceFromLeft = null,
+    uint? DistanceFromRight = null,
+    string? HorizontalAlignment = null,
+    string? VerticalAlignment = null,
+    bool? SimplePosition = null,
+    long? SimplePositionX = null,
+    long? SimplePositionY = null,
+    uint? RelativeHeight = null,
+    bool? BehindDoc = null,
+    bool? Locked = null,
+    bool? LayoutInCell = null,
+    bool? AllowOverlap = null,
+    DrawingWrapDetail? Wrap = null);
+
+public sealed record DrawingWrapDetail(
+    string Kind,
+    string? TextFlow = null,
+    uint? DistanceFromTop = null,
+    uint? DistanceFromBottom = null,
+    uint? DistanceFromLeft = null,
     uint? DistanceFromRight = null);
 
+[method: JsonConstructor]
 public sealed record DrawingDetail(
     string Id,
     string Name,
@@ -178,10 +198,44 @@ public sealed record DrawingDetail(
     string AnchorText,
     string ParagraphId,
     string? SectionId,
+    IReadOnlyList<string> SectionIds,
     string? TableId,
     int? RowIndex,
     int? CellIndex,
-    DrawingPlacementDetail Placement);
+    DrawingPlacementDetail Placement)
+{
+    public DrawingDetail(
+        string Id,
+        string Name,
+        string RelationshipId,
+        string PartUri,
+        string ContentSha256,
+        string AnchorKind,
+        string AnchorText,
+        string ParagraphId,
+        string? SectionId,
+        string? TableId,
+        int? RowIndex,
+        int? CellIndex,
+        DrawingPlacementDetail Placement)
+        : this(
+            Id,
+            Name,
+            RelationshipId,
+            PartUri,
+            ContentSha256,
+            AnchorKind,
+            AnchorText,
+            ParagraphId,
+            SectionId,
+            SectionId is null ? [] : [SectionId],
+            TableId,
+            RowIndex,
+            CellIndex,
+            Placement)
+    {
+    }
+}
 
 public sealed record StructureSummary(
     int BookmarkCount,

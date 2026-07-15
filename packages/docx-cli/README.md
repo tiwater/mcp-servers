@@ -17,7 +17,9 @@ The CLI provides several commands for document processing, structural inspection
 ### 1. Inspect a Document
 Outputs a unified structural report of a Word document, including paragraph styles, headings, placeholders, comments, annotation anchors, table previews, fields, drawings, and formatting metrics. Detailed evidence preserves body-node and section order, assigns position-based paragraph/table/part identities, records section header/footer bindings (including links to the previous section), and includes paragraph/run formatting for body, header, and footer content.
 
-Image drawing records include the OpenXML drawing id, the direct owning paragraph or table-cell anchor, section/paragraph/table/row/cell identities, inline or anchored placement metadata, the image relationship and package part, and a SHA-256 hash computed from the actual image bytes. Inspection fails closed when drawing ids are duplicated or an embedded image relationship is missing or does not target an image part.
+Image drawing records include the OpenXML drawing id, the direct owning paragraph or table-cell anchor, complete ordered section bindings, paragraph/table/row/cell identities, inline or anchored placement metadata, the image relationship and package part, and a SHA-256 hash computed from the actual image bytes. A singular `SectionId` is emitted only when exactly one section owns the drawing; `SectionIds` is authoritative for linked header/footer parts shared by multiple sections. Anchored placement distinguishes alignment from offset positioning and records simple-position coordinates, relative height, layout flags, anchor distances, and wrap mode/details. Inspection fails closed when drawing ids are duplicated or an embedded image relationship is missing or does not target an image part.
+
+Paragraph run evidence follows all valid nested run containers in document order, including hyperlinks and run-level content controls, so formatted run evidence corresponds to the paragraph's descendant text rather than only direct child runs.
 
 ```bash
 tiwater-docx inspect <input.docx> [--json]

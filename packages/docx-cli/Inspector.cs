@@ -486,7 +486,7 @@ public static class Inspector
 
     private static DocumentParagraphDetail BuildParagraphDetail(Paragraph paragraph, string id, int paragraphIndex)
     {
-        var runs = paragraph.Elements<Run>().ToList();
+        var runs = paragraph.Descendants<Run>().ToList();
         return new DocumentParagraphDetail(
             id,
             paragraphIndex,
@@ -566,6 +566,7 @@ public static class Inspector
                     GetParagraphText(paragraph),
                     identity.ParagraphId,
                     identity.SectionId,
+                    identity.SectionIds,
                     identity.TableId,
                     identity.RowIndex,
                     identity.CellIndex,
@@ -579,6 +580,7 @@ public static class Inspector
     private sealed record ParagraphIdentity(
         string ParagraphId,
         string? SectionId,
+        IReadOnlyList<string> SectionIds,
         string? TableId,
         int? RowIndex,
         int? CellIndex);
@@ -607,19 +609,36 @@ public static class Inspector
                 var cellIndex = GetRequiredIndex(row.Elements<TableCell>().ToList(), cell, "drawing cell");
                 var paragraphIndex = GetRequiredIndex(cell.Elements<Paragraph>().ToList(), paragraph, "drawing paragraph");
                 var tableId = $"body-t{tableIndex}";
-                return new ParagraphIdentity($"{tableId}-r{rowIndex}-c{cellIndex}-p{paragraphIndex}", sectionId, tableId, rowIndex, cellIndex);
+                return new ParagraphIdentity(
+                    $"{tableId}-r{rowIndex}-c{cellIndex}-p{paragraphIndex}",
+                    sectionId,
+                    sectionId is null ? [] : [sectionId],
+                    tableId,
+                    rowIndex,
+                    cellIndex);
             }
 
             var bodyParagraphs = body.Descendants<Paragraph>().ToList();
             var index = GetRequiredIndex(bodyParagraphs, paragraph, "drawing paragraph");
-            return new ParagraphIdentity($"body-p{index}", sectionId, null, null, null);
+            return new ParagraphIdentity(
+                $"body-p{index}",
+                sectionId,
+                sectionId is null ? [] : [sectionId],
+                null,
+                null,
+                null);
         }
 
         var partUri = root.OpenXmlPart?.Uri.ToString();
         var part = headers.Cast<HeaderFooterPartDetail>().Concat(footers).SingleOrDefault(item => item.PartUri == partUri);
         var prefix = part?.Id ?? $"{GetPartSource(paragraph)}";
-        var partSection = sections.FirstOrDefault(section =>
-            section.Headers.Concat(section.Footers).Any(binding => binding.PartId == part?.Id))?.Id;
+        var partSections = part is null
+            ? []
+            : sections
+                .Where(section => section.Headers.Concat(section.Footers).Any(binding => binding.PartId == part.Id))
+                .Select(section => section.Id)
+                .ToList();
+        var singularPartSection = partSections.Count == 1 ? partSections[0] : null;
         var rootParagraphIndex = GetRequiredIndex(rootParagraphs, paragraph, "part paragraph");
         if (table is not null && row is not null && cell is not null)
         {
@@ -628,10 +647,22 @@ public static class Inspector
             var cellIndex = GetRequiredIndex(row.Elements<TableCell>().ToList(), cell, "part cell");
             var paragraphIndex = GetRequiredIndex(cell.Elements<Paragraph>().ToList(), paragraph, "part cell paragraph");
             var tableId = $"{prefix}-t{tableIndex}";
-            return new ParagraphIdentity($"{tableId}-r{rowIndex}-c{cellIndex}-p{paragraphIndex}", partSection, tableId, rowIndex, cellIndex);
+            return new ParagraphIdentity(
+                $"{tableId}-r{rowIndex}-c{cellIndex}-p{paragraphIndex}",
+                singularPartSection,
+                partSections,
+                tableId,
+                rowIndex,
+                cellIndex);
         }
 
-        return new ParagraphIdentity($"{prefix}-p{rootParagraphIndex}", partSection, null, null, null);
+        return new ParagraphIdentity(
+            $"{prefix}-p{rootParagraphIndex}",
+            singularPartSection,
+            partSections,
+            null,
+            null,
+            null);
     }
 
     private static string? ResolveBodySectionId(
@@ -683,6 +714,7 @@ public static class Inspector
         var anchorExtent = anchor.GetFirstChild<DW.Extent>();
         var horizontal = anchor.GetFirstChild<DW.HorizontalPosition>();
         var vertical = anchor.GetFirstChild<DW.VerticalPosition>();
+        var simplePosition = anchor.GetFirstChild<DW.SimplePosition>();
         return new DrawingPlacementDetail(
             "anchor",
             anchorExtent?.Cx?.Value,
@@ -694,7 +726,47 @@ public static class Inspector
             anchor.DistanceFromTop?.Value,
             anchor.DistanceFromBottom?.Value,
             anchor.DistanceFromLeft?.Value,
-            anchor.DistanceFromRight?.Value);
+            anchor.DistanceFromRight?.Value,
+            horizontal?.GetFirstChild<DW.HorizontalAlignment>()?.Text,
+            vertical?.GetFirstChild<DW.VerticalAlignment>()?.Text,
+            anchor.SimplePos?.Value,
+            simplePosition?.X?.Value,
+            simplePosition?.Y?.Value,
+            anchor.RelativeHeight?.Value,
+            anchor.BehindDoc?.Value,
+            anchor.Locked?.Value,
+            anchor.LayoutInCell?.Value,
+            anchor.AllowOverlap?.Value,
+            BuildDrawingWrap(anchor));
+    }
+
+    private static DrawingWrapDetail BuildDrawingWrap(DW.Anchor anchor)
+    {
+        var wrap = anchor.ChildElements.FirstOrDefault(element =>
+            element is DW.WrapNone or DW.WrapSquare or DW.WrapTight or DW.WrapThrough or DW.WrapTopBottom)
+            ?? throw new InvalidDataException("Anchored drawing is missing wrap evidence.");
+        var kind = wrap switch
+        {
+            DW.WrapNone => "none",
+            DW.WrapSquare => "square",
+            DW.WrapTight => "tight",
+            DW.WrapThrough => "through",
+            DW.WrapTopBottom => "topBottom",
+            _ => throw new InvalidDataException($"Unsupported drawing wrap element '{wrap.LocalName}'.")
+        };
+        return new DrawingWrapDetail(
+            kind,
+            GetAttribute(wrap, "wrapText"),
+            GetUIntAttribute(wrap, "distT"),
+            GetUIntAttribute(wrap, "distB"),
+            GetUIntAttribute(wrap, "distL"),
+            GetUIntAttribute(wrap, "distR"));
+    }
+
+    private static uint? GetUIntAttribute(OpenXmlElement element, string localName)
+    {
+        var value = GetAttribute(element, localName);
+        return uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
     }
 
     private static int GetRequiredIndex<T>(IReadOnlyList<T> list, T value, string description) where T : class

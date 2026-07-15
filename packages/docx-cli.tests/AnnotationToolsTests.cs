@@ -64,6 +64,7 @@ public class AnnotationToolsTests
         Assert.Equal("paragraph", inline.AnchorKind);
         Assert.Equal("body-p0", inline.ParagraphId);
         Assert.Equal("section-0", inline.SectionId);
+        Assert.Equal(["section-0"], inline.SectionIds);
         Assert.Equal(fixture.ImageSha256, inline.ContentSha256);
         Assert.Null(inline.TableId);
 
@@ -76,12 +77,14 @@ public class AnnotationToolsTests
         Assert.Equal(0, anchored.RowIndex);
         Assert.Equal(0, anchored.CellIndex);
         Assert.Equal("section-1", anchored.SectionId);
+        Assert.Equal(["section-1"], anchored.SectionIds);
         Assert.Equal(914400L, anchored.Placement.WidthEmu);
         Assert.Equal(457200L, anchored.Placement.HeightEmu);
         Assert.Equal("page", anchored.Placement.HorizontalRelativeFrom);
         Assert.Equal("paragraph", anchored.Placement.VerticalRelativeFrom);
         Assert.Equal("1200", anchored.Placement.HorizontalOffset);
         Assert.Equal("2400", anchored.Placement.VerticalOffset);
+        Assert.Equal("none", Assert.IsType<DrawingWrapDetail>(anchored.Placement.Wrap).Kind);
     }
 
     [Fact]
@@ -125,6 +128,88 @@ public class AnnotationToolsTests
         var error = Assert.Throws<InvalidDataException>(() => Inspector.Inspect(fixture.Path));
 
         Assert.Contains("missing image relationship", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Detailed_structure_includes_nested_hyperlink_and_content_control_runs_in_document_order()
+    {
+        var fixture = CreateNestedRunFixture();
+
+        var paragraph = Assert.Single(Inspector.Inspect(fixture).Structure.BodyNodes).Paragraph!;
+
+        Assert.Equal("direct hyperlink controlled", paragraph.Text);
+        Assert.Equal(["direct ", "hyperlink ", "controlled"], paragraph.Runs.Select(run => run.Text));
+        Assert.Equal(paragraph.Text, string.Concat(paragraph.Runs.Select(run => run.Text)).Trim());
+        Assert.Equal([0, 1, 2], paragraph.Runs.Select(run => run.RunIndex));
+        Assert.Null(paragraph.Runs[0].Color);
+        Assert.Equal("FF0000", paragraph.Runs[1].Color);
+        Assert.True(paragraph.Runs[1].Underline == "single");
+        Assert.Equal("NestedStyle", paragraph.Runs[2].Style);
+        Assert.True(paragraph.Runs[2].Bold);
+    }
+
+    [Fact]
+    public void Drawing_evidence_reports_every_section_using_a_linked_header_or_footer_part()
+    {
+        var fixture = CreateLinkedHeaderFooterDrawingFixture();
+
+        var report = Inspector.Inspect(fixture);
+        var drawings = report.Structure.Drawings;
+
+        Assert.Equal(["21", "22"], drawings.Select(drawing => drawing.Id));
+        Assert.All(drawings, drawing => Assert.Equal(["section-0", "section-1"], drawing.SectionIds));
+        Assert.All(drawings, drawing => Assert.Null(drawing.SectionId));
+        Assert.Equal("header-0-p0", drawings[0].ParagraphId);
+        Assert.Equal("footer-0-p0", drawings[1].ParagraphId);
+        var json = System.Text.Json.JsonSerializer.Serialize(report, Json.Options);
+        Assert.DoesNotContain("\"SectionId\":", json, StringComparison.Ordinal);
+        Assert.Contains("\"SectionIds\":", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Drawing_evidence_distinguishes_alignment_simple_position_and_wrap_variants()
+    {
+        var fixture = CreatePlacementVariantsFixture();
+
+        var drawings = Inspector.Inspect(fixture).Structure.Drawings;
+
+        var aligned = Assert.Single(drawings, drawing => drawing.Id == "31").Placement;
+        Assert.Equal("center", aligned.HorizontalAlignment);
+        Assert.Null(aligned.HorizontalOffset);
+        Assert.Equal("page", aligned.HorizontalRelativeFrom);
+        Assert.Equal("bottom", aligned.VerticalAlignment);
+        Assert.Null(aligned.VerticalOffset);
+        Assert.Equal("page", aligned.VerticalRelativeFrom);
+        Assert.True(aligned.SimplePosition);
+        Assert.Equal(111L, aligned.SimplePositionX);
+        Assert.Equal(222L, aligned.SimplePositionY);
+        Assert.Equal(7U, aligned.RelativeHeight);
+        Assert.True(aligned.BehindDoc);
+        Assert.True(aligned.Locked);
+        Assert.False(aligned.LayoutInCell);
+        Assert.False(aligned.AllowOverlap);
+        Assert.Equal(1U, aligned.DistanceFromTop);
+        Assert.Equal(2U, aligned.DistanceFromBottom);
+        Assert.Equal(3U, aligned.DistanceFromLeft);
+        Assert.Equal(4U, aligned.DistanceFromRight);
+        var topBottomWrap = Assert.IsType<DrawingWrapDetail>(aligned.Wrap);
+        Assert.Equal("topBottom", topBottomWrap.Kind);
+        Assert.Equal(10U, topBottomWrap.DistanceFromTop);
+        Assert.Equal(20U, topBottomWrap.DistanceFromBottom);
+
+        var square = Assert.Single(drawings, drawing => drawing.Id == "32").Placement;
+        Assert.Null(square.HorizontalAlignment);
+        Assert.Equal("3100", square.HorizontalOffset);
+        Assert.Equal("column", square.HorizontalRelativeFrom);
+        Assert.Null(square.VerticalAlignment);
+        Assert.Equal("4200", square.VerticalOffset);
+        Assert.Equal("line", square.VerticalRelativeFrom);
+        Assert.False(square.SimplePosition);
+        var squareWrap = Assert.IsType<DrawingWrapDetail>(square.Wrap);
+        Assert.Equal("square", squareWrap.Kind);
+        Assert.Equal("bothSides", squareWrap.TextFlow);
+        Assert.Equal(30U, squareWrap.DistanceFromLeft);
+        Assert.Equal(40U, squareWrap.DistanceFromRight);
     }
 
     [Fact]
@@ -2051,6 +2136,180 @@ public class AnnotationToolsTests
                             new A.Extents { Cx = 914400L, Cy = 457200L }),
                         new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle })))
             { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" });
+
+    private static string CreateNestedRunFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-nested-runs-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            var hyperlinkRelationship = mainPart.AddHyperlinkRelationship(new Uri("https://example.invalid"), true);
+            var paragraph = new Paragraph(
+                new Run(new Text("direct ") { Space = SpaceProcessingModeValues.Preserve }),
+                new Hyperlink(
+                    new Run(
+                        new RunProperties(
+                            new Color { Val = "FF0000" },
+                            new Underline { Val = UnderlineValues.Single }),
+                        new Text("hyperlink ") { Space = SpaceProcessingModeValues.Preserve }))
+                { Id = hyperlinkRelationship.Id },
+                new SdtRun(
+                    new SdtProperties(new Tag { Val = "nested-run" }),
+                    new SdtContentRun(
+                        new Run(
+                            new RunProperties(
+                                new RunStyle { Val = "NestedStyle" },
+                                new Bold()),
+                            new Text("controlled")))));
+            mainPart.Document = new Document(new Body(paragraph, new SectionProperties()));
+            mainPart.Document.Save();
+        }
+
+        AssertValidOpenXml(path);
+        return path;
+    }
+
+    private static string CreateLinkedHeaderFooterDrawingFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-linked-part-drawings-{Guid.NewGuid():N}.docx");
+        var imageBytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body());
+            var header = mainPart.AddNewPart<HeaderPart>();
+            var headerImage = header.AddImagePart(ImagePartType.Png);
+            WritePartBytes(headerImage, imageBytes);
+            header.Header = new Header(
+                new Paragraph(
+                    new Run(
+                        new Text("Shared header"),
+                        CreateInlineDrawing(21U, header.GetIdOfPart(headerImage)))));
+            var footer = mainPart.AddNewPart<FooterPart>();
+            var footerImage = footer.AddImagePart(ImagePartType.Png);
+            WritePartBytes(footerImage, imageBytes);
+            footer.Footer = new Footer(
+                new Paragraph(
+                    new Run(
+                        new Text("Shared footer"),
+                        CreateInlineDrawing(22U, footer.GetIdOfPart(footerImage)))));
+            var firstSection = new SectionProperties(
+                new HeaderReference { Type = HeaderFooterValues.Default, Id = mainPart.GetIdOfPart(header) },
+                new FooterReference { Type = HeaderFooterValues.Default, Id = mainPart.GetIdOfPart(footer) });
+            mainPart.Document.Body!.Append(
+                new Paragraph(new ParagraphProperties(firstSection), new Run(new Text("first"))),
+                new Paragraph(new Run(new Text("second"))),
+                new SectionProperties());
+            mainPart.Document.Save();
+            header.Header.Save();
+            footer.Footer.Save();
+        }
+
+        AssertValidOpenXml(path);
+        return path;
+    }
+
+    private static string CreatePlacementVariantsFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-placement-variants-{Guid.NewGuid():N}.docx");
+        var imageBytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            var imagePart = mainPart.AddImagePart(ImagePartType.Png);
+            WritePartBytes(imagePart, imageBytes);
+            var relationshipId = mainPart.GetIdOfPart(imagePart);
+            mainPart.Document = new Document(new Body(
+                new Paragraph(new Run(new Text("aligned"), CreateAlignedAnchorDrawing(31U, relationshipId))),
+                new Paragraph(new Run(new Text("square"), CreateSquareAnchorDrawing(32U, relationshipId))),
+                new SectionProperties()));
+            mainPart.Document.Save();
+        }
+
+        AssertValidOpenXml(path);
+        return path;
+    }
+
+    private static Drawing CreateAlignedAnchorDrawing(uint id, string relationshipId)
+    {
+        var anchor = new DW.Anchor(
+            new DW.SimplePosition { X = 111L, Y = 222L },
+            new DW.HorizontalPosition(new DW.HorizontalAlignment("center"))
+            {
+                RelativeFrom = DW.HorizontalRelativePositionValues.Page
+            },
+            new DW.VerticalPosition(new DW.VerticalAlignment("bottom"))
+            {
+                RelativeFrom = DW.VerticalRelativePositionValues.Page
+            },
+            new DW.Extent { Cx = 914400L, Cy = 457200L },
+            new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+            new DW.WrapTopBottom { DistanceFromTop = 10U, DistanceFromBottom = 20U },
+            new DW.DocProperties { Id = id, Name = $"Aligned {id}" },
+            new DW.NonVisualGraphicFrameDrawingProperties(
+                new A.GraphicFrameLocks { NoChangeAspect = true }),
+            BuildPictureGraphic(relationshipId))
+        {
+            DistanceFromTop = 1U,
+            DistanceFromBottom = 2U,
+            DistanceFromLeft = 3U,
+            DistanceFromRight = 4U,
+            SimplePos = true,
+            RelativeHeight = 7U,
+            BehindDoc = true,
+            Locked = true,
+            LayoutInCell = false,
+            AllowOverlap = false
+        };
+        return new Drawing(anchor);
+    }
+
+    private static Drawing CreateSquareAnchorDrawing(uint id, string relationshipId)
+    {
+        var anchor = new DW.Anchor(
+            new DW.SimplePosition { X = 0L, Y = 0L },
+            new DW.HorizontalPosition(new DW.PositionOffset("3100"))
+            {
+                RelativeFrom = DW.HorizontalRelativePositionValues.Column
+            },
+            new DW.VerticalPosition(new DW.PositionOffset("4200"))
+            {
+                RelativeFrom = DW.VerticalRelativePositionValues.Line
+            },
+            new DW.Extent { Cx = 914400L, Cy = 457200L },
+            new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+            new DW.WrapSquare
+            {
+                WrapText = DW.WrapTextValues.BothSides,
+                DistanceFromLeft = 30U,
+                DistanceFromRight = 40U
+            },
+            new DW.DocProperties { Id = id, Name = $"Square {id}" },
+            new DW.NonVisualGraphicFrameDrawingProperties(
+                new A.GraphicFrameLocks { NoChangeAspect = true }),
+            BuildPictureGraphic(relationshipId))
+        {
+            DistanceFromTop = 5U,
+            DistanceFromBottom = 6U,
+            DistanceFromLeft = 7U,
+            DistanceFromRight = 8U,
+            SimplePos = false,
+            RelativeHeight = 8U,
+            BehindDoc = false,
+            Locked = false,
+            LayoutInCell = true,
+            AllowOverlap = true
+        };
+        return new Drawing(anchor);
+    }
+
+    private static void WritePartBytes(OpenXmlPart part, byte[] bytes)
+    {
+        using var stream = part.GetStream(FileMode.Create, FileAccess.Write);
+        stream.Write(bytes);
+    }
 
     private static Comment CreateComment(string id, string author, string text)
     {
