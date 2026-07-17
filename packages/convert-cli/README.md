@@ -35,6 +35,14 @@ fallback reason. Set `TIWATER_OFFICE_PDF_BACKEND=wps-writer` to require the
 native WPS backend and fail closed when it is unavailable; use `libreoffice` to
 request the auxiliary backend explicitly.
 
+On macOS, set `TIWATER_WPS_WRITER_LIMA_INSTANCE` to the name of a configured
+Lima Linux instance that exposes the documented `/tmp/lucid-wps-render` shared
+directory and has the published WPS Writer runtime installed. The converter
+then stages each input and output in a unique shared directory and invokes
+`limactl shell <instance>` itself; it still reports `backend: "wps-writer"` and
+fails closed if the configured instance cannot render. This is an explicit
+runtime configuration, not an arbitrary command hook.
+
 LibreOffice-backed PDF conversion requires `soffice`. If it is not on `PATH`, set one of:
 
 - `TIWATER_SOFFICE`
