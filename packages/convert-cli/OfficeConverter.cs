@@ -73,9 +73,14 @@ public static class OfficeConverter
                 WpsWriterPdfConverter.ConvertToPdf(input, output);
                 return new OfficePdfConversionResult("wps-writer");
             }
+            if (LimaWpsWriterPdfConverter.IsAvailable())
+            {
+                LimaWpsWriterPdfConverter.ConvertToPdf(input, output);
+                return new OfficePdfConversionResult("wps-writer");
+            }
             if (requestedBackend == "wps-writer")
             {
-                throw new InvalidOperationException("WPS Writer PDF backend was required but WPS Writer, xvfb-run, dbus-run-session, or pywpsrpc is unavailable.");
+                throw new InvalidOperationException("WPS Writer PDF backend was required but neither a local WPS Writer runtime nor a configured Lima WPS Writer instance is available.");
             }
         }
 
