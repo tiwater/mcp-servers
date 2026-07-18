@@ -166,20 +166,21 @@ public static class TemplateMigration
     }
 
     /// <summary>
-    /// Extends unique exact-text anchors only when two consecutive anchors
-    /// enclose equally sized paragraph gaps in the same document scope. It
-    /// does not use absolute positions and never bridges an unequal gap.
+    /// Derives review-required semantic candidates only when two consecutive
+    /// exact-text anchors enclose equally sized paragraph gaps in the same
+    /// document scope. It never turns structural adjacency into an operation.
     /// </summary>
     public static TemplateMigrationMappingDerivation DeriveAnchorGapPlan(string source, string baseline)
     {
         var analysis = Analyze(source, baseline);
         var exact = DeriveExactTextPlan(source, baseline);
         var mappings = exact.Plan.Mappings.ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
+        var candidates = new List<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)>();
         foreach (var scope in analysis.Source.Objects.Where(item => item.Kind == "paragraph" && IsContentBearing(item)).Select(item => item.Scope).Distinct(StringComparer.Ordinal))
         {
             var sourceParagraphs = analysis.Source.Objects.Where(item => item.Kind == "paragraph" && item.Scope == scope && IsContentBearing(item)).ToList();
             var baselineParagraphs = analysis.Baseline.Objects.Where(item => item.Kind == "paragraph" && item.Scope == scope && IsContentBearing(item)).ToList();
-            PairEqualAnchorGaps(sourceParagraphs, baselineParagraphs, mappings);
+            candidates.AddRange(FindEqualAnchorGapCandidates(sourceParagraphs, baselineParagraphs, mappings));
         }
 
         var plan = new TemplateMigrationPlan(
@@ -193,6 +194,10 @@ public static class TemplateMigration
         {
             unresolved.Add(new TemplateMigrationPlanFailure(mapping.Reason ?? "template-migration-review-required", mapping.SourceObjectId, mapping.BaselineObjectId));
         }
+        foreach (var candidate in candidates)
+        {
+            unresolved.Add(new TemplateMigrationPlanFailure("template-migration-anchor-gap-candidate-review-required", candidate.Source.Id, candidate.Baseline.Id));
+        }
         return new TemplateMigrationMappingDerivation(
             "tiwater.docx.template-migration-anchor-gap-plan/v1",
             build.Pass && unresolved.Count == 0,
@@ -200,40 +205,70 @@ public static class TemplateMigration
             unresolved);
     }
 
-    private static void PairEqualAnchorGaps(
+    private static IReadOnlyList<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)> FindEqualAnchorGapCandidates(
         IReadOnlyList<TemplateMigrationObject> source,
         IReadOnlyList<TemplateMigrationObject> baseline,
         IDictionary<string, TemplateMigrationMapping> mappings)
     {
+        var candidates = new List<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)>();
         var baselineIndexes = baseline.Select((item, index) => (item.Id, index)).ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
-        var anchors = new List<(int SourceIndex, int BaselineIndex)> { (-1, -1) };
-        var lastBaselineIndex = -1;
+        var rawAnchors = new List<(int SourceIndex, int BaselineIndex)>();
         for (var sourceIndex = 0; sourceIndex < source.Count; sourceIndex += 1)
         {
             if (!mappings.TryGetValue(source[sourceIndex].Id, out var mapping)
                 || !string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal)
                 || string.IsNullOrWhiteSpace(mapping.BaselineObjectId)
-                || !baselineIndexes.TryGetValue(mapping.BaselineObjectId, out var baselineIndex)
-                || baselineIndex <= lastBaselineIndex) continue;
-            anchors.Add((sourceIndex, baselineIndex));
-            lastBaselineIndex = baselineIndex;
+                || !baselineIndexes.TryGetValue(mapping.BaselineObjectId, out var baselineIndex)) continue;
+            rawAnchors.Add((sourceIndex, baselineIndex));
         }
+        var anchors = LongestIncreasingAnchorChain(rawAnchors);
+        anchors.Insert(0, (-1, -1));
         anchors.Add((source.Count, baseline.Count));
         for (var index = 1; index < anchors.Count; index += 1)
         {
             var previous = anchors[index - 1];
             var next = anchors[index];
-            var sourceGap = next.SourceIndex - previous.SourceIndex - 1;
-            var baselineGap = next.BaselineIndex - previous.BaselineIndex - 1;
-            if (sourceGap <= 0 || sourceGap != baselineGap) continue;
-            for (var gap = 1; gap <= sourceGap; gap += 1)
+            var claimedBaselineIds = mappings.Values
+                .Where(mapping => string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(mapping.BaselineObjectId))
+                .Select(mapping => mapping.BaselineObjectId!)
+                .ToHashSet(StringComparer.Ordinal);
+            var sourceGap = source.Skip(previous.SourceIndex + 1).Take(next.SourceIndex - previous.SourceIndex - 1)
+                .Where(item => mappings.TryGetValue(item.Id, out var mapping) && string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal))
+                .ToList();
+            var baselineGap = baseline.Skip(previous.BaselineIndex + 1).Take(next.BaselineIndex - previous.BaselineIndex - 1)
+                .Where(item => !claimedBaselineIds.Contains(item.Id))
+                .ToList();
+            if (sourceGap.Count == 0 || sourceGap.Count != baselineGap.Count) continue;
+            for (var gap = 0; gap < sourceGap.Count; gap += 1)
             {
-                var sourceObject = source[previous.SourceIndex + gap];
-                if (!mappings.TryGetValue(sourceObject.Id, out var pending) || !string.Equals(pending.Disposition, "review-required", StringComparison.Ordinal)) continue;
-                var baselineObject = baseline[previous.BaselineIndex + gap];
-                mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, baselineObject.Id, "copy-text", "anchor-gap-paired");
+                var sourceObject = sourceGap[gap];
+                var baselineObject = baselineGap[gap];
+                candidates.Add((sourceObject, baselineObject));
             }
         }
+        return candidates;
+    }
+
+    private static List<(int SourceIndex, int BaselineIndex)> LongestIncreasingAnchorChain(IReadOnlyList<(int SourceIndex, int BaselineIndex)> anchors)
+    {
+        var lengths = new int[anchors.Count];
+        var previous = Enumerable.Repeat(-1, anchors.Count).ToArray();
+        var best = -1;
+        for (var current = 0; current < anchors.Count; current += 1)
+        {
+            lengths[current] = 1;
+            for (var candidate = 0; candidate < current; candidate += 1)
+            {
+                if (anchors[candidate].BaselineIndex >= anchors[current].BaselineIndex || lengths[candidate] + 1 <= lengths[current]) continue;
+                lengths[current] = lengths[candidate] + 1;
+                previous[current] = candidate;
+            }
+            if (best < 0 || lengths[current] > lengths[best]) best = current;
+        }
+        var chain = new List<(int SourceIndex, int BaselineIndex)>();
+        for (var index = best; index >= 0; index = previous[index]) chain.Add(anchors[index]);
+        chain.Reverse();
+        return chain;
     }
 
     public static int RunResolveSemanticCandidate(string[] args)
