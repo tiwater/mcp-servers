@@ -26,6 +26,7 @@ internal static class Cli
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
+                "analyze-template-migration" => Task.FromResult(TemplateMigration.RunAnalyze(args[1..])),
                 "strip-direct-formatting" => Task.FromResult(Transforms.RunStripDirectFormatting(args[1..])),
                 "replace-style-ids" => Task.FromResult(Transforms.RunReplaceStyleIds(args[1..])),
                 "export-json" => Task.FromResult(Transforms.RunExportJson(args[1..])),
@@ -119,6 +120,7 @@ internal static class Cli
         Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
+        Console.WriteLine("  analyze-template-migration <source.docx> <baseline.docx> [--json]");
         Console.WriteLine("  strip-direct-formatting <input.docx> <output.docx>");
         Console.WriteLine("  replace-style-ids <input.docx> <output.docx> <style-map.json>");
         Console.WriteLine("  export-json <input.docx> [<output.json>]");
