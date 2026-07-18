@@ -237,6 +237,18 @@ public sealed record TemplateMigrationOperationBuild(
     IReadOnlyList<DocxEditOperation> Operations,
     IReadOnlyList<TemplateMigrationPlanFailure> Failures);
 
+public sealed record TemplateMigrationReadback(
+    bool Pass,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
+
+public sealed record TemplateMigrationApplyResult(
+    string Schema,
+    bool Pass,
+    string? Output,
+    TemplateMigrationOperationBuild Build,
+    DocxEditResult? Edit,
+    TemplateMigrationReadback? Readback);
+
 public sealed record DocxSemanticFillRule(
     IReadOnlyList<string> RowPatterns,
     IReadOnlyList<string> ColPatterns,
@@ -248,6 +260,7 @@ public sealed record DocxEditOperation(
     string? Text = null,
     string? FindText = null,
     int? HeaderIndex = null,
+    int? FooterIndex = null,
     int? ParagraphIndex = null,
     int? TableIndex = null,
     int? RowIndex = null,
