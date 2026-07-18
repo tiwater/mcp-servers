@@ -221,6 +221,12 @@ public sealed record TemplateMigrationPlan(
     string BaselineSha256,
     IReadOnlyList<TemplateMigrationMapping> Mappings);
 
+public sealed record TemplateMigrationMappingDerivation(
+    string Schema,
+    bool Pass,
+    TemplateMigrationPlan Plan,
+    IReadOnlyList<TemplateMigrationPlanFailure> Unresolved);
+
 public sealed record TemplateMigrationPlanFailure(
     string Reason,
     string? SourceObjectId = null,

@@ -130,6 +130,25 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_exact_text_derivation_maps_only_unique_same_kind_content()
+    {
+        var source = CreateExactTextMappingFixture(includeDuplicateBaselineText: false, baseline: false);
+        var baseline = CreateExactTextMappingFixture(includeDuplicateBaselineText: false, baseline: true);
+
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
+
+        Assert.True(derived.Pass, string.Join("; ", derived.Unresolved.Select(item => item.Reason)));
+        Assert.All(derived.Plan.Mappings, mapping => Assert.Equal("copy-text", mapping.Disposition));
+        Assert.Contains(derived.Plan.Mappings, mapping => mapping.SourceObjectId == "body:paragraph:0" && mapping.BaselineObjectId == "body:paragraph:1");
+        Assert.Contains(derived.Plan.Mappings, mapping => mapping.SourceObjectId == "body:table:0:row:0:cell:0" && mapping.BaselineObjectId == "body:table:0:row:0:cell:1");
+
+        var duplicateBaseline = CreateExactTextMappingFixture(includeDuplicateBaselineText: true, baseline: true);
+        var rejected = TemplateMigration.DeriveExactTextPlan(source, duplicateBaseline);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
+    }
+
+    [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
         var docPath = CreateAnnotatedFixture();
@@ -1098,6 +1117,24 @@ public class AnnotationToolsTests
         main.Document.Save();
         header.Header.Save();
         footer.Footer.Save();
+        return path;
+    }
+
+    private static string CreateExactTextMappingFixture(bool includeDuplicateBaselineText, bool baseline)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"exact-text-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var body = new Body();
+        if (baseline) body.Append(new Paragraph(new Run(new Text("baseline heading"))));
+        body.Append(new Paragraph(new Run(new Text("unique paragraph"))));
+        if (baseline && includeDuplicateBaselineText) body.Append(new Paragraph(new Run(new Text("unique paragraph"))));
+        var row = baseline
+            ? new TableRow(new TableCell(new Paragraph(new Run(new Text("baseline cell")))), new TableCell(new Paragraph(new Run(new Text("unique cell")))))
+            : new TableRow(new TableCell(new Paragraph(new Run(new Text("unique cell")))));
+        body.Append(new Table(new TableProperties(), new TableGrid(new GridColumn { Width = "2400" }, new GridColumn { Width = "2400" }), row));
+        main.Document = new Document(body);
+        main.Document.Save();
         return path;
     }
 

@@ -91,6 +91,63 @@ public static class TemplateMigration
             UnsupportedObjectKinds: ["footnotes", "endnotes", "comments", "content-controls"]);
     }
 
+    public static int RunDeriveExactTextPlan(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            throw new InvalidOperationException("derive-template-migration-exact-text-plan requires <source.docx> <baseline.docx>");
+        }
+        var result = DeriveExactTextPlan(args[0], args[1]);
+        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
+        return result.Pass ? 0 : 1;
+    }
+
+    /// <summary>
+    /// A conservative generic mapping strategy for arbitrary layouts. It maps
+    /// only a content-bearing source object whose normalized text occurs once
+    /// in its source kind and once in the same baseline kind. Everything else
+    /// is review-required; it never resolves a duplicate by position.
+    /// </summary>
+    public static TemplateMigrationMappingDerivation DeriveExactTextPlan(string source, string baseline)
+    {
+        var analysis = Analyze(source, baseline);
+        var sourceContent = analysis.Source.Objects.Where(IsContentBearing).OrderBy(item => item.Id, StringComparer.Ordinal).ToList();
+        var baselineContent = analysis.Baseline.Objects.Where(IsContentBearing).ToList();
+        var sourceCounts = sourceContent.GroupBy(MappingKey).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var baselineByKey = baselineContent.GroupBy(MappingKey).ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var mappings = new List<TemplateMigrationMapping>();
+        var unresolved = new List<TemplateMigrationPlanFailure>();
+
+        foreach (var sourceObject in sourceContent)
+        {
+            var key = MappingKey(sourceObject);
+            baselineByKey.TryGetValue(key, out var candidates);
+            var sourceCount = sourceCounts[key];
+            if (sourceCount == 1 && candidates is { Count: 1 })
+            {
+                mappings.Add(new TemplateMigrationMapping(sourceObject.Id, candidates[0].Id, "copy-text"));
+                continue;
+            }
+
+            var reason = candidates is null || candidates.Count == 0
+                ? "template-migration-exact-text-target-missing"
+                : "template-migration-exact-text-ambiguous";
+            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "review-required", reason));
+            unresolved.Add(new TemplateMigrationPlanFailure(reason, sourceObject.Id, Detail: $"sourceMatches={sourceCount};baselineMatches={candidates?.Count ?? 0}"));
+        }
+
+        var plan = new TemplateMigrationPlan(
+            Schema: "tiwater.docx.template-migration-plan/v1",
+            SourceSha256: analysis.Source.Sha256,
+            BaselineSha256: analysis.Baseline.Sha256,
+            Mappings: mappings);
+        return new TemplateMigrationMappingDerivation(
+            Schema: "tiwater.docx.template-migration-exact-text-plan/v1",
+            Pass: unresolved.Count == 0,
+            Plan: plan,
+            Unresolved: unresolved);
+    }
+
     public static int RunBuildOperations(string[] args)
     {
         if (args.Length < 3)
@@ -417,6 +474,12 @@ public static class TemplateMigration
 
     private static bool IsContentBearing(TemplateMigrationObject item)
         => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text);
+
+    private static string MappingKey(TemplateMigrationObject item)
+        => $"{item.Kind}\u001F{NormalizeMappingText(item.Text)}";
+
+    private static string NormalizeMappingText(string? text)
+        => Regex.Replace(text ?? string.Empty, "\\s+", " ").Trim();
 
     private static DocxEditOperation? BuildCopyTextOperation(string baselineObjectId, string text)
     {
