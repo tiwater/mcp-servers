@@ -88,6 +88,11 @@ public class AnnotationToolsTests
         var media = Assert.Single(inventory, item => item.Kind == "media");
         Assert.Equal("image/png", media.Provenance["contentType"]);
         Assert.Matches("^[A-F0-9]{64}$", media.Provenance["sha256"]);
+
+        var derived = TemplateMigration.DeriveExactTextPlan(source, source);
+        Assert.False(derived.Pass);
+        Assert.Contains(derived.Unresolved, item => item.SourceObjectId == revision.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
+        Assert.Contains(derived.Unresolved, item => item.SourceObjectId == media.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
     }
 
     [Fact]
@@ -118,7 +123,7 @@ public class AnnotationToolsTests
         var incomplete = plan with { Mappings = mappings.Skip(1).ToList() };
         var rejected = TemplateMigration.BuildOperations(source, baseline, incomplete);
         Assert.False(rejected.Pass);
-        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-source-content-unmapped");
+        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-source-object-unmapped");
         Assert.Empty(rejected.Operations);
 
         var blockedOutput = Path.Combine(Path.GetTempPath(), $"migration-blocked-{Guid.NewGuid():N}.docx");
