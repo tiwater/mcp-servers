@@ -253,7 +253,7 @@ public static class TemplateMigration
             foreach (var side in new[] { "source", "baseline" })
             {
                 if (!mapping.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
             }
         }
     }
@@ -288,12 +288,36 @@ public static class TemplateMigration
     private static List<TemplateMigrationObject> ResolveSelector(IReadOnlyList<TemplateMigrationObject> objects, TemplateMigrationSemanticSelector selector)
     {
         var normalizedText = selector.Text is null ? null : NormalizeMappingText(selector.Text);
-        return objects.Where(item => string.Equals(item.Kind, selector.Kind, StringComparison.Ordinal)
-                && (string.IsNullOrWhiteSpace(selector.Scope) || string.Equals(item.Scope, selector.Scope, StringComparison.Ordinal))
-                && (normalizedText is null || string.Equals(NormalizeMappingText(item.Text), normalizedText, StringComparison.Ordinal))
-                && (selector.Sha256 is null || (item.Provenance.TryGetValue("sha256", out var hash) && string.Equals(hash, selector.Sha256, StringComparison.OrdinalIgnoreCase))))
+        var normalizedParentText = selector.ParentText is null ? null : NormalizeMappingText(selector.ParentText);
+        var normalizedPreviousText = selector.PreviousText is null ? null : NormalizeMappingText(selector.PreviousText);
+        var normalizedNextText = selector.NextText is null ? null : NormalizeMappingText(selector.NextText);
+        var byId = objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var siblings = objects.Where(item => string.Equals(item.Kind, selector.Kind, StringComparison.Ordinal)
+                && (string.IsNullOrWhiteSpace(selector.Scope) || string.Equals(item.Scope, selector.Scope, StringComparison.Ordinal)))
+            .ToList();
+        return siblings.Where(item =>
+                (normalizedText is null || string.Equals(NormalizeMappingText(item.Text), normalizedText, StringComparison.Ordinal))
+                && (selector.Sha256 is null || (item.Provenance.TryGetValue("sha256", out var hash) && string.Equals(hash, selector.Sha256, StringComparison.OrdinalIgnoreCase)))
+                && (normalizedParentText is null || (item.ParentId is not null && byId.TryGetValue(item.ParentId, out var parent) && string.Equals(NormalizeMappingText(parent.Text), normalizedParentText, StringComparison.Ordinal)))
+                && ContextTextMatches(siblings, item, -1, normalizedPreviousText)
+                && ContextTextMatches(siblings, item, 1, normalizedNextText))
             .OrderBy(item => item.Id, StringComparer.Ordinal)
             .ToList();
+    }
+
+    private static bool ContextTextMatches(IReadOnlyList<TemplateMigrationObject> siblings, TemplateMigrationObject item, int offset, string? expected)
+    {
+        if (expected is null) return true;
+        var index = -1;
+        for (var current = 0; current < siblings.Count; current += 1)
+        {
+            if (!ReferenceEquals(siblings[current], item)) continue;
+            index = current;
+            break;
+        }
+        var neighbor = index + offset;
+        return neighbor >= 0 && neighbor < siblings.Count
+            && string.Equals(NormalizeMappingText(siblings[neighbor].Text), expected, StringComparison.Ordinal);
     }
 
     public static int RunBuildOperations(string[] args)
@@ -691,7 +715,8 @@ public static class TemplateMigration
         foreach (var (row, rowIndex) in table.Elements<TableRow>().Select((row, index) => (row, index)))
         {
             var rowId = $"{tableId}:row:{rowIndex}";
-            objects.Add(Object(rowId, "table-row", scope, tableId, null, null, EmptyProvenance));
+            var rowText = string.Concat(row.Elements<TableCell>().Select(cell => string.Concat(cell.Descendants<Text>().Select(text => text.Text))));
+            objects.Add(Object(rowId, "table-row", scope, tableId, rowText, null, EmptyProvenance));
             foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((cell, index) => (cell, index)))
             {
                 var cellId = $"{rowId}:cell:{cellIndex}";
