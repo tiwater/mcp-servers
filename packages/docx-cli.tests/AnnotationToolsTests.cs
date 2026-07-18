@@ -446,6 +446,51 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_appends_a_semantically_selected_body_range_without_coordinates()
+    {
+        var source = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: false);
+        var baseline = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [],
+            [new TemplateMigrationSemanticCandidateBodyAppend(
+                new TemplateMigrationSemanticSelector("paragraph", "body", "Revision history"),
+                new TemplateMigrationSemanticSelector("table", "body", DescendantText: "Revision No."))]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal("tiwater.docx.template-migration-plan/v2", resolved.Plan.Schema);
+        Assert.Single(resolved.Plan.BodyAppends!);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-body-append-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using var document = WordprocessingDocument.Open(output, false);
+        var body = document.MainDocumentPart!.Document!.Body!;
+        Assert.Equal(["before", "after", "Revision history"], body.Elements<Paragraph>().Select(item => item.InnerText).ToArray());
+        var table = Assert.Single(body.Elements<Table>());
+        Assert.Contains("Revision No.", table.InnerText);
+        Assert.Contains("R1", table.InnerText);
+    }
+
+    [Fact]
+    public void TemplateMigration_rejects_an_ambiguous_semantic_body_append_selector()
+    {
+        var source = CreateBodyAppendFixture(includeDuplicateRevisionTable: true, baseline: false);
+        var baseline = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [],
+            [new TemplateMigrationSemanticCandidateBodyAppend(
+                new TemplateMigrationSemanticSelector("paragraph", "body", "Revision history"),
+                new TemplateMigrationSemanticSelector("table", "body", DescendantText: "Revision No."))]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.False(resolved.Pass);
+        Assert.Contains(resolved.Unresolved, item => item.Reason == "template-migration-semantic-append-end-ambiguous");
+    }
+
+    [Fact]
     public void TemplateMigration_and_editor_support_header_and_footer_table_cells()
     {
         var source = CreateHeaderFooterTableFixture("source-header", "source-footer");
@@ -2154,6 +2199,31 @@ public class AnnotationToolsTests
         main.Document.Save();
         return path;
     }
+
+    private static string CreateBodyAppendFixture(bool includeDuplicateRevisionTable, bool baseline)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-body-append-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var body = new Body(new Paragraph(new Run(new Text("before"))), new Paragraph(new Run(new Text("after"))));
+        if (!baseline)
+        {
+            var after = body.Elements<Paragraph>().Last();
+            body.InsertBefore(new Paragraph(new Run(new Text("Revision history"))), after);
+            body.InsertBefore(CreateRevisionTable(), after);
+            if (includeDuplicateRevisionTable) body.InsertBefore(CreateRevisionTable(), after);
+        }
+        main.Document = new Document(body);
+        main.Document.Save();
+        return path;
+    }
+
+    private static Table CreateRevisionTable()
+        => new(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "2400" }, new GridColumn { Width = "2400" }),
+            new TableRow(new TableCell(new Paragraph(new Run(new Text("Revision No.")))), new TableCell(new Paragraph(new Run(new Text("Description"))))),
+            new TableRow(new TableCell(new Paragraph(new Run(new Text("R1")))), new TableCell(new Paragraph(new Run(new Text("Current source fact"))))));
 
     private static string CreateLabeledRunMigrationFixture(string label, string value)
     {
