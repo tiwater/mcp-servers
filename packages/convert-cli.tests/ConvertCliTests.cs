@@ -47,11 +47,20 @@ public class ConvertCliTests
     {
         var input = CreateDocxFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
+        var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => OfficePdfConverter.ConvertToPdf(input, output, "docx", sofficePath: "/missing/soffice"));
+        try
+        {
+            Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "libreoffice");
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => OfficePdfConverter.ConvertToPdf(input, output, "docx", sofficePath: "/missing/soffice"));
 
-        Assert.Contains("LibreOffice/soffice is required", ex.Message);
+            Assert.Contains("LibreOffice/soffice is required", ex.Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", originalBackend);
+        }
     }
 
     [Fact]
@@ -91,7 +100,9 @@ public class ConvertCliTests
         var input = CreateDocxFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
         var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
+        var originalLimaInstance = Environment.GetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE");
         Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps-writer");
+        Environment.SetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE", null);
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() => OfficePdfConverter.ConvertToPdf(input, output, "docx"));
@@ -100,6 +111,7 @@ public class ConvertCliTests
         finally
         {
             Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", originalBackend);
+            Environment.SetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE", originalLimaInstance);
         }
     }
 
@@ -176,6 +188,42 @@ public class ConvertCliTests
 
         Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
         Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
+        Assert.Equal(Path.Combine(Path.GetFullPath(isolated), "cache"), startInfo.Environment["XDG_CACHE_HOME"]);
+        Assert.Equal(Path.Combine(Path.GetFullPath(isolated), "runtime"), startInfo.Environment["XDG_RUNTIME_DIR"]);
+    }
+
+    [Fact]
+    public void Wps_writer_starts_an_isolated_dbus_session()
+    {
+        var arguments = WpsWriterPdfConverter.CreateHelperArguments(
+            "dbus-run-session",
+            "/tmp/wpsrpc-python",
+            "/tmp/writer_to_pdf_wps.py",
+            "/tmp/input.docx",
+            "/tmp/output.pdf");
+
+        Assert.Equal(new[]
+        {
+            "-a",
+            "dbus-run-session",
+            "--",
+            "/tmp/wpsrpc-python",
+            "/tmp/writer_to_pdf_wps.py",
+            "/tmp/input.docx",
+            "/tmp/output.pdf",
+        }, arguments);
+    }
+
+    [Fact]
+    public void Wps_writer_uses_the_supported_SaveAs2_pdf_api()
+    {
+        var helperScript = typeof(WpsWriterPdfConverter)
+            .GetField("WpsHelperScript", BindingFlags.NonPublic | BindingFlags.Static)
+            ?.GetRawConstantValue() as string;
+
+        Assert.NotNull(helperScript);
+        Assert.Contains("document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatPDF)", helperScript);
+        Assert.DoesNotContain("ExportAsFixedFormat", helperScript);
     }
 
     private static string CreateLegacyXlsFixture()

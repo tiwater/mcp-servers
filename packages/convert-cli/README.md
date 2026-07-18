@@ -27,7 +27,10 @@ available or fails, the converter falls back to LibreOffice/soffice and then to
 the built-in NPOI converter.
 
 DOC, DOCX, ODT, and RTF PDF conversion prefers WPS Writer through `pywpsrpc`
-when `wps`, `xvfb-run`, and the configured WPS RPC Python are available. The
+when `wps`, `xvfb-run`, `dbus-run-session`, and the configured WPS RPC Python
+are available. The converter launches WPS with an isolated D-Bus session and
+writable per-conversion XDG cache/runtime directories so it remains usable from
+restricted automation sandboxes. The
 JSON result records `backend: "wps-writer"` or `backend: "libreoffice"` and a
 fallback reason. Set `TIWATER_OFFICE_PDF_BACKEND=wps-writer` to require the
 native WPS backend and fail closed when it is unavailable; use `libreoffice` to
@@ -38,6 +41,14 @@ XLS and XLSX PDF conversion likewise prefers WPS Spreadsheets through
 Python are available. Set `TIWATER_OFFICE_PDF_BACKEND=wps-spreadsheet` to
 require that native backend and fail closed; it never treats LibreOffice output
 as WPS Spreadsheet proof.
+
+On macOS, set `TIWATER_WPS_WRITER_LIMA_INSTANCE` to the name of a configured
+Lima Linux instance that exposes the documented `/tmp/lucid-wps-render` shared
+directory and has the published WPS Writer runtime installed. The converter
+then stages each input and output in a unique shared directory and invokes
+`limactl shell <instance>` itself; it still reports `backend: "wps-writer"` and
+fails closed if the configured instance cannot render. This is an explicit
+runtime configuration, not an arbitrary command hook.
 
 LibreOffice-backed PDF conversion requires `soffice`. If it is not on `PATH`, set one of:
 
