@@ -5,6 +5,9 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Dockit.Docx;
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx.Tests;
@@ -93,6 +96,35 @@ public class AnnotationToolsTests
         Assert.False(derived.Pass);
         Assert.Contains(derived.Unresolved, item => item.SourceObjectId == revision.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
         Assert.Contains(derived.Unresolved, item => item.SourceObjectId == media.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
+    }
+
+    [Fact]
+    public void TemplateMigration_copies_declared_media_into_a_current_baseline_slot_and_proves_readback()
+    {
+        var source = CreateMediaMigrationFixture("source text", [1, 2, 3, 4]);
+        var baseline = CreateMediaMigrationFixture("baseline placeholder", [9, 8, 7, 6]);
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var sourceMedia = Assert.Single(analysis.Source.Objects, item => item.Kind == "media");
+        var baselineMedia = Assert.Single(analysis.Baseline.Objects, item => item.Kind == "media");
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v1",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            [
+                new TemplateMigrationMapping("body:paragraph:0", "body:paragraph:0", "copy-text"),
+                new TemplateMigrationMapping(sourceMedia.Id, baselineMedia.Id, "copy-media")
+            ]);
+
+        var build = TemplateMigration.BuildOperations(source, baseline, plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Single(build.MediaCopies);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-media-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, plan, output);
+
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        Assert.Empty(applied.MediaFailures);
+        var outputMedia = Assert.Single(TemplateMigration.Analyze(output, output).Source.Objects, item => item.Id == baselineMedia.Id);
+        Assert.Equal(sourceMedia.Provenance["sha256"], outputMedia.Provenance["sha256"]);
     }
 
     [Fact]
@@ -1802,6 +1834,36 @@ public class AnnotationToolsTests
             ));
             mainPart.Document.Save();
         }
+        return path;
+    }
+
+    private static string CreateMediaMigrationFixture(string text, byte[] mediaBytes)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-media-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var image = main.AddImagePart(ImagePartType.Png);
+        using var stream = new MemoryStream(mediaBytes);
+        image.FeedData(stream);
+        var drawing = new Drawing(
+            new DW.Inline(
+                new DW.Extent { Cx = 990000L, Cy = 990000L },
+                new DW.DocProperties { Id = 1U, Name = "migration-image" },
+                new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(new A.GraphicData(
+                    new PIC.Picture(
+                        new PIC.NonVisualPictureProperties(
+                            new PIC.NonVisualDrawingProperties { Id = 0U, Name = "migration-image" },
+                            new PIC.NonVisualPictureDrawingProperties()),
+                        new PIC.BlipFill(
+                            new A.Blip { Embed = main.GetIdOfPart(image) },
+                            new A.Stretch(new A.FillRectangle())),
+                        new PIC.ShapeProperties(
+                            new A.Transform2D(new A.Offset { X = 0L, Y = 0L }, new A.Extents { Cx = 990000L, Cy = 990000L }),
+                            new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }))
+                    ) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })));
+        main.Document = new Document(new Body(new Paragraph(new Run(new Text(text)), new Run(drawing))));
+        main.Document.Save();
         return path;
     }
 

@@ -233,6 +233,10 @@ public sealed record TemplateMigrationPlanFailure(
     string? BaselineObjectId = null,
     string? Detail = null);
 
+public sealed record TemplateMigrationMediaCopy(
+    string SourceObjectId,
+    string BaselineObjectId);
+
 public sealed record TemplateMigrationOperationBuild(
     string Schema,
     bool Pass,
@@ -241,6 +245,7 @@ public sealed record TemplateMigrationOperationBuild(
     string BaselineSha256,
     string? OperationsSha256,
     IReadOnlyList<DocxEditOperation> Operations,
+    IReadOnlyList<TemplateMigrationMediaCopy> MediaCopies,
     IReadOnlyList<TemplateMigrationPlanFailure> Failures);
 
 public sealed record TemplateMigrationReadback(
@@ -253,6 +258,7 @@ public sealed record TemplateMigrationApplyResult(
     string? Output,
     TemplateMigrationOperationBuild Build,
     DocxEditResult? Edit,
+    IReadOnlyList<TemplateMigrationPlanFailure> MediaFailures,
     TemplateMigrationReadback? Readback);
 
 public sealed record DocxSemanticFillRule(
