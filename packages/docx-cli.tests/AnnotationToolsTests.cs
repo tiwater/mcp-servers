@@ -409,6 +409,43 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_retains_an_explicitly_selected_target_label_without_emitting_an_edit()
+    {
+        var source = CreateTextMigrationFixture("Legacy purpose label");
+        var baseline = CreateTextMigrationFixture("Objective:");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Legacy purpose label"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Objective:"),
+                    "retain-target-label")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(resolved.Plan.Mappings, item => item.Disposition == "retain-target-label" && item.Reason == "semantic-candidate-retain-target-label");
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Empty(build.Operations);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-label-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using (var document = WordprocessingDocument.Open(output, false))
+        {
+            Assert.Equal("Objective:", string.Concat(document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().Descendants<Text>().Select(text => text.Text)));
+        }
+        using (var document = WordprocessingDocument.Open(output, true))
+        {
+            document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().GetFirstChild<Run>()!.GetFirstChild<Text>()!.Text = "Tampered label:";
+            document.MainDocumentPart.Document.Save();
+        }
+        var tampered = TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan);
+        Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-retained-target-run-mismatch");
+    }
+
+    [Fact]
     public void TemplateMigration_and_editor_support_header_and_footer_table_cells()
     {
         var source = CreateHeaderFooterTableFixture("source-header", "source-footer");

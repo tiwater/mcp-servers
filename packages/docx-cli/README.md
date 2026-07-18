@@ -75,6 +75,9 @@ hash-attested inventories, never as caller-supplied document coordinates.
 For a mixed label/value parent, a semantic candidate may use `retain-target`
 for the attested target parent only together with at least one mapped child
 run. Readback verifies that every untargeted target run remains unchanged.
+For an explicitly selected label-only parent, `retain-target-label` records
+that target label retention without inferring semantic equivalence or accepting
+coordinates; it emits no edit and readback verifies every target run unchanged.
 
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
