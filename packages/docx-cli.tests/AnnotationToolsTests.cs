@@ -54,6 +54,50 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_builds_hash_bound_operations_only_from_complete_declared_mapping()
+    {
+        var source = CreateAnnotatedFixture();
+        var baseline = Path.Combine(Path.GetTempPath(), $"migration-plan-baseline-{Guid.NewGuid():N}.docx");
+        Editor.Apply(source, baseline, [
+            new DocxEditOperation("replaceParagraphText", ParagraphIndex: 0, Text: "Target heading"),
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 1, Text: "Target cell")
+        ]);
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var mappings = analysis.Source.Objects
+            .Where(item => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text))
+            .Select(item => new TemplateMigrationMapping(item.Id, item.Id, "copy-text"))
+            .ToList();
+        var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256, mappings);
+
+        var result = TemplateMigration.BuildOperations(source, baseline, plan);
+
+        Assert.True(result.Pass, string.Join("; ", result.Failures.Select(item => item.Reason)));
+        Assert.False(result.ReviewRequired);
+        Assert.NotNull(result.OperationsSha256);
+        Assert.Equal(mappings.Count, result.Operations.Count);
+        Assert.Contains(result.Operations, operation => operation.Type == "replaceParagraphText" && operation.ParagraphIndex == 0 && operation.Text == "Project code XXXX 峰面积");
+        Assert.Contains(result.Operations, operation => operation.Type == "replaceTableCellText" && operation.TableIndex == 0 && operation.RowIndex == 0 && operation.CellIndex == 1 && operation.Text == "Batch YYYY");
+
+        var incomplete = plan with { Mappings = mappings.Skip(1).ToList() };
+        var rejected = TemplateMigration.BuildOperations(source, baseline, incomplete);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-source-content-unmapped");
+        Assert.Empty(rejected.Operations);
+
+        var stale = plan with { SourceSha256 = new string('0', 64) };
+        var staleRejected = TemplateMigration.BuildOperations(source, baseline, stale);
+        Assert.False(staleRejected.Pass);
+        Assert.Contains(staleRejected.Failures, item => item.Reason == "template-migration-source-hash-mismatch");
+        Assert.Empty(staleRejected.Operations);
+
+        var duplicate = plan with { Mappings = [mappings[0], mappings[0], .. mappings.Skip(1)] };
+        var duplicateRejected = TemplateMigration.BuildOperations(source, baseline, duplicate);
+        Assert.False(duplicateRejected.Pass);
+        Assert.Contains(duplicateRejected.Failures, item => item.Reason == "template-migration-source-object-duplicate");
+        Assert.Empty(duplicateRejected.Operations);
+    }
+
+    [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
         var docPath = CreateAnnotatedFixture();
