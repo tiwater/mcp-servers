@@ -67,7 +67,14 @@ tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.d
 Compiles a hash-bound, caller-declared object mapping into deterministic edit
 operations. It rejects missing/duplicate source content, duplicate targets,
 hash drift, type mismatches, unsupported targets, and review-required
-mappings. It does not infer any source-to-target mapping.
+mappings. It does not infer any source-to-target mapping. A mapping can target
+an attested `run` as well as a paragraph or table cell; run operations preserve
+the target template's surrounding labels and formatting while replacing only
+the mapped run's text. Object ids are accepted only from the current
+hash-attested inventories, never as caller-supplied document coordinates.
+For a mixed label/value parent, a semantic candidate may use `retain-target`
+for the attested target parent only together with at least one mapped child
+run. Readback verifies that every untargeted target run remains unchanged.
 
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>

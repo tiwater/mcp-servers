@@ -361,13 +361,61 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_copies_attested_run_content_without_replacing_target_owned_label()
+    {
+        var source = CreateLabeledRunMigrationFixture("Legacy document no.: ", "SOP03-5-0014");
+        var baseline = CreateLabeledRunMigrationFixture("Document No.: ", "PLACEHOLDER");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Legacy document no.: SOP03-5-0014"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Document No.: PLACEHOLDER"),
+                    "retain-target"),
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("run", "body", "SOP03-5-0014", ParentText: "Legacy document no.: SOP03-5-0014"),
+                    new TemplateMigrationSemanticSelector("run", "body", "PLACEHOLDER", ParentText: "Document No.: PLACEHOLDER"),
+                    "copy-text")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(resolved.Plan.Mappings, item => item.Disposition == "retain-target" && item.SourceObjectId == "body:paragraph:0" && item.BaselineObjectId == "body:paragraph:0");
+        var missingFactRun = resolved.Plan with { Mappings = resolved.Plan.Mappings.Where(item => item.Disposition != "copy-text").ToList() };
+        var rejected = TemplateMigration.BuildOperations(source, baseline, missingFactRun);
+        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-retain-target-fact-run-required");
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        var operation = Assert.Single(build.Operations);
+        Assert.Equal("replaceParagraphRunText", operation.Type);
+        Assert.Equal(1, operation.RunIndex);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-run-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using (var document = WordprocessingDocument.Open(output, false))
+        {
+            var runs = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().Elements<Run>().ToList();
+            Assert.Equal("Document No.: ", string.Concat(runs[0].Descendants<Text>().Select(text => text.Text)));
+            Assert.Equal("SOP03-5-0014", string.Concat(runs[1].Descendants<Text>().Select(text => text.Text)));
+        }
+        using (var document = WordprocessingDocument.Open(output, true))
+        {
+            document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().Elements<Run>().First().GetFirstChild<Text>()!.Text = "Tampered label: ";
+            document.MainDocumentPart.Document.Save();
+        }
+        var tampered = TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan);
+        Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-retained-target-run-mismatch");
+    }
+
+    [Fact]
     public void TemplateMigration_and_editor_support_header_and_footer_table_cells()
     {
         var source = CreateHeaderFooterTableFixture("source-header", "source-footer");
         var baseline = CreateHeaderFooterTableFixture("baseline-header", "baseline-footer");
         var analysis = TemplateMigration.Analyze(source, baseline);
         var mappings = analysis.Source.Objects
-            .Where(item => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text))
+            .Where(item => (item.Kind == "paragraph" || item.Kind == "table-cell" || item.Kind == "run") && !string.IsNullOrWhiteSpace(item.Text))
             .Select(item => new TemplateMigrationMapping(item.Id, item.Id, "copy-text"))
             .ToList();
         var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256, mappings);
@@ -376,6 +424,10 @@ public class AnnotationToolsTests
         Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
         Assert.Contains(build.Operations, item => item.Type == "replaceHeaderTableCellText" && item.Text == "source-header");
         Assert.Contains(build.Operations, item => item.Type == "replaceFooterTableCellText" && item.Text == "source-footer");
+        Assert.Contains(build.Operations, item => item.Type == "replaceHeaderParagraphRunText" && item.Text == "header-paragraph-source-header");
+        Assert.Contains(build.Operations, item => item.Type == "replaceFooterParagraphRunText" && item.Text == "footer-paragraph-source-footer");
+        Assert.Contains(build.Operations, item => item.Type == "replaceHeaderTableCellRunText" && item.Text == "source-header");
+        Assert.Contains(build.Operations, item => item.Type == "replaceFooterTableCellRunText" && item.Text == "source-footer");
 
         var output = Path.Combine(Path.GetTempPath(), $"migration-header-footer-{Guid.NewGuid():N}.docx");
         var applied = TemplateMigration.Apply(source, baseline, plan, output);
@@ -1358,15 +1410,21 @@ public class AnnotationToolsTests
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
         var header = main.AddNewPart<HeaderPart>();
-        header.Header = new Header(new Table(
+        var headerCell = new TableCell();
+        headerCell.Append(new Paragraph(new Run(new Text(headerText))));
+        var headerTable = new Table(
             new TableProperties(),
             new TableGrid(new GridColumn { Width = "2400" }),
-            new TableRow(new TableCell(new Paragraph(new Run(new Text(headerText)))))));
+            new TableRow(headerCell));
+        header.Header = new Header(new Paragraph(new Run(new Text($"header-paragraph-{headerText}"))), headerTable);
         var footer = main.AddNewPart<FooterPart>();
-        footer.Footer = new Footer(new Table(
+        var footerCell = new TableCell();
+        footerCell.Append(new Paragraph(new Run(new Text(footerText))));
+        var footerTable = new Table(
             new TableProperties(),
             new TableGrid(new GridColumn { Width = "2400" }),
-            new TableRow(new TableCell(new Paragraph(new Run(new Text(footerText)))))));
+            new TableRow(footerCell));
+        footer.Footer = new Footer(new Paragraph(new Run(new Text($"footer-paragraph-{footerText}"))), footerTable);
         var section = new SectionProperties(
             new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
             new FooterReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(footer) });
@@ -2056,6 +2114,18 @@ public class AnnotationToolsTests
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
         main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateLabeledRunMigrationFixture(string label, string value)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-labeled-run-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(new Paragraph(
+            new Run(new RunProperties(new Bold()), new Text(label)),
+            new Run(new RunProperties(new Italic()), new Text(value)))));
         main.Document.Save();
         return path;
     }

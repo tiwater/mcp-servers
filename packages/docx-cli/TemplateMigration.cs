@@ -23,6 +23,12 @@ public static class TemplateMigration
     private static readonly Regex BodyTableCellId = new("^body:table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex HeaderTableCellId = new("^header:(?<header>\\d+):table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex FooterTableCellId = new("^footer:(?<footer>\\d+):table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex BodyParagraphRunId = new("^body:paragraph:(?<paragraph>\\d+):run:(?<run>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex HeaderParagraphRunId = new("^header:(?<header>\\d+):paragraph:(?<paragraph>\\d+):run:(?<run>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex FooterParagraphRunId = new("^footer:(?<footer>\\d+):paragraph:(?<paragraph>\\d+):run:(?<run>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex BodyTableCellRunId = new("^body:table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+):paragraph:(?<paragraph>\\d+):run:(?<run>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex HeaderTableCellRunId = new("^header:(?<header>\\d+):table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+):paragraph:(?<paragraph>\\d+):run:(?<run>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex FooterTableCellRunId = new("^footer:(?<footer>\\d+):table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+):paragraph:(?<paragraph>\\d+):run:(?<run>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static int RunAnalyze(string[] args)
     {
@@ -317,12 +323,18 @@ public static class TemplateMigration
             }
             var sourceObject = sourceMatches[0];
             var baselineObject = baselineMatches[0];
-            if (!mappings.TryGetValue(sourceObject.Id, out var existing) || !string.Equals(existing.Disposition, "review-required", StringComparison.Ordinal))
+            var pending = mappings.TryGetValue(sourceObject.Id, out var existing)
+                && string.Equals(existing.Disposition, "review-required", StringComparison.Ordinal);
+            var newRunMapping = sourceObject.Kind == "run" && !mappings.ContainsKey(sourceObject.Id);
+            if (!pending && !newRunMapping)
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id, baselineObject.Id));
                 continue;
             }
-            mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, baselineObject.Id, proposal.Disposition, "semantic-candidate-resolved");
+            var reason = string.Equals(proposal.Disposition, "retain-target", StringComparison.Ordinal)
+                ? "semantic-candidate-retain-target"
+                : "semantic-candidate-resolved";
+            mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, baselineObject.Id, proposal.Disposition, reason);
         }
 
         var copiedMediaRelationships = mappings.Values
@@ -394,7 +406,7 @@ public static class TemplateMigration
         {
             ValidateSemanticSelector(mapping.Source, "source");
             ValidateSemanticSelector(mapping.Baseline, "baseline");
-            if (mapping.Disposition is not ("copy-text" or "copy-media")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
+            if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
         }
     }
 
@@ -544,6 +556,27 @@ public static class TemplateMigration
                 }
                 mediaCopies.Add(new TemplateMigrationMediaCopy(mapping.SourceObjectId, mapping.BaselineObjectId));
             }
+            else if (string.Equals(disposition, "retain-target", StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(mapping.Reason))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-terminal-reason-required", mapping.SourceObjectId, mapping.BaselineObjectId));
+                }
+                if (string.IsNullOrWhiteSpace(mapping.BaselineObjectId) || !baselineById.TryGetValue(mapping.BaselineObjectId, out var baselineObject))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-unknown", mapping.SourceObjectId, mapping.BaselineObjectId));
+                    continue;
+                }
+                if (sourceObject.Kind is not ("paragraph" or "table-cell") || !string.Equals(sourceObject.Kind, baselineObject.Kind, StringComparison.Ordinal))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-retain-target-parent-required", mapping.SourceObjectId, mapping.BaselineObjectId));
+                    continue;
+                }
+                if (!copyTargets.Add(mapping.BaselineObjectId))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-duplicate", mapping.SourceObjectId, mapping.BaselineObjectId));
+                }
+            }
             else if (string.Equals(disposition, "review-required", StringComparison.Ordinal) || string.Equals(disposition, "out-of-scope", StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(mapping.Reason))
@@ -555,6 +588,22 @@ public static class TemplateMigration
             else
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-disposition-invalid", mapping.SourceObjectId, mapping.BaselineObjectId, mapping.Disposition));
+            }
+        }
+
+        foreach (var mapping in mappingsBySource.Values.Where(item => string.Equals(item.Disposition, "retain-target", StringComparison.Ordinal)))
+        {
+            var sourceParent = sourceById[mapping.SourceObjectId];
+            var hasMappedFactRun = mappingsBySource.Values.Any(child =>
+                string.Equals(child.Disposition, "copy-text", StringComparison.Ordinal)
+                && sourceById[child.SourceObjectId].Kind == "run"
+                && string.Equals(sourceById[child.SourceObjectId].ParentId, sourceParent.Id, StringComparison.Ordinal)
+                && child.BaselineObjectId is not null
+                && baselineById[child.BaselineObjectId].Kind == "run"
+                && string.Equals(baselineById[child.BaselineObjectId].ParentId, mapping.BaselineObjectId, StringComparison.Ordinal));
+            if (!hasMappedFactRun)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-retain-target-fact-run-required", mapping.SourceObjectId, mapping.BaselineObjectId));
             }
         }
 
@@ -754,6 +803,26 @@ public static class TemplateMigration
                     || !string.Equals(sourceHash, outputHash, StringComparison.Ordinal)))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-media-mismatch", mapping.SourceObjectId, mapping.BaselineObjectId));
+            }
+        }
+
+        foreach (var mapping in (plan.Mappings ?? []).Where(item => string.Equals(item.Disposition, "retain-target", StringComparison.Ordinal)))
+        {
+            if (string.IsNullOrWhiteSpace(mapping.BaselineObjectId)) continue;
+            var copiedTargetRuns = (plan.Mappings ?? [])
+                .Where(item => string.Equals(item.Disposition, "copy-text", StringComparison.Ordinal))
+                .Select(item => item.BaselineObjectId)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var baselineRun in baselineInventory.Objects.Where(item => item.Kind == "run" && string.Equals(item.ParentId, mapping.BaselineObjectId, StringComparison.Ordinal)))
+            {
+                if (copiedTargetRuns.Contains(baselineRun.Id)) continue;
+                if (!outputById.TryGetValue(baselineRun.Id, out var outputRun)
+                    || !string.Equals(baselineRun.Text, outputRun.Text, StringComparison.Ordinal)
+                    || !string.Equals(baselineRun.Provenance.GetValueOrDefault("runPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("runPropertiesSha256"), StringComparison.Ordinal))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-retained-target-run-mismatch", mapping.SourceObjectId, baselineRun.Id));
+                }
             }
         }
 
@@ -1113,6 +1182,36 @@ public static class TemplateMigration
 
     private static DocxEditOperation? BuildCopyTextOperation(string baselineObjectId, string text)
     {
+        var bodyParagraphRun = BodyParagraphRunId.Match(baselineObjectId);
+        if (bodyParagraphRun.Success)
+        {
+            return new DocxEditOperation("replaceParagraphRunText", ParagraphIndex: int.Parse(bodyParagraphRun.Groups["paragraph"].Value), RunIndex: int.Parse(bodyParagraphRun.Groups["run"].Value), Text: text);
+        }
+        var headerParagraphRun = HeaderParagraphRunId.Match(baselineObjectId);
+        if (headerParagraphRun.Success)
+        {
+            return new DocxEditOperation("replaceHeaderParagraphRunText", HeaderIndex: int.Parse(headerParagraphRun.Groups["header"].Value), ParagraphIndex: int.Parse(headerParagraphRun.Groups["paragraph"].Value), RunIndex: int.Parse(headerParagraphRun.Groups["run"].Value), Text: text);
+        }
+        var footerParagraphRun = FooterParagraphRunId.Match(baselineObjectId);
+        if (footerParagraphRun.Success)
+        {
+            return new DocxEditOperation("replaceFooterParagraphRunText", FooterIndex: int.Parse(footerParagraphRun.Groups["footer"].Value), ParagraphIndex: int.Parse(footerParagraphRun.Groups["paragraph"].Value), RunIndex: int.Parse(footerParagraphRun.Groups["run"].Value), Text: text);
+        }
+        var bodyTableCellRun = BodyTableCellRunId.Match(baselineObjectId);
+        if (bodyTableCellRun.Success)
+        {
+            return new DocxEditOperation("replaceTableCellRunText", TableIndex: int.Parse(bodyTableCellRun.Groups["table"].Value), RowIndex: int.Parse(bodyTableCellRun.Groups["row"].Value), CellIndex: int.Parse(bodyTableCellRun.Groups["cell"].Value), ParagraphIndex: int.Parse(bodyTableCellRun.Groups["paragraph"].Value), RunIndex: int.Parse(bodyTableCellRun.Groups["run"].Value), Text: text);
+        }
+        var headerTableCellRun = HeaderTableCellRunId.Match(baselineObjectId);
+        if (headerTableCellRun.Success)
+        {
+            return new DocxEditOperation("replaceHeaderTableCellRunText", HeaderIndex: int.Parse(headerTableCellRun.Groups["header"].Value), TableIndex: int.Parse(headerTableCellRun.Groups["table"].Value), RowIndex: int.Parse(headerTableCellRun.Groups["row"].Value), CellIndex: int.Parse(headerTableCellRun.Groups["cell"].Value), ParagraphIndex: int.Parse(headerTableCellRun.Groups["paragraph"].Value), RunIndex: int.Parse(headerTableCellRun.Groups["run"].Value), Text: text);
+        }
+        var footerTableCellRun = FooterTableCellRunId.Match(baselineObjectId);
+        if (footerTableCellRun.Success)
+        {
+            return new DocxEditOperation("replaceFooterTableCellRunText", FooterIndex: int.Parse(footerTableCellRun.Groups["footer"].Value), TableIndex: int.Parse(footerTableCellRun.Groups["table"].Value), RowIndex: int.Parse(footerTableCellRun.Groups["row"].Value), CellIndex: int.Parse(footerTableCellRun.Groups["cell"].Value), ParagraphIndex: int.Parse(footerTableCellRun.Groups["paragraph"].Value), RunIndex: int.Parse(footerTableCellRun.Groups["run"].Value), Text: text);
+        }
         var bodyParagraph = BodyParagraphId.Match(baselineObjectId);
         if (bodyParagraph.Success)
         {

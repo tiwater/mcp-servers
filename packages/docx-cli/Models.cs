@@ -306,6 +306,7 @@ public sealed record DocxEditOperation(
     int? HeaderIndex = null,
     int? FooterIndex = null,
     int? ParagraphIndex = null,
+    int? RunIndex = null,
     int? TableIndex = null,
     int? RowIndex = null,
     int? CellIndex = null,
