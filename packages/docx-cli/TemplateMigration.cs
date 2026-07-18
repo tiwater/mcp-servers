@@ -177,6 +177,7 @@ public static class TemplateMigration
         var analysis = Analyze(source, baseline);
         var failures = new List<TemplateMigrationPlanFailure>();
         var operations = new List<DocxEditOperation>();
+        var mediaCopies = new List<TemplateMigrationMediaCopy>();
         var reviewRequired = false;
 
         if (!string.Equals(plan.Schema, "tiwater.docx.template-migration-plan/v1", StringComparison.Ordinal))
@@ -236,6 +237,25 @@ public static class TemplateMigration
                 }
                 operations.Add(operation);
             }
+            else if (string.Equals(disposition, "copy-media", StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(mapping.BaselineObjectId) || !baselineById.TryGetValue(mapping.BaselineObjectId, out var baselineObject))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-unknown", mapping.SourceObjectId, mapping.BaselineObjectId));
+                    continue;
+                }
+                if (sourceObject.Kind != "media" || baselineObject.Kind != "media")
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-media-object-required", mapping.SourceObjectId, mapping.BaselineObjectId, $"{sourceObject.Kind}->{baselineObject.Kind}"));
+                    continue;
+                }
+                if (!copyTargets.Add(mapping.BaselineObjectId))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-duplicate", mapping.SourceObjectId, mapping.BaselineObjectId));
+                    continue;
+                }
+                mediaCopies.Add(new TemplateMigrationMediaCopy(mapping.SourceObjectId, mapping.BaselineObjectId));
+            }
             else if (string.Equals(disposition, "review-required", StringComparison.Ordinal) || string.Equals(disposition, "out-of-scope", StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(mapping.Reason))
@@ -250,9 +270,18 @@ public static class TemplateMigration
             }
         }
 
+        var copiedMediaRelationships = mappingsBySource.Values
+            .Where(mapping => string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal))
+            .Select(mapping => sourceById[mapping.SourceObjectId])
+            .Select(item => item.Provenance.TryGetValue("relationshipId", out var relationshipId) ? relationshipId : null)
+            .Where(relationshipId => !string.IsNullOrWhiteSpace(relationshipId))
+            .ToHashSet(StringComparer.Ordinal);
         foreach (var sourceObject in sourceById.Values.Where(IsMigrationRequired))
         {
-            if (!mappingsBySource.ContainsKey(sourceObject.Id))
+            var drawingCoveredByMedia = sourceObject.Kind == "drawing"
+                && sourceObject.Provenance.TryGetValue("embedRelationshipId", out var embeddedRelationshipId)
+                && copiedMediaRelationships.Contains(embeddedRelationshipId);
+            if (!mappingsBySource.ContainsKey(sourceObject.Id) && !drawingCoveredByMedia)
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-source-object-unmapped", sourceObject.Id, Detail: sourceObject.Kind));
             }
@@ -260,14 +289,16 @@ public static class TemplateMigration
 
         var pass = failures.Count == 0 && !reviewRequired;
         var canonicalOperations = pass ? operations : [];
+        var canonicalMediaCopies = pass ? mediaCopies : [];
         return new TemplateMigrationOperationBuild(
             Schema: "tiwater.docx.template-migration-operation-build/v1",
             Pass: pass,
             ReviewRequired: reviewRequired,
             SourceSha256: analysis.Source.Sha256,
             BaselineSha256: analysis.Baseline.Sha256,
-            OperationsSha256: pass ? HashCanonical(canonicalOperations) : null,
+            OperationsSha256: pass ? HashCanonical(new { operations = canonicalOperations, mediaCopies = canonicalMediaCopies }) : null,
             Operations: canonicalOperations,
+            MediaCopies: canonicalMediaCopies,
             Failures: failures);
     }
 
@@ -296,19 +327,22 @@ public static class TemplateMigration
                 Output: null,
                 Build: build,
                 Edit: null,
+                MediaFailures: [],
                 Readback: null);
         }
 
         var outputPath = Path.GetFullPath(output);
         var edit = Editor.Apply(Path.GetFullPath(baseline), outputPath, build.Operations);
+        var mediaFailures = ApplyMediaCopies(source, outputPath, build.MediaCopies);
         var readback = ValidateReadback(source, baseline, outputPath, plan);
-        var pass = edit.AppliedOperations.All(operation => operation.Applied) && readback.Pass;
+        var pass = edit.AppliedOperations.All(operation => operation.Applied) && mediaFailures.Count == 0 && readback.Pass;
         return new TemplateMigrationApplyResult(
             Schema: "tiwater.docx.template-migration-apply/v1",
             Pass: pass,
             Output: outputPath,
             Build: build,
             Edit: edit,
+            MediaFailures: mediaFailures,
             Readback: readback);
     }
 
@@ -336,15 +370,22 @@ public static class TemplateMigration
         var outputById = outputInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         foreach (var mapping in plan.Mappings ?? [])
         {
-            if (!string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal)) continue;
+            if (!string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal) && !string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal)) continue;
             if (!sourceById.TryGetValue(mapping.SourceObjectId, out var sourceObject) || string.IsNullOrWhiteSpace(mapping.BaselineObjectId) || !outputById.TryGetValue(mapping.BaselineObjectId, out var outputObject))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-object-missing", mapping.SourceObjectId, mapping.BaselineObjectId));
                 continue;
             }
-            if (!string.Equals(sourceObject.Text, outputObject.Text, StringComparison.Ordinal))
+            if (string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal) && !string.Equals(sourceObject.Text, outputObject.Text, StringComparison.Ordinal))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-content-mismatch", mapping.SourceObjectId, mapping.BaselineObjectId));
+            }
+            if (string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal)
+                && (!sourceObject.Provenance.TryGetValue("sha256", out var sourceHash)
+                    || !outputObject.Provenance.TryGetValue("sha256", out var outputHash)
+                    || !string.Equals(sourceHash, outputHash, StringComparison.Ordinal)))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-media-mismatch", mapping.SourceObjectId, mapping.BaselineObjectId));
             }
         }
 
@@ -371,6 +412,52 @@ public static class TemplateMigration
         }
 
         return new TemplateMigrationReadback(failures.Count == 0, failures);
+    }
+
+    private static IReadOnlyList<TemplateMigrationPlanFailure> ApplyMediaCopies(string source, string output, IReadOnlyList<TemplateMigrationMediaCopy> copies)
+    {
+        if (copies.Count == 0) return [];
+        var failures = new List<TemplateMigrationPlanFailure>();
+        var sourceInventory = Inventory(source).Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var outputInventory = Inventory(output).Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        using var sourceDocument = WordprocessingDocument.Open(Path.GetFullPath(source), false);
+        using var outputDocument = WordprocessingDocument.Open(Path.GetFullPath(output), true);
+        foreach (var copy in copies)
+        {
+            if (!sourceInventory.TryGetValue(copy.SourceObjectId, out var sourceObject)
+                || !outputInventory.TryGetValue(copy.BaselineObjectId, out var outputObject)
+                || !TryResolveImagePart(sourceDocument, sourceObject, out var sourceImage)
+                || !TryResolveImagePart(outputDocument, outputObject, out var outputImage))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-media-part-unresolved", copy.SourceObjectId, copy.BaselineObjectId));
+                continue;
+            }
+            using var sourceStream = sourceImage.GetStream(FileMode.Open, FileAccess.Read);
+            using var outputStream = outputImage.GetStream(FileMode.Create, FileAccess.Write);
+            sourceStream.CopyTo(outputStream);
+        }
+        return failures;
+    }
+
+    private static bool TryResolveImagePart(WordprocessingDocument document, TemplateMigrationObject item, out ImagePart image)
+    {
+        image = null!;
+        if (item.Kind != "media" || !item.Provenance.TryGetValue("relationshipId", out var relationshipId)) return false;
+        var container = ResolvePartContainer(document.MainDocumentPart!, item.Scope);
+        if (container?.GetPartById(relationshipId) is not ImagePart part) return false;
+        image = part;
+        return true;
+    }
+
+    private static OpenXmlPartContainer? ResolvePartContainer(MainDocumentPart mainPart, string scope)
+    {
+        if (scope == "mainDocument") return mainPart;
+        var match = Regex.Match(scope, "^(?<kind>header|footer):(?<index>\\d+)$", RegexOptions.CultureInvariant);
+        if (!match.Success) return null;
+        var index = int.Parse(match.Groups["index"].Value);
+        return match.Groups["kind"].Value == "header"
+            ? mainPart.HeaderParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).ElementAtOrDefault(index)
+            : mainPart.FooterParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).ElementAtOrDefault(index);
     }
 
     private static TemplateMigrationInventory Inventory(string input)
@@ -491,9 +578,14 @@ public static class TemplateMigration
     private static void AddDrawingObjects(List<TemplateMigrationObject> objects, OpenXmlPartRootElement? root, string scope)
     {
         if (root is null) return;
-        foreach (var (_, index) in root.Descendants<Drawing>().Select((drawing, index) => (drawing, index)))
+        foreach (var (drawing, index) in root.Descendants<Drawing>().Select((drawing, index) => (drawing, index)))
         {
-            objects.Add(Object($"{scope}:drawing:{index}", "drawing", scope, null, null, null, EmptyProvenance));
+            var provenance = new Dictionary<string, string>(StringComparer.Ordinal);
+            var embeddedRelationshipId = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Blip>()
+                .Select(blip => blip.Embed?.Value)
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+            if (!string.IsNullOrWhiteSpace(embeddedRelationshipId)) provenance["embedRelationshipId"] = embeddedRelationshipId;
+            objects.Add(Object($"{scope}:drawing:{index}", "drawing", scope, null, null, null, provenance));
         }
     }
 
@@ -631,10 +723,10 @@ public static class TemplateMigration
         return null;
     }
 
-    private static string HashCanonical(IReadOnlyList<DocxEditOperation> operations)
+    private static string HashCanonical<T>(T value)
     {
         using var sha = SHA256.Create();
-        return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(operations, Json.Options))));
+        return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, Json.Options))));
     }
 
     private static string StructureFingerprint(TemplateMigrationObject item)
