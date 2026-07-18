@@ -52,6 +52,16 @@ modify either document.
 tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
 ```
 
+### 3aa. Derive an Exact-Text Mapping Candidate
+
+Produces a plan only for content that is unique within both source and baseline
+for the same object kind. Repeated, absent, or otherwise ambiguous content is
+emitted as `review-required`; it is never matched by position.
+
+```bash
+tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
+```
+
 ### 3b. Build Cross-Template Operations
 
 Compiles a hash-bound, caller-declared object mapping into deterministic edit

@@ -27,6 +27,7 @@ internal static class Cli
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
                 "analyze-template-migration" => Task.FromResult(TemplateMigration.RunAnalyze(args[1..])),
+                "derive-template-migration-exact-text-plan" => Task.FromResult(TemplateMigration.RunDeriveExactTextPlan(args[1..])),
                 "build-template-migration-operations" => Task.FromResult(TemplateMigration.RunBuildOperations(args[1..])),
                 "apply-template-migration" => Task.FromResult(TemplateMigration.RunApply(args[1..])),
                 "strip-direct-formatting" => Task.FromResult(Transforms.RunStripDirectFormatting(args[1..])),
@@ -123,6 +124,7 @@ internal static class Cli
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  analyze-template-migration <source.docx> <baseline.docx> [--json]");
+        Console.WriteLine("  derive-template-migration-exact-text-plan <source.docx> <baseline.docx>");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
         Console.WriteLine("  apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>");
         Console.WriteLine("  strip-direct-formatting <input.docx> <output.docx>");
