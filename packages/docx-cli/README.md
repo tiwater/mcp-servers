@@ -42,6 +42,16 @@ Validates compatibility between a source template and a target template. Ensures
 tiwater-docx validate-template-transform <source-template.docx> <target-template.docx> [--json]
 ```
 
+### 3a. Analyze Cross-Template Migration
+
+Exports hash-attested source and baseline object inventories plus unresolved
+structural/content/style differences. It does not infer a business mapping or
+modify either document.
+
+```bash
+tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
+```
+
 ### 4. Strip Direct Formatting
 Removes direct formatting from paragraphs and runs. Useful for enforcing strict style adherence instead of manual styling.
 

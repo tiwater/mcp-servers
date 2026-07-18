@@ -12,6 +12,48 @@ namespace Dockit.Docx.Tests;
 public class AnnotationToolsTests
 {
     [Fact]
+    public void TemplateMigration_analysis_exports_hash_attested_object_inventories_without_guessing_mapping()
+    {
+        var source = CreateAnnotatedFixture();
+        var baseline = Path.Combine(Path.GetTempPath(), $"migration-baseline-{Guid.NewGuid():N}.docx");
+
+        Editor.Apply(source, baseline, [
+            new DocxEditOperation("replaceParagraphText", ParagraphIndex: 0, Text: "Target format heading"),
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 1, Text: "Target placeholder")
+        ]);
+
+        var analysis = TemplateMigration.Analyze(source, baseline);
+
+        Assert.Equal("tiwater.docx.template-migration-analysis/v1", analysis.Schema);
+        Assert.Matches("^[A-F0-9]{64}$", analysis.Source.Sha256);
+        Assert.Matches("^[A-F0-9]{64}$", analysis.Baseline.Sha256);
+        Assert.Contains(analysis.Source.Objects, item => item.Id == "body:paragraph:0" && item.Kind == "paragraph");
+        Assert.Contains(analysis.Source.Objects, item => item.Id == "body:table:0:row:0:cell:1" && item.Kind == "table-cell");
+        Assert.Contains(analysis.Findings, item => item.SourceObjectId == "body:paragraph:0" && item.Kind == "object-content-differs");
+        Assert.Contains(analysis.Findings, item => item.SourceObjectId == "body:table:0:row:0:cell:1" && item.Kind == "object-content-differs");
+        Assert.All(analysis.Findings, item => Assert.Equal("requires-declared-mapping", item.Disposition));
+    }
+
+    [Fact]
+    public void TemplateMigration_analysis_inventories_nested_tables_as_distinct_objects()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"migration-nested-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var inner = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("inner"))))));
+            var outer = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("outer"))), inner)));
+            main.Document = new Document(new Body(outer));
+            main.Document.Save();
+        }
+
+        var analysis = TemplateMigration.Analyze(source, source);
+
+        Assert.Equal(2, analysis.Source.Objects.Count(item => item.Kind == "table"));
+        Assert.Contains(analysis.Source.Objects, item => item.Id == "body:table:0:row:0:cell:0:table:0" && item.ParentId == "body:table:0:row:0:cell:0");
+    }
+
+    [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
         var docPath = CreateAnnotatedFixture();

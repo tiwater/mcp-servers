@@ -180,6 +180,35 @@ public sealed record TemplateTransformValidationReport(
     IReadOnlyList<string> Errors,
     IReadOnlyList<string> Warnings);
 
+public sealed record TemplateMigrationObject(
+    string Id,
+    string Kind,
+    string Scope,
+    string? ParentId,
+    string? Text,
+    string? Style,
+    IReadOnlyDictionary<string, string> Provenance);
+
+public sealed record TemplateMigrationInventory(
+    string File,
+    string Sha256,
+    IReadOnlyList<TemplateMigrationObject> Objects);
+
+public sealed record TemplateMigrationFinding(
+    string Id,
+    string Kind,
+    string SourceObjectId,
+    string? BaselineObjectId,
+    string Disposition,
+    IReadOnlyDictionary<string, string> Evidence);
+
+public sealed record TemplateMigrationAnalysis(
+    string Schema,
+    TemplateMigrationInventory Source,
+    TemplateMigrationInventory Baseline,
+    IReadOnlyList<TemplateMigrationFinding> Findings,
+    IReadOnlyList<string> UnsupportedObjectKinds);
+
 public sealed record DocxSemanticFillRule(
     IReadOnlyList<string> RowPatterns,
     IReadOnlyList<string> ColPatterns,
