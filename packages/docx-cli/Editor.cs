@@ -79,8 +79,11 @@ public static class Editor
             "startSectionBeforeParagraph" => StartSectionBeforeParagraph(body, operation),
             "replaceAllHeaderParagraphText" => ReplaceAllHeaderParagraphText(doc, operation),
             "replaceHeaderParagraphText" => ReplaceHeaderParagraphText(doc, operation),
+            "replaceFooterParagraphText" => ReplaceFooterParagraphText(doc, operation),
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
+            "replaceHeaderTableCellText" => ReplacePartTableCellText(doc, operation, "header"),
+            "replaceFooterTableCellText" => ReplacePartTableCellText(doc, operation, "footer"),
             "replaceTableCellRichText" => ReplaceTableCellRichText(body, operation),
             "replaceTable" => ReplaceTable(body, operation),
             "insertTableRows" => InsertTableRows(body, operation),
@@ -313,6 +316,76 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated paragraph {operation.ParagraphIndex} in {updated} header part(s)");
+    }
+
+    private static DocxEditAppliedOperation ReplaceFooterParagraphText(WordprocessingDocument doc, DocxEditOperation operation)
+    {
+        if (operation.FooterIndex is null || operation.ParagraphIndex is null || operation.Text is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "footerIndex, paragraphIndex, and text are required");
+        }
+
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        var footers = mainPart.FooterParts
+            .Where(part => part.Footer is not null)
+            .OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal)
+            .ToList();
+        if (operation.FooterIndex.Value < 0 || operation.FooterIndex.Value >= footers.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"footerIndex {operation.FooterIndex} is out of range");
+        }
+
+        var paragraphs = footers[operation.FooterIndex.Value].Footer!.Elements<Paragraph>().ToList();
+        if (operation.ParagraphIndex.Value < 0 || operation.ParagraphIndex.Value >= paragraphs.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"paragraphIndex {operation.ParagraphIndex} is out of range for footer {operation.FooterIndex}");
+        }
+
+        ReplaceWholeParagraphText(paragraphs[operation.ParagraphIndex.Value], operation.Text);
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated footer[{operation.FooterIndex}].paragraph[{operation.ParagraphIndex}]");
+    }
+
+    private static DocxEditAppliedOperation ReplacePartTableCellText(WordprocessingDocument doc, DocxEditOperation operation, string partKind)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null || operation.Text is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, cellIndex, and text are required");
+        }
+
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        var partIndex = partKind == "header" ? operation.HeaderIndex : operation.FooterIndex;
+        if (partIndex is null)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"{partKind}Index is required");
+        }
+
+        var roots = partKind == "header"
+            ? mainPart.HeaderParts.Where(part => part.Header is not null).OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).Select(part => (OpenXmlPartRootElement)part.Header!).ToList()
+            : mainPart.FooterParts.Where(part => part.Footer is not null).OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).Select(part => (OpenXmlPartRootElement)part.Footer!).ToList();
+        if (partIndex.Value < 0 || partIndex.Value >= roots.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"{partKind}Index {partIndex} is out of range");
+        }
+
+        var tables = roots[partIndex.Value].Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range for {partKind} {partIndex}");
+        }
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value < 0 || operation.RowIndex.Value >= rows.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {operation.RowIndex} is out of range");
+        }
+        var cells = rows[operation.RowIndex.Value].Elements<TableCell>().ToList();
+        if (operation.CellIndex.Value < 0 || operation.CellIndex.Value >= cells.Count)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {operation.CellIndex} is out of range");
+        }
+
+        var fallbackRun = FindNearestTableRun(rows, operation.RowIndex.Value, operation.CellIndex.Value);
+        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text, operation.Alignment, fallbackRun);
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated {partKind}[{partIndex}].table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}]");
     }
 
     private static DocxEditAppliedOperation ReplaceHeaderText(WordprocessingDocument doc, DocxEditOperation operation)

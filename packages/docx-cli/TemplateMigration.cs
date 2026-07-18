@@ -18,7 +18,10 @@ public static class TemplateMigration
     private static readonly IReadOnlyDictionary<string, string> EmptyProvenance = new Dictionary<string, string>(StringComparer.Ordinal);
     private static readonly Regex BodyParagraphId = new("^body:paragraph:(?<paragraph>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex HeaderParagraphId = new("^header:(?<header>\\d+):paragraph:(?<paragraph>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex FooterParagraphId = new("^footer:(?<footer>\\d+):paragraph:(?<paragraph>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex BodyTableCellId = new("^body:table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex HeaderTableCellId = new("^header:(?<header>\\d+):table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex FooterTableCellId = new("^footer:(?<footer>\\d+):table:(?<table>\\d+):row:(?<row>\\d+):cell:(?<cell>\\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static int RunAnalyze(string[] args)
     {
@@ -213,8 +216,8 @@ public static class TemplateMigration
         var objects = new List<TemplateMigrationObject>();
 
         AddBodyObjects(objects, body);
-        AddHeaderFooterObjects(objects, mainPart.HeaderParts.Select(part => part.Header), "header");
-        AddHeaderFooterObjects(objects, mainPart.FooterParts.Select(part => part.Footer), "footer");
+        AddHeaderFooterObjects(objects, mainPart.HeaderParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).Select(part => part.Header), "header");
+        AddHeaderFooterObjects(objects, mainPart.FooterParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).Select(part => part.Footer), "footer");
         AddDrawingObjects(objects, mainPart.Document, "mainDocument");
         foreach (var (header, index) in mainPart.HeaderParts.Select((part, index) => (part.Header, index))) AddDrawingObjects(objects, header, $"header:{index}");
         foreach (var (footer, index) in mainPart.FooterParts.Select((part, index) => (part.Footer, index))) AddDrawingObjects(objects, footer, $"footer:{index}");
@@ -324,6 +327,11 @@ public static class TemplateMigration
         {
             return new DocxEditOperation("replaceHeaderParagraphText", HeaderIndex: int.Parse(headerParagraph.Groups["header"].Value), ParagraphIndex: int.Parse(headerParagraph.Groups["paragraph"].Value), Text: text);
         }
+        var footerParagraph = FooterParagraphId.Match(baselineObjectId);
+        if (footerParagraph.Success)
+        {
+            return new DocxEditOperation("replaceFooterParagraphText", FooterIndex: int.Parse(footerParagraph.Groups["footer"].Value), ParagraphIndex: int.Parse(footerParagraph.Groups["paragraph"].Value), Text: text);
+        }
         var bodyTableCell = BodyTableCellId.Match(baselineObjectId);
         if (bodyTableCell.Success)
         {
@@ -333,6 +341,16 @@ public static class TemplateMigration
                 RowIndex: int.Parse(bodyTableCell.Groups["row"].Value),
                 CellIndex: int.Parse(bodyTableCell.Groups["cell"].Value),
                 Text: text);
+        }
+        var headerTableCell = HeaderTableCellId.Match(baselineObjectId);
+        if (headerTableCell.Success)
+        {
+            return new DocxEditOperation("replaceHeaderTableCellText", HeaderIndex: int.Parse(headerTableCell.Groups["header"].Value), TableIndex: int.Parse(headerTableCell.Groups["table"].Value), RowIndex: int.Parse(headerTableCell.Groups["row"].Value), CellIndex: int.Parse(headerTableCell.Groups["cell"].Value), Text: text);
+        }
+        var footerTableCell = FooterTableCellId.Match(baselineObjectId);
+        if (footerTableCell.Success)
+        {
+            return new DocxEditOperation("replaceFooterTableCellText", FooterIndex: int.Parse(footerTableCell.Groups["footer"].Value), TableIndex: int.Parse(footerTableCell.Groups["table"].Value), RowIndex: int.Parse(footerTableCell.Groups["row"].Value), CellIndex: int.Parse(footerTableCell.Groups["cell"].Value), Text: text);
         }
         return null;
     }

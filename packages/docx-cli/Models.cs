@@ -248,6 +248,7 @@ public sealed record DocxEditOperation(
     string? Text = null,
     string? FindText = null,
     int? HeaderIndex = null,
+    int? FooterIndex = null,
     int? ParagraphIndex = null,
     int? TableIndex = null,
     int? RowIndex = null,

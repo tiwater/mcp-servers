@@ -98,6 +98,31 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_and_editor_support_header_and_footer_table_cells()
+    {
+        var source = CreateHeaderFooterTableFixture("source-header", "source-footer");
+        var baseline = CreateHeaderFooterTableFixture("baseline-header", "baseline-footer");
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var mappings = analysis.Source.Objects
+            .Where(item => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text))
+            .Select(item => new TemplateMigrationMapping(item.Id, item.Id, "copy-text"))
+            .ToList();
+        var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256, mappings);
+
+        var build = TemplateMigration.BuildOperations(source, baseline, plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Contains(build.Operations, item => item.Type == "replaceHeaderTableCellText" && item.Text == "source-header");
+        Assert.Contains(build.Operations, item => item.Type == "replaceFooterTableCellText" && item.Text == "source-footer");
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-header-footer-{Guid.NewGuid():N}.docx");
+        var edit = Editor.Apply(baseline, output, build.Operations);
+        Assert.All(edit.AppliedOperations, item => Assert.True(item.Applied, item.Detail));
+        using var document = WordprocessingDocument.Open(output, false);
+        Assert.Contains("source-header", document.MainDocumentPart!.HeaderParts.Single().Header!.Descendants<Text>().Select(item => item.Text));
+        Assert.Contains("source-footer", document.MainDocumentPart.FooterParts.Single().Footer!.Descendants<Text>().Select(item => item.Text));
+    }
+
+    [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
         var docPath = CreateAnnotatedFixture();
@@ -1041,6 +1066,25 @@ public class AnnotationToolsTests
         body.Append(CreateFieldParagraph());
         mainPart.Document.Save();
         commentsPart.Comments.Save();
+        return path;
+    }
+
+    private static string CreateHeaderFooterTableFixture(string headerText, string footerText)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"header-footer-table-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        header.Header = new Header(new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text(headerText)))))));
+        var footer = main.AddNewPart<FooterPart>();
+        footer.Footer = new Footer(new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text(footerText)))))));
+        var section = new SectionProperties(
+            new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
+            new FooterReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(footer) });
+        main.Document = new Document(new Body(new Paragraph(new Run(new Text("body"))), section));
+        main.Document.Save();
+        header.Header.Save();
+        footer.Footer.Save();
         return path;
     }
 
