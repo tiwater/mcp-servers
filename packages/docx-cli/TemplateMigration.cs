@@ -379,8 +379,20 @@ public static class TemplateMigration
         AddHeaderFooterObjects(objects, mainPart.HeaderParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).Select(part => part.Header), "header");
         AddHeaderFooterObjects(objects, mainPart.FooterParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).Select(part => part.Footer), "footer");
         AddDrawingObjects(objects, mainPart.Document, "mainDocument");
-        foreach (var (header, index) in mainPart.HeaderParts.Select((part, index) => (part.Header, index))) AddDrawingObjects(objects, header, $"header:{index}");
-        foreach (var (footer, index) in mainPart.FooterParts.Select((part, index) => (part.Footer, index))) AddDrawingObjects(objects, footer, $"footer:{index}");
+        AddRevisionObjects(objects, mainPart.Document, "mainDocument");
+        AddMediaObjects(objects, mainPart, "mainDocument");
+        foreach (var (headerPart, index) in mainPart.HeaderParts.Select((part, index) => (part, index)))
+        {
+            AddDrawingObjects(objects, headerPart.Header, $"header:{index}");
+            AddRevisionObjects(objects, headerPart.Header, $"header:{index}");
+            AddMediaObjects(objects, headerPart, $"header:{index}");
+        }
+        foreach (var (footerPart, index) in mainPart.FooterParts.Select((part, index) => (part, index)))
+        {
+            AddDrawingObjects(objects, footerPart.Footer, $"footer:{index}");
+            AddRevisionObjects(objects, footerPart.Footer, $"footer:{index}");
+            AddMediaObjects(objects, footerPart, $"footer:{index}");
+        }
 
         var styleIndex = 0;
         foreach (var style in mainPart.StyleDefinitionsPart?.Styles?.Elements<Style>() ?? [])
@@ -388,7 +400,11 @@ public static class TemplateMigration
             var id = style.StyleId?.Value;
             if (string.IsNullOrWhiteSpace(id)) continue;
             objects.Add(Object($"style:{styleIndex++}:{id}", "style", "styles", null, style.StyleName?.Val?.Value, id,
-                new Dictionary<string, string>(StringComparer.Ordinal) { ["styleType"] = style.Type?.Value.ToString() ?? "unknown" }));
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["styleType"] = style.Type?.Value.ToString() ?? "unknown",
+                    ["propertiesSha256"] = HashXml(style)
+                }));
         }
 
         return new TemplateMigrationInventory(path, HashFile(path), objects);
@@ -405,9 +421,11 @@ public static class TemplateMigration
             {
                 var id = $"body:paragraph:{paragraphIndex++}";
                 objects.Add(Object(id, "paragraph", "body", null, Inspector.GetParagraphText(paragraph), ParagraphStyle(paragraph), EmptyProvenance));
+                AddRunObjects(objects, paragraph, id, "body");
                 if (paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>() is not null)
                 {
-                    objects.Add(Object($"body:section:{sectionIndex++}", "section", "body", id, null, null, EmptyProvenance));
+                    var properties = paragraph.ParagraphProperties.GetFirstChild<SectionProperties>()!;
+                    objects.Add(Object($"body:section:{sectionIndex++}", "section", "body", id, null, null, SectionProvenance(properties)));
                 }
             }
             else if (child is Table table)
@@ -416,7 +434,7 @@ public static class TemplateMigration
             }
             else if (child is SectionProperties)
             {
-                objects.Add(Object($"body:section:{sectionIndex++}", "section", "body", null, null, null, EmptyProvenance));
+                objects.Add(Object($"body:section:{sectionIndex++}", "section", "body", null, null, null, SectionProvenance((SectionProperties)child)));
             }
         }
     }
@@ -432,6 +450,10 @@ public static class TemplateMigration
             {
                 var cellId = $"{rowId}:cell:{cellIndex}";
                 objects.Add(Object(cellId, "table-cell", scope, rowId, string.Concat(cell.Elements<Paragraph>().SelectMany(paragraph => paragraph.Descendants<Text>()).Select(text => text.Text)).Trim(), null, EmptyProvenance));
+                foreach (var (paragraph, paragraphIndex) in cell.Elements<Paragraph>().Select((paragraph, index) => (paragraph, index)))
+                {
+                    AddRunObjects(objects, paragraph, cellId, scope, paragraphIndex);
+                }
                 foreach (var (nestedTable, nestedIndex) in cell.Elements<Table>().Select((nested, index) => (nested, index)))
                 {
                     AddTableObjects(objects, nestedTable, $"{cellId}:table:{nestedIndex}", cellId, scope);
@@ -449,7 +471,9 @@ public static class TemplateMigration
             // emitting them here as well would create two mappings for one fact.
             foreach (var (paragraph, paragraphIndex) in root.Elements<Paragraph>().Select((paragraph, index) => (paragraph, index)))
             {
-                objects.Add(Object($"{scope}:{rootIndex}:paragraph:{paragraphIndex}", "paragraph", scope, null, Inspector.GetParagraphText(paragraph), ParagraphStyle(paragraph), EmptyProvenance));
+                var id = $"{scope}:{rootIndex}:paragraph:{paragraphIndex}";
+                objects.Add(Object(id, "paragraph", scope, null, Inspector.GetParagraphText(paragraph), ParagraphStyle(paragraph), EmptyProvenance));
+                AddRunObjects(objects, paragraph, id, scope);
             }
             foreach (var (table, tableIndex) in root.Elements<Table>().Select((table, index) => (table, index)))
             {
@@ -465,6 +489,80 @@ public static class TemplateMigration
         {
             objects.Add(Object($"{scope}:drawing:{index}", "drawing", scope, null, null, null, EmptyProvenance));
         }
+    }
+
+    private static void AddRunObjects(List<TemplateMigrationObject> objects, Paragraph paragraph, string parentId, string scope, int? cellParagraphIndex = null)
+    {
+        var runPrefix = cellParagraphIndex is null ? parentId : $"{parentId}:paragraph:{cellParagraphIndex.Value}";
+        foreach (var (run, index) in paragraph.Descendants<Run>().Select((run, index) => (run, index)))
+        {
+            var provenance = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["runPropertiesSha256"] = HashXml(run.RunProperties),
+                ["paragraphPropertiesSha256"] = HashXml(paragraph.ParagraphProperties)
+            };
+            var numbering = paragraph.ParagraphProperties?.NumberingProperties;
+            if (numbering is not null) provenance["numberingPropertiesSha256"] = HashXml(numbering);
+            objects.Add(Object($"{runPrefix}:run:{index}", "run", scope, parentId,
+                string.Concat(run.Descendants<Text>().Select(text => text.Text)),
+                run.RunProperties?.RunStyle?.Val?.Value, provenance));
+        }
+    }
+
+    private static void AddRevisionObjects(List<TemplateMigrationObject> objects, OpenXmlPartRootElement? root, string scope)
+    {
+        if (root is null) return;
+        var revisionNames = new HashSet<string>(["ins", "del", "moveFrom", "moveTo"], StringComparer.Ordinal);
+        foreach (var (element, index) in root.Descendants().Where(element => revisionNames.Contains(element.LocalName)).Select((element, index) => (element, index)))
+        {
+            var provenance = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["revisionType"] = element.LocalName,
+                ["revisionPropertiesSha256"] = HashXml(element)
+            };
+            var author = element.GetAttribute("author", "http://schemas.openxmlformats.org/wordprocessingml/2006/main").Value;
+            var date = element.GetAttribute("date", "http://schemas.openxmlformats.org/wordprocessingml/2006/main").Value;
+            if (!string.IsNullOrWhiteSpace(author)) provenance["author"] = author;
+            if (!string.IsNullOrWhiteSpace(date)) provenance["date"] = date;
+            objects.Add(Object($"{scope}:revision:{index}", "revision", scope, null, element.InnerText, null, provenance));
+        }
+    }
+
+    private static void AddMediaObjects(List<TemplateMigrationObject> objects, OpenXmlPartContainer container, string scope)
+    {
+        foreach (var (image, index) in container.Parts.Select(part => part.OpenXmlPart).OfType<ImagePart>().Select((image, index) => (image, index)))
+        {
+            using var stream = image.GetStream(FileMode.Open, FileAccess.Read);
+            using var sha = SHA256.Create();
+            objects.Add(Object($"{scope}:media:{index}", "media", scope, null, null, null,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["relationshipId"] = container.GetIdOfPart(image),
+                    ["contentType"] = image.ContentType,
+                    ["sha256"] = Convert.ToHexString(sha.ComputeHash(stream))
+                }));
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> SectionProvenance(SectionProperties properties)
+        => new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["sectionPropertiesSha256"] = HashXml(properties),
+            ["pageSizeSha256"] = HashXml(properties.GetFirstChild<PageSize>()),
+            ["pageMarginSha256"] = HashXml(properties.GetFirstChild<PageMargin>()),
+            ["headerFooterReferencesSha256"] = HashXml(properties.Elements<HeaderReference>().Concat<OpenXmlElement>(properties.Elements<FooterReference>()))
+        };
+
+    private static string HashXml(OpenXmlElement? element)
+        => element is null ? HashText(string.Empty) : HashText(element.OuterXml);
+
+    private static string HashXml(IEnumerable<OpenXmlElement> elements)
+        => HashText(string.Concat(elements.Select(element => element.OuterXml)));
+
+    private static string HashText(string text)
+    {
+        using var sha = SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(text)));
     }
 
     private static TemplateMigrationObject Object(string id, string kind, string scope, string? parentId, string? text, string? style, IReadOnlyDictionary<string, string> provenance)

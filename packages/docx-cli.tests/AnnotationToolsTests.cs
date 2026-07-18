@@ -54,6 +54,43 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_inventory_captures_runs_sections_revisions_and_media_without_document_specific_rules()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"migration-rich-inventory-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var paragraph = new Paragraph(new Run(new RunProperties(new Bold()), new Text("stable content")));
+            paragraph.Append(new InsertedRun(new Run(new Text("tracked content")))
+            {
+                Author = "reviewer",
+                Date = new DateTimeValue(DateTime.Parse("2026-07-19T00:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind))
+            });
+            main.Document = new Document(new Body(
+                paragraph,
+                new SectionProperties(new PageSize { Width = 11906, Height = 16838 }, new PageMargin { Top = 1440, Right = 1440, Bottom = 1440, Left = 1440 })));
+            var image = main.AddImagePart(ImagePartType.Png);
+            using var imageBytes = new MemoryStream(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
+            image.FeedData(imageBytes);
+            main.Document.Save();
+        }
+
+        var inventory = TemplateMigration.Analyze(source, source).Source.Objects;
+
+        var run = Assert.Single(inventory, item => item.Kind == "run" && item.Text == "stable content");
+        Assert.Equal("body:paragraph:0", run.ParentId);
+        Assert.Matches("^[A-F0-9]{64}$", run.Provenance["runPropertiesSha256"]);
+        var section = Assert.Single(inventory, item => item.Kind == "section");
+        Assert.Matches("^[A-F0-9]{64}$", section.Provenance["pageMarginSha256"]);
+        var revision = Assert.Single(inventory, item => item.Kind == "revision");
+        Assert.Equal("ins", revision.Provenance["revisionType"]);
+        Assert.Equal("reviewer", revision.Provenance["author"]);
+        var media = Assert.Single(inventory, item => item.Kind == "media");
+        Assert.Equal("image/png", media.Provenance["contentType"]);
+        Assert.Matches("^[A-F0-9]{64}$", media.Provenance["sha256"]);
+    }
+
+    [Fact]
     public void TemplateMigration_builds_hash_bound_operations_only_from_complete_declared_mapping()
     {
         var source = CreateAnnotatedFixture();
