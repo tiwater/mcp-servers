@@ -191,8 +191,9 @@ public class AnnotationToolsTests
 
         var paired = TemplateMigration.DeriveAnchorGapPlan(source, baseline);
 
-        Assert.True(paired.Pass, string.Join("; ", paired.Unresolved.Select(item => item.Reason)));
-        Assert.Contains(paired.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1" && item.Reason == "anchor-gap-paired");
+        Assert.False(paired.Pass);
+        Assert.Contains(paired.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
+        Assert.Contains(paired.Unresolved, item => item.Reason == "template-migration-anchor-gap-candidate-review-required" && item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1");
 
         var unequalSource = CreateTextMigrationFixture("anchor start", "legacy heading one", "legacy heading two", "anchor end");
         var unequal = TemplateMigration.DeriveAnchorGapPlan(unequalSource, baseline);
