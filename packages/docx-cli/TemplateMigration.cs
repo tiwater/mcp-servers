@@ -136,6 +136,12 @@ public static class TemplateMigration
             unresolved.Add(new TemplateMigrationPlanFailure(reason, sourceObject.Id, Detail: $"sourceMatches={sourceCount};baselineMatches={candidates?.Count ?? 0}"));
         }
 
+        foreach (var sourceObject in analysis.Source.Objects.Where(RequiresTerminalMigrationDisposition).OrderBy(item => item.Id, StringComparer.Ordinal))
+        {
+            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "review-required", "template-migration-automatic-strategy-unsupported"));
+            unresolved.Add(new TemplateMigrationPlanFailure("template-migration-automatic-strategy-unsupported", sourceObject.Id, Detail: sourceObject.Kind));
+        }
+
         var plan = new TemplateMigrationPlan(
             Schema: "tiwater.docx.template-migration-plan/v1",
             SourceSha256: analysis.Source.Sha256,
@@ -244,11 +250,11 @@ public static class TemplateMigration
             }
         }
 
-        foreach (var sourceObject in sourceById.Values.Where(IsContentBearing))
+        foreach (var sourceObject in sourceById.Values.Where(IsMigrationRequired))
         {
             if (!mappingsBySource.ContainsKey(sourceObject.Id))
             {
-                failures.Add(new TemplateMigrationPlanFailure("template-migration-source-content-unmapped", sourceObject.Id));
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-source-object-unmapped", sourceObject.Id, Detail: sourceObject.Kind));
             }
         }
 
@@ -572,6 +578,12 @@ public static class TemplateMigration
 
     private static bool IsContentBearing(TemplateMigrationObject item)
         => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text);
+
+    private static bool RequiresTerminalMigrationDisposition(TemplateMigrationObject item)
+        => item.Kind is "revision" or "drawing" or "media";
+
+    private static bool IsMigrationRequired(TemplateMigrationObject item)
+        => IsContentBearing(item) || RequiresTerminalMigrationDisposition(item);
 
     private static string MappingKey(TemplateMigrationObject item)
         => $"{item.Kind}\u001F{NormalizeMappingText(item.Text)}";
