@@ -79,6 +79,17 @@ For an explicitly selected label-only parent, `retain-target-label` records
 that target label retention without inferring semantic equivalence or accepting
 coordinates; it emits no edit and readback verifies every target run unchanged.
 
+A semantic candidate may also declare one or more source body ranges to append.
+Each range is bounded by unique current paragraph/table selectors (a table may
+be selected by a unique descendant header). The runtime resolves those selectors
+to the current inventories, copies only plain body paragraph/table blocks after
+the baseline body, and independently verifies both copied blocks and every
+pre-existing baseline object. It rejects duplicate selectors, overlapping
+ranges, drawings/revisions/content controls, missing styles, and any structural
+drift outside the declared append. This is explicit source preservation when a
+target template has no compatible section; it does not infer a target location,
+style conversion, or semantic equivalence.
+
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
 ```

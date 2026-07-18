@@ -215,11 +215,20 @@ public sealed record TemplateMigrationMapping(
     string Disposition,
     string? Reason = null);
 
+/// <summary>
+/// A hash-bound source body range appended after the baseline body. The range
+/// is resolved from semantic selectors before it becomes this plan payload.
+/// </summary>
+public sealed record TemplateMigrationBodyAppend(
+    string SourceStartObjectId,
+    string SourceEndObjectId);
+
 public sealed record TemplateMigrationPlan(
     string Schema,
     string SourceSha256,
     string BaselineSha256,
-    IReadOnlyList<TemplateMigrationMapping> Mappings);
+    IReadOnlyList<TemplateMigrationMapping> Mappings,
+    IReadOnlyList<TemplateMigrationBodyAppend>? BodyAppends = null);
 
 public sealed record TemplateMigrationSemanticSelector(
     string Kind,
@@ -228,16 +237,22 @@ public sealed record TemplateMigrationSemanticSelector(
     string? Sha256 = null,
     string? ParentText = null,
     string? PreviousText = null,
-    string? NextText = null);
+    string? NextText = null,
+    string? DescendantText = null);
 
 public sealed record TemplateMigrationSemanticCandidateMapping(
     TemplateMigrationSemanticSelector Source,
     TemplateMigrationSemanticSelector Baseline,
     string Disposition);
 
+public sealed record TemplateMigrationSemanticCandidateBodyAppend(
+    TemplateMigrationSemanticSelector SourceStart,
+    TemplateMigrationSemanticSelector SourceEnd);
+
 public sealed record TemplateMigrationSemanticCandidate(
     string Schema,
-    IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings);
+    IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings,
+    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null);
 
 public sealed record TemplateMigrationMappingDerivation(
     string Schema,
@@ -264,6 +279,7 @@ public sealed record TemplateMigrationOperationBuild(
     string? OperationsSha256,
     IReadOnlyList<DocxEditOperation> Operations,
     IReadOnlyList<TemplateMigrationMediaCopy> MediaCopies,
+    IReadOnlyList<TemplateMigrationBodyAppend> BodyAppends,
     string? PreviewOperationsSha256,
     IReadOnlyList<DocxEditOperation> PreviewOperations,
     IReadOnlyList<TemplateMigrationMediaCopy> PreviewMediaCopies,
