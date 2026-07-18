@@ -60,8 +60,8 @@ jobs:
           verify_tool() {
             local project="$1"
             local package version destination
-            package="$(sed -n 's:.*<PackageId>\\(.*\\)</PackageId>.*:\1:p' "$project" | head -n 1)"
-            version="$(sed -n 's:.*<Version>\\(.*\\)</Version>.*:\1:p' "$project" | head -n 1)"
+            package="$(sed -n 's:.*<PackageId>\(.*\)</PackageId>.*:\1:p' "$project" | head -n 1)"
+            version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$project" | head -n 1)"
             test -n "$package"
             test -n "$version"
             destination="$(mktemp -d)"
