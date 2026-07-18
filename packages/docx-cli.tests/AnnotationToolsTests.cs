@@ -15,6 +15,13 @@ namespace Dockit.Docx.Tests;
 public class AnnotationToolsTests
 {
     [Fact]
+    public void OpenXmlValidation_accepts_a_valid_document()
+    {
+        var input = CreateTextMigrationFixture("valid document");
+        Assert.Equal(0, OpenXmlValidation.Run([input]));
+    }
+
+    [Fact]
     public void TemplateMigration_analysis_exports_hash_attested_object_inventories_without_guessing_mapping()
     {
         var source = CreateAnnotatedFixture();
@@ -96,6 +103,30 @@ public class AnnotationToolsTests
         Assert.False(derived.Pass);
         Assert.Contains(derived.Unresolved, item => item.SourceObjectId == revision.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
         Assert.Contains(derived.Unresolved, item => item.SourceObjectId == media.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
+    }
+
+    [Fact]
+    public void TemplateMigration_inventory_requires_review_for_present_unsupported_document_objects()
+    {
+        var annotated = CreateAnnotatedFixture();
+        var annotatedAnalysis = TemplateMigration.Analyze(annotated, annotated);
+        var annotatedPlan = TemplateMigration.DeriveExactTextPlan(annotated, annotated);
+        Assert.Contains("comments", annotatedAnalysis.UnsupportedObjectKinds);
+        Assert.Contains(annotatedPlan.Plan.Mappings, item => item.SourceObjectId == "mainDocument:comments" && item.Disposition == "review-required");
+
+        var controlled = Path.Combine(Path.GetTempPath(), $"migration-content-control-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(controlled, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new SdtBlock(
+                new SdtProperties(new Tag { Val = "controlled" }),
+                new SdtContentBlock(new Paragraph(new Run(new Text("controlled source content")))))));
+            main.Document.Save();
+        }
+        var controlledAnalysis = TemplateMigration.Analyze(controlled, controlled);
+        var controlledPlan = TemplateMigration.DeriveExactTextPlan(controlled, controlled);
+        Assert.Contains("content-control", controlledAnalysis.UnsupportedObjectKinds);
+        Assert.Contains(controlledPlan.Plan.Mappings, item => item.Disposition == "review-required" && item.Reason == "template-migration-automatic-strategy-unsupported");
     }
 
     [Fact]
@@ -203,9 +234,86 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_preview_emits_a_verified_review_candidate_without_claiming_pass()
+    {
+        var source = CreateTextMigrationFixture("shared verified content", "source content pending review");
+        var baseline = CreateTextMigrationFixture("shared verified content", "target-owned format label");
+        var plan = TemplateMigration.DeriveExactTextPlan(source, baseline).Plan;
+        var output = Path.Combine(Path.GetTempPath(), $"migration-review-preview-{Guid.NewGuid():N}.docx");
+
+        var preview = TemplateMigration.Preview(source, baseline, plan, output);
+
+        Assert.False(preview.Pass);
+        Assert.True(preview.ReviewRequired);
+        Assert.True(preview.OutputVerified);
+        Assert.Equal(output, preview.Output);
+        Assert.True(File.Exists(output));
+        using var document = WordprocessingDocument.Open(output, false);
+        var paragraphs = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ToList();
+        Assert.Equal("shared verified content", GetParagraphText(paragraphs[0]));
+        Assert.Equal("target-owned format label", GetParagraphText(paragraphs[1]));
+    }
+
+    [Fact]
+    public void TemplateMigration_preview_accepts_a_legacy_baseline_only_when_it_introduces_no_new_openxml_errors()
+    {
+        var source = CreateTextMigrationFixture("verified source value");
+        var baseline = CreateTextMigrationFixture("baseline placeholder");
+        ReplaceZipEntry(
+            baseline,
+            "word/document.xml",
+            ReadZipEntry(baseline, "word/document.xml").Replace(
+                "<w:p>",
+                "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"-1\"/></w:numPr></w:pPr>",
+                StringComparison.Ordinal));
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v1",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            [new TemplateMigrationMapping("body:paragraph:0", "body:paragraph:0", "copy-text")]);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-legacy-openxml-{Guid.NewGuid():N}.docx");
+
+        var preview = TemplateMigration.Preview(source, baseline, plan, output);
+
+        Assert.NotEqual(0, OpenXmlValidation.Run([baseline]));
+        Assert.True(preview.OutputVerified, string.Join("; ", preview.Readback!.Failures.Select(item => item.Reason)));
+        Assert.True(preview.Pass);
+        Assert.True(File.Exists(output));
+        Assert.Equal(1, OpenXmlValidation.Run([output]));
+    }
+
+    [Fact]
+    public void TemplateMigration_semantic_selectors_migrate_shifted_body_header_and_footer_content_without_coordinates()
+    {
+        var source = CreateCrossTemplateMigrationFixture("source header", "source opening", "source fact", "source closing", "source footer", false);
+        var baseline = CreateCrossTemplateMigrationFixture("target header", "target opening", "target fact", "target closing", "target footer", true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("paragraph", "header", "source header"), new TemplateMigrationSemanticSelector("paragraph", "header", "target header"), "copy-text"),
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("paragraph", "body", "source opening"), new TemplateMigrationSemanticSelector("paragraph", "body", "target opening"), "copy-text"),
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("table-cell", "body", "source fact"), new TemplateMigrationSemanticSelector("table-cell", "body", "target fact"), "copy-text"),
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("paragraph", "body", "source closing"), new TemplateMigrationSemanticSelector("paragraph", "body", "target closing"), "copy-text"),
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("table-cell", "footer", "source footer"), new TemplateMigrationSemanticSelector("table-cell", "footer", "target footer"), "copy-text")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-shifted-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using var document = WordprocessingDocument.Open(output, false);
+        Assert.Contains("source header", document.MainDocumentPart!.HeaderParts.Single().Header!.InnerText);
+        Assert.Contains("source fact", document.MainDocumentPart.Document!.Body!.InnerText);
+        Assert.Contains("source footer", document.MainDocumentPart.FooterParts.Single().Footer!.InnerText);
+    }
+
+    [Fact]
     public void TemplateMigration_builds_hash_bound_operations_only_from_complete_declared_mapping()
     {
-        var source = CreateAnnotatedFixture();
+        var source = CreatePlainMigrationFixture();
         var baseline = Path.Combine(Path.GetTempPath(), $"migration-plan-baseline-{Guid.NewGuid():N}.docx");
         Editor.Apply(source, baseline, [
             new DocxEditOperation("replaceParagraphText", ParagraphIndex: 0, Text: "Target heading"),
@@ -1948,6 +2056,52 @@ public class AnnotationToolsTests
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
         main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateCrossTemplateMigrationFixture(string headerText, string openingText, string factText, string closingText, string footerText, bool shifted)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-cross-template-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        header.Header = new Header(new Paragraph(new Run(new Text(headerText))));
+        var footer = main.AddNewPart<FooterPart>();
+        footer.Footer = new Footer(new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text(footerText)))))));
+        var section = new SectionProperties(
+            new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
+            new FooterReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(footer) });
+        var factTable = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text(factText))))));
+        main.Document = shifted
+            ? new Document(new Body(
+                new Paragraph(new Run(new Text("template-owned banner"))),
+                factTable,
+                new Paragraph(new Run(new Text(closingText))),
+                new Paragraph(new Run(new Text(openingText))),
+                section))
+            : new Document(new Body(
+                new Paragraph(new Run(new Text(openingText))),
+                factTable,
+                new Paragraph(new Run(new Text(closingText))),
+                section));
+        main.Document.Save();
+        header.Header.Save();
+        footer.Footer.Save();
+        return path;
+    }
+
+    private static string CreatePlainMigrationFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-plain-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("Project code XXXX 峰面积"))),
+            new Table(new TableRow(
+                new TableCell(new Paragraph(new Run(new Text("Batch")))),
+                new TableCell(new Paragraph(new Run(new Text("Batch YYYY")))))),
+            new Paragraph(new Run(new Text("Top-level paragraph XXXX")))));
         main.Document.Save();
         return path;
     }

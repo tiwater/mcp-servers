@@ -88,7 +88,12 @@ public static class TemplateMigration
             Source: sourceInventory,
             Baseline: baselineInventory,
             Findings: findings,
-            UnsupportedObjectKinds: ["footnotes", "endnotes", "comments", "content-controls"]);
+            UnsupportedObjectKinds: sourceInventory.Objects
+                .Where(IsUnsupportedObject)
+                .Select(item => item.Kind)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(kind => kind, StringComparer.Ordinal)
+                .ToList());
     }
 
     public static int RunDeriveExactTextPlan(string[] args)
@@ -573,6 +578,9 @@ public static class TemplateMigration
         var pass = failures.Count == 0 && !reviewRequired;
         var canonicalOperations = pass ? operations : [];
         var canonicalMediaCopies = pass ? mediaCopies : [];
+        var previewAllowed = failures.Count == 0;
+        var canonicalPreviewOperations = previewAllowed ? operations : [];
+        var canonicalPreviewMediaCopies = previewAllowed ? mediaCopies : [];
         return new TemplateMigrationOperationBuild(
             Schema: "tiwater.docx.template-migration-operation-build/v1",
             Pass: pass,
@@ -582,6 +590,9 @@ public static class TemplateMigration
             OperationsSha256: pass ? HashCanonical(new { operations = canonicalOperations, mediaCopies = canonicalMediaCopies }) : null,
             Operations: canonicalOperations,
             MediaCopies: canonicalMediaCopies,
+            PreviewOperationsSha256: previewAllowed ? HashCanonical(new { operations = canonicalPreviewOperations, mediaCopies = canonicalPreviewMediaCopies }) : null,
+            PreviewOperations: canonicalPreviewOperations,
+            PreviewMediaCopies: canonicalPreviewMediaCopies,
             Failures: failures);
     }
 
@@ -640,6 +651,69 @@ public static class TemplateMigration
             Readback: readback);
     }
 
+    public static int RunPreview(string[] args)
+    {
+        if (args.Length < 4)
+        {
+            throw new InvalidOperationException("preview-template-migration requires <source.docx> <baseline.docx> <plan.json> <output.docx>");
+        }
+        var plan = JsonSerializer.Deserialize<TemplateMigrationPlan>(File.ReadAllText(Path.GetFullPath(args[2])), Json.Options)
+            ?? throw new InvalidOperationException("template-migration-plan-invalid");
+        var result = Preview(source: args[0], baseline: args[1], plan: plan, output: args[3]);
+        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
+        return result.OutputVerified ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Produces a review-only candidate from verified subset operations. A
+    /// review-required plan is never reported as pass and this method is not a
+    /// substitute for Apply or a platform delivery decision.
+    /// </summary>
+    public static TemplateMigrationPreviewResult Preview(string source, string baseline, TemplateMigrationPlan plan, string output)
+    {
+        var build = BuildOperations(source, baseline, plan);
+        if (build.Failures.Count != 0)
+        {
+            return new TemplateMigrationPreviewResult(
+                Schema: "tiwater.docx.template-migration-preview/v1",
+                Pass: false,
+                ReviewRequired: build.ReviewRequired,
+                OutputVerified: false,
+                Output: null,
+                Build: build,
+                Edit: null,
+                MediaFailures: [],
+                Readback: null);
+        }
+
+        var outputPath = Path.GetFullPath(output);
+        var candidatePath = Path.Combine(
+            Path.GetDirectoryName(outputPath) ?? Directory.GetCurrentDirectory(),
+            $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.pending");
+        var edit = Editor.Apply(Path.GetFullPath(baseline), candidatePath, build.PreviewOperations);
+        var mediaFailures = ApplyMediaCopies(source, candidatePath, build.PreviewMediaCopies);
+        var readback = ValidateReadback(source, baseline, candidatePath, plan);
+        var outputVerified = edit.AppliedOperations.All(operation => operation.Applied) && mediaFailures.Count == 0 && readback.Pass;
+        if (outputVerified)
+        {
+            File.Move(candidatePath, outputPath, true);
+        }
+        else if (File.Exists(candidatePath))
+        {
+            File.Delete(candidatePath);
+        }
+        return new TemplateMigrationPreviewResult(
+            Schema: "tiwater.docx.template-migration-preview/v1",
+            Pass: build.Pass && outputVerified,
+            ReviewRequired: build.ReviewRequired,
+            OutputVerified: outputVerified,
+            Output: outputVerified ? outputPath : null,
+            Build: build,
+            Edit: edit,
+            MediaFailures: mediaFailures,
+            Readback: readback);
+    }
+
     /// <summary>
     /// Rebuilds both authority inventories and validates the final document;
     /// it does not trust the builder or Editor result as proof of correctness.
@@ -684,10 +758,12 @@ public static class TemplateMigration
         }
 
         var baselineStructure = baselineInventory.Objects
+            .Where(IsStructuralObject)
             .Select(StructureFingerprint)
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToList();
         var outputStructure = outputInventory.Objects
+            .Where(IsStructuralObject)
             .Select(StructureFingerprint)
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToList();
@@ -696,12 +772,16 @@ public static class TemplateMigration
             failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-structure-drift"));
         }
 
-        using (var document = WordprocessingDocument.Open(Path.GetFullPath(output), false))
+        using (var baselineDocument = WordprocessingDocument.Open(Path.GetFullPath(baseline), false))
+        using (var outputDocument = WordprocessingDocument.Open(Path.GetFullPath(output), false))
         {
-            var validationErrors = new OpenXmlValidator().Validate(document).Take(10).ToList();
-            foreach (var error in validationErrors)
+            var baselineErrors = CountOpenXmlErrors(baselineDocument);
+            var outputErrors = CountOpenXmlErrors(outputDocument);
+            foreach (var (fingerprint, count) in outputErrors)
             {
-                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-openxml-invalid", Detail: error.Description));
+                var baselineCount = baselineErrors.GetValueOrDefault(fingerprint);
+                if (count <= baselineCount) continue;
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-openxml-new-invalid", Detail: $"{fingerprint};output={count};baseline={baselineCount}"));
             }
         }
 
@@ -763,18 +843,32 @@ public static class TemplateMigration
         var objects = new List<TemplateMigrationObject>();
 
         AddBodyObjects(objects, body);
-        AddHeaderFooterObjects(objects, mainPart.HeaderParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).Select(part => part.Header), "header");
-        AddHeaderFooterObjects(objects, mainPart.FooterParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).Select(part => part.Footer), "footer");
+        AddContentControls(objects, mainPart.Document, "body", "body");
+        var headerParts = mainPart.HeaderParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).ToList();
+        var footerParts = mainPart.FooterParts.OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).ToList();
+        AddHeaderFooterObjects(objects, headerParts.Select(part => part.Header), "header");
+        AddHeaderFooterObjects(objects, footerParts.Select(part => part.Footer), "footer");
+        foreach (var (headerPart, index) in headerParts.Select((part, index) => (part, index)))
+        {
+            AddContentControls(objects, headerPart.Header, $"header:{index}", "header");
+        }
+        foreach (var (footerPart, index) in footerParts.Select((part, index) => (part, index)))
+        {
+            AddContentControls(objects, footerPart.Footer, $"footer:{index}", "footer");
+        }
+        AddUnsupportedPart(objects, mainPart.FootnotesPart?.Footnotes, "footnotes");
+        AddUnsupportedPart(objects, mainPart.EndnotesPart?.Endnotes, "endnotes");
+        AddUnsupportedPart(objects, mainPart.WordprocessingCommentsPart?.Comments, "comments");
         AddDrawingObjects(objects, mainPart.Document, "mainDocument");
         AddRevisionObjects(objects, mainPart.Document, "mainDocument");
         AddMediaObjects(objects, mainPart, "mainDocument");
-        foreach (var (headerPart, index) in mainPart.HeaderParts.Select((part, index) => (part, index)))
+        foreach (var (headerPart, index) in headerParts.Select((part, index) => (part, index)))
         {
             AddDrawingObjects(objects, headerPart.Header, $"header:{index}");
             AddRevisionObjects(objects, headerPart.Header, $"header:{index}");
             AddMediaObjects(objects, headerPart, $"header:{index}");
         }
-        foreach (var (footerPart, index) in mainPart.FooterParts.Select((part, index) => (part, index)))
+        foreach (var (footerPart, index) in footerParts.Select((part, index) => (part, index)))
         {
             AddDrawingObjects(objects, footerPart.Footer, $"footer:{index}");
             AddRevisionObjects(objects, footerPart.Footer, $"footer:{index}");
@@ -868,6 +962,29 @@ public static class TemplateMigration
                 AddTableObjects(objects, table, $"{scope}:{rootIndex}:table:{tableIndex}", null, scope);
             }
         }
+    }
+
+    private static void AddContentControls(List<TemplateMigrationObject> objects, OpenXmlPartRootElement? root, string idPrefix, string scope)
+    {
+        if (root is null) return;
+        foreach (var (control, index) in root.Descendants<SdtElement>().Select((control, index) => (control, index)))
+        {
+            objects.Add(Object($"{idPrefix}:content-control:{index}", "content-control", scope, null, control.InnerText, null,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["propertiesSha256"] = HashXml(control)
+                }));
+        }
+    }
+
+    private static void AddUnsupportedPart(List<TemplateMigrationObject> objects, OpenXmlPartRootElement? root, string kind)
+    {
+        if (root is null) return;
+        objects.Add(Object($"mainDocument:{kind}", kind, "mainDocument", null, root.InnerText, null,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["propertiesSha256"] = HashXml(root)
+            }));
     }
 
     private static void AddDrawingObjects(List<TemplateMigrationObject> objects, OpenXmlPartRootElement? root, string scope)
@@ -967,10 +1084,26 @@ public static class TemplateMigration
         => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text);
 
     private static bool RequiresTerminalMigrationDisposition(TemplateMigrationObject item)
-        => item.Kind is "revision" or "drawing" or "media";
+        => item.Kind is "revision" or "drawing" or "media" or "footnotes" or "endnotes" or "comments" or "content-control";
+
+    private static bool IsUnsupportedObject(TemplateMigrationObject item)
+        => item.Kind is "footnotes" or "endnotes" or "comments" or "content-control";
 
     private static bool IsMigrationRequired(TemplateMigrationObject item)
         => IsContentBearing(item) || RequiresTerminalMigrationDisposition(item);
+
+    private static bool IsStructuralObject(TemplateMigrationObject item) => item.Kind != "run";
+
+    private static Dictionary<string, int> CountOpenXmlErrors(WordprocessingDocument document)
+    {
+        var errors = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var error in new OpenXmlValidator().Validate(document))
+        {
+            var fingerprint = $"{error.Id}|{error.Description}";
+            errors[fingerprint] = errors.GetValueOrDefault(fingerprint) + 1;
+        }
+        return errors;
+    }
 
     private static string MappingKey(TemplateMigrationObject item)
         => $"{item.Kind}\u001F{NormalizeMappingText(item.Text)}";
