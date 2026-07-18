@@ -128,6 +128,49 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_resolves_semantic_text_selectors_to_current_ids_without_accepting_coordinates()
+    {
+        var source = CreateTextMigrationFixture("legacy factual content");
+        var baseline = CreateTextMigrationFixture("target format placeholder");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "legacy factual content"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "target format placeholder"),
+                    "copy-text")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var mapping = Assert.Single(resolved.Plan.Mappings);
+        Assert.Equal("body:paragraph:0", mapping.SourceObjectId);
+        Assert.Equal("body:paragraph:0", mapping.BaselineObjectId);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-semantic-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+
+        var duplicateSource = Path.Combine(Path.GetTempPath(), $"migration-semantic-duplicate-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(duplicateSource, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new Paragraph(new Run(new Text("legacy factual content"))), new Paragraph(new Run(new Text("legacy factual content")))));
+            main.Document.Save();
+        }
+        var rejected = TemplateMigration.ResolveSemanticCandidate(duplicateSource, baseline, candidate);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-semantic-source-ambiguous");
+
+        var invalidCandidate = Path.Combine(Path.GetTempPath(), $"migration-semantic-invalid-{Guid.NewGuid():N}.json");
+        File.WriteAllText(invalidCandidate, """
+        {"schema":"tiwater.docx.template-migration-semantic-candidate/v1","mappings":[{"source":{"kind":"paragraph","text":"legacy factual content","sourceObjectId":"body:paragraph:0"},"baseline":{"kind":"paragraph","text":"target format placeholder"},"disposition":"copy-text"}]}
+        """);
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RunResolveSemanticCandidate([source, baseline, invalidCandidate]));
+        Assert.Equal("template-migration-semantic-candidate-source-unknown-field:sourceObjectId", error.Message);
+    }
+
+    [Fact]
     public void TemplateMigration_builds_hash_bound_operations_only_from_complete_declared_mapping()
     {
         var source = CreateAnnotatedFixture();
@@ -1863,6 +1906,16 @@ public class AnnotationToolsTests
                             new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }))
                     ) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })));
         main.Document = new Document(new Body(new Paragraph(new Run(new Text(text)), new Run(drawing))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateTextMigrationFixture(string text)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-text-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(new Paragraph(new Run(new Text(text)))));
         main.Document.Save();
         return path;
     }

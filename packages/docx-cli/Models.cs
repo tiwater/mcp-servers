@@ -221,6 +221,21 @@ public sealed record TemplateMigrationPlan(
     string BaselineSha256,
     IReadOnlyList<TemplateMigrationMapping> Mappings);
 
+public sealed record TemplateMigrationSemanticSelector(
+    string Kind,
+    string? Scope = null,
+    string? Text = null,
+    string? Sha256 = null);
+
+public sealed record TemplateMigrationSemanticCandidateMapping(
+    TemplateMigrationSemanticSelector Source,
+    TemplateMigrationSemanticSelector Baseline,
+    string Disposition);
+
+public sealed record TemplateMigrationSemanticCandidate(
+    string Schema,
+    IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings);
+
 public sealed record TemplateMigrationMappingDerivation(
     string Schema,
     bool Pass,

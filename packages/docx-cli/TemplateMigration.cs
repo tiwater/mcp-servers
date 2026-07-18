@@ -154,6 +154,148 @@ public static class TemplateMigration
             Unresolved: unresolved);
     }
 
+    public static int RunResolveSemanticCandidate(string[] args)
+    {
+        if (args.Length < 3)
+        {
+            throw new InvalidOperationException("resolve-template-migration-semantic-candidate requires <source.docx> <baseline.docx> <candidate.json>");
+        }
+        var candidate = ReadSemanticCandidate(args[2]);
+        var result = ResolveSemanticCandidate(args[0], args[1], candidate);
+        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
+        return result.Pass ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Resolves a semantic candidate expressed only as current-document
+    /// observable text or media hashes. It never accepts object ids, indexes,
+    /// coordinates, or operation payloads from the candidate.
+    /// </summary>
+    public static TemplateMigrationMappingDerivation ResolveSemanticCandidate(string source, string baseline, TemplateMigrationSemanticCandidate candidate)
+    {
+        ValidateSemanticCandidate(candidate);
+        var analysis = Analyze(source, baseline);
+        var automatic = DeriveExactTextPlan(source, baseline);
+        var mappings = automatic.Plan.Mappings.ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
+        var failures = new List<TemplateMigrationPlanFailure>();
+
+        foreach (var proposal in candidate.Mappings)
+        {
+            var sourceMatches = ResolveSelector(analysis.Source.Objects, proposal.Source);
+            var baselineMatches = ResolveSelector(analysis.Baseline.Objects, proposal.Baseline);
+            if (sourceMatches.Count != 1)
+            {
+                failures.Add(new TemplateMigrationPlanFailure(sourceMatches.Count == 0 ? "template-migration-semantic-source-missing" : "template-migration-semantic-source-ambiguous", Detail: proposal.Source.Kind));
+                continue;
+            }
+            if (baselineMatches.Count != 1)
+            {
+                failures.Add(new TemplateMigrationPlanFailure(baselineMatches.Count == 0 ? "template-migration-semantic-baseline-missing" : "template-migration-semantic-baseline-ambiguous", Detail: proposal.Baseline.Kind));
+                continue;
+            }
+            var sourceObject = sourceMatches[0];
+            var baselineObject = baselineMatches[0];
+            if (!mappings.TryGetValue(sourceObject.Id, out var existing) || !string.Equals(existing.Disposition, "review-required", StringComparison.Ordinal))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id, baselineObject.Id));
+                continue;
+            }
+            mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, baselineObject.Id, proposal.Disposition, "semantic-candidate-resolved");
+        }
+
+        var copiedMediaRelationships = mappings.Values
+            .Where(mapping => string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal))
+            .Select(mapping => analysis.Source.Objects.Single(item => item.Id == mapping.SourceObjectId))
+            .Select(item => item.Provenance.TryGetValue("relationshipId", out var relationshipId) ? relationshipId : null)
+            .Where(relationshipId => !string.IsNullOrWhiteSpace(relationshipId))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var drawing in analysis.Source.Objects.Where(item => item.Kind == "drawing"))
+        {
+            if (drawing.Provenance.TryGetValue("embedRelationshipId", out var relationshipId) && copiedMediaRelationships.Contains(relationshipId))
+            {
+                mappings.Remove(drawing.Id);
+            }
+        }
+
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v1",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            mappings.Values.OrderBy(mapping => mapping.SourceObjectId, StringComparer.Ordinal).ToList());
+        var build = BuildOperations(source, baseline, plan);
+        failures.AddRange(build.Failures);
+        foreach (var mapping in plan.Mappings.Where(mapping => string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal)))
+        {
+            failures.Add(new TemplateMigrationPlanFailure(mapping.Reason ?? "template-migration-review-required", mapping.SourceObjectId, mapping.BaselineObjectId));
+        }
+        return new TemplateMigrationMappingDerivation(
+            "tiwater.docx.template-migration-semantic-resolution/v1",
+            build.Pass && failures.Count == 0,
+            plan,
+            failures);
+    }
+
+    private static TemplateMigrationSemanticCandidate ReadSemanticCandidate(string file)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.GetFullPath(file)));
+        ValidateSemanticCandidateJson(document.RootElement);
+        return JsonSerializer.Deserialize<TemplateMigrationSemanticCandidate>(document.RootElement.GetRawText(), Json.Options)
+            ?? throw new InvalidOperationException("template-migration-semantic-candidate-invalid");
+    }
+
+    private static void ValidateSemanticCandidateJson(JsonElement root)
+    {
+        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings"], StringComparer.Ordinal), "template-migration-semantic-candidate");
+        if (!root.TryGetProperty("mappings", out var mappings) || mappings.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-mappings-invalid");
+        foreach (var mapping in mappings.EnumerateArray())
+        {
+            RequireOnlyFields(mapping, new HashSet<string>(["source", "baseline", "disposition"], StringComparer.Ordinal), "template-migration-semantic-candidate-mapping");
+            foreach (var side in new[] { "source", "baseline" })
+            {
+                if (!mapping.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
+                RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+            }
+        }
+    }
+
+    private static void RequireOnlyFields(JsonElement element, IReadOnlySet<string> allowed, string label)
+    {
+        if (element.ValueKind != JsonValueKind.Object) throw new InvalidOperationException($"{label}-object-invalid");
+        foreach (var property in element.EnumerateObject()) if (!allowed.Contains(property.Name)) throw new InvalidOperationException($"{label}-unknown-field:{property.Name}");
+    }
+
+    private static void ValidateSemanticCandidate(TemplateMigrationSemanticCandidate candidate)
+    {
+        if (!string.Equals(candidate.Schema, "tiwater.docx.template-migration-semantic-candidate/v1", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
+        if (candidate.Mappings is null || candidate.Mappings.Count == 0) throw new InvalidOperationException("template-migration-semantic-candidate-mappings-required");
+        foreach (var mapping in candidate.Mappings)
+        {
+            ValidateSemanticSelector(mapping.Source, "source");
+            ValidateSemanticSelector(mapping.Baseline, "baseline");
+            if (mapping.Disposition is not ("copy-text" or "copy-media")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
+        }
+    }
+
+    private static void ValidateSemanticSelector(TemplateMigrationSemanticSelector selector, string side)
+    {
+        if (string.IsNullOrWhiteSpace(selector.Kind)) throw new InvalidOperationException($"template-migration-semantic-{side}-kind-required");
+        var text = !string.IsNullOrWhiteSpace(selector.Text);
+        var sha = !string.IsNullOrWhiteSpace(selector.Sha256);
+        if (text == sha) throw new InvalidOperationException($"template-migration-semantic-{side}-selector-required");
+        if (sha && !Regex.IsMatch(selector.Sha256!, "^[A-Fa-f0-9]{64}$", RegexOptions.CultureInvariant)) throw new InvalidOperationException($"template-migration-semantic-{side}-sha256-invalid");
+    }
+
+    private static List<TemplateMigrationObject> ResolveSelector(IReadOnlyList<TemplateMigrationObject> objects, TemplateMigrationSemanticSelector selector)
+    {
+        var normalizedText = selector.Text is null ? null : NormalizeMappingText(selector.Text);
+        return objects.Where(item => string.Equals(item.Kind, selector.Kind, StringComparison.Ordinal)
+                && (string.IsNullOrWhiteSpace(selector.Scope) || string.Equals(item.Scope, selector.Scope, StringComparison.Ordinal))
+                && (normalizedText is null || string.Equals(NormalizeMappingText(item.Text), normalizedText, StringComparison.Ordinal))
+                && (selector.Sha256 is null || (item.Provenance.TryGetValue("sha256", out var hash) && string.Equals(hash, selector.Sha256, StringComparison.OrdinalIgnoreCase))))
+            .OrderBy(item => item.Id, StringComparer.Ordinal)
+            .ToList();
+    }
+
     public static int RunBuildOperations(string[] args)
     {
         if (args.Length < 3)
