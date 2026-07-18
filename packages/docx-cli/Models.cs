@@ -209,6 +209,34 @@ public sealed record TemplateMigrationAnalysis(
     IReadOnlyList<TemplateMigrationFinding> Findings,
     IReadOnlyList<string> UnsupportedObjectKinds);
 
+public sealed record TemplateMigrationMapping(
+    string SourceObjectId,
+    string? BaselineObjectId,
+    string Disposition,
+    string? Reason = null);
+
+public sealed record TemplateMigrationPlan(
+    string Schema,
+    string SourceSha256,
+    string BaselineSha256,
+    IReadOnlyList<TemplateMigrationMapping> Mappings);
+
+public sealed record TemplateMigrationPlanFailure(
+    string Reason,
+    string? SourceObjectId = null,
+    string? BaselineObjectId = null,
+    string? Detail = null);
+
+public sealed record TemplateMigrationOperationBuild(
+    string Schema,
+    bool Pass,
+    bool ReviewRequired,
+    string SourceSha256,
+    string BaselineSha256,
+    string? OperationsSha256,
+    IReadOnlyList<DocxEditOperation> Operations,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
+
 public sealed record DocxSemanticFillRule(
     IReadOnlyList<string> RowPatterns,
     IReadOnlyList<string> ColPatterns,
