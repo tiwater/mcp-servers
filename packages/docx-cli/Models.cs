@@ -264,6 +264,9 @@ public sealed record TemplateMigrationOperationBuild(
     string? OperationsSha256,
     IReadOnlyList<DocxEditOperation> Operations,
     IReadOnlyList<TemplateMigrationMediaCopy> MediaCopies,
+    string? PreviewOperationsSha256,
+    IReadOnlyList<DocxEditOperation> PreviewOperations,
+    IReadOnlyList<TemplateMigrationMediaCopy> PreviewMediaCopies,
     IReadOnlyList<TemplateMigrationPlanFailure> Failures);
 
 public sealed record TemplateMigrationReadback(
@@ -273,6 +276,17 @@ public sealed record TemplateMigrationReadback(
 public sealed record TemplateMigrationApplyResult(
     string Schema,
     bool Pass,
+    string? Output,
+    TemplateMigrationOperationBuild Build,
+    DocxEditResult? Edit,
+    IReadOnlyList<TemplateMigrationPlanFailure> MediaFailures,
+    TemplateMigrationReadback? Readback);
+
+public sealed record TemplateMigrationPreviewResult(
+    string Schema,
+    bool Pass,
+    bool ReviewRequired,
+    bool OutputVerified,
     string? Output,
     TemplateMigrationOperationBuild Build,
     DocxEditResult? Edit,
