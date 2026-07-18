@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace Dockit.Docx;
@@ -207,6 +208,108 @@ public static class TemplateMigration
             Failures: failures);
     }
 
+    public static int RunApply(string[] args)
+    {
+        if (args.Length < 4)
+        {
+            throw new InvalidOperationException("apply-template-migration requires <source.docx> <baseline.docx> <plan.json> <output.docx>");
+        }
+
+        var plan = JsonSerializer.Deserialize<TemplateMigrationPlan>(File.ReadAllText(Path.GetFullPath(args[2])), Json.Options)
+            ?? throw new InvalidOperationException("template-migration-plan-invalid");
+        var result = Apply(args[0], args[1], plan, args[3]);
+        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
+        return result.Pass ? 0 : 1;
+    }
+
+    public static TemplateMigrationApplyResult Apply(string source, string baseline, TemplateMigrationPlan plan, string output)
+    {
+        var build = BuildOperations(source, baseline, plan);
+        if (!build.Pass)
+        {
+            return new TemplateMigrationApplyResult(
+                Schema: "tiwater.docx.template-migration-apply/v1",
+                Pass: false,
+                Output: null,
+                Build: build,
+                Edit: null,
+                Readback: null);
+        }
+
+        var outputPath = Path.GetFullPath(output);
+        var edit = Editor.Apply(Path.GetFullPath(baseline), outputPath, build.Operations);
+        var readback = ValidateReadback(source, baseline, outputPath, plan);
+        var pass = edit.AppliedOperations.All(operation => operation.Applied) && readback.Pass;
+        return new TemplateMigrationApplyResult(
+            Schema: "tiwater.docx.template-migration-apply/v1",
+            Pass: pass,
+            Output: outputPath,
+            Build: build,
+            Edit: edit,
+            Readback: readback);
+    }
+
+    /// <summary>
+    /// Rebuilds both authority inventories and validates the final document;
+    /// it does not trust the builder or Editor result as proof of correctness.
+    /// </summary>
+    public static TemplateMigrationReadback ValidateReadback(string source, string baseline, string output, TemplateMigrationPlan plan)
+    {
+        var sourceInventory = Inventory(source);
+        var baselineInventory = Inventory(baseline);
+        var outputInventory = Inventory(output);
+        var failures = new List<TemplateMigrationPlanFailure>();
+
+        if (!string.Equals(plan.SourceSha256, sourceInventory.Sha256, StringComparison.Ordinal))
+        {
+            failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-source-hash-mismatch"));
+        }
+        if (!string.Equals(plan.BaselineSha256, baselineInventory.Sha256, StringComparison.Ordinal))
+        {
+            failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-hash-mismatch"));
+        }
+
+        var sourceById = sourceInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var outputById = outputInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        foreach (var mapping in plan.Mappings ?? [])
+        {
+            if (!string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal)) continue;
+            if (!sourceById.TryGetValue(mapping.SourceObjectId, out var sourceObject) || string.IsNullOrWhiteSpace(mapping.BaselineObjectId) || !outputById.TryGetValue(mapping.BaselineObjectId, out var outputObject))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-object-missing", mapping.SourceObjectId, mapping.BaselineObjectId));
+                continue;
+            }
+            if (!string.Equals(sourceObject.Text, outputObject.Text, StringComparison.Ordinal))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-content-mismatch", mapping.SourceObjectId, mapping.BaselineObjectId));
+            }
+        }
+
+        var baselineStructure = baselineInventory.Objects
+            .Select(StructureFingerprint)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToList();
+        var outputStructure = outputInventory.Objects
+            .Select(StructureFingerprint)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToList();
+        if (!baselineStructure.SequenceEqual(outputStructure, StringComparer.Ordinal))
+        {
+            failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-structure-drift"));
+        }
+
+        using (var document = WordprocessingDocument.Open(Path.GetFullPath(output), false))
+        {
+            var validationErrors = new OpenXmlValidator().Validate(document).Take(10).ToList();
+            foreach (var error in validationErrors)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-openxml-invalid", Detail: error.Description));
+            }
+        }
+
+        return new TemplateMigrationReadback(failures.Count == 0, failures);
+    }
+
     private static TemplateMigrationInventory Inventory(string input)
     {
         var path = Path.GetFullPath(input);
@@ -360,6 +463,9 @@ public static class TemplateMigration
         using var sha = SHA256.Create();
         return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(operations, Json.Options))));
     }
+
+    private static string StructureFingerprint(TemplateMigrationObject item)
+        => string.Join("|", item.Id, item.Kind, item.Scope, item.ParentId ?? string.Empty, item.Style ?? string.Empty);
 
     private static string HashFile(string path)
     {

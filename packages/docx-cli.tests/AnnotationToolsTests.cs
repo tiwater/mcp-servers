@@ -84,6 +84,12 @@ public class AnnotationToolsTests
         Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-source-content-unmapped");
         Assert.Empty(rejected.Operations);
 
+        var blockedOutput = Path.Combine(Path.GetTempPath(), $"migration-blocked-{Guid.NewGuid():N}.docx");
+        var blockedApply = TemplateMigration.Apply(source, baseline, incomplete, blockedOutput);
+        Assert.False(blockedApply.Pass);
+        Assert.Null(blockedApply.Output);
+        Assert.False(File.Exists(blockedOutput));
+
         var stale = plan with { SourceSha256 = new string('0', 64) };
         var staleRejected = TemplateMigration.BuildOperations(source, baseline, stale);
         Assert.False(staleRejected.Pass);
@@ -115,8 +121,9 @@ public class AnnotationToolsTests
         Assert.Contains(build.Operations, item => item.Type == "replaceFooterTableCellText" && item.Text == "source-footer");
 
         var output = Path.Combine(Path.GetTempPath(), $"migration-header-footer-{Guid.NewGuid():N}.docx");
-        var edit = Editor.Apply(baseline, output, build.Operations);
-        Assert.All(edit.AppliedOperations, item => Assert.True(item.Applied, item.Detail));
+        var applied = TemplateMigration.Apply(source, baseline, plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => $"{item.Reason}:{item.Detail}")));
+        Assert.All(applied.Edit!.AppliedOperations, item => Assert.True(item.Applied, item.Detail));
         using var document = WordprocessingDocument.Open(output, false);
         Assert.Contains("source-header", document.MainDocumentPart!.HeaderParts.Single().Header!.Descendants<Text>().Select(item => item.Text));
         Assert.Contains("source-footer", document.MainDocumentPart.FooterParts.Single().Footer!.Descendants<Text>().Select(item => item.Text));
@@ -1075,9 +1082,15 @@ public class AnnotationToolsTests
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
         var header = main.AddNewPart<HeaderPart>();
-        header.Header = new Header(new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text(headerText)))))));
+        header.Header = new Header(new Table(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "2400" }),
+            new TableRow(new TableCell(new Paragraph(new Run(new Text(headerText)))))));
         var footer = main.AddNewPart<FooterPart>();
-        footer.Footer = new Footer(new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text(footerText)))))));
+        footer.Footer = new Footer(new Table(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "2400" }),
+            new TableRow(new TableCell(new Paragraph(new Run(new Text(footerText)))))));
         var section = new SectionProperties(
             new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
             new FooterReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(footer) });

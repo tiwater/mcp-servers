@@ -63,6 +63,17 @@ mappings. It does not infer any source-to-target mapping.
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
 ```
 
+### 3c. Apply and Independently Read Back a Migration
+
+Applies only a passing operation build to the baseline, then independently
+re-inventories source, baseline, and output. It checks every copied value,
+baseline structure/style preservation, and OpenXML validity. A failed builder
+does not create an output.
+
+```bash
+tiwater-docx apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>
+```
+
 ### 4. Strip Direct Formatting
 Removes direct formatting from paragraphs and runs. Useful for enforcing strict style adherence instead of manual styling.
 
