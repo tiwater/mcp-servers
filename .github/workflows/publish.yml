@@ -66,7 +66,7 @@ jobs:
             test -n "$version"
             destination="$(mktemp -d)"
             for attempt in $(seq 1 20); do
-              if dotnet tool install "$package" --version "$version" --tool-path "$destination" --add-source https://api.nuget.org/v3/index.json; then
+              if dotnet tool install "$package" --version "$version" --tool-path "$destination" --add-source https://api.nuget.org/v3/index.json --no-http-cache; then
                 return 0
               fi
               if [ "$attempt" = 20 ]; then
