@@ -184,6 +184,24 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_pairs_only_equal_paragraph_gaps_between_unique_text_anchors()
+    {
+        var source = CreateTextMigrationFixture("anchor start", "legacy heading", "anchor end");
+        var baseline = CreateTextMigrationFixture("anchor start", "target heading", "anchor end");
+
+        var paired = TemplateMigration.DeriveAnchorGapPlan(source, baseline);
+
+        Assert.True(paired.Pass, string.Join("; ", paired.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(paired.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1" && item.Reason == "anchor-gap-paired");
+
+        var unequalSource = CreateTextMigrationFixture("anchor start", "legacy heading one", "legacy heading two", "anchor end");
+        var unequal = TemplateMigration.DeriveAnchorGapPlan(unequalSource, baseline);
+        Assert.False(unequal.Pass);
+        Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
+        Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:2" && item.Disposition == "review-required");
+    }
+
+    [Fact]
     public void TemplateMigration_builds_hash_bound_operations_only_from_complete_declared_mapping()
     {
         var source = CreateAnnotatedFixture();

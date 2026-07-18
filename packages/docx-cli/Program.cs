@@ -28,6 +28,7 @@ internal static class Cli
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
                 "analyze-template-migration" => Task.FromResult(TemplateMigration.RunAnalyze(args[1..])),
                 "derive-template-migration-exact-text-plan" => Task.FromResult(TemplateMigration.RunDeriveExactTextPlan(args[1..])),
+                "derive-template-migration-anchor-gap-plan" => Task.FromResult(TemplateMigration.RunDeriveAnchorGapPlan(args[1..])),
                 "resolve-template-migration-semantic-candidate" => Task.FromResult(TemplateMigration.RunResolveSemanticCandidate(args[1..])),
                 "build-template-migration-operations" => Task.FromResult(TemplateMigration.RunBuildOperations(args[1..])),
                 "apply-template-migration" => Task.FromResult(TemplateMigration.RunApply(args[1..])),
@@ -126,6 +127,7 @@ internal static class Cli
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  analyze-template-migration <source.docx> <baseline.docx> [--json]");
         Console.WriteLine("  derive-template-migration-exact-text-plan <source.docx> <baseline.docx>");
+        Console.WriteLine("  derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
         Console.WriteLine("  apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>");
