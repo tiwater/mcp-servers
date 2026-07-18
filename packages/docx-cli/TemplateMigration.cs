@@ -332,14 +332,25 @@ public static class TemplateMigration
         }
 
         var outputPath = Path.GetFullPath(output);
-        var edit = Editor.Apply(Path.GetFullPath(baseline), outputPath, build.Operations);
-        var mediaFailures = ApplyMediaCopies(source, outputPath, build.MediaCopies);
-        var readback = ValidateReadback(source, baseline, outputPath, plan);
+        var candidatePath = Path.Combine(
+            Path.GetDirectoryName(outputPath) ?? Directory.GetCurrentDirectory(),
+            $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.pending");
+        var edit = Editor.Apply(Path.GetFullPath(baseline), candidatePath, build.Operations);
+        var mediaFailures = ApplyMediaCopies(source, candidatePath, build.MediaCopies);
+        var readback = ValidateReadback(source, baseline, candidatePath, plan);
         var pass = edit.AppliedOperations.All(operation => operation.Applied) && mediaFailures.Count == 0 && readback.Pass;
+        if (pass)
+        {
+            File.Move(candidatePath, outputPath, true);
+        }
+        else if (File.Exists(candidatePath))
+        {
+            File.Delete(candidatePath);
+        }
         return new TemplateMigrationApplyResult(
             Schema: "tiwater.docx.template-migration-apply/v1",
             Pass: pass,
-            Output: outputPath,
+            Output: pass ? outputPath : null,
             Build: build,
             Edit: edit,
             MediaFailures: mediaFailures,
