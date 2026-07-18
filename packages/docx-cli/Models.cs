@@ -225,7 +225,10 @@ public sealed record TemplateMigrationSemanticSelector(
     string Kind,
     string? Scope = null,
     string? Text = null,
-    string? Sha256 = null);
+    string? Sha256 = null,
+    string? ParentText = null,
+    string? PreviousText = null,
+    string? NextText = null);
 
 public sealed record TemplateMigrationSemanticCandidateMapping(
     TemplateMigrationSemanticSelector Source,

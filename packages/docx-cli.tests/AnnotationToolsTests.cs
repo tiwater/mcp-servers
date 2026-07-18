@@ -162,6 +162,19 @@ public class AnnotationToolsTests
         Assert.False(rejected.Pass);
         Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-semantic-source-ambiguous");
 
+        var contextualSource = CreateTextMigrationFixture("before source", "repeated label", "after source", "repeated label");
+        var contextualBaseline = CreateTextMigrationFixture("before target", "target slot one", "after target", "target slot two");
+        var contextualCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "repeated label", PreviousText: "before source"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "target slot one", PreviousText: "before target"),
+                    "copy-text")
+            ]);
+        var contextResolved = TemplateMigration.ResolveSemanticCandidate(contextualSource, contextualBaseline, contextualCandidate);
+        Assert.Contains(contextResolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1" && item.Disposition == "copy-text");
+
         var invalidCandidate = Path.Combine(Path.GetTempPath(), $"migration-semantic-invalid-{Guid.NewGuid():N}.json");
         File.WriteAllText(invalidCandidate, """
         {"schema":"tiwater.docx.template-migration-semantic-candidate/v1","mappings":[{"source":{"kind":"paragraph","text":"legacy factual content","sourceObjectId":"body:paragraph:0"},"baseline":{"kind":"paragraph","text":"target format placeholder"},"disposition":"copy-text"}]}
@@ -1910,12 +1923,12 @@ public class AnnotationToolsTests
         return path;
     }
 
-    private static string CreateTextMigrationFixture(string text)
+    private static string CreateTextMigrationFixture(params string[] text)
     {
         var path = Path.Combine(Path.GetTempPath(), $"migration-text-{Guid.NewGuid():N}.docx");
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
-        main.Document = new Document(new Body(new Paragraph(new Run(new Text(text)))));
+        main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
         main.Document.Save();
         return path;
     }
