@@ -331,9 +331,12 @@ public static class TemplateMigration
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id, baselineObject.Id));
                 continue;
             }
-            var reason = string.Equals(proposal.Disposition, "retain-target", StringComparison.Ordinal)
-                ? "semantic-candidate-retain-target"
-                : "semantic-candidate-resolved";
+            var reason = proposal.Disposition switch
+            {
+                "retain-target" => "semantic-candidate-retain-target",
+                "retain-target-label" => "semantic-candidate-retain-target-label",
+                _ => "semantic-candidate-resolved"
+            };
             mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, baselineObject.Id, proposal.Disposition, reason);
         }
 
@@ -406,7 +409,7 @@ public static class TemplateMigration
         {
             ValidateSemanticSelector(mapping.Source, "source");
             ValidateSemanticSelector(mapping.Baseline, "baseline");
-            if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
+            if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
         }
     }
 
@@ -557,6 +560,27 @@ public static class TemplateMigration
                 mediaCopies.Add(new TemplateMigrationMediaCopy(mapping.SourceObjectId, mapping.BaselineObjectId));
             }
             else if (string.Equals(disposition, "retain-target", StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(mapping.Reason))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-terminal-reason-required", mapping.SourceObjectId, mapping.BaselineObjectId));
+                }
+                if (string.IsNullOrWhiteSpace(mapping.BaselineObjectId) || !baselineById.TryGetValue(mapping.BaselineObjectId, out var baselineObject))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-unknown", mapping.SourceObjectId, mapping.BaselineObjectId));
+                    continue;
+                }
+                if (sourceObject.Kind is not ("paragraph" or "table-cell") || !string.Equals(sourceObject.Kind, baselineObject.Kind, StringComparison.Ordinal))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-retain-target-parent-required", mapping.SourceObjectId, mapping.BaselineObjectId));
+                    continue;
+                }
+                if (!copyTargets.Add(mapping.BaselineObjectId))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-duplicate", mapping.SourceObjectId, mapping.BaselineObjectId));
+                }
+            }
+            else if (string.Equals(disposition, "retain-target-label", StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(mapping.Reason))
                 {
@@ -806,7 +830,7 @@ public static class TemplateMigration
             }
         }
 
-        foreach (var mapping in (plan.Mappings ?? []).Where(item => string.Equals(item.Disposition, "retain-target", StringComparison.Ordinal)))
+        foreach (var mapping in (plan.Mappings ?? []).Where(item => item.Disposition is "retain-target" or "retain-target-label"))
         {
             if (string.IsNullOrWhiteSpace(mapping.BaselineObjectId)) continue;
             var copiedTargetRuns = (plan.Mappings ?? [])
