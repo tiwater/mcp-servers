@@ -16,16 +16,22 @@ public static class Extractor
         var output = cleanArgs.Length > 1 ? Path.GetFullPath(cleanArgs[1]) : null;
 
         var workbook = WorkbookLoader.Load(input, resolveMergedCells);
+        var inspected = Inspector.Inspect(input);
         var result = new List<object>();
 
         foreach (var sheet in workbook.Sheets)
         {
+            var inspectedCells = inspected.Sheets.Single(item => item.Name == sheet.Name).Cells ?? [];
+            var styles = inspectedCells.ToDictionary(cell => cell.Reference, cell => cell.Style, StringComparer.OrdinalIgnoreCase);
             result.Add(new
             {
                 Sheet = sheet.Name,
                 Rows = sheet.Rows,
                 FormattedRows = sheet.FormattedRows,
-                Cells = sheet.Cells
+                Cells = sheet.Cells.Select(cell => new {
+                    cell.Reference, cell.Row, cell.Column, cell.Value, cell.FormattedValue, cell.Formula,
+                    cell.RichTextRuns, Style = styles.GetValueOrDefault(cell.Reference)
+                })
             });
         }
 

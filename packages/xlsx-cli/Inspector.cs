@@ -60,7 +60,8 @@ public static class Inspector
                 openXmlDetails.GetValueOrDefault(sheet.Name)?.TextCells ?? GetLoadedTextCells(sheet),
                 openXmlDetails.GetValueOrDefault(sheet.Name)?.FormulaCells,
                 openXmlDetails.GetValueOrDefault(sheet.Name)?.RowHeights,
-                openXmlDetails.GetValueOrDefault(sheet.Name)?.ColumnWidths));
+                openXmlDetails.GetValueOrDefault(sheet.Name)?.ColumnWidths,
+                openXmlDetails.GetValueOrDefault(sheet.Name)?.Cells));
         }
 
         return new WorkbookReport(path, sheets.Count, sheets);
@@ -79,6 +80,7 @@ public static class Inspector
         using var spreadsheet = SpreadsheetDocument.Open(path, false);
         var workbookPart = spreadsheet.WorkbookPart ?? throw new InvalidOperationException("Workbook not found.");
         var sharedStrings = workbookPart.SharedStringTablePart?.SharedStringTable;
+        var stylesheet = workbookPart.WorkbookStylesPart?.Stylesheet;
         var details = new Dictionary<string, SheetInspectionDetails>(StringComparer.Ordinal);
 
         foreach (var sheet in workbookPart.Workbook.Descendants<Sheet>())
@@ -93,6 +95,7 @@ public static class Inspector
             var formulaCells = new List<FormulaCellReport>();
             var rowHeights = new List<RowHeightReport>();
             var columnWidths = new List<ColumnWidthReport>();
+            var cells = new List<CellEvidenceReport>();
 
             foreach (var column in worksheet.Elements<Columns>().SelectMany(columns => columns.Elements<Column>()))
             {
@@ -130,6 +133,8 @@ public static class Inspector
                         }
 
                         var visibleText = GetVisibleCellText(cell, sharedStrings);
+                        cells.Add(new CellEvidenceReport(reference, visibleText ?? string.Empty, cell.CellFormula?.Text,
+                            GetCellStyle(cell, stylesheet), OpenXmlRichText.GetCellRichTextRuns(cell, sharedStrings)));
                         if (!string.IsNullOrWhiteSpace(visibleText))
                         {
                             textCells.Add(new TextCellReport(
@@ -153,10 +158,23 @@ public static class Inspector
                 textCells,
                 formulaCells,
                 rowHeights,
-                columnWidths);
+                columnWidths,
+                cells);
         }
 
         return details;
+    }
+
+    private static CellStyleReport GetCellStyle(Cell cell, Stylesheet? stylesheet)
+    {
+        var styleIndex = cell.StyleIndex?.Value ?? 0U;
+        var format = stylesheet?.CellFormats?.Elements<CellFormat>().ElementAtOrDefault((int)styleIndex);
+        var numberFormatId = format?.NumberFormatId?.Value ?? 0U;
+        var custom = stylesheet?.NumberingFormats?.Elements<NumberingFormat>().FirstOrDefault(item => item.NumberFormatId?.Value == numberFormatId)?.FormatCode?.Value;
+        var code = custom ?? numberFormatId switch { 0 => "General", 1 => "0", 2 => "0.00", 9 => "0%", 10 => "0.00%", 14 => "m/d/yy", 49 => "@", _ => null };
+        var alignment = format?.Alignment;
+        return new CellStyleReport(styleIndex, numberFormatId, code, format?.FontId?.Value ?? 0U, format?.FillId?.Value ?? 0U,
+            format?.BorderId?.Value ?? 0U, alignment?.Horizontal?.InnerText, alignment?.Vertical?.InnerText, alignment?.WrapText?.Value ?? false);
     }
 
     private static string? GetVisibleCellText(Cell cell, SharedStringTable? sharedStrings)
@@ -189,5 +207,6 @@ public static class Inspector
         List<TextCellReport> TextCells,
         List<FormulaCellReport> FormulaCells,
         List<RowHeightReport> RowHeights,
-        List<ColumnWidthReport> ColumnWidths);
+        List<ColumnWidthReport> ColumnWidths,
+        List<CellEvidenceReport> Cells);
 }

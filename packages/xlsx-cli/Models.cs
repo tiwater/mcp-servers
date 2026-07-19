@@ -24,6 +24,24 @@ public record TextCellReport(string Reference, string Text, IReadOnlyList<RichTe
 
 public record FormulaCellReport(string Reference, string Formula, string? CachedValue);
 
+public record CellStyleReport(
+    uint StyleIndex,
+    uint NumberFormatId,
+    string? NumberFormatCode,
+    uint FontId,
+    uint FillId,
+    uint BorderId,
+    string? HorizontalAlignment,
+    string? VerticalAlignment,
+    bool WrapText);
+
+public record CellEvidenceReport(
+    string Reference,
+    string Value,
+    string? Formula,
+    CellStyleReport Style,
+    IReadOnlyList<RichTextRunReport>? RichTextRuns = null);
+
 public record RowHeightReport(uint Row, double Height);
 
 public record ColumnWidthReport(uint Column, double Width);
@@ -40,7 +58,8 @@ public record SheetReport(
     List<TextCellReport>? TextCells = null,
     List<FormulaCellReport>? FormulaCells = null,
     List<RowHeightReport>? RowHeights = null,
-    List<ColumnWidthReport>? ColumnWidths = null
+    List<ColumnWidthReport>? ColumnWidths = null,
+    List<CellEvidenceReport>? Cells = null
 );
 
 public record FillData(
