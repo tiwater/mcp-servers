@@ -1,6 +1,7 @@
 name: Publish Shared Runtimes
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*.*.*'
@@ -51,6 +52,34 @@ jobs:
           cd packages/convert-cli
           dotnet pack -c Release -o ./nupkg
           dotnet nuget push ./nupkg/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://www.nuget.org/api/v2/package --skip-duplicate
+
+      - name: Verify tools are installable from NuGet V3
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify_tool() {
+            local project="$1"
+            local package version destination
+            package="$(sed -n 's:.*<PackageId>\(.*\)</PackageId>.*:\1:p' "$project" | head -n 1)"
+            version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$project" | head -n 1)"
+            test -n "$package"
+            test -n "$version"
+            destination="$(mktemp -d)"
+            for attempt in $(seq 1 40); do
+              if dotnet tool install "$package" --version "$version" --tool-path "$destination" --add-source https://api.nuget.org/v3/index.json --no-http-cache; then
+                return 0
+              fi
+              if [ "$attempt" = 40 ]; then
+                echo "NuGet V3 did not make $package $version installable within 600 seconds" >&2
+                return 1
+              fi
+              sleep 15
+            done
+          }
+          verify_tool packages/xlsx-cli/xlsx.csproj
+          verify_tool packages/docx-cli/docx.csproj
+          verify_tool packages/pptx-cli/pptx.csproj
+          verify_tool packages/convert-cli/convert.csproj
 
   publish-python:
     name: Publish Python Runtime (tiwater-pdf)

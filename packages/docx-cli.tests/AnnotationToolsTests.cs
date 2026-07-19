@@ -5,11 +5,13 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Dockit.Docx;
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using W14 = DocumentFormat.OpenXml.Office2010.Word;
 using Tiwater.FormatEvidence;
 using System.Security.Cryptography;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 
 namespace Dockit.Docx.Tests;
 
@@ -18,14 +20,583 @@ public class AnnotationToolsTests
     [Fact]
     public void Published_inspection_evidence_is_recomputed_from_docx_bytes()
     {
-        var source = CreateAnnotatedFixture(); var root = Path.Combine(Path.GetTempPath(), $"docx-evidence-{Guid.NewGuid():N}"); Directory.CreateDirectory(root); var evidence = Path.Combine(root, "evidence.json"); var verdict = Path.Combine(root, "verdict.json"); var request = WriteEvidenceRequest(root, source, evidence, "docx");
-        Assert.Equal(0, FormatEvidenceCommand.RunProducer(["--request", request, "--output", evidence], "tiwater-docx", "0.5.1", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input) }));
-        Assert.Equal(0, FormatEvidenceCommand.RunValidator(["--request", request, "--evidence", evidence, "--output", verdict], "tiwater-docx", "0.5.1", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input) }));
-        Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
-        var changed=JsonNode.Parse(File.ReadAllText(evidence))!.AsObject();changed["observations"]![0]!["value"]=new JsonObject{{"forged",true}};File.WriteAllText(evidence,changed.ToJsonString());File.Delete(verdict);Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-docx","0.5.1","docx",input=>new{document=Inspector.Inspect(input),tables=Inspector.InspectTables(input)}));Assert.False(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+        var source=CreateAnnotatedFixture();var root=Path.Combine(Path.GetTempPath(),$"docx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="docx"},extraction=new{schema="tiwater.docx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-docx","0.9.1","docx",input=>new{document=Inspector.Inspect(input),tables=Inspector.InspectTables(input)}));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-docx","0.9.1","docx",input=>new{document=Inspector.Inspect(input),tables=Inspector.InspectTables(input)}));Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+    }
+    [Fact]
+    public void OpenXmlValidation_accepts_a_valid_document()
+    {
+        var input = CreateTextMigrationFixture("valid document");
+        Assert.Equal(0, OpenXmlValidation.Run([input]));
     }
 
-    private static string WriteEvidenceRequest(string root,string source,string output,string format){var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();var request=Path.Combine(root,"request.json");File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format},extraction=new{schema=$"tiwater.{format}.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=output}));return request;}
+    [Fact]
+    public void TemplateMigration_analysis_exports_hash_attested_object_inventories_without_guessing_mapping()
+    {
+        var source = CreateAnnotatedFixture();
+        var baseline = Path.Combine(Path.GetTempPath(), $"migration-baseline-{Guid.NewGuid():N}.docx");
+
+        Editor.Apply(source, baseline, [
+            new DocxEditOperation("replaceParagraphText", ParagraphIndex: 0, Text: "Target format heading"),
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 1, Text: "Target placeholder")
+        ]);
+
+        var analysis = TemplateMigration.Analyze(source, baseline);
+
+        Assert.Equal("tiwater.docx.template-migration-analysis/v1", analysis.Schema);
+        Assert.Matches("^[A-F0-9]{64}$", analysis.Source.Sha256);
+        Assert.Matches("^[A-F0-9]{64}$", analysis.Baseline.Sha256);
+        Assert.Contains(analysis.Source.Objects, item => item.Id == "body:paragraph:0" && item.Kind == "paragraph");
+        Assert.Contains(analysis.Source.Objects, item => item.Id == "body:table:0:row:0:cell:1" && item.Kind == "table-cell");
+        Assert.Contains(analysis.Findings, item => item.SourceObjectId == "body:paragraph:0" && item.Kind == "object-content-differs");
+        Assert.Contains(analysis.Findings, item => item.SourceObjectId == "body:table:0:row:0:cell:1" && item.Kind == "object-content-differs");
+        Assert.All(analysis.Findings, item => Assert.Equal("requires-declared-mapping", item.Disposition));
+    }
+
+    [Fact]
+    public void TemplateMigration_analysis_inventories_nested_tables_as_distinct_objects()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"migration-nested-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var inner = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("inner"))))));
+            var outer = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("outer"))), inner)));
+            main.Document = new Document(new Body(outer));
+            main.Document.Save();
+        }
+
+        var analysis = TemplateMigration.Analyze(source, source);
+
+        Assert.Equal(2, analysis.Source.Objects.Count(item => item.Kind == "table"));
+        Assert.Contains(analysis.Source.Objects, item => item.Id == "body:table:0:row:0:cell:0:table:0" && item.ParentId == "body:table:0:row:0:cell:0");
+    }
+
+    [Fact]
+    public void InspectTables_versions_the_view_and_addresses_nested_tables_without_leaking_nested_text()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"inspect-nested-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var inner = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("inner"))))));
+            var outer = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("outer"))), inner)));
+            main.Document = new Document(new Body(outer)); main.Document.Save();
+        }
+
+        var report = Inspector.InspectTables(source);
+
+        Assert.Equal("tiwater.docx.inspect-tables/v1", report.Schema);
+        Assert.NotEmpty(report.ToolVersion);
+        Assert.Equal("direct-cell-paragraphs-excluding-nested-tables", report.ExtractionView["cellText"]);
+        Assert.Equal(2, report.Tables.Count);
+        Assert.Equal(report.Tables[0].ColumnCount, report.Tables[0].GridColumnCount);
+        Assert.Equal(report.Tables[0].GridColumnCount, report.Tables[0].GridColumnWidths.Count);
+        Assert.Equal("outer", report.Tables[0].Rows[0].Cells[0].Text);
+        Assert.Equal(["body", "table:0", "row:0", "cell:0", "table:0"], report.Tables[1].ContainmentPath);
+        Assert.Equal("table:0:row:0:cell:0", report.Tables[1].ParentCellAddress);
+        Assert.Equal("inner", report.Tables[1].Rows[0].Cells[0].Text);
+    }
+
+    [Fact]
+    public void TemplateMigration_inventory_captures_runs_sections_revisions_and_media_without_document_specific_rules()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"migration-rich-inventory-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var paragraph = new Paragraph(new Run(new RunProperties(new Bold()), new Text("stable content")));
+            paragraph.Append(new InsertedRun(new Run(new Text("tracked content")))
+            {
+                Author = "reviewer",
+                Date = new DateTimeValue(DateTime.Parse("2026-07-19T00:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind))
+            });
+            main.Document = new Document(new Body(
+                paragraph,
+                new SectionProperties(new PageSize { Width = 11906, Height = 16838 }, new PageMargin { Top = 1440, Right = 1440, Bottom = 1440, Left = 1440 })));
+            var image = main.AddImagePart(ImagePartType.Png);
+            using var imageBytes = new MemoryStream(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
+            image.FeedData(imageBytes);
+            main.Document.Save();
+        }
+
+        var inventory = TemplateMigration.Analyze(source, source).Source.Objects;
+
+        var run = Assert.Single(inventory, item => item.Kind == "run" && item.Text == "stable content");
+        Assert.Equal("body:paragraph:0", run.ParentId);
+        Assert.Matches("^[A-F0-9]{64}$", run.Provenance["runPropertiesSha256"]);
+        var section = Assert.Single(inventory, item => item.Kind == "section");
+        Assert.Matches("^[A-F0-9]{64}$", section.Provenance["pageMarginSha256"]);
+        var revision = Assert.Single(inventory, item => item.Kind == "revision");
+        Assert.Equal("ins", revision.Provenance["revisionType"]);
+        Assert.Equal("reviewer", revision.Provenance["author"]);
+        var media = Assert.Single(inventory, item => item.Kind == "media");
+        Assert.Equal("image/png", media.Provenance["contentType"]);
+        Assert.Matches("^[A-F0-9]{64}$", media.Provenance["sha256"]);
+
+        var derived = TemplateMigration.DeriveExactTextPlan(source, source);
+        Assert.False(derived.Pass);
+        Assert.Contains(derived.Unresolved, item => item.SourceObjectId == revision.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
+        Assert.Contains(derived.Unresolved, item => item.SourceObjectId == media.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
+    }
+
+    [Fact]
+    public void TemplateMigration_inventory_requires_review_for_present_unsupported_document_objects()
+    {
+        var annotated = CreateAnnotatedFixture();
+        var annotatedAnalysis = TemplateMigration.Analyze(annotated, annotated);
+        var annotatedPlan = TemplateMigration.DeriveExactTextPlan(annotated, annotated);
+        Assert.Contains("comments", annotatedAnalysis.UnsupportedObjectKinds);
+        Assert.Contains(annotatedPlan.Plan.Mappings, item => item.SourceObjectId == "mainDocument:comments" && item.Disposition == "review-required");
+
+        var controlled = Path.Combine(Path.GetTempPath(), $"migration-content-control-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(controlled, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new SdtBlock(
+                new SdtProperties(new Tag { Val = "controlled" }),
+                new SdtContentBlock(new Paragraph(new Run(new Text("controlled source content")))))));
+            main.Document.Save();
+        }
+        var controlledAnalysis = TemplateMigration.Analyze(controlled, controlled);
+        var controlledPlan = TemplateMigration.DeriveExactTextPlan(controlled, controlled);
+        Assert.Contains("content-control", controlledAnalysis.UnsupportedObjectKinds);
+        Assert.Contains(controlledPlan.Plan.Mappings, item => item.Disposition == "review-required" && item.Reason == "template-migration-automatic-strategy-unsupported");
+    }
+
+    [Fact]
+    public void TemplateMigration_copies_declared_media_into_a_current_baseline_slot_and_proves_readback()
+    {
+        var source = CreateMediaMigrationFixture("source text", [1, 2, 3, 4]);
+        var baseline = CreateMediaMigrationFixture("baseline placeholder", [9, 8, 7, 6]);
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var sourceMedia = Assert.Single(analysis.Source.Objects, item => item.Kind == "media");
+        var baselineMedia = Assert.Single(analysis.Baseline.Objects, item => item.Kind == "media");
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v1",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            [
+                new TemplateMigrationMapping("body:paragraph:0", "body:paragraph:0", "copy-text"),
+                new TemplateMigrationMapping(sourceMedia.Id, baselineMedia.Id, "copy-media")
+            ]);
+
+        var build = TemplateMigration.BuildOperations(source, baseline, plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Single(build.MediaCopies);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-media-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, plan, output);
+
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        Assert.Empty(applied.MediaFailures);
+        var outputMedia = Assert.Single(TemplateMigration.Analyze(output, output).Source.Objects, item => item.Id == baselineMedia.Id);
+        Assert.Equal(sourceMedia.Provenance["sha256"], outputMedia.Provenance["sha256"]);
+    }
+
+    [Fact]
+    public void TemplateMigration_resolves_semantic_text_selectors_to_current_ids_without_accepting_coordinates()
+    {
+        var source = CreateTextMigrationFixture("legacy factual content");
+        var baseline = CreateTextMigrationFixture("target format placeholder");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "legacy factual content"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "target format placeholder"),
+                    "copy-text")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var mapping = Assert.Single(resolved.Plan.Mappings);
+        Assert.Equal("body:paragraph:0", mapping.SourceObjectId);
+        Assert.Equal("body:paragraph:0", mapping.BaselineObjectId);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-semantic-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+
+        var duplicateSource = Path.Combine(Path.GetTempPath(), $"migration-semantic-duplicate-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(duplicateSource, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new Paragraph(new Run(new Text("legacy factual content"))), new Paragraph(new Run(new Text("legacy factual content")))));
+            main.Document.Save();
+        }
+        var rejected = TemplateMigration.ResolveSemanticCandidate(duplicateSource, baseline, candidate);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-semantic-source-ambiguous");
+
+        var contextualSource = CreateTextMigrationFixture("before source", "repeated label", "after source", "repeated label");
+        var contextualBaseline = CreateTextMigrationFixture("before target", "target slot one", "after target", "target slot two");
+        var contextualCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "repeated label", PreviousText: "before source"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "target slot one", PreviousText: "before target"),
+                    "copy-text")
+            ]);
+        var contextResolved = TemplateMigration.ResolveSemanticCandidate(contextualSource, contextualBaseline, contextualCandidate);
+        Assert.Contains(contextResolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1" && item.Disposition == "copy-text");
+
+        var invalidCandidate = Path.Combine(Path.GetTempPath(), $"migration-semantic-invalid-{Guid.NewGuid():N}.json");
+        File.WriteAllText(invalidCandidate, """
+        {"schema":"tiwater.docx.template-migration-semantic-candidate/v1","mappings":[{"source":{"kind":"paragraph","text":"legacy factual content","sourceObjectId":"body:paragraph:0"},"baseline":{"kind":"paragraph","text":"target format placeholder"},"disposition":"copy-text"}]}
+        """);
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RunResolveSemanticCandidate([source, baseline, invalidCandidate]));
+        Assert.Equal("template-migration-semantic-candidate-source-unknown-field:sourceObjectId", error.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_pairs_only_equal_paragraph_gaps_between_unique_text_anchors()
+    {
+        var source = CreateTextMigrationFixture("anchor start", "legacy heading", "anchor end");
+        var baseline = CreateTextMigrationFixture("anchor start", "target heading", "anchor end");
+
+        var paired = TemplateMigration.DeriveAnchorGapPlan(source, baseline);
+
+        Assert.False(paired.Pass);
+        Assert.Contains(paired.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
+        Assert.Contains(paired.Unresolved, item => item.Reason == "template-migration-anchor-gap-candidate-review-required" && item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1");
+
+        var unequalSource = CreateTextMigrationFixture("anchor start", "legacy heading one", "legacy heading two", "anchor end");
+        var unequal = TemplateMigration.DeriveAnchorGapPlan(unequalSource, baseline);
+        Assert.False(unequal.Pass);
+        Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
+        Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:2" && item.Disposition == "review-required");
+    }
+
+    [Fact]
+    public void TemplateMigration_preview_emits_a_verified_review_candidate_without_claiming_pass()
+    {
+        var source = CreateTextMigrationFixture("shared verified content", "source content pending review");
+        var baseline = CreateTextMigrationFixture("shared verified content", "target-owned format label");
+        var plan = TemplateMigration.DeriveExactTextPlan(source, baseline).Plan;
+        var output = Path.Combine(Path.GetTempPath(), $"migration-review-preview-{Guid.NewGuid():N}.docx");
+
+        var preview = TemplateMigration.Preview(source, baseline, plan, output);
+
+        Assert.False(preview.Pass);
+        Assert.True(preview.ReviewRequired);
+        Assert.True(preview.OutputVerified);
+        Assert.Equal(output, preview.Output);
+        Assert.True(File.Exists(output));
+        using var document = WordprocessingDocument.Open(output, false);
+        var paragraphs = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ToList();
+        Assert.Equal("shared verified content", GetParagraphText(paragraphs[0]));
+        Assert.Equal("target-owned format label", GetParagraphText(paragraphs[1]));
+    }
+
+    [Fact]
+    public void TemplateMigration_preview_accepts_a_legacy_baseline_only_when_it_introduces_no_new_openxml_errors()
+    {
+        var source = CreateTextMigrationFixture("verified source value");
+        var baseline = CreateTextMigrationFixture("baseline placeholder");
+        ReplaceZipEntry(
+            baseline,
+            "word/document.xml",
+            ReadZipEntry(baseline, "word/document.xml").Replace(
+                "<w:p>",
+                "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"-1\"/></w:numPr></w:pPr>",
+                StringComparison.Ordinal));
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v1",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            [new TemplateMigrationMapping("body:paragraph:0", "body:paragraph:0", "copy-text")]);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-legacy-openxml-{Guid.NewGuid():N}.docx");
+
+        var preview = TemplateMigration.Preview(source, baseline, plan, output);
+
+        Assert.NotEqual(0, OpenXmlValidation.Run([baseline]));
+        Assert.True(preview.OutputVerified, string.Join("; ", preview.Readback!.Failures.Select(item => item.Reason)));
+        Assert.True(preview.Pass);
+        Assert.True(File.Exists(output));
+        Assert.Equal(1, OpenXmlValidation.Run([output]));
+    }
+
+    [Fact]
+    public void TemplateMigration_semantic_selectors_migrate_shifted_body_header_and_footer_content_without_coordinates()
+    {
+        var source = CreateCrossTemplateMigrationFixture("source header", "source opening", "source fact", "source closing", "source footer", false);
+        var baseline = CreateCrossTemplateMigrationFixture("target header", "target opening", "target fact", "target closing", "target footer", true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("paragraph", "header", "source header"), new TemplateMigrationSemanticSelector("paragraph", "header", "target header"), "copy-text"),
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("paragraph", "body", "source opening"), new TemplateMigrationSemanticSelector("paragraph", "body", "target opening"), "copy-text"),
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("table-cell", "body", "source fact"), new TemplateMigrationSemanticSelector("table-cell", "body", "target fact"), "copy-text"),
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("paragraph", "body", "source closing"), new TemplateMigrationSemanticSelector("paragraph", "body", "target closing"), "copy-text"),
+                new TemplateMigrationSemanticCandidateMapping(new TemplateMigrationSemanticSelector("table-cell", "footer", "source footer"), new TemplateMigrationSemanticSelector("table-cell", "footer", "target footer"), "copy-text")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-shifted-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using var document = WordprocessingDocument.Open(output, false);
+        Assert.Contains("source header", document.MainDocumentPart!.HeaderParts.Single().Header!.InnerText);
+        Assert.Contains("source fact", document.MainDocumentPart.Document!.Body!.InnerText);
+        Assert.Contains("source footer", document.MainDocumentPart.FooterParts.Single().Footer!.InnerText);
+    }
+
+    [Fact]
+    public void TemplateMigration_builds_hash_bound_operations_only_from_complete_declared_mapping()
+    {
+        var source = CreatePlainMigrationFixture();
+        var baseline = Path.Combine(Path.GetTempPath(), $"migration-plan-baseline-{Guid.NewGuid():N}.docx");
+        Editor.Apply(source, baseline, [
+            new DocxEditOperation("replaceParagraphText", ParagraphIndex: 0, Text: "Target heading"),
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 1, Text: "Target cell")
+        ]);
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var mappings = analysis.Source.Objects
+            .Where(item => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text))
+            .Select(item => new TemplateMigrationMapping(item.Id, item.Id, "copy-text"))
+            .ToList();
+        var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256, mappings);
+
+        var result = TemplateMigration.BuildOperations(source, baseline, plan);
+
+        Assert.True(result.Pass, string.Join("; ", result.Failures.Select(item => item.Reason)));
+        Assert.False(result.ReviewRequired);
+        Assert.NotNull(result.OperationsSha256);
+        Assert.Equal(mappings.Count, result.Operations.Count);
+        Assert.Contains(result.Operations, operation => operation.Type == "replaceParagraphText" && operation.ParagraphIndex == 0 && operation.Text == "Project code XXXX 峰面积");
+        Assert.Contains(result.Operations, operation => operation.Type == "replaceTableCellText" && operation.TableIndex == 0 && operation.RowIndex == 0 && operation.CellIndex == 1 && operation.Text == "Batch YYYY");
+
+        var incomplete = plan with { Mappings = mappings.Skip(1).ToList() };
+        var rejected = TemplateMigration.BuildOperations(source, baseline, incomplete);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-source-object-unmapped");
+        Assert.Empty(rejected.Operations);
+
+        var blockedOutput = Path.Combine(Path.GetTempPath(), $"migration-blocked-{Guid.NewGuid():N}.docx");
+        var blockedApply = TemplateMigration.Apply(source, baseline, incomplete, blockedOutput);
+        Assert.False(blockedApply.Pass);
+        Assert.Null(blockedApply.Output);
+        Assert.False(File.Exists(blockedOutput));
+
+        var stale = plan with { SourceSha256 = new string('0', 64) };
+        var staleRejected = TemplateMigration.BuildOperations(source, baseline, stale);
+        Assert.False(staleRejected.Pass);
+        Assert.Contains(staleRejected.Failures, item => item.Reason == "template-migration-source-hash-mismatch");
+        Assert.Empty(staleRejected.Operations);
+
+        var duplicate = plan with { Mappings = [mappings[0], mappings[0], .. mappings.Skip(1)] };
+        var duplicateRejected = TemplateMigration.BuildOperations(source, baseline, duplicate);
+        Assert.False(duplicateRejected.Pass);
+        Assert.Contains(duplicateRejected.Failures, item => item.Reason == "template-migration-source-object-duplicate");
+        Assert.Empty(duplicateRejected.Operations);
+    }
+
+    [Fact]
+    public void TemplateMigration_copies_attested_run_content_without_replacing_target_owned_label()
+    {
+        var source = CreateLabeledRunMigrationFixture("Legacy document no.: ", "SOP03-5-0014");
+        var baseline = CreateLabeledRunMigrationFixture("Document No.: ", "PLACEHOLDER");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Legacy document no.: SOP03-5-0014"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Document No.: PLACEHOLDER"),
+                    "retain-target"),
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("run", "body", "SOP03-5-0014", ParentText: "Legacy document no.: SOP03-5-0014"),
+                    new TemplateMigrationSemanticSelector("run", "body", "PLACEHOLDER", ParentText: "Document No.: PLACEHOLDER"),
+                    "copy-text")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(resolved.Plan.Mappings, item => item.Disposition == "retain-target" && item.SourceObjectId == "body:paragraph:0" && item.BaselineObjectId == "body:paragraph:0");
+        var missingFactRun = resolved.Plan with { Mappings = resolved.Plan.Mappings.Where(item => item.Disposition != "copy-text").ToList() };
+        var rejected = TemplateMigration.BuildOperations(source, baseline, missingFactRun);
+        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-retain-target-fact-run-required");
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        var operation = Assert.Single(build.Operations);
+        Assert.Equal("replaceParagraphRunText", operation.Type);
+        Assert.Equal(1, operation.RunIndex);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-run-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using (var document = WordprocessingDocument.Open(output, false))
+        {
+            var runs = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().Elements<Run>().ToList();
+            Assert.Equal("Document No.: ", string.Concat(runs[0].Descendants<Text>().Select(text => text.Text)));
+            Assert.Equal("SOP03-5-0014", string.Concat(runs[1].Descendants<Text>().Select(text => text.Text)));
+        }
+        using (var document = WordprocessingDocument.Open(output, true))
+        {
+            document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().Elements<Run>().First().GetFirstChild<Text>()!.Text = "Tampered label: ";
+            document.MainDocumentPart.Document.Save();
+        }
+        var tampered = TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan);
+        Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-retained-target-run-mismatch");
+    }
+
+    [Fact]
+    public void TemplateMigration_retains_an_explicitly_selected_target_label_without_emitting_an_edit()
+    {
+        var source = CreateTextMigrationFixture("Legacy purpose label");
+        var baseline = CreateTextMigrationFixture("Objective:");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Legacy purpose label"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Objective:"),
+                    "retain-target-label")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(resolved.Plan.Mappings, item => item.Disposition == "retain-target-label" && item.Reason == "semantic-candidate-retain-target-label");
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Empty(build.Operations);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-label-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using (var document = WordprocessingDocument.Open(output, false))
+        {
+            Assert.Equal("Objective:", string.Concat(document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().Descendants<Text>().Select(text => text.Text)));
+        }
+        using (var document = WordprocessingDocument.Open(output, true))
+        {
+            document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().GetFirstChild<Run>()!.GetFirstChild<Text>()!.Text = "Tampered label:";
+            document.MainDocumentPart.Document.Save();
+        }
+        var tampered = TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan);
+        Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-retained-target-run-mismatch");
+    }
+
+    [Fact]
+    public void TemplateMigration_output_validator_rebuilds_authority_and_rejects_tampering_without_apply_result()
+    {
+        var source = CreateTextMigrationFixture("source fact"); var baseline = CreateTextMigrationFixture("target slot");
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256,
+            [new TemplateMigrationMapping("body:paragraph:0", "body:paragraph:0", "copy-text")]);
+        var planPath = Path.Combine(Path.GetTempPath(), $"migration-plan-{Guid.NewGuid():N}.json");
+        File.WriteAllText(planPath, System.Text.Json.JsonSerializer.Serialize(plan, Json.Options));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-validated-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, plan, output).Pass);
+
+        var valid = TemplateMigration.ValidateOutput(source, baseline, planPath, output, plan);
+        Assert.True(valid.Pass); Assert.Equal("tiwater.docx.template-migration-output-validation/v1", valid.Schema); Assert.Matches("^[A-F0-9]{64}$", valid.OutputSha256);
+
+        using (var document = WordprocessingDocument.Open(output, true))
+        {
+            document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().GetFirstChild<Run>()!.GetFirstChild<Text>()!.Text = "tampered";
+            document.MainDocumentPart.Document.Save();
+        }
+        var tampered = TemplateMigration.ValidateOutput(source, baseline, planPath, output, plan);
+        Assert.False(tampered.Pass); Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-content-mismatch");
+    }
+
+    [Fact]
+    public void TemplateMigration_appends_a_semantically_selected_body_range_without_coordinates()
+    {
+        var source = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: false);
+        var baseline = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [],
+            [new TemplateMigrationSemanticCandidateBodyAppend(
+                new TemplateMigrationSemanticSelector("paragraph", "body", "Revision history"),
+                new TemplateMigrationSemanticSelector("table", "body", DescendantText: "Revision No."))]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal("tiwater.docx.template-migration-plan/v2", resolved.Plan.Schema);
+        Assert.Single(resolved.Plan.BodyAppends!);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-body-append-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using var document = WordprocessingDocument.Open(output, false);
+        var body = document.MainDocumentPart!.Document!.Body!;
+        Assert.Equal(["before", "after", "Revision history"], body.Elements<Paragraph>().Select(item => item.InnerText).ToArray());
+        var table = Assert.Single(body.Elements<Table>());
+        Assert.Contains("Revision No.", table.InnerText);
+        Assert.Contains("R1", table.InnerText);
+    }
+
+    [Fact]
+    public void TemplateMigration_rejects_an_ambiguous_semantic_body_append_selector()
+    {
+        var source = CreateBodyAppendFixture(includeDuplicateRevisionTable: true, baseline: false);
+        var baseline = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [],
+            [new TemplateMigrationSemanticCandidateBodyAppend(
+                new TemplateMigrationSemanticSelector("paragraph", "body", "Revision history"),
+                new TemplateMigrationSemanticSelector("table", "body", DescendantText: "Revision No."))]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.False(resolved.Pass);
+        Assert.Contains(resolved.Unresolved, item => item.Reason == "template-migration-semantic-append-end-ambiguous");
+    }
+
+    [Fact]
+    public void TemplateMigration_and_editor_support_header_and_footer_table_cells()
+    {
+        var source = CreateHeaderFooterTableFixture("source-header", "source-footer");
+        var baseline = CreateHeaderFooterTableFixture("baseline-header", "baseline-footer");
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var mappings = analysis.Source.Objects
+            .Where(item => (item.Kind == "paragraph" || item.Kind == "table-cell" || item.Kind == "run") && !string.IsNullOrWhiteSpace(item.Text))
+            .Select(item => new TemplateMigrationMapping(item.Id, item.Id, "copy-text"))
+            .ToList();
+        var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256, mappings);
+
+        var build = TemplateMigration.BuildOperations(source, baseline, plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Contains(build.Operations, item => item.Type == "replaceHeaderTableCellText" && item.Text == "source-header");
+        Assert.Contains(build.Operations, item => item.Type == "replaceFooterTableCellText" && item.Text == "source-footer");
+        Assert.Contains(build.Operations, item => item.Type == "replaceHeaderParagraphRunText" && item.Text == "header-paragraph-source-header");
+        Assert.Contains(build.Operations, item => item.Type == "replaceFooterParagraphRunText" && item.Text == "footer-paragraph-source-footer");
+        Assert.Contains(build.Operations, item => item.Type == "replaceHeaderTableCellRunText" && item.Text == "source-header");
+        Assert.Contains(build.Operations, item => item.Type == "replaceFooterTableCellRunText" && item.Text == "source-footer");
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-header-footer-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => $"{item.Reason}:{item.Detail}")));
+        Assert.All(applied.Edit!.AppliedOperations, item => Assert.True(item.Applied, item.Detail));
+        using var document = WordprocessingDocument.Open(output, false);
+        Assert.Contains("source-header", document.MainDocumentPart!.HeaderParts.Single().Header!.Descendants<Text>().Select(item => item.Text));
+        Assert.Contains("source-footer", document.MainDocumentPart.FooterParts.Single().Footer!.Descendants<Text>().Select(item => item.Text));
+    }
+
+    [Fact]
+    public void TemplateMigration_exact_text_derivation_maps_only_unique_same_kind_content()
+    {
+        var source = CreateExactTextMappingFixture(includeDuplicateBaselineText: false, baseline: false);
+        var baseline = CreateExactTextMappingFixture(includeDuplicateBaselineText: false, baseline: true);
+
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
+
+        Assert.True(derived.Pass, string.Join("; ", derived.Unresolved.Select(item => item.Reason)));
+        Assert.All(derived.Plan.Mappings, mapping => Assert.Equal("copy-text", mapping.Disposition));
+        Assert.Contains(derived.Plan.Mappings, mapping => mapping.SourceObjectId == "body:paragraph:0" && mapping.BaselineObjectId == "body:paragraph:1");
+        Assert.Contains(derived.Plan.Mappings, mapping => mapping.SourceObjectId == "body:table:0:row:0:cell:0" && mapping.BaselineObjectId == "body:table:0:row:0:cell:1");
+
+        var duplicateBaseline = CreateExactTextMappingFixture(includeDuplicateBaselineText: true, baseline: true);
+        var rejected = TemplateMigration.DeriveExactTextPlan(source, duplicateBaseline);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
+    }
+
     [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
@@ -845,29 +1416,6 @@ public class AnnotationToolsTests
     }
 
     [Fact]
-    public void Edit_replaces_every_body_text_occurrence_in_the_same_paragraph()
-    {
-        var docPath = Path.Combine(Path.GetTempPath(), $"body-text-all-{Guid.NewGuid():N}.docx");
-        using (var fixture = WordprocessingDocument.Create(docPath, WordprocessingDocumentType.Document))
-        {
-            var mainPart = fixture.AddMainDocumentPart();
-            mainPart.Document = new Document(new Body(
-                new Paragraph(new Run(new Text("项目：TOKEN；复核项目：TOKEN")))));
-            mainPart.Document.Save();
-        }
-        var output = Path.Combine(Path.GetTempPath(), $"body-text-all-edited-{Guid.NewGuid():N}.docx");
-
-        var result = Editor.Apply(docPath, output, [
-            new DocxEditOperation("replaceBodyText", FindText: "TOKEN", Text: "HSPTEST")
-        ]);
-
-        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
-        using var doc = WordprocessingDocument.Open(output, false);
-        var paragraph = doc.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single();
-        Assert.Equal("项目：HSPTEST；复核项目：HSPTEST", GetParagraphText(paragraph));
-    }
-
-    [Fact]
     public void Edit_can_freeze_fields_to_current_display_text()
     {
         var docPath = CreateFieldFixture();
@@ -993,6 +1541,55 @@ public class AnnotationToolsTests
         body.Append(CreateFieldParagraph());
         mainPart.Document.Save();
         commentsPart.Comments.Save();
+        return path;
+    }
+
+    private static string CreateHeaderFooterTableFixture(string headerText, string footerText)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"header-footer-table-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        var headerCell = new TableCell();
+        headerCell.Append(new Paragraph(new Run(new Text(headerText))));
+        var headerTable = new Table(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "2400" }),
+            new TableRow(headerCell));
+        header.Header = new Header(new Paragraph(new Run(new Text($"header-paragraph-{headerText}"))), headerTable);
+        var footer = main.AddNewPart<FooterPart>();
+        var footerCell = new TableCell();
+        footerCell.Append(new Paragraph(new Run(new Text(footerText))));
+        var footerTable = new Table(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "2400" }),
+            new TableRow(footerCell));
+        footer.Footer = new Footer(new Paragraph(new Run(new Text($"footer-paragraph-{footerText}"))), footerTable);
+        var section = new SectionProperties(
+            new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
+            new FooterReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(footer) });
+        main.Document = new Document(new Body(new Paragraph(new Run(new Text("body"))), section));
+        main.Document.Save();
+        header.Header.Save();
+        footer.Footer.Save();
+        return path;
+    }
+
+    private static string CreateExactTextMappingFixture(bool includeDuplicateBaselineText, bool baseline)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"exact-text-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var body = new Body();
+        if (baseline) body.Append(new Paragraph(new Run(new Text("baseline heading"))));
+        body.Append(new Paragraph(new Run(new Text("unique paragraph"))));
+        if (baseline && includeDuplicateBaselineText) body.Append(new Paragraph(new Run(new Text("unique paragraph"))));
+        var row = baseline
+            ? new TableRow(new TableCell(new Paragraph(new Run(new Text("baseline cell")))), new TableCell(new Paragraph(new Run(new Text("unique cell")))))
+            : new TableRow(new TableCell(new Paragraph(new Run(new Text("unique cell")))));
+        body.Append(new Table(new TableProperties(), new TableGrid(new GridColumn { Width = "2400" }, new GridColumn { Width = "2400" }), row));
+        main.Document = new Document(body);
+        main.Document.Save();
         return path;
     }
 
@@ -1618,6 +2215,129 @@ public class AnnotationToolsTests
             ));
             mainPart.Document.Save();
         }
+        return path;
+    }
+
+    private static string CreateMediaMigrationFixture(string text, byte[] mediaBytes)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-media-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var image = main.AddImagePart(ImagePartType.Png);
+        using var stream = new MemoryStream(mediaBytes);
+        image.FeedData(stream);
+        var drawing = new Drawing(
+            new DW.Inline(
+                new DW.Extent { Cx = 990000L, Cy = 990000L },
+                new DW.DocProperties { Id = 1U, Name = "migration-image" },
+                new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(new A.GraphicData(
+                    new PIC.Picture(
+                        new PIC.NonVisualPictureProperties(
+                            new PIC.NonVisualDrawingProperties { Id = 0U, Name = "migration-image" },
+                            new PIC.NonVisualPictureDrawingProperties()),
+                        new PIC.BlipFill(
+                            new A.Blip { Embed = main.GetIdOfPart(image) },
+                            new A.Stretch(new A.FillRectangle())),
+                        new PIC.ShapeProperties(
+                            new A.Transform2D(new A.Offset { X = 0L, Y = 0L }, new A.Extents { Cx = 990000L, Cy = 990000L }),
+                            new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }))
+                    ) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })));
+        main.Document = new Document(new Body(new Paragraph(new Run(new Text(text)), new Run(drawing))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateTextMigrationFixture(params string[] text)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-text-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateBodyAppendFixture(bool includeDuplicateRevisionTable, bool baseline)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-body-append-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var body = new Body(new Paragraph(new Run(new Text("before"))), new Paragraph(new Run(new Text("after"))));
+        if (!baseline)
+        {
+            var after = body.Elements<Paragraph>().Last();
+            body.InsertBefore(new Paragraph(new Run(new Text("Revision history"))), after);
+            body.InsertBefore(CreateRevisionTable(), after);
+            if (includeDuplicateRevisionTable) body.InsertBefore(CreateRevisionTable(), after);
+        }
+        main.Document = new Document(body);
+        main.Document.Save();
+        return path;
+    }
+
+    private static Table CreateRevisionTable()
+        => new(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "2400" }, new GridColumn { Width = "2400" }),
+            new TableRow(new TableCell(new Paragraph(new Run(new Text("Revision No.")))), new TableCell(new Paragraph(new Run(new Text("Description"))))),
+            new TableRow(new TableCell(new Paragraph(new Run(new Text("R1")))), new TableCell(new Paragraph(new Run(new Text("Current source fact"))))));
+
+    private static string CreateLabeledRunMigrationFixture(string label, string value)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-labeled-run-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(new Paragraph(
+            new Run(new RunProperties(new Bold()), new Text(label)),
+            new Run(new RunProperties(new Italic()), new Text(value)))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateCrossTemplateMigrationFixture(string headerText, string openingText, string factText, string closingText, string footerText, bool shifted)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-cross-template-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        header.Header = new Header(new Paragraph(new Run(new Text(headerText))));
+        var footer = main.AddNewPart<FooterPart>();
+        footer.Footer = new Footer(new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text(footerText)))))));
+        var section = new SectionProperties(
+            new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
+            new FooterReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(footer) });
+        var factTable = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text(factText))))));
+        main.Document = shifted
+            ? new Document(new Body(
+                new Paragraph(new Run(new Text("template-owned banner"))),
+                factTable,
+                new Paragraph(new Run(new Text(closingText))),
+                new Paragraph(new Run(new Text(openingText))),
+                section))
+            : new Document(new Body(
+                new Paragraph(new Run(new Text(openingText))),
+                factTable,
+                new Paragraph(new Run(new Text(closingText))),
+                section));
+        main.Document.Save();
+        header.Header.Save();
+        footer.Footer.Save();
+        return path;
+    }
+
+    private static string CreatePlainMigrationFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-plain-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("Project code XXXX 峰面积"))),
+            new Table(new TableRow(
+                new TableCell(new Paragraph(new Run(new Text("Batch")))),
+                new TableCell(new Paragraph(new Run(new Text("Batch YYYY")))))),
+            new Paragraph(new Run(new Text("Top-level paragraph XXXX")))));
+        main.Document.Save();
         return path;
     }
 

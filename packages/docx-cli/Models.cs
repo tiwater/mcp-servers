@@ -105,11 +105,18 @@ public sealed record TableRowDetail(
 
 public sealed record TableDetail(
     int TableIndex,
+    IReadOnlyList<string> ContainmentPath,
+    string? ParentCellAddress,
     int RowCount,
     int ColumnCount,
+    int GridColumnCount,
+    IReadOnlyList<string?> GridColumnWidths,
     IReadOnlyList<TableRowDetail> Rows);
 
 public sealed record TableInspectionReport(
+    string Schema,
+    string ToolVersion,
+    IReadOnlyDictionary<string, string> ExtractionView,
     string File,
     IReadOnlyList<TableDetail> Tables);
 
@@ -180,6 +187,151 @@ public sealed record TemplateTransformValidationReport(
     IReadOnlyList<string> Errors,
     IReadOnlyList<string> Warnings);
 
+public sealed record TemplateMigrationObject(
+    string Id,
+    string Kind,
+    string Scope,
+    string? ParentId,
+    string? Text,
+    string? Style,
+    IReadOnlyDictionary<string, string> Provenance);
+
+public sealed record TemplateMigrationInventory(
+    string File,
+    string Sha256,
+    IReadOnlyList<TemplateMigrationObject> Objects);
+
+public sealed record TemplateMigrationFinding(
+    string Id,
+    string Kind,
+    string SourceObjectId,
+    string? BaselineObjectId,
+    string Disposition,
+    IReadOnlyDictionary<string, string> Evidence);
+
+public sealed record TemplateMigrationAnalysis(
+    string Schema,
+    TemplateMigrationInventory Source,
+    TemplateMigrationInventory Baseline,
+    IReadOnlyList<TemplateMigrationFinding> Findings,
+    IReadOnlyList<string> UnsupportedObjectKinds);
+
+public sealed record TemplateMigrationMapping(
+    string SourceObjectId,
+    string? BaselineObjectId,
+    string Disposition,
+    string? Reason = null);
+
+/// <summary>
+/// A hash-bound source body range appended after the baseline body. The range
+/// is resolved from semantic selectors before it becomes this plan payload.
+/// </summary>
+public sealed record TemplateMigrationBodyAppend(
+    string SourceStartObjectId,
+    string SourceEndObjectId);
+
+public sealed record TemplateMigrationPlan(
+    string Schema,
+    string SourceSha256,
+    string BaselineSha256,
+    IReadOnlyList<TemplateMigrationMapping> Mappings,
+    IReadOnlyList<TemplateMigrationBodyAppend>? BodyAppends = null);
+
+public sealed record TemplateMigrationSemanticSelector(
+    string Kind,
+    string? Scope = null,
+    string? Text = null,
+    string? Sha256 = null,
+    string? ParentText = null,
+    string? PreviousText = null,
+    string? NextText = null,
+    string? DescendantText = null);
+
+public sealed record TemplateMigrationSemanticCandidateMapping(
+    TemplateMigrationSemanticSelector Source,
+    TemplateMigrationSemanticSelector Baseline,
+    string Disposition);
+
+public sealed record TemplateMigrationSemanticCandidateBodyAppend(
+    TemplateMigrationSemanticSelector SourceStart,
+    TemplateMigrationSemanticSelector SourceEnd);
+
+public sealed record TemplateMigrationSemanticCandidate(
+    string Schema,
+    IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings,
+    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null);
+
+public sealed record TemplateMigrationMappingDerivation(
+    string Schema,
+    bool Pass,
+    TemplateMigrationPlan Plan,
+    IReadOnlyList<TemplateMigrationPlanFailure> Unresolved);
+
+public sealed record TemplateMigrationPlanFailure(
+    string Reason,
+    string? SourceObjectId = null,
+    string? BaselineObjectId = null,
+    string? Detail = null);
+
+public sealed record TemplateMigrationMediaCopy(
+    string SourceObjectId,
+    string BaselineObjectId);
+
+public sealed record TemplateMigrationOperationBuild(
+    string Schema,
+    bool Pass,
+    bool ReviewRequired,
+    string SourceSha256,
+    string BaselineSha256,
+    string? OperationsSha256,
+    IReadOnlyList<DocxEditOperation> Operations,
+    IReadOnlyList<TemplateMigrationMediaCopy> MediaCopies,
+    IReadOnlyList<TemplateMigrationBodyAppend> BodyAppends,
+    string? PreviewOperationsSha256,
+    IReadOnlyList<DocxEditOperation> PreviewOperations,
+    IReadOnlyList<TemplateMigrationMediaCopy> PreviewMediaCopies,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
+
+public sealed record TemplateMigrationReadback(
+    bool Pass,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
+
+public sealed record TemplateMigrationOutputValidation(
+    string Schema,
+    string ToolVersion,
+    bool Pass,
+    string Source,
+    string SourceSha256,
+    string Baseline,
+    string BaselineSha256,
+    string Output,
+    string OutputSha256,
+    string Plan,
+    string PlanSha256,
+    TemplateMigrationOperationBuild Build,
+    TemplateMigrationReadback Readback,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
+
+public sealed record TemplateMigrationApplyResult(
+    string Schema,
+    bool Pass,
+    string? Output,
+    TemplateMigrationOperationBuild Build,
+    DocxEditResult? Edit,
+    IReadOnlyList<TemplateMigrationPlanFailure> MediaFailures,
+    TemplateMigrationReadback? Readback);
+
+public sealed record TemplateMigrationPreviewResult(
+    string Schema,
+    bool Pass,
+    bool ReviewRequired,
+    bool OutputVerified,
+    string? Output,
+    TemplateMigrationOperationBuild Build,
+    DocxEditResult? Edit,
+    IReadOnlyList<TemplateMigrationPlanFailure> MediaFailures,
+    TemplateMigrationReadback? Readback);
+
 public sealed record DocxSemanticFillRule(
     IReadOnlyList<string> RowPatterns,
     IReadOnlyList<string> ColPatterns,
@@ -191,7 +343,9 @@ public sealed record DocxEditOperation(
     string? Text = null,
     string? FindText = null,
     int? HeaderIndex = null,
+    int? FooterIndex = null,
     int? ParagraphIndex = null,
+    int? RunIndex = null,
     int? TableIndex = null,
     int? RowIndex = null,
     int? CellIndex = null,

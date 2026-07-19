@@ -22,7 +22,7 @@ tiwater-docx inspect <input.docx> [--json]
 ```
 
 ### 1a. Inspect Table Details
-Exports body table rows, cells, grid spans, vertical merges, paragraph alignment, run font, color, underline, and text-fill details. Use this for template-fidelity validation where row/cell merge structure and run-level formatting matter.
+Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. Tables are traversed depth-first from the body through arbitrarily nested table cells; every table carries a containment path and nested tables carry their parent-cell runtime address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, and cells expose mutation address, grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
 
 ```bash
 tiwater-docx inspect-tables <input.docx> [--json]
@@ -47,6 +47,81 @@ Validates compatibility between a source template and a target template. Ensures
 
 ```bash
 tiwater-docx validate-template-transform <source-template.docx> <target-template.docx> [--json]
+```
+
+### 3a. Analyze Cross-Template Migration
+
+Exports hash-attested source and baseline object inventories plus unresolved
+structural/content/style differences. It does not infer a business mapping or
+modify either document.
+
+```bash
+tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
+```
+
+### 3aa. Derive an Exact-Text Mapping Candidate
+
+Produces a plan only for content that is unique within both source and baseline
+for the same object kind. Repeated, absent, or otherwise ambiguous content is
+emitted as `review-required`; it is never matched by position.
+
+```bash
+tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
+```
+
+### 3b. Build Cross-Template Operations
+
+Compiles a hash-bound, caller-declared object mapping into deterministic edit
+operations. It rejects missing/duplicate source content, duplicate targets,
+hash drift, type mismatches, unsupported targets, and review-required
+mappings. It does not infer any source-to-target mapping. A mapping can target
+an attested `run` as well as a paragraph or table cell; run operations preserve
+the target template's surrounding labels and formatting while replacing only
+the mapped run's text. Object ids are accepted only from the current
+hash-attested inventories, never as caller-supplied document coordinates.
+For a mixed label/value parent, a semantic candidate may use `retain-target`
+for the attested target parent only together with at least one mapped child
+run. Readback verifies that every untargeted target run remains unchanged.
+For an explicitly selected label-only parent, `retain-target-label` records
+that target label retention without inferring semantic equivalence or accepting
+coordinates; it emits no edit and readback verifies every target run unchanged.
+
+A semantic candidate may also declare one or more source body ranges to append.
+Each range is bounded by unique current paragraph/table selectors (a table may
+be selected by a unique descendant header). The runtime resolves those selectors
+to the current inventories, copies only plain body paragraph/table blocks after
+the baseline body, and independently verifies both copied blocks and every
+pre-existing baseline object. It rejects duplicate selectors, overlapping
+ranges, drawings/revisions/content controls, missing styles, and any structural
+drift outside the declared append. This is explicit source preservation when a
+target template has no compatible section; it does not infer a target location,
+style conversion, or semantic equivalence.
+
+```bash
+tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
+```
+
+### 3c. Apply and Independently Read Back a Migration
+
+Applies only a passing operation build to the baseline, then independently
+re-inventories source, baseline, and output. It checks every copied value,
+baseline structure/style preservation, and OpenXML validity. A failed builder
+does not create an output.
+
+```bash
+tiwater-docx apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>
+```
+
+### 3d. Independently Validate a Migration Output
+
+Rebuilds source, baseline, plan admission, and output evidence in a fresh
+invocation. It does not accept an apply result or trust its embedded
+`Readback.Pass`. The versioned verdict binds all four file hashes and fails on
+an incomplete plan, content/media mismatch, baseline structure drift, body
+append drift, or newly introduced OpenXML errors.
+
+```bash
+tiwater-docx validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>
 ```
 
 ### 4. Strip Direct Formatting

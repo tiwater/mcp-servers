@@ -35,6 +35,16 @@ tiwater-xlsx validate-inspect-evidence --request request.json --evidence evidenc
 ```
 
 ### 2. Fill a Template
+`tiwater-xlsx evidence <input.xlsx>` emits the versioned `tiwater.xlsx.evidence/v1`
+readback envelope. It includes typed raw cells, style identity and alignment,
+number formats, formula/shared-formula metadata, merges, dimensions, sheet view,
+print/page settings and workbook date system for independent baseline comparison.
+Each physical cell also exposes its formatted display value, effective inherited
+style identifiers, and normalized number-format evidence (source, normalized code,
+semantic kind, and date classification). Numeric date/time cells include an ISO-8601
+value computed from the workbook's declared 1900 or 1904 date system. These are
+technical readback facts; the tool does not infer scenario semantics.
+
 Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
 
 ```bash
@@ -74,7 +84,8 @@ By default, edit operations use `valueType: "auto"` semantics. Numeric-looking
 values are written as numeric Excel cells unless the target cell is formatted as
 text; other values are written as strings. The target cell's existing style and
 number format are preserved. Set `valueType` to `"text"` or `"number"` on an
-operation when a caller needs explicit behavior.
+operation when a caller needs explicit behavior. `valueType: "date"` accepts an
+ISO date/time and writes its Excel serial while preserving the target number format.
 
 Formula adjustment for `insertRows` and `copyRow` is intentionally conservative.
 It supports A1-style cell references, including local references and sheet-qualified

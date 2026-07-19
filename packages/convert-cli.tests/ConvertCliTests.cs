@@ -47,11 +47,20 @@ public class ConvertCliTests
     {
         var input = CreateDocxFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
+        var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => OfficePdfConverter.ConvertToPdf(input, output, "docx", sofficePath: "/missing/soffice"));
+        try
+        {
+            Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "libreoffice");
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => OfficePdfConverter.ConvertToPdf(input, output, "docx", sofficePath: "/missing/soffice"));
 
-        Assert.Contains("LibreOffice/soffice is required", ex.Message);
+            Assert.Contains("LibreOffice/soffice is required", ex.Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", originalBackend);
+        }
     }
 
     [Fact]
@@ -91,11 +100,69 @@ public class ConvertCliTests
         var input = CreateDocxFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
         var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
+        var originalLimaInstance = Environment.GetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE");
         Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps-writer");
+        Environment.SetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE", null);
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() => OfficePdfConverter.ConvertToPdf(input, output, "docx"));
             Assert.Contains("WPS Writer PDF backend was required", ex.Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", originalBackend);
+            Environment.SetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE", originalLimaInstance);
+        }
+    }
+
+    [Fact]
+    public void Required_wps_spreadsheet_backend_fails_closed_when_runtime_is_unavailable()
+    {
+        if (WpsSpreadsheetPdfConverter.IsAvailable()) return;
+        var input = CreateLegacyXlsFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
+        var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
+        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps-spreadsheet");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => OfficePdfConverter.ConvertToPdf(input, output, "xls"));
+            Assert.Contains("WPS Spreadsheets PDF backend was required", ex.Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", originalBackend);
+        }
+    }
+
+    [Fact]
+    public void Wps_spreadsheet_uses_the_supported_ExportAsFixedFormat_pdf_api()
+    {
+        var helperScript = typeof(WpsSpreadsheetPdfConverter)
+            .GetField("WpsHelperScript", BindingFlags.NonPublic | BindingFlags.Static)
+            ?.GetRawConstantValue() as string;
+
+        Assert.NotNull(helperScript);
+        Assert.Contains("from pywpsrpc.rpcetapi import createEtRpcInstance, etapi", helperScript);
+        Assert.Contains("book.ExportAsFixedFormat(", helperScript);
+        Assert.Contains("etapi.XlFixedFormatType.xlTypePDF", helperScript);
+        Assert.Contains("IgnorePrintAreas=False", helperScript);
+    }
+
+    [Fact]
+    public void Wps_spreadsheet_pdf_conversion_creates_a_real_pdf_when_runtime_is_available()
+    {
+        if (!WpsSpreadsheetPdfConverter.IsAvailable()) return;
+        var input = CreateXlsxFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
+        var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
+        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps-spreadsheet");
+        try
+        {
+            var result = OfficePdfConverter.ConvertToPdf(input, output, "xlsx");
+            Assert.Equal("wps-spreadsheet", result.Backend);
+            Assert.True(File.Exists(output));
+            Assert.True(new FileInfo(output).Length > 1_000);
+            Assert.Equal("%PDF", File.ReadAllText(output)[..4]);
         }
         finally
         {
@@ -177,6 +244,18 @@ public class ConvertCliTests
         styledCell.CellStyle = borderedStyle;
         row1.CreateCell(1).SetCellValue("2025-09-23");
 
+        using var output = File.Create(path);
+        workbook.Write(output);
+        return path;
+    }
+
+    private static string CreateXlsxFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-convert-{Guid.NewGuid():N}.xlsx");
+        using var workbook = new XSSFWorkbook();
+        var sheet = workbook.CreateSheet("Results");
+        sheet.CreateRow(0).CreateCell(0).SetCellValue("Batch");
+        sheet.CreateRow(1).CreateCell(0).SetCellValue("260245");
         using var output = File.Create(path);
         workbook.Write(output);
         return path;

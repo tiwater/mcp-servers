@@ -54,11 +54,17 @@ public static class OfficeConverter
         }
 
         var writerFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "doc", "docx", "odt", "rtf" };
+        var spreadsheetFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "xls", "xlsx" };
         var requestedBackend = (Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND") ?? "auto").Trim().ToLowerInvariant();
-        if (!new[] { "auto", "wps-writer", "libreoffice" }.Contains(requestedBackend))
+        if (!new[] { "auto", "wps-writer", "wps-spreadsheet", "libreoffice" }.Contains(requestedBackend))
         {
             throw new InvalidOperationException($"Unsupported TIWATER_OFFICE_PDF_BACKEND: {requestedBackend}");
         }
+
+        if (requestedBackend == "wps-writer" && !writerFormats.Contains(normalizedFormat))
+            throw new InvalidOperationException($"WPS Writer PDF backend does not support {normalizedFormat} input.");
+        if (requestedBackend == "wps-spreadsheet" && !spreadsheetFormats.Contains(normalizedFormat))
+            throw new InvalidOperationException($"WPS Spreadsheets PDF backend does not support {normalizedFormat} input.");
 
         if (writerFormats.Contains(normalizedFormat) && requestedBackend != "libreoffice")
         {
@@ -78,8 +84,24 @@ public static class OfficeConverter
             }
         }
 
+        if (spreadsheetFormats.Contains(normalizedFormat) && requestedBackend != "libreoffice")
+        {
+            if (WpsSpreadsheetPdfConverter.IsAvailable())
+            {
+                WpsSpreadsheetPdfConverter.ConvertToPdf(input, output);
+                return new OfficePdfConversionResult("wps-spreadsheet");
+            }
+            if (requestedBackend == "wps-spreadsheet")
+            {
+                throw new InvalidOperationException("WPS Spreadsheets PDF backend was required but WPS Spreadsheets, xvfb-run, dbus-run-session, or pywpsrpc is unavailable.");
+            }
+        }
+
         ConvertWithSoffice(input, output, "pdf", sofficePath);
-        return new OfficePdfConversionResult("libreoffice", writerFormats.Contains(normalizedFormat) ? "wps-writer-unavailable" : null);
+        var fallbackReason = writerFormats.Contains(normalizedFormat)
+            ? "wps-writer-unavailable"
+            : spreadsheetFormats.Contains(normalizedFormat) ? "wps-spreadsheet-unavailable" : null;
+        return new OfficePdfConversionResult("libreoffice", fallbackReason);
     }
 
     public static void ConvertXlsToXlsx(string input, string output, string? sofficePath = null)

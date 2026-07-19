@@ -6,6 +6,7 @@ A generic CLI for loss-aware office format conversion.
 
 - `.xls` -> `.xlsx`
 - Writer documents -> `.pdf` through WPS Writer RPC when available
+- XLS/XLSX workbooks -> `.pdf` through WPS Spreadsheets RPC when available
 - Other Office document/workbook/presentation formats -> `.pdf` through a local LibreOffice/soffice install
 
 ## Usage
@@ -34,6 +35,12 @@ JSON result records `backend: "wps-writer"` or `backend: "libreoffice"` and a
 fallback reason. Set `TIWATER_OFFICE_PDF_BACKEND=wps-writer` to require the
 native WPS backend and fail closed when it is unavailable; use `libreoffice` to
 request the auxiliary backend explicitly.
+
+XLS and XLSX PDF conversion likewise prefers WPS Spreadsheets through
+`pywpsrpc` when `et`, `xvfb-run`, `dbus-run-session`, and the configured RPC
+Python are available. Set `TIWATER_OFFICE_PDF_BACKEND=wps-spreadsheet` to
+require that native backend and fail closed; it never treats LibreOffice output
+as WPS Spreadsheet proof.
 
 On macOS, set `TIWATER_WPS_WRITER_LIMA_INSTANCE` to the name of a configured
 Lima Linux instance that exposes the documented `/tmp/lucid-wps-render` shared
