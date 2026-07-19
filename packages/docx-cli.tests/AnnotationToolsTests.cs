@@ -81,6 +81,8 @@ public class AnnotationToolsTests
         Assert.NotEmpty(report.ToolVersion);
         Assert.Equal("direct-cell-paragraphs-excluding-nested-tables", report.ExtractionView["cellText"]);
         Assert.Equal(2, report.Tables.Count);
+        Assert.Equal(report.Tables[0].ColumnCount, report.Tables[0].GridColumnCount);
+        Assert.Equal(report.Tables[0].GridColumnCount, report.Tables[0].GridColumnWidths.Count);
         Assert.Equal("outer", report.Tables[0].Rows[0].Cells[0].Text);
         Assert.Equal(["body", "table:0", "row:0", "cell:0", "table:0"], report.Tables[1].ContainmentPath);
         Assert.Equal("table:0:row:0:cell:0", report.Tables[1].ParentCellAddress);

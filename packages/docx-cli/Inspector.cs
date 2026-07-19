@@ -178,12 +178,17 @@ public static class Inspector
                     Cells: cellDetails));
             }
 
+            var declaredGridWidths = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Select(column => (string?)column.Width?.Value).ToList() ?? [];
+            var gridColumnCount = Math.Max(columnCount, declaredGridWidths.Count);
+            while (declaredGridWidths.Count < gridColumnCount) declaredGridWidths.Add(null);
             details.Add(new TableDetail(
                 TableIndex: tableIndex,
                 ContainmentPath: containmentPath,
                 ParentCellAddress: parentCellAddress,
                 RowCount: rows.Count,
-                ColumnCount: columnCount,
+                ColumnCount: gridColumnCount,
+                GridColumnCount: gridColumnCount,
+                GridColumnWidths: declaredGridWidths,
                 Rows: rowDetails));
 
             for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)

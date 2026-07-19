@@ -109,6 +109,8 @@ public sealed record TableDetail(
     string? ParentCellAddress,
     int RowCount,
     int ColumnCount,
+    int GridColumnCount,
+    IReadOnlyList<string?> GridColumnWidths,
     IReadOnlyList<TableRowDetail> Rows);
 
 public sealed record TableInspectionReport(
