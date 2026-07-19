@@ -64,6 +64,32 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void InspectTables_versions_the_view_and_addresses_nested_tables_without_leaking_nested_text()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"inspect-nested-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var inner = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("inner"))))));
+            var outer = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("outer"))), inner)));
+            main.Document = new Document(new Body(outer)); main.Document.Save();
+        }
+
+        var report = Inspector.InspectTables(source);
+
+        Assert.Equal("tiwater.docx.inspect-tables/v1", report.Schema);
+        Assert.NotEmpty(report.ToolVersion);
+        Assert.Equal("direct-cell-paragraphs-excluding-nested-tables", report.ExtractionView["cellText"]);
+        Assert.Equal(2, report.Tables.Count);
+        Assert.Equal(report.Tables[0].ColumnCount, report.Tables[0].GridColumnCount);
+        Assert.Equal(report.Tables[0].GridColumnCount, report.Tables[0].GridColumnWidths.Count);
+        Assert.Equal("outer", report.Tables[0].Rows[0].Cells[0].Text);
+        Assert.Equal(["body", "table:0", "row:0", "cell:0", "table:0"], report.Tables[1].ContainmentPath);
+        Assert.Equal("table:0:row:0:cell:0", report.Tables[1].ParentCellAddress);
+        Assert.Equal("inner", report.Tables[1].Rows[0].Cells[0].Text);
+    }
+
+    [Fact]
     public void TemplateMigration_inventory_captures_runs_sections_revisions_and_media_without_document_specific_rules()
     {
         var source = Path.Combine(Path.GetTempPath(), $"migration-rich-inventory-{Guid.NewGuid():N}.docx");
@@ -443,6 +469,30 @@ public class AnnotationToolsTests
         }
         var tampered = TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan);
         Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-retained-target-run-mismatch");
+    }
+
+    [Fact]
+    public void TemplateMigration_output_validator_rebuilds_authority_and_rejects_tampering_without_apply_result()
+    {
+        var source = CreateTextMigrationFixture("source fact"); var baseline = CreateTextMigrationFixture("target slot");
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256,
+            [new TemplateMigrationMapping("body:paragraph:0", "body:paragraph:0", "copy-text")]);
+        var planPath = Path.Combine(Path.GetTempPath(), $"migration-plan-{Guid.NewGuid():N}.json");
+        File.WriteAllText(planPath, System.Text.Json.JsonSerializer.Serialize(plan, Json.Options));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-validated-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, plan, output).Pass);
+
+        var valid = TemplateMigration.ValidateOutput(source, baseline, planPath, output, plan);
+        Assert.True(valid.Pass); Assert.Equal("tiwater.docx.template-migration-output-validation/v1", valid.Schema); Assert.Matches("^[A-F0-9]{64}$", valid.OutputSha256);
+
+        using (var document = WordprocessingDocument.Open(output, true))
+        {
+            document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().GetFirstChild<Run>()!.GetFirstChild<Text>()!.Text = "tampered";
+            document.MainDocumentPart.Document.Save();
+        }
+        var tampered = TemplateMigration.ValidateOutput(source, baseline, planPath, output, plan);
+        Assert.False(tampered.Pass); Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-content-mismatch");
     }
 
     [Fact]

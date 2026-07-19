@@ -789,6 +789,32 @@ public static class TemplateMigration
         return result.Pass ? 0 : 1;
     }
 
+    public static int RunValidateOutput(string[] args)
+    {
+        if (args.Length < 4) throw new InvalidOperationException("validate-template-migration-output requires <source.docx> <baseline.docx> <plan.json> <output.docx>");
+        var planPath = Path.GetFullPath(args[2]);
+        var plan = JsonSerializer.Deserialize<TemplateMigrationPlan>(File.ReadAllText(planPath), Json.Options)
+            ?? throw new InvalidOperationException("template-migration-plan-invalid");
+        var result = ValidateOutput(args[0], args[1], planPath, args[3], plan);
+        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
+        return result.Pass ? 0 : 1;
+    }
+
+    /// <summary>Independently rebuilds authority inventories and never consumes apply-result readback.</summary>
+    public static TemplateMigrationOutputValidation ValidateOutput(string source, string baseline, string planPath, string output, TemplateMigrationPlan plan)
+    {
+        var sourcePath = Path.GetFullPath(source); var baselinePath = Path.GetFullPath(baseline); var outputPath = Path.GetFullPath(output); var canonicalPlanPath = Path.GetFullPath(planPath);
+        var build = BuildOperations(sourcePath, baselinePath, plan);
+        var readback = ValidateReadback(sourcePath, baselinePath, outputPath, plan);
+        var failures = new List<TemplateMigrationPlanFailure>(); failures.AddRange(build.Failures); failures.AddRange(readback.Failures);
+        return new TemplateMigrationOutputValidation(
+            "tiwater.docx.template-migration-output-validation/v1",
+            typeof(TemplateMigration).Assembly.GetName().Version?.ToString() ?? "unknown",
+            build.Pass && readback.Pass,
+            sourcePath, HashFile(sourcePath), baselinePath, HashFile(baselinePath), outputPath, HashFile(outputPath), canonicalPlanPath, HashFile(canonicalPlanPath),
+            build, readback, failures);
+    }
+
     public static TemplateMigrationApplyResult Apply(string source, string baseline, TemplateMigrationPlan plan, string output)
     {
         var build = BuildOperations(source, baseline, plan);

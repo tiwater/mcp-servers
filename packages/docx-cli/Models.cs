@@ -105,11 +105,18 @@ public sealed record TableRowDetail(
 
 public sealed record TableDetail(
     int TableIndex,
+    IReadOnlyList<string> ContainmentPath,
+    string? ParentCellAddress,
     int RowCount,
     int ColumnCount,
+    int GridColumnCount,
+    IReadOnlyList<string?> GridColumnWidths,
     IReadOnlyList<TableRowDetail> Rows);
 
 public sealed record TableInspectionReport(
+    string Schema,
+    string ToolVersion,
+    IReadOnlyDictionary<string, string> ExtractionView,
     string File,
     IReadOnlyList<TableDetail> Tables);
 
@@ -287,6 +294,22 @@ public sealed record TemplateMigrationOperationBuild(
 
 public sealed record TemplateMigrationReadback(
     bool Pass,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
+
+public sealed record TemplateMigrationOutputValidation(
+    string Schema,
+    string ToolVersion,
+    bool Pass,
+    string Source,
+    string SourceSha256,
+    string Baseline,
+    string BaselineSha256,
+    string Output,
+    string OutputSha256,
+    string Plan,
+    string PlanSha256,
+    TemplateMigrationOperationBuild Build,
+    TemplateMigrationReadback Readback,
     IReadOnlyList<TemplateMigrationPlanFailure> Failures);
 
 public sealed record TemplateMigrationApplyResult(

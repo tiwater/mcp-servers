@@ -22,7 +22,7 @@ tiwater-docx inspect <input.docx> [--json]
 ```
 
 ### 1a. Inspect Table Details
-Exports body table rows, cells, grid spans, vertical merges, paragraph alignment, run font, color, underline, and text-fill details. Use this for template-fidelity validation where row/cell merge structure and run-level formatting matter.
+Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. Tables are traversed depth-first from the body through arbitrarily nested table cells; every table carries a containment path and nested tables carry their parent-cell runtime address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, and cells expose mutation address, grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
 
 ```bash
 tiwater-docx inspect-tables <input.docx> [--json]
@@ -103,6 +103,18 @@ does not create an output.
 
 ```bash
 tiwater-docx apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>
+```
+
+### 3d. Independently Validate a Migration Output
+
+Rebuilds source, baseline, plan admission, and output evidence in a fresh
+invocation. It does not accept an apply result or trust its embedded
+`Readback.Pass`. The versioned verdict binds all four file hashes and fails on
+an incomplete plan, content/media mismatch, baseline structure drift, body
+append drift, or newly introduced OpenXML errors.
+
+```bash
+tiwater-docx validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>
 ```
 
 ### 4. Strip Direct Formatting
