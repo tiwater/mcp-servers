@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Dockit.Pptx;
+using Tiwater.FormatEvidence;
 
 namespace Dockit.Pptx.Cli;
 
@@ -23,6 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", "0.1.3", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", "0.1.3", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
@@ -99,6 +102,8 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.pptx> [--json]");
+        Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
+        Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect <input.pptx> --json --detail");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");

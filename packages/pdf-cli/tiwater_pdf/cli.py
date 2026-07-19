@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import fitz
+from .format_evidence import run as run_format_evidence
 
 DEFAULT_OCR_MODEL = "qwen3.7-plus"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
@@ -1767,6 +1768,15 @@ def main() -> int:
     inspect_parser.add_argument("input", type=Path, help="PDF file to inspect")
     inspect_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
+    evidence_parser = subparsers.add_parser("inspect-evidence", help="Produce hash-bound published inspection evidence")
+    evidence_parser.add_argument("--request", type=Path, required=True)
+    evidence_parser.add_argument("--output", type=Path, required=True)
+
+    evidence_validator_parser = subparsers.add_parser("validate-inspect-evidence", help="Independently recompute published inspection evidence")
+    evidence_validator_parser.add_argument("--request", type=Path, required=True)
+    evidence_validator_parser.add_argument("--evidence", type=Path, required=True)
+    evidence_validator_parser.add_argument("--output", type=Path, required=True)
+
     # extract-tables command
     extract_parser = subparsers.add_parser("extract-tables", help="Extract tables from PDF")
     extract_parser.add_argument("input", type=Path, help="PDF file to extract from")
@@ -1832,7 +1842,13 @@ def main() -> int:
         return 1
 
     try:
-        if args.command == "inspect":
+        if args.command == "inspect-evidence":
+            return run_format_evidence(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, "0.21.1")
+
+        elif args.command == "validate-inspect-evidence":
+            return run_format_evidence(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, "0.21.1", args.evidence)
+
+        elif args.command == "inspect":
             result = inspect(args.input)
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))

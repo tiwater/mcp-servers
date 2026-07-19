@@ -4,11 +4,18 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System.Text.Json;
 using Xunit;
+using Tiwater.FormatEvidence;
+using System.Security.Cryptography;
 
 namespace Dockit.Xlsx.Tests;
 
 public class InspectionDetailTests
 {
+    [Fact]
+    public void Published_inspection_evidence_is_recomputed_from_xlsx_bytes()
+    {
+        var source=CreateAna14LikeWorkbook();var root=Path.Combine(Path.GetTempPath(),$"xlsx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="xlsx"},extraction=new{schema="tiwater.xlsx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-xlsx","0.1.36","xlsx",Inspector.Inspect));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-xlsx","0.1.36","xlsx",Inspector.Inspect));Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+    }
     [Fact]
     public void Inspect_exposes_visible_text_formulas_dimensions_and_merges()
     {

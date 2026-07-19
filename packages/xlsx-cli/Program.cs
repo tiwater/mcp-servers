@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Dockit.Xlsx;
+using Tiwater.FormatEvidence;
 
 namespace Dockit.Xlsx.Cli;
 
@@ -23,6 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", "0.1.36", "xlsx", Inspector.Inspect)),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", "0.1.36", "xlsx", Inspector.Inspect)),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
@@ -102,6 +105,8 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.xlsx> [--json]");
+        Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
+        Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");
         Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");

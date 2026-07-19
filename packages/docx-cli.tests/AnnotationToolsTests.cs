@@ -6,11 +6,26 @@ using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Dockit.Docx;
 using W14 = DocumentFormat.OpenXml.Office2010.Word;
+using Tiwater.FormatEvidence;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Dockit.Docx.Tests;
 
 public class AnnotationToolsTests
 {
+    [Fact]
+    public void Published_inspection_evidence_is_recomputed_from_docx_bytes()
+    {
+        var source = CreateAnnotatedFixture(); var root = Path.Combine(Path.GetTempPath(), $"docx-evidence-{Guid.NewGuid():N}"); Directory.CreateDirectory(root); var evidence = Path.Combine(root, "evidence.json"); var verdict = Path.Combine(root, "verdict.json"); var request = WriteEvidenceRequest(root, source, evidence, "docx");
+        Assert.Equal(0, FormatEvidenceCommand.RunProducer(["--request", request, "--output", evidence], "tiwater-docx", "0.5.1", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input) }));
+        Assert.Equal(0, FormatEvidenceCommand.RunValidator(["--request", request, "--evidence", evidence, "--output", verdict], "tiwater-docx", "0.5.1", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input) }));
+        Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+        var changed=JsonNode.Parse(File.ReadAllText(evidence))!.AsObject();changed["observations"]![0]!["value"]=new JsonObject{{"forged",true}};File.WriteAllText(evidence,changed.ToJsonString());File.Delete(verdict);Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-docx","0.5.1","docx",input=>new{document=Inspector.Inspect(input),tables=Inspector.InspectTables(input)}));Assert.False(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+    }
+
+    private static string WriteEvidenceRequest(string root,string source,string output,string format){var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();var request=Path.Combine(root,"request.json");File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format},extraction=new{schema=$"tiwater.{format}.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=output}));return request;}
     [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {

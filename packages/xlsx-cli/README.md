@@ -27,6 +27,13 @@ tiwater-xlsx inspect <template.xlsx> [--json]
 *   `--json` returns structured output suitable for parsers.
 *   Text cells that use XLSX rich text expose `richTextRuns` with per-run text, font name, color, underline, bold, and italic fields.
 
+The same inspector backs the closed published evidence ports; validation re-opens the workbook and independently recomputes the evidence.
+
+```bash
+tiwater-xlsx inspect-evidence --request request.json --output evidence.json
+tiwater-xlsx validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
+```
+
 ### 2. Fill a Template
 Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
 

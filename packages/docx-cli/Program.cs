@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Dockit.Docx;
+using Tiwater.FormatEvidence;
 
 namespace Dockit.Docx.Cli;
 
@@ -23,6 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", "0.5.1", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input) })),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", "0.5.1", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input) })),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -116,6 +119,8 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
+        Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
+        Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");

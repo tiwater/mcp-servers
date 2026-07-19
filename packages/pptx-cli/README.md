@@ -10,7 +10,11 @@ tiwater-pptx inspect <input.pptx> --json --detail
 tiwater-pptx export-json <input.pptx> [output.json]
 tiwater-pptx fill-template <template.pptx> <data.json> <output.pptx>
 tiwater-pptx apply-format-edits <input.pptx> <plan.json> <output.pptx>
+tiwater-pptx inspect-evidence --request request.json --output evidence.json
+tiwater-pptx validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
 ```
+
+The evidence commands reuse detailed PPTX inspection. Validation re-opens the presentation and independently recomputes the evidence.
 
 For local development fallback:
 

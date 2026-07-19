@@ -51,6 +51,13 @@ Provides a high-level inspection of the PDF's structural layout and tables to de
 tiwater-pdf inspect <report.pdf>
 ```
 
+Published evidence uses the same PDF metadata and detailed-table inspectors. The validator re-opens the PDF and independently recomputes the evidence.
+
+```bash
+tiwater-pdf inspect-evidence --request request.json --output evidence.json
+tiwater-pdf validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
+```
+
 ### 5. OCR Scanned PDFs With a Vision LLM
 Extracts text from scanned or image-only PDFs using an OpenAI-compatible vision model.
 

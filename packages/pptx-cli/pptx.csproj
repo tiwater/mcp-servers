@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-pptx</ToolCommandName>
     <PackageId>tiwater.pptx.cli</PackageId>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
     <Authors>Tiwater</Authors>
     <Description>Inspect PowerPoint templates, export slide text, and fill placeholders from the command line.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.2.0" />
+    <Compile Include="../format-evidence/FormatEvidenceCommand.cs" Link="FormatEvidenceCommand.cs" />
   </ItemGroup>
 
   <ItemGroup>
