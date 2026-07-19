@@ -24,6 +24,7 @@ internal static class Cli
             {
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
+                "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 "validate" => RunValidateAsync(args[1..]),
@@ -35,6 +36,13 @@ internal static class Cli
             Console.Error.WriteLine(ex.Message);
             return Task.FromResult(1);
         }
+    }
+
+    private static Task<int> RunEvidenceAsync(string[] args)
+    {
+        if (args.Length < 1) throw new InvalidOperationException("evidence requires <input.xlsx>");
+        WriteJson(EvidenceInspector.Inspect(args[0]));
+        return Task.FromResult(0);
     }
 
     private static Task<int> RunInspectAsync(string[] args)
@@ -103,6 +111,7 @@ internal static class Cli
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.xlsx> [--json]");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
+        Console.WriteLine("  evidence <input.xlsx>");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");
         Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");
         Console.WriteLine("  validate <input.xlsx>");

@@ -1070,6 +1070,12 @@ public static class Editor
     private static void SetCellValue(Cell cell, string value, WorkbookPart workbookPart, string? valueType)
     {
         var normalizedValueType = string.IsNullOrWhiteSpace(valueType) ? "auto" : valueType.Trim().ToLowerInvariant();
+        if (normalizedValueType == "date")
+        {
+            if (!DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var date)) throw new InvalidOperationException($"Invalid ISO date value: {value}");
+            SetCellNumberValue(cell, date.ToOADate().ToString("G17", CultureInfo.InvariantCulture));
+            return;
+        }
         if (normalizedValueType == "number")
         {
             if (TryGetNumericCellText(value, cell, workbookPart, allowTextFormat: true, out var numberText))
