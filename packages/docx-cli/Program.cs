@@ -24,8 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", "0.10.0", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) })),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", "0.10.0", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) })),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", "0.10.1", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", "0.10.1", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -53,6 +53,19 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>
+    [
+        new("document-target-1", "document.semantic-target", "structure", new
+        {
+            candidateId = "docx-document-root",
+            semanticIdentity = new { format = "docx", scope = "document" },
+            runtimeLocator = new { kind = "docx-document" },
+            capabilities = new[] { "docx.edit" },
+            resourceSet = new[] { new { resourceKey = "docx-main-document", access = "write" } },
+            writeSet = new[] { new { resourceKey = "docx-main-document", writeKey = "document-content" } }
+        }, "/inspection/document")
+    ];
 
     private static Task<int> RunInspectAsync(string[] args)
     {

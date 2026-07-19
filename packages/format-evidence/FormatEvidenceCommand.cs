@@ -8,14 +8,15 @@ namespace Tiwater.FormatEvidence;
 
 public static class FormatEvidenceCommand
 {
+    public sealed record AdditionalObservation(string ObservationId, string SemanticField, string Use, object Value, string Pointer);
     private static readonly JsonSerializerOptions CanonicalOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-    public static int RunProducer(string[] args, string tool, string version, string format, Func<string, object> inspect)
-        => Run(args, false, tool, version, format, inspect);
+    public static int RunProducer(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null)
+        => Run(args, false, tool, version, format, inspect, additionalObservations);
 
-    public static int RunValidator(string[] args, string tool, string version, string format, Func<string, object> inspect)
-        => Run(args, true, tool, version, format, inspect);
+    public static int RunValidator(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null)
+        => Run(args, true, tool, version, format, inspect, additionalObservations);
 
-    private static int Run(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect)
+    private static int Run(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations)
     {
         var values = ParseArgs(args, validator);
         var request = JsonNode.Parse(File.ReadAllText(values["request"]))!.AsObject();
@@ -23,7 +24,7 @@ public static class FormatEvidenceCommand
         try
         {
             ValidateRequest(request, output, format, validator);
-            var expected = BuildEvidence(request, tool, version, format, inspect);
+            var expected = BuildEvidence(request, tool, version, format, inspect, additionalObservations);
             JsonObject result;
             if (!validator) result = expected;
             else
@@ -92,13 +93,15 @@ public static class FormatEvidenceCommand
         var extraction = request["extraction"]!.AsObject(); if (Sha(Canonical(extraction["options"]!)) != extraction["optionsSha256"]!.GetValue<string>()) throw new InvalidOperationException("extraction options mismatch");
     }
 
-    private static JsonObject BuildEvidence(JsonObject request, string tool, string version, string format, Func<string, object> inspect)
+    private static JsonObject BuildEvidence(JsonObject request, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations)
     {
-        var artifact = request["artifact"]!.AsObject(); var extraction = request["extraction"]!.AsObject(); var inspection = JsonSerializer.SerializeToNode(inspect(artifact["path"]!.GetValue<string>()))!;
+        var artifact = request["artifact"]!.AsObject(); var extraction = request["extraction"]!.AsObject(); var artifactPath = artifact["path"]!.GetValue<string>(); var inspection = JsonSerializer.SerializeToNode(inspect(artifactPath))!;
         var entity = new JsonObject { ["entityId"] = "document-1", ["kind"] = $"{format}-document", ["provenance"] = new JsonObject { ["source"] = "runtime", ["pointer"] = "/inspection" } };
         var observation = new JsonObject { ["observationId"] = "inspection-1", ["entityId"] = "document-1", ["semanticField"] = $"{format}.inspection", ["use"] = "structure", ["value"] = inspection, ["parentObservationIds"] = new JsonArray(), ["provenance"] = new JsonObject { ["source"] = "runtime", ["pointer"] = "/inspection" } };
+        var observations = new JsonArray(observation);
+        foreach (var item in additionalObservations?.Invoke(artifactPath) ?? []) observations.Add(new JsonObject { ["observationId"] = item.ObservationId, ["entityId"] = "document-1", ["semanticField"] = item.SemanticField, ["use"] = item.Use, ["value"] = JsonSerializer.SerializeToNode(item.Value), ["parentObservationIds"] = new JsonArray("inspection-1"), ["provenance"] = new JsonObject { ["source"] = "runtime", ["pointer"] = item.Pointer } });
         var epochMaterial = new JsonObject { ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["runtimeTool"] = tool, ["runtimeSchema"] = extraction["schema"]!.GetValue<string>(), ["runtimeVersion"] = version, ["extractionOptions"] = extraction["options"]!.DeepClone() };
-        var evidence = new JsonObject { ["schema"] = "lucid.published-format-evidence/v1", ["requestId"] = request["requestId"]!.GetValue<string>(), ["subject"] = request["subject"]!.DeepClone(), ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(), ["provider"] = new JsonObject { ["tool"] = tool, ["toolVersion"] = version, ["capabilityId"] = "inspect-evidence", ["capabilityVersion"] = "1", ["outputSchema"] = "lucid.published-format-evidence/v1" }, ["source"] = new JsonObject { ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["format"] = format }, ["extraction"] = extraction.DeepClone(), ["epoch"] = new JsonObject { ["epochId"] = $"ep-{Sha(Canonical(epochMaterial))}", ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["runtimeTool"] = tool, ["runtimeSchema"] = extraction["schema"]!.GetValue<string>(), ["runtimeVersion"] = version, ["extractionOptionsSha256"] = extraction["optionsSha256"]!.GetValue<string>() }, ["entities"] = new JsonArray(entity), ["observations"] = new JsonArray(observation) };
+        var evidence = new JsonObject { ["schema"] = "lucid.published-format-evidence/v1", ["requestId"] = request["requestId"]!.GetValue<string>(), ["subject"] = request["subject"]!.DeepClone(), ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(), ["provider"] = new JsonObject { ["tool"] = tool, ["toolVersion"] = version, ["capabilityId"] = "inspect-evidence", ["capabilityVersion"] = "1", ["outputSchema"] = "lucid.published-format-evidence/v1" }, ["source"] = new JsonObject { ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["format"] = format }, ["extraction"] = extraction.DeepClone(), ["epoch"] = new JsonObject { ["epochId"] = $"ep-{Sha(Canonical(epochMaterial))}", ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["runtimeTool"] = tool, ["runtimeSchema"] = extraction["schema"]!.GetValue<string>(), ["runtimeVersion"] = version, ["extractionOptionsSha256"] = extraction["optionsSha256"]!.GetValue<string>() }, ["entities"] = new JsonArray(entity), ["observations"] = observations };
         evidence["evidenceId"] = $"evidence-{Sha(Canonical(evidence))}"; return evidence;
     }
 
