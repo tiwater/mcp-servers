@@ -64,6 +64,30 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void InspectTables_versions_the_view_and_addresses_nested_tables_without_leaking_nested_text()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"inspect-nested-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var inner = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("inner"))))));
+            var outer = new Table(new TableRow(new TableCell(new Paragraph(new Run(new Text("outer"))), inner)));
+            main.Document = new Document(new Body(outer)); main.Document.Save();
+        }
+
+        var report = Inspector.InspectTables(source);
+
+        Assert.Equal("tiwater.docx.inspect-tables/v1", report.Schema);
+        Assert.NotEmpty(report.ToolVersion);
+        Assert.Equal("direct-cell-paragraphs-excluding-nested-tables", report.ExtractionView["cellText"]);
+        Assert.Equal(2, report.Tables.Count);
+        Assert.Equal("outer", report.Tables[0].Rows[0].Cells[0].Text);
+        Assert.Equal(["body", "table:0", "row:0", "cell:0", "table:0"], report.Tables[1].ContainmentPath);
+        Assert.Equal("table:0:row:0:cell:0", report.Tables[1].ParentCellAddress);
+        Assert.Equal("inner", report.Tables[1].Rows[0].Cells[0].Text);
+    }
+
+    [Fact]
     public void TemplateMigration_inventory_captures_runs_sections_revisions_and_media_without_document_specific_rules()
     {
         var source = Path.Combine(Path.GetTempPath(), $"migration-rich-inventory-{Guid.NewGuid():N}.docx");

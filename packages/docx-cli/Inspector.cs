@@ -117,12 +117,11 @@ public static class Inspector
         using var doc = WordprocessingDocument.Open(path, false);
         var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
         var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
-        var tables = body.Elements<Table>().ToList();
-        var details = new List<TableDetail>(tables.Count);
-
-        for (var tableIndex = 0; tableIndex < tables.Count; tableIndex++)
+        var details = new List<TableDetail>();
+        var nextTableIndex = 0;
+        void AddTable(Table table, IReadOnlyList<string> containmentPath, string? parentCellAddress)
         {
-            var table = tables[tableIndex];
+            var tableIndex = nextTableIndex++;
             var rows = table.Elements<TableRow>().ToList();
             var rowDetails = new List<TableRowDetail>(rows.Count);
             var columnCount = 0;
@@ -149,7 +148,7 @@ public static class Inspector
                     var widthType = GetValAttribute(properties?.TableCellWidth);
                     var verticalAlignment = GetValAttribute(properties?.TableCellVerticalAlignment);
                     var shadingFill = properties?.Shading?.Fill?.Value;
-                    var text = string.Concat(cell.Descendants<Text>().Select(node => node.Text)).Trim();
+                    var text = string.Concat(paragraphDetails.Select(paragraph => paragraph.Text)).Trim();
 
                     cellDetails.Add(new TableCellDetail(
                         CellIndex: cellIndex,
@@ -181,12 +180,42 @@ public static class Inspector
 
             details.Add(new TableDetail(
                 TableIndex: tableIndex,
+                ContainmentPath: containmentPath,
+                ParentCellAddress: parentCellAddress,
                 RowCount: rows.Count,
                 ColumnCount: columnCount,
                 Rows: rowDetails));
+
+            for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            for (var cellIndex = 0; cellIndex < rows[rowIndex].Elements<TableCell>().Count(); cellIndex++)
+            {
+                var cell = rows[rowIndex].Elements<TableCell>().ElementAt(cellIndex);
+                var nested = cell.Elements<Table>().ToList();
+                for (var nestedIndex = 0; nestedIndex < nested.Count; nestedIndex++)
+                {
+                    var cellAddress = $"table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}";
+                    AddTable(nested[nestedIndex], [.. containmentPath, $"row:{rowIndex}", $"cell:{cellIndex}", $"table:{nestedIndex}"], cellAddress);
+                }
+            }
         }
 
-        return new TableInspectionReport(path, details);
+        var bodyTables = body.Elements<Table>().ToList();
+        for (var index = 0; index < bodyTables.Count; index++) AddTable(bodyTables[index], ["body", $"table:{index}"], null);
+
+        var version = typeof(Inspector).Assembly.GetName().Version?.ToString() ?? "unknown";
+        return new TableInspectionReport(
+            "tiwater.docx.inspect-tables/v1",
+            version,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["revisionView"] = "package-current",
+                ["visibilityView"] = "all-direct-visible-text",
+                ["tableTraversal"] = "body-and-nested-depth-first",
+                ["cellText"] = "direct-cell-paragraphs-excluding-nested-tables",
+                ["paragraphs"] = "direct-cell-paragraphs-only"
+            },
+            path,
+            details);
     }
 
     public static IReadOnlyList<AnnotationAnchor> BuildAnnotationAnchors(

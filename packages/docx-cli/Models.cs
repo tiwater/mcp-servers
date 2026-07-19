@@ -105,11 +105,16 @@ public sealed record TableRowDetail(
 
 public sealed record TableDetail(
     int TableIndex,
+    IReadOnlyList<string> ContainmentPath,
+    string? ParentCellAddress,
     int RowCount,
     int ColumnCount,
     IReadOnlyList<TableRowDetail> Rows);
 
 public sealed record TableInspectionReport(
+    string Schema,
+    string ToolVersion,
+    IReadOnlyDictionary<string, string> ExtractionView,
     string File,
     IReadOnlyList<TableDetail> Tables);
 
