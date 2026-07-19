@@ -32,6 +32,11 @@ tiwater-xlsx inspect <template.xlsx> [--json]
 readback envelope. It includes typed raw cells, style identity and alignment,
 number formats, formula/shared-formula metadata, merges, dimensions, sheet view,
 print/page settings and workbook date system for independent baseline comparison.
+Each physical cell also exposes its formatted display value, effective inherited
+style identifiers, and normalized number-format evidence (source, normalized code,
+semantic kind, and date classification). Numeric date/time cells include an ISO-8601
+value computed from the workbook's declared 1900 or 1904 date system. These are
+technical readback facts; the tool does not infer scenario semantics.
 
 Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
 
