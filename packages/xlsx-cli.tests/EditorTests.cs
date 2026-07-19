@@ -66,6 +66,20 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_writes_iso_date_as_excel_serial_while_preserving_target_style()
+    {
+        var path = CreateFormattedWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-date-{Guid.NewGuid():N}.xlsx");
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "A2", Value: "2026-07-19", ValueType: "date")]);
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var cell = GetCell(spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet, "A2");
+        Assert.Null(cell.DataType);
+        Assert.Equal(DateTime.Parse("2026-07-19").ToOADate(), double.Parse(cell.CellValue!.Text, System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal<UInt32Value>(1, cell.StyleIndex!);
+    }
+
+    [Fact]
     public void Edit_keeps_numeric_text_as_text_when_target_cell_is_text_formatted()
     {
         var path = CreateTextFormattedWorkbookFixture();
