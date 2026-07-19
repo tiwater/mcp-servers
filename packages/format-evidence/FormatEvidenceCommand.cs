@@ -2,14 +2,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.Encodings.Web;
 
 namespace Tiwater.FormatEvidence;
 
 public static class FormatEvidenceCommand
 {
     public sealed record AdditionalObservation(string ObservationId, string SemanticField, string Use, object Value, string Pointer);
-    private static readonly JsonSerializerOptions CanonicalOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     public static int RunProducer(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null)
         => Run(args, false, tool, version, format, inspect, additionalObservations);
 
@@ -105,12 +103,37 @@ public static class FormatEvidenceCommand
         evidence["evidenceId"] = $"evidence-{Sha(Canonical(evidence))}"; return evidence;
     }
 
+    private static string Quote(string value)
+    {
+        var output = new StringBuilder(value.Length + 2).Append('"');
+        for (var index = 0; index < value.Length; index++)
+        {
+            var current = value[index];
+            switch (current)
+            {
+                case '"': output.Append("\\\""); break;
+                case '\\': output.Append("\\\\"); break;
+                case '\b': output.Append("\\b"); break;
+                case '\f': output.Append("\\f"); break;
+                case '\n': output.Append("\\n"); break;
+                case '\r': output.Append("\\r"); break;
+                case '\t': output.Append("\\t"); break;
+                default:
+                    if (current < 0x20 || (char.IsSurrogate(current) && !(char.IsHighSurrogate(current) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1])))) output.Append($"\\u{(int)current:x4}");
+                    else { output.Append(current); if (char.IsHighSurrogate(current)) output.Append(value[++index]); }
+                    break;
+            }
+        }
+        return output.Append('"').ToString();
+    }
+
     private static string Canonical(JsonNode? node) => node switch
     {
         null => "null",
-        JsonObject value => "{" + string.Join(",", value.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => JsonSerializer.Serialize(item.Key, CanonicalOptions) + ":" + Canonical(item.Value))) + "}",
+        JsonObject value => "{" + string.Join(",", value.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => Quote(item.Key) + ":" + Canonical(item.Value))) + "}",
         JsonArray value => "[" + string.Join(",", value.Select(Canonical)) + "]",
-        _ => node.ToJsonString(CanonicalOptions)
+        JsonValue value when value.TryGetValue<string>(out var text) => Quote(text),
+        _ => node.ToJsonString()
     };
     private static string Sha(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static string FileSha(string file) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).ToLowerInvariant();
