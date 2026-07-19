@@ -470,6 +470,30 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_output_validator_rebuilds_authority_and_rejects_tampering_without_apply_result()
+    {
+        var source = CreateTextMigrationFixture("source fact"); var baseline = CreateTextMigrationFixture("target slot");
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256,
+            [new TemplateMigrationMapping("body:paragraph:0", "body:paragraph:0", "copy-text")]);
+        var planPath = Path.Combine(Path.GetTempPath(), $"migration-plan-{Guid.NewGuid():N}.json");
+        File.WriteAllText(planPath, System.Text.Json.JsonSerializer.Serialize(plan, Json.Options));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-validated-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, plan, output).Pass);
+
+        var valid = TemplateMigration.ValidateOutput(source, baseline, planPath, output, plan);
+        Assert.True(valid.Pass); Assert.Equal("tiwater.docx.template-migration-output-validation/v1", valid.Schema); Assert.Matches("^[A-F0-9]{64}$", valid.OutputSha256);
+
+        using (var document = WordprocessingDocument.Open(output, true))
+        {
+            document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single().GetFirstChild<Run>()!.GetFirstChild<Text>()!.Text = "tampered";
+            document.MainDocumentPart.Document.Save();
+        }
+        var tampered = TemplateMigration.ValidateOutput(source, baseline, planPath, output, plan);
+        Assert.False(tampered.Pass); Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-content-mismatch");
+    }
+
+    [Fact]
     public void TemplateMigration_appends_a_semantically_selected_body_range_without_coordinates()
     {
         var source = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: false);

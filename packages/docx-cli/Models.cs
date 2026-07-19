@@ -294,6 +294,22 @@ public sealed record TemplateMigrationReadback(
     bool Pass,
     IReadOnlyList<TemplateMigrationPlanFailure> Failures);
 
+public sealed record TemplateMigrationOutputValidation(
+    string Schema,
+    string ToolVersion,
+    bool Pass,
+    string Source,
+    string SourceSha256,
+    string Baseline,
+    string BaselineSha256,
+    string Output,
+    string OutputSha256,
+    string Plan,
+    string PlanSha256,
+    TemplateMigrationOperationBuild Build,
+    TemplateMigrationReadback Readback,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
+
 public sealed record TemplateMigrationApplyResult(
     string Schema,
     bool Pass,

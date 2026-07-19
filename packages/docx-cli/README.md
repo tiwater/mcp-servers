@@ -105,6 +105,18 @@ does not create an output.
 tiwater-docx apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>
 ```
 
+### 3d. Independently Validate a Migration Output
+
+Rebuilds source, baseline, plan admission, and output evidence in a fresh
+invocation. It does not accept an apply result or trust its embedded
+`Readback.Pass`. The versioned verdict binds all four file hashes and fails on
+an incomplete plan, content/media mismatch, baseline structure drift, body
+append drift, or newly introduced OpenXML errors.
+
+```bash
+tiwater-docx validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>
+```
+
 ### 4. Strip Direct Formatting
 Removes direct formatting from paragraphs and runs. Useful for enforcing strict style adherence instead of manual styling.
 
