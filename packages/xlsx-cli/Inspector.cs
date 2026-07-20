@@ -18,10 +18,13 @@ public static class Inspector
                 var conversion = WorkbookConverter.ConvertXlsToXlsx(path, converted);
                 var convertedWorkbook = Inspect(converted) with { File = Path.GetFullPath(path) };
                 var convertedExport = Extractor.Export(converted);
+                var convertedEvidence = System.Text.Json.JsonSerializer.SerializeToNode(EvidenceInspector.Inspect(converted), Json.Options)!.AsObject();
+                convertedEvidence["file"] = Path.GetFullPath(path);
                 return System.Text.Json.JsonSerializer.SerializeToElement(new
                 {
                     workbook = convertedWorkbook,
                     export = convertedExport,
+                    evidence = convertedEvidence,
                     conversion = new { sourceFormat = "xls", observationFormat = "xlsx", conversion.Backend, conversion.FallbackReason }
                 }, Json.Options);
             }
