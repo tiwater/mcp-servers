@@ -190,6 +190,16 @@ public static class Inspector
                     string.Concat(frame.Descendants<A.Text>().Select(value => value.Text)), ExtractTransform(frame.Transform),
                     ExtractDescendantParagraphs(frame), ExtractDescendantRuns(frame), ExtractTable(frame)));
             }
+            else if (child is GroupShape group)
+            {
+                var shapeId = group.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
+                if (!seen.Add(("groupShape", shapeId))) continue;
+                shapes.Add(new ShapeDetail(shapeId,
+                    group.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "groupShape", zOrder++,
+                    null, null, null, string.Concat(group.Descendants<A.Text>().Select(value => value.Text)),
+                    ExtractTransform(group.GroupShapeProperties?.TransformGroup),
+                    ExtractDescendantParagraphs(group), ExtractDescendantRuns(group)));
+            }
         }
         return shapes;
     }
@@ -219,6 +229,20 @@ public static class Inspector
     }
 
     private static TransformInfo? ExtractTransform(Transform? transform)
+    {
+        if (transform?.Offset is null && transform?.Extents is null)
+        {
+            return null;
+        }
+
+        return new TransformInfo(
+            X: transform.Offset?.X ?? 0L,
+            Y: transform.Offset?.Y ?? 0L,
+            Cx: transform.Extents?.Cx ?? 0L,
+            Cy: transform.Extents?.Cy ?? 0L);
+    }
+
+    private static TransformInfo? ExtractTransform(A.TransformGroup? transform)
     {
         if (transform?.Offset is null && transform?.Extents is null)
         {
