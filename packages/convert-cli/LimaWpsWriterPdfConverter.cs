@@ -23,23 +23,30 @@ internal static class LimaWpsWriterPdfConverter
         => ConvertToPdf(input, output, "wps-presentation");
 
     internal static void ConvertSpreadsheetToXlsx(string input, string output)
+        => SaveSpreadsheetAsXlsx(input, output, requireLegacyInput: true);
+
+    internal static void RecalculateXlsx(string input, string output)
+        => SaveSpreadsheetAsXlsx(input, output, requireLegacyInput: false);
+
+    private static void SaveSpreadsheetAsXlsx(string input, string output, bool requireLegacyInput)
     {
         var instance = InstanceName()
             ?? throw new InvalidOperationException($"{InstanceEnvironment} is required for the Lima WPS Spreadsheet backend.");
         var limactl = FindOnPath("limactl")
             ?? throw new InvalidOperationException("limactl is required for the Lima WPS Spreadsheet backend.");
-        if (!string.Equals(Path.GetExtension(input), ".xls", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Lima WPS Spreadsheet input must be an XLS file.");
+        var expectedExtension = requireLegacyInput ? ".xls" : ".xlsx";
+        if (!string.Equals(Path.GetExtension(input), expectedExtension, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Lima WPS Spreadsheet input must be an {expectedExtension.TrimStart('.').ToUpperInvariant()} file.");
 
         var staging = Path.Combine(SharedRoot, $"tiwater-convert-wps-spreadsheet-{Guid.NewGuid():N}");
-        var stagedInput = Path.Combine(staging, "input.xls");
+        var stagedInput = Path.Combine(staging, $"input{expectedExtension}");
         var stagedOutput = Path.Combine(staging, "output.xlsx");
         Directory.CreateDirectory(staging);
         File.Copy(input, stagedInput, overwrite: false);
 
         try
         {
-            RunSpreadsheetConversion(limactl, instance, stagedInput, stagedOutput);
+            RunSpreadsheetConversion(limactl, instance, stagedInput, stagedOutput, requireLegacyInput ? "xls-to-xlsx" : "recalculate-xlsx");
             ValidateXlsx(stagedOutput);
             var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
             if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
@@ -118,7 +125,7 @@ internal static class LimaWpsWriterPdfConverter
     internal static ProcessStartInfo CreateProcessStartInfo(string limactl, string instance, string input, string output)
         => CreateProcessStartInfo(limactl, instance, input, output, "wps-writer");
 
-    internal static ProcessStartInfo CreateSpreadsheetConversionStartInfo(string limactl, string instance, string input, string output)
+    internal static ProcessStartInfo CreateSpreadsheetConversionStartInfo(string limactl, string instance, string input, string output, string command = "xls-to-xlsx")
     {
         var startInfo = new ProcessStartInfo
         {
@@ -127,7 +134,7 @@ internal static class LimaWpsWriterPdfConverter
             RedirectStandardOutput = true,
             UseShellExecute = false,
         };
-        foreach (var argument in new[] { "shell", instance, "--", "bash", "-lc", SpreadsheetConversionCommand(input, output) }) startInfo.ArgumentList.Add(argument);
+        foreach (var argument in new[] { "shell", instance, "--", "bash", "-lc", SpreadsheetConversionCommand(input, output, command) }) startInfo.ArgumentList.Add(argument);
         return startInfo;
     }
 
@@ -147,40 +154,50 @@ internal static class LimaWpsWriterPdfConverter
     private static string RemoteCommand(string input, string output, string backend)
         => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
 
-    private static string SpreadsheetConversionCommand(string input, string output)
-        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_XLSX_BACKEND=wps-spreadsheet; tiwater-convert xls-to-xlsx '{input}' '{output}'";
+    private static string SpreadsheetConversionCommand(string input, string output, string command)
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_XLSX_BACKEND=wps-spreadsheet; tiwater-convert {command} '{input}' '{output}'";
 
-    private static void RunSpreadsheetConversion(string limactl, string instance, string input, string output)
+    private static void RunSpreadsheetConversion(string limactl, string instance, string input, string output, string command)
     {
-        using var process = Process.Start(CreateSpreadsheetConversionStartInfo(limactl, instance, input, output))
+        using var process = Process.Start(CreateSpreadsheetConversionStartInfo(limactl, instance, input, output, command))
             ?? throw new InvalidOperationException("Failed to start Lima WPS Spreadsheet conversion.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
+        if (!process.WaitForExit(TimeSpan.FromMinutes(10)))
         {
             try { process.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException("Lima WPS Spreadsheet conversion timed out after 180 seconds.");
+            throw new TimeoutException($"Lima WPS Spreadsheet {command} timed out after 600 seconds.");
         }
         var stdout = stdoutTask.GetAwaiter().GetResult();
         var stderr = stderrTask.GetAwaiter().GetResult();
         if (process.ExitCode != 0)
         {
             var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));
-            throw new InvalidOperationException("Lima WPS Spreadsheet conversion failed." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+            throw new InvalidOperationException($"Lima WPS Spreadsheet {command} failed." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
         }
         try
         {
             using var document = JsonDocument.Parse(stdout);
             var root = document.RootElement;
+            var expectedSourceFormat = command == "xls-to-xlsx" ? "xls" : "xlsx";
             if (root.GetProperty("status").GetString() != "ok"
                 || root.GetProperty("backend").GetString() != "wps-spreadsheet"
-                || root.GetProperty("fallback_reason").ValueKind != JsonValueKind.Null)
+                || root.GetProperty("fallback_reason").ValueKind != JsonValueKind.Null
+                || root.GetProperty("source_format").GetString() != expectedSourceFormat
+                || root.GetProperty("target_format").GetString() != "xlsx"
+                || (command == "recalculate-xlsx" && (!IsSha256(root.GetProperty("input_sha256")) || !IsSha256(root.GetProperty("output_sha256")))))
                 throw new InvalidOperationException();
         }
         catch (Exception error)
         {
-            throw new InvalidOperationException("Lima WPS Spreadsheet conversion evidence is missing or invalid.", error);
+            throw new InvalidOperationException($"Lima WPS Spreadsheet {command} evidence is missing or invalid.", error);
         }
+    }
+
+    private static bool IsSha256(JsonElement value)
+    {
+        var text = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        return text is { Length: 64 } && text.All(static character => char.IsAsciiHexDigit(character));
     }
 
     private static void ValidateXlsx(string path)

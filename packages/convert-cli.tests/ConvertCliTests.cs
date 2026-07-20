@@ -13,6 +13,27 @@ namespace Dockit.Convert.Tests;
 public class ConvertCliTests
 {
     [Fact]
+    public void Wps_xlsx_recalculation_is_writable_full_calculation_and_fresh_save()
+    {
+        var script = WpsSpreadsheetRecalculator.WpsHelperScript;
+        Assert.Contains("ReadOnly=False", script);
+        Assert.Contains("hr = app.CalculateFull()", script);
+        Assert.Contains("Application.CalculateFull failed", script);
+        Assert.Contains("book.SaveAs(output_path", script);
+        Assert.Throws<InvalidOperationException>(() => WpsSpreadsheetRecalculator.Recalculate("/missing/input.xlsx", "/tmp/output.xlsx"));
+        var input = CreateXlsxFixture();
+        Assert.Throws<InvalidOperationException>(() => WpsSpreadsheetRecalculator.Recalculate(input, input));
+    }
+
+    [Fact]
+    public void Lima_recalculation_transport_invokes_the_versioned_remote_command()
+    {
+        var start = LimaWpsWriterPdfConverter.CreateSpreadsheetConversionStartInfo("/usr/bin/limactl", "wps", "/shared/input.xlsx", "/shared/output.xlsx", "recalculate-xlsx");
+        Assert.Equal("/usr/bin/limactl", start.FileName);
+        Assert.Contains("recalculate-xlsx '/shared/input.xlsx' '/shared/output.xlsx'", start.ArgumentList.Last());
+    }
+
+    [Fact]
     public void Xls_to_xlsx_conversion_preserves_sheet_and_values()
     {
         var input = CreateLegacyXlsFixture();

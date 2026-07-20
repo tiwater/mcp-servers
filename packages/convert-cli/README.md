@@ -14,6 +14,7 @@ A generic CLI for loss-aware office format conversion.
 
 ```bash
 tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>
+tiwater-convert recalculate-xlsx <input.xlsx> <output.xlsx>
 tiwater-convert docx-to-pdf <input.docx> <output.pdf>
 tiwater-convert xlsx-to-pdf <input.xlsx> <output.pdf>
 tiwater-convert pptx-to-pdf <input.pptx> <output.pdf>
