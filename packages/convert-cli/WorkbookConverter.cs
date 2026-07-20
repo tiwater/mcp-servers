@@ -46,10 +46,34 @@ public static class WorkbookConverter
             }
         }
 
+        if (LimaWpsWriterPdfConverter.IsAvailable())
+        {
+            try
+            {
+                LimaWpsWriterPdfConverter.ConvertSpreadsheetToXlsx(input, output);
+                return new ConversionResult("wps-spreadsheet");
+            }
+            catch (Exception ex)
+            {
+                if (requireWps)
+                {
+                    throw new InvalidOperationException($"Required Lima WPS Spreadsheet XLS conversion failed: {ex.Message}", ex);
+                }
+                var fallbackReason = $"Lima WPS RPC conversion failed: {ex.Message}";
+                var fallback = ConvertXlsToXlsxWithoutWps(input, output);
+                return fallback with
+                {
+                    FallbackReason = string.IsNullOrWhiteSpace(fallback.FallbackReason)
+                        ? fallbackReason
+                        : $"{fallbackReason}; {fallback.FallbackReason}",
+                };
+            }
+        }
+
         if (requireWps)
         {
             throw new InvalidOperationException(
-                "WPS Spreadsheet XLS conversion was required but WPS Spreadsheets, xvfb-run, dbus-run-session, or pywpsrpc is unavailable.");
+                "WPS Spreadsheet XLS conversion was required but neither local WPS RPC nor a configured Lima WPS runtime is available.");
         }
 
         return ConvertXlsToXlsxWithoutWps(input, output);

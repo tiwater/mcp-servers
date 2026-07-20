@@ -21,7 +21,7 @@ public class ConvertCliTests
         var result = WorkbookConverter.ConvertXlsToXlsx(input, output);
 
         Assert.True(File.Exists(output));
-        Assert.Contains(result.Backend, new[] { "wps", "libreoffice", "npoi" });
+        Assert.Contains(result.Backend, new[] { "wps-spreadsheet", "libreoffice", "npoi" });
         using var stream = File.OpenRead(output);
         var workbook = new XSSFWorkbook(stream);
         var sheet = workbook.GetSheetAt(0);
@@ -118,7 +118,7 @@ public class ConvertCliTests
     [Fact]
     public void Required_wps_spreadsheet_backend_fails_closed_when_runtime_is_unavailable()
     {
-        if (WpsSpreadsheetPdfConverter.IsAvailable()) return;
+        if (WpsSpreadsheetPdfConverter.IsAvailable() || LimaWpsWriterPdfConverter.IsAvailable()) return;
         var input = CreateLegacyXlsFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
         var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");

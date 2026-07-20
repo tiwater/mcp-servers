@@ -37,4 +37,20 @@ public class LimaWpsWriterPdfConverterTests
 
         Assert.Contains("rtf-to-pdf", startInfo.ArgumentList[5]);
     }
+
+    [Fact]
+    public void Lima_backend_runs_xls_conversion_with_required_wps_spreadsheet_identity()
+    {
+        var startInfo = LimaWpsWriterPdfConverter.CreateSpreadsheetConversionStartInfo(
+            "/usr/local/bin/limactl",
+            "lucid-wps",
+            "/tmp/lucid-wps-render/input.xls",
+            "/tmp/lucid-wps-render/output.xlsx");
+
+        Assert.Equal("/usr/local/bin/limactl", startInfo.FileName);
+        Assert.Equal(new[] { "shell", "lucid-wps", "--", "bash", "-lc" }, startInfo.ArgumentList.Take(5));
+        Assert.Contains("TIWATER_OFFICE_XLSX_BACKEND=wps-spreadsheet", startInfo.ArgumentList[5]);
+        Assert.Contains("xls-to-xlsx", startInfo.ArgumentList[5]);
+        Assert.DoesNotContain("soffice", startInfo.ArgumentList[5], StringComparison.OrdinalIgnoreCase);
+    }
 }
