@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Dockit.Convert;
@@ -177,16 +178,7 @@ internal static class LimaWpsWriterPdfConverter
         }
         try
         {
-            using var document = JsonDocument.Parse(stdout);
-            var root = document.RootElement;
-            var expectedSourceFormat = command == "xls-to-xlsx" ? "xls" : "xlsx";
-            if (root.GetProperty("status").GetString() != "ok"
-                || root.GetProperty("backend").GetString() != "wps-spreadsheet"
-                || root.GetProperty("fallback_reason").ValueKind != JsonValueKind.Null
-                || root.GetProperty("source_format").GetString() != expectedSourceFormat
-                || root.GetProperty("target_format").GetString() != "xlsx"
-                || (command == "recalculate-xlsx" && (!IsSha256(root.GetProperty("input_sha256")) || !IsSha256(root.GetProperty("output_sha256")))))
-                throw new InvalidOperationException();
+            ValidateSpreadsheetEvidence(stdout, command, input, output);
         }
         catch (Exception error)
         {
@@ -194,10 +186,25 @@ internal static class LimaWpsWriterPdfConverter
         }
     }
 
-    private static bool IsSha256(JsonElement value)
+    internal static void ValidateSpreadsheetEvidence(string stdout, string command, string input, string output)
     {
-        var text = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-        return text is { Length: 64 } && text.All(static character => char.IsAsciiHexDigit(character));
+        using var document = JsonDocument.Parse(stdout);
+        var root = document.RootElement;
+        var expectedSourceFormat = command == "xls-to-xlsx" ? "xls" : "xlsx";
+        if (root.GetProperty("status").GetString() != "ok"
+            || root.GetProperty("backend").GetString() != "wps-spreadsheet"
+            || root.GetProperty("fallback_reason").ValueKind != JsonValueKind.Null
+            || root.GetProperty("source_format").GetString() != expectedSourceFormat
+            || root.GetProperty("target_format").GetString() != "xlsx"
+            || (command == "recalculate-xlsx" && (root.GetProperty("input_sha256").GetString() != FileSha256(input)
+                || root.GetProperty("output_sha256").GetString() != FileSha256(output))))
+            throw new InvalidOperationException("Spreadsheet evidence does not attest the staged input and output bytes.");
+    }
+
+    private static string FileSha256(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return System.Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 
     private static void ValidateXlsx(string path)
