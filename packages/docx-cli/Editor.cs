@@ -100,6 +100,7 @@ public static class Editor
             "setTableCellAlignment" => SetTableCellAlignment(body, operation),
             "setTableCellNoWrap" => SetTableCellNoWrap(body, operation),
             "setTableCellFontSize" => SetTableCellFontSize(body, operation),
+            "applyDocumentFontPolicy" => ApplyDocumentFontPolicy(body, operation),
             "setTableRowHeight" => SetTableRowHeight(body, operation),
             "setTableRowCantSplit" => SetTableRowCantSplit(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
@@ -686,6 +687,25 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}] font size");
+    }
+
+    private static DocxEditAppliedOperation ApplyDocumentFontPolicy(Body body, DocxEditOperation operation)
+    {
+        if (operation.FontPolicy is null)
+            return new DocxEditAppliedOperation(operation.Type, false, "fontPolicy is required");
+        if (!FontPolicy.TryNormalize(operation.FontPolicy, out var normalized, out var error))
+            return new DocxEditAppliedOperation(operation.Type, false, error ?? "fontPolicy is invalid");
+
+        var bodyCount = 0;
+        var tableCount = 0;
+        foreach (var run in body.Descendants<Run>().Where(FontPolicy.HasText))
+        {
+            var inTable = run.Ancestors<Table>().Any();
+            FontPolicy.Apply(run, inTable ? normalized.Table : normalized.Body);
+            if (inTable) tableCount++; else bodyCount++;
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true, $"Applied document font policy to {bodyCount} body run(s) and {tableCount} table run(s)");
     }
 
     private static DocxEditAppliedOperation SetTableRowHeight(Body body, DocxEditOperation operation)

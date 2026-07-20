@@ -24,8 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", "0.10.2", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", "0.10.2", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", "0.10.7", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", "0.10.7", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -44,6 +44,7 @@ internal static class Cli
                 "fill-template" => Task.FromResult(Transforms.RunFillTemplate(args[1..])),
                 "normalize-openxml" => Task.FromResult(DocxPackageNormalizer.RunNormalize(args[1..])),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
+                "validate-font-policy" => Task.FromResult(FontPolicy.RunValidate(args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -161,6 +162,7 @@ internal static class Cli
         Console.WriteLine("  fill-template <template.docx> <data.json> <output.docx>");
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
         Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
+        Console.WriteLine("  validate-font-policy <input.docx> <policy.json>");
     }
 
     private static Task<int> FailUnknown(string command)
