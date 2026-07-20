@@ -100,7 +100,9 @@ external workbook references are not guaranteed to be adjusted correctly.
 `anchorText`, treats the following `exampleRows` as the template section, inserts
 rows until the section reaches `targetRows`, and copies example rows cyclically
 into generated rows. Styles, translated formulas, and merged-range movement are
-preserved by default. Shrinking existing sections is reported as a warning and
+preserved by default. A print area that contains the example section, including
+one ending at its last example row, expands with the generated rows. Shrinking
+existing sections is reported as a warning and
 does not delete rows.
 
 ```bash
