@@ -21,7 +21,7 @@ public static class Editor
         var request = LoadOperations(operationsPath);
         var result = Apply(input, output, request.Operations);
         Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
-        return 0;
+        return result.AppliedOperations.All(operation => operation.Applied) ? 0 : 1;
     }
 
     public static DocxEditResult Apply(string input, string output, IReadOnlyList<DocxEditOperation> operations)
