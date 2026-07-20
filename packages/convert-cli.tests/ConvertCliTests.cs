@@ -7,11 +7,50 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using System.Reflection;
+using System.Security.Cryptography;
 
 namespace Dockit.Convert.Tests;
 
 public class ConvertCliTests
 {
+    [Fact]
+    public void Wps_xlsx_recalculation_is_writable_full_calculation_and_fresh_save()
+    {
+        var script = WpsSpreadsheetRecalculator.WpsHelperScript;
+        Assert.Contains("ReadOnly=False", script);
+        Assert.Contains("hr = app.CalculateFull()", script);
+        Assert.Contains("Application.CalculateFull failed", script);
+        Assert.Contains("book.SaveAs(output_path", script);
+        Assert.Throws<InvalidOperationException>(() => WpsSpreadsheetRecalculator.Recalculate("/missing/input.xlsx", "/tmp/output.xlsx"));
+        var input = CreateXlsxFixture();
+        Assert.Throws<InvalidOperationException>(() => WpsSpreadsheetRecalculator.Recalculate(input, input));
+    }
+
+    [Fact]
+    public void Lima_recalculation_transport_invokes_the_versioned_remote_command()
+    {
+        var start = LimaWpsWriterPdfConverter.CreateSpreadsheetConversionStartInfo("/usr/bin/limactl", "wps", "/shared/input.xlsx", "/shared/output.xlsx", "recalculate-xlsx");
+        Assert.Equal("/usr/bin/limactl", start.FileName);
+        Assert.Contains("recalculate-xlsx '/shared/input.xlsx' '/shared/output.xlsx'", start.ArgumentList.Last());
+    }
+
+    [Fact]
+    public void Lima_recalculation_evidence_must_attest_actual_staged_bytes()
+    {
+        var input = Path.GetTempFileName();
+        var output = Path.GetTempFileName();
+        File.WriteAllText(input, "input bytes");
+        File.WriteAllText(output, "output bytes");
+        var inputHash = System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(input))).ToLowerInvariant();
+        var outputHash = System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(output))).ToLowerInvariant();
+        var valid = $$"""{"status":"ok","backend":"wps-spreadsheet","fallback_reason":null,"source_format":"xlsx","target_format":"xlsx","input_sha256":"{{inputHash}}","output_sha256":"{{outputHash}}"}""";
+
+        LimaWpsWriterPdfConverter.ValidateSpreadsheetEvidence(valid, "recalculate-xlsx", input, output);
+
+        var unattested = valid.Replace(outputHash, new string('0', 64), StringComparison.Ordinal);
+        Assert.Throws<InvalidOperationException>(() => LimaWpsWriterPdfConverter.ValidateSpreadsheetEvidence(unattested, "recalculate-xlsx", input, output));
+    }
+
     [Fact]
     public void Xls_to_xlsx_conversion_preserves_sheet_and_values()
     {

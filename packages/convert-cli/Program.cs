@@ -39,6 +39,22 @@ internal static class Program
                         fallback_reason = result.FallbackReason,
                     }));
                     return 0;
+                case "recalculate-xlsx":
+                    var recalculated = WorkbookRecalculator.RecalculateXlsx(args[1], args[2]);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        status = "ok",
+                        input = Path.GetFullPath(args[1]),
+                        output = Path.GetFullPath(args[2]),
+                        input_sha256 = System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(args[1]))).ToLowerInvariant(),
+                        output_sha256 = System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(args[2]))).ToLowerInvariant(),
+                        source_format = "xlsx",
+                        target_format = "xlsx",
+                        version = ToolVersion,
+                        backend = recalculated.Backend,
+                        fallback_reason = recalculated.FallbackReason,
+                    }));
+                    return 0;
                 default:
                     if (args[0].EndsWith("-to-pdf", StringComparison.OrdinalIgnoreCase))
                     {
@@ -78,6 +94,7 @@ internal static class Program
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>");
+        Console.WriteLine("  tiwater-convert recalculate-xlsx <input.xlsx> <output.xlsx>");
         Console.WriteLine("  tiwater-convert <docx|xlsx|pptx|doc|xls|ppt|odt|ods|odp|rtf>-to-pdf <input> <output.pdf>");
     }
 
