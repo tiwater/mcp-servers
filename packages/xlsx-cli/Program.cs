@@ -24,8 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", "0.2.4", "xlsx", input => Inspector.InspectEvidence(input), _ => WorkbookTargetObservations())),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", "0.2.4", "xlsx", input => Inspector.InspectEvidence(input), _ => WorkbookTargetObservations())),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", "0.2.5", "xlsx", input => Inspector.InspectEvidence(input), _ => WorkbookTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", "0.2.5", "xlsx", input => Inspector.InspectEvidence(input), _ => WorkbookTargetObservations())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
