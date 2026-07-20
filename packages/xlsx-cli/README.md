@@ -78,7 +78,8 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 
 ### 3. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
-- `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType`, `bold`, and `shrinkToFit`
+- `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType`, `bold`, `shrinkToFit`, and `wrapText`
+- `setPrintArea` with required `sheet` and A1-style `range`
 - `setRichTextCellValue` with required `sheet`, `cell`, `value`, and `bold`; writes one explicit rich-text run so value and all-run bold state are one operation
 - `setRangeValues` with required `sheet`, `startCell`, and `values`; optional `valueType`
 - `insertRows` with required `sheet`, `startRow`, and `count`
@@ -118,6 +119,8 @@ Example operations file:
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "E7", "value": "浅于黄色0.5号标准比色液", "bold": false },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "E2", "value": "10.2" },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "F2", "value": "a value that must remain visible", "shrinkToFit": true },
+    { "type": "setCellValue", "sheet": "Sheet1", "cell": "G2", "value": "a long value that may use multiple lines", "wrapText": true },
+    { "type": "setPrintArea", "sheet": "Sheet1", "range": "A1:G12" },
     { "type": "setRangeValues", "sheet": "Sheet1", "startCell": "F2", "values": [["233988", "383789"], ["252353", "341366"]], "valueType": "number" },
     { "type": "insertRows", "sheet": "RP", "startRow": 8, "count": 2 },
     { "type": "copyRow", "sheet": "RP", "sourceRow": 12, "targetRow": 14, "translateFormulas": true },

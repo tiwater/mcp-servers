@@ -62,7 +62,7 @@ public static class EvidenceInspector
                         numberFormat = formatCode,
                         numberFormatEvidence = normalizedFormat,
                         horizontalAlignment = alignment?.Horizontal?.InnerText, verticalAlignment = alignment?.Vertical?.InnerText,
-                        wrapText = alignment?.WrapText?.Value, textRotation = alignment?.TextRotation?.Value
+                        wrapText = alignment?.WrapText?.Value, shrinkToFit = alignment?.ShrinkToFit?.Value, textRotation = alignment?.TextRotation?.Value
                     },
                     normalizedValue,
                     formula = formula is null ? null : new { text = formula.Text, type = formula.FormulaType?.InnerText, sharedIndex = formula.SharedIndex?.Value, reference = formula.Reference?.Value },
