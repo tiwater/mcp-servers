@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace Dockit.Convert;
 
@@ -12,16 +13,16 @@ internal static class LimaWpsWriterPdfConverter
             && !string.IsNullOrWhiteSpace(InstanceName())
             && !string.IsNullOrWhiteSpace(FindOnPath("limactl"));
 
-    internal static void ConvertToPdf(string input, string output)
+    internal static NativeRenderProvenance ConvertToPdf(string input, string output)
         => ConvertToPdf(input, output, "wps-writer");
 
-    internal static void ConvertSpreadsheetToPdf(string input, string output)
+    internal static NativeRenderProvenance ConvertSpreadsheetToPdf(string input, string output)
         => ConvertToPdf(input, output, "wps-spreadsheet");
 
-    internal static void ConvertPresentationToPdf(string input, string output)
+    internal static NativeRenderProvenance ConvertPresentationToPdf(string input, string output)
         => ConvertToPdf(input, output, "wps-presentation");
 
-    private static void ConvertToPdf(string input, string output, string backend)
+    private static NativeRenderProvenance ConvertToPdf(string input, string output, string backend)
     {
         var instance = InstanceName()
             ?? throw new InvalidOperationException($"{InstanceEnvironment} is required for the Lima WPS PDF backend.");
@@ -38,11 +39,13 @@ internal static class LimaWpsWriterPdfConverter
 
         try
         {
-            Run(limactl, instance, stagedInput, stagedOutput, backend);
+            var provenance = Run(limactl, instance, stagedInput, stagedOutput, backend);
             if (!IsPdf(stagedOutput)) throw new InvalidOperationException($"Lima {backend} did not produce a valid PDF.");
             var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
             if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
             File.Copy(stagedOutput, output, overwrite: true);
+            NativeRenderProvenanceCollector.Validate(provenance, input, output, backend);
+            return provenance;
         }
         finally
         {
@@ -50,7 +53,7 @@ internal static class LimaWpsWriterPdfConverter
         }
     }
 
-    private static void Run(string limactl, string instance, string input, string output, string backend)
+    private static NativeRenderProvenance Run(string limactl, string instance, string input, string output, string backend)
     {
         var startInfo = CreateProcessStartInfo(limactl, instance, input, output, backend);
         using var process = Process.Start(startInfo)
@@ -69,6 +72,17 @@ internal static class LimaWpsWriterPdfConverter
         {
             var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));
             throw new InvalidOperationException($"Lima {backend} PDF conversion failed." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+        }
+        try
+        {
+            using var document = JsonDocument.Parse(stdout);
+            var provenance = document.RootElement.GetProperty("native_render_provenance")
+                .Deserialize<NativeRenderProvenance>() ?? throw new InvalidOperationException();
+            return provenance;
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException($"Lima {backend} native render provenance is missing or invalid.", error);
         }
     }
 

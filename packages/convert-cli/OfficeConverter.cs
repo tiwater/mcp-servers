@@ -3,7 +3,10 @@ using NPOI.XSSF.UserModel;
 
 namespace Dockit.Convert;
 
-public sealed record OfficePdfConversionResult(string Backend, string? FallbackReason = null);
+public sealed record OfficePdfConversionResult(
+    string Backend,
+    string? FallbackReason = null,
+    NativeRenderProvenance? NativeRenderProvenance = null);
 
 public static class OfficeConverter
 {
@@ -74,12 +77,11 @@ public static class OfficeConverter
             if (WpsWriterPdfConverter.IsAvailable())
             {
                 WpsWriterPdfConverter.ConvertToPdf(input, output);
-                return new OfficePdfConversionResult("wps-writer");
+                return NativeWpsResult(input, output, "wps-writer");
             }
             if (LimaWpsWriterPdfConverter.IsAvailable())
             {
-                LimaWpsWriterPdfConverter.ConvertToPdf(input, output);
-                return new OfficePdfConversionResult("wps-writer");
+                return new OfficePdfConversionResult("wps-writer", NativeRenderProvenance: LimaWpsWriterPdfConverter.ConvertToPdf(input, output));
             }
             if (requestedBackend == "wps-writer")
             {
@@ -92,12 +94,11 @@ public static class OfficeConverter
             if (WpsSpreadsheetPdfConverter.IsAvailable())
             {
                 WpsSpreadsheetPdfConverter.ConvertToPdf(input, output);
-                return new OfficePdfConversionResult("wps-spreadsheet");
+                return NativeWpsResult(input, output, "wps-spreadsheet");
             }
             if (LimaWpsWriterPdfConverter.IsAvailable())
             {
-                LimaWpsWriterPdfConverter.ConvertSpreadsheetToPdf(input, output);
-                return new OfficePdfConversionResult("wps-spreadsheet");
+                return new OfficePdfConversionResult("wps-spreadsheet", NativeRenderProvenance: LimaWpsWriterPdfConverter.ConvertSpreadsheetToPdf(input, output));
             }
             if (requestedBackend == "wps-spreadsheet")
             {
@@ -110,12 +111,11 @@ public static class OfficeConverter
             if (WpsPresentationPdfConverter.IsAvailable())
             {
                 WpsPresentationPdfConverter.ConvertToPdf(input, output);
-                return new OfficePdfConversionResult("wps-presentation");
+                return NativeWpsResult(input, output, "wps-presentation");
             }
             if (LimaWpsWriterPdfConverter.IsAvailable())
             {
-                LimaWpsWriterPdfConverter.ConvertPresentationToPdf(input, output);
-                return new OfficePdfConversionResult("wps-presentation");
+                return new OfficePdfConversionResult("wps-presentation", NativeRenderProvenance: LimaWpsWriterPdfConverter.ConvertPresentationToPdf(input, output));
             }
             if (requestedBackend == "wps-presentation")
             {
@@ -131,6 +131,9 @@ public static class OfficeConverter
                 : presentationFormats.Contains(normalizedFormat) ? "wps-presentation-unavailable" : null;
         return new OfficePdfConversionResult("libreoffice", fallbackReason);
     }
+
+    private static OfficePdfConversionResult NativeWpsResult(string input, string output, string backend)
+        => new(backend, NativeRenderProvenance: NativeRenderProvenanceCollector.Capture(input, output, backend));
 
     public static void ConvertXlsToXlsx(string input, string output, string? sofficePath = null)
     {

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.convert-native-render-provenance/v1",
+  "type": "object",
+  "required": ["schema", "backend", "wps", "runtime", "fonts", "input", "output", "page_count"],
+  "properties": {
+    "schema": { "const": "tiwater.convert-native-render-provenance/v1" },
+    "backend": { "enum": ["wps-writer", "wps-spreadsheet", "wps-presentation"] },
+    "wps": {
+      "type": "object",
+      "required": ["package", "build_version", "executable_sha256"],
+      "properties": {
+        "package": { "const": "wps-office" },
+        "build_version": { "type": "string", "minLength": 1 },
+        "executable_sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["os_description", "os_architecture", "process_architecture", "framework_description"],
+      "properties": {
+        "os_description": { "type": "string", "minLength": 1 },
+        "os_architecture": { "type": "string", "minLength": 1 },
+        "process_architecture": { "type": "string", "minLength": 1 },
+        "framework_description": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "fonts": {
+      "type": "object",
+      "required": ["source", "count", "sha256"],
+      "properties": {
+        "source": { "const": "fontconfig-family-style-file-sha256" },
+        "count": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "input": { "$ref": "#/$defs/fileIdentity" },
+    "output": { "$ref": "#/$defs/fileIdentity" },
+    "page_count": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "fileIdentity": {
+      "type": "object",
+      "required": ["sha256", "size_bytes"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}
