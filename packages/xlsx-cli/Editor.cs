@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 
@@ -31,6 +32,12 @@ public static class Editor
 
     public static XlsxEditResult Apply(string input, string output, IReadOnlyList<XlsxEditOperation> operations)
     {
+        var preflight = operations.Select(ValidateWritableCoordinates).ToList();
+        if (preflight.Any(error => error is not null))
+        {
+            return new XlsxEditResult(Path.GetFullPath(input), Path.GetFullPath(output), operations.Select((operation, index) =>
+                new XlsxEditAppliedOperation(operation.Type, false, preflight[index] ?? "operation batch aborted by coordinate preflight")).ToList());
+        }
         File.Copy(input, output, overwrite: true);
         using var spreadsheet = SpreadsheetDocument.Open(output, true);
         var workbookPart = spreadsheet.WorkbookPart ?? throw new InvalidOperationException("Workbook part not found.");
@@ -131,12 +138,21 @@ public static class Editor
         var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>().ToList() ?? [];
         var sheetIndex = sheets.FindIndex(sheet => string.Equals(sheet.Name?.Value, operation.Sheet, StringComparison.Ordinal));
         if (sheetIndex < 0) return new XlsxEditAppliedOperation(operation.Type, false, $"Worksheet not found: {operation.Sheet}");
-        workbookPart.Workbook.DefinedNames ??= new DefinedNames();
-        foreach (var existing in workbookPart.Workbook.DefinedNames.Elements<DefinedName>()
+        if (workbookPart.Workbook.DefinedNames is null)
+        {
+            var definedNames = new DefinedNames();
+            OpenXmlElement anchor = workbookPart.Workbook.ExternalReferences
+                ?? (OpenXmlElement?)workbookPart.Workbook.FunctionGroups
+                ?? workbookPart.Workbook.Sheets
+                ?? throw new InvalidOperationException("Workbook sheets are missing.");
+            workbookPart.Workbook.InsertAfter(definedNames, anchor);
+        }
+        var workbookDefinedNames = workbookPart.Workbook.DefinedNames!;
+        foreach (var existing in workbookDefinedNames.Elements<DefinedName>()
             .Where(name => name.Name?.Value == "_xlnm.Print_Area" && name.LocalSheetId?.Value == (uint)sheetIndex).ToList()) existing.Remove();
         static string absolute(string reference) => Regex.Replace(reference.ToUpperInvariant(), "^([A-Z]+)([0-9]+)$", "$$$1$$$2");
         var escapedSheet = operation.Sheet.Replace("'", "''", StringComparison.Ordinal);
-        workbookPart.Workbook.DefinedNames.Append(new DefinedName($"'{escapedSheet}'!{absolute(startCell)}:{absolute(endCell)}")
+        workbookDefinedNames.Append(new DefinedName($"'{escapedSheet}'!{absolute(startCell)}:{absolute(endCell)}")
         {
             Name = "_xlnm.Print_Area", LocalSheetId = (uint)sheetIndex,
         });
@@ -1369,7 +1385,7 @@ public static class Editor
         var baseFormat = baseFormatIndex is not null
             ? stylesPart.Stylesheet.CellStyleFormats?.Elements<CellFormat>().ElementAtOrDefault((int)baseFormatIndex.Value)
             : null;
-        targetFormat.Alignment = MaterializeAlignment(baseFormat?.Alignment, sourceFormat.Alignment);
+        targetFormat.Alignment = MaterializeAlignment(baseFormat?.Alignment, sourceFormat.ApplyAlignment?.Value == false ? null : sourceFormat.Alignment);
         mutate(targetFormat.Alignment);
         targetFormat.ApplyAlignment = true;
         var existingFormats = formats.Elements<CellFormat>().ToList();
@@ -1462,6 +1478,31 @@ public static class Editor
             throw new InvalidOperationException($"Invalid cell reference: {cellReference}");
         }
         return (GetColumnIndex(column), rowIndex);
+    }
+
+    private static string? ValidateWritableCoordinates(XlsxEditOperation operation)
+    {
+        if (operation.Type is "setCellValue" or "setRichTextCellValue")
+            return TryParseWritableCell(operation.Cell, out _, out _) ? null : "cell must be a bounded A1 reference";
+        if (operation.Type == "setPrintArea")
+            return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
+        if (operation.Type == "setRangeValues")
+        {
+            if (!TryParseWritableCell(operation.StartCell, out var column, out var row)) return "startCell must be a bounded A1 reference";
+            var rowCount = operation.Values?.Count ?? 0;
+            var columnCount = operation.Values?.Count > 0 ? operation.Values.Max(values => values?.Count ?? 0) : 0;
+            if ((long)row + Math.Max(0, rowCount - 1) > 1048576L || (long)column + Math.Max(0, columnCount - 1) > 16384L) return "range exceeds worksheet bounds";
+        }
+        return null;
+    }
+
+    private static bool TryParseWritableCell(string? reference, out int column, out int row)
+    {
+        column = 0; row = 0;
+        var match = Regex.Match(reference ?? string.Empty, "^(?<column>[A-Za-z]{1,3})(?<row>[1-9]\\d*)$", RegexOptions.CultureInvariant);
+        if (!match.Success || !int.TryParse(match.Groups["row"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out row)) return false;
+        column = GetColumnIndex(match.Groups["column"].Value);
+        return column is >= 1 and <= 16384 && row is >= 1 and <= 1048576;
     }
 
     private static int GetColumnIndex(string columnName)
