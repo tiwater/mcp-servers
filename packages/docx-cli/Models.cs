@@ -111,6 +111,8 @@ public sealed record TableDetail(
     int ColumnCount,
     int GridColumnCount,
     IReadOnlyList<string?> GridColumnWidths,
+    string? Width,
+    string? WidthType,
     IReadOnlyList<TableRowDetail> Rows);
 
 public sealed record TableInspectionReport(

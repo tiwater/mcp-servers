@@ -22,7 +22,7 @@ tiwater-docx inspect <input.docx> [--json]
 ```
 
 ### 1a. Inspect Table Details
-Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. Tables are traversed depth-first from the body through arbitrarily nested table cells; every table carries a containment path and nested tables carry their parent-cell runtime address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, and cells expose mutation address, grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
+Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. Tables are traversed depth-first from the body through arbitrarily nested table cells; every table carries a containment path, declared `Width`/`WidthType`, and nested tables carry their parent-cell runtime address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, and cells expose mutation address, grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
 
 ```bash
 tiwater-docx inspect-tables <input.docx> [--json]
