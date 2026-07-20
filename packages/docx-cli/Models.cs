@@ -256,10 +256,21 @@ public sealed record TemplateMigrationSemanticCandidateBodyAppend(
     TemplateMigrationSemanticSelector SourceStart,
     TemplateMigrationSemanticSelector SourceEnd);
 
+public sealed record TemplateMigrationSemanticCandidateSourceExclusion(
+    TemplateMigrationSemanticSelector SourceStart,
+    TemplateMigrationSemanticSelector SourceEnd,
+    string Reason);
+
+public sealed record TemplateMigrationSemanticCandidateScopeExclusion(
+    string Scope,
+    string Reason);
+
 public sealed record TemplateMigrationSemanticCandidate(
     string Schema,
     IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings,
-    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null);
+    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateSourceExclusion>? SourceExclusions = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateScopeExclusion>? ScopeExclusions = null);
 
 public sealed record TemplateMigrationMappingDerivation(
     string Schema,

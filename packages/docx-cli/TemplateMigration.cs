@@ -176,6 +176,193 @@ public static class TemplateMigration
         return result.Pass ? 0 : 1;
     }
 
+    public static int RunDeriveStructureSafePlan(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            throw new InvalidOperationException("derive-template-migration-structure-safe-plan requires <source.docx> <baseline.docx>");
+        }
+        var result = DeriveStructureSafePlan(args[0], args[1]);
+        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
+        return result.Pass ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Extends exact-text authority with mappings that are proven by two
+    /// independent structural signals: a monotonic chain of unique text
+    /// anchors and an equal-size gap in the same scope and object kind.
+    /// Table cells additionally retain their row/cell coordinates; table
+    /// ordinals may move between templates. Media is mapped only by a unique
+    /// byte hash in the same scope. Every other object remains review-required.
+    /// </summary>
+    public static TemplateMigrationMappingDerivation DeriveStructureSafePlan(string source, string baseline)
+    {
+        var analysis = Analyze(source, baseline);
+        var exact = DeriveExactTextPlan(source, baseline);
+        var mappings = exact.Plan.Mappings.ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
+
+        foreach (var kind in new[] { "paragraph", "table-cell" })
+        {
+            foreach (var scope in analysis.Source.Objects
+                .Where(item => item.Kind == kind && IsContentBearing(item))
+                .Select(item => item.Scope)
+                .Distinct(StringComparer.Ordinal))
+            {
+                var sourceObjects = analysis.Source.Objects
+                    .Where(item => item.Kind == kind && item.Scope == scope && IsContentBearing(item))
+                    .ToList();
+                var baselineObjects = analysis.Baseline.Objects
+                    .Where(item => item.Kind == kind && item.Scope == scope && IsContentBearing(item))
+                    .ToList();
+                foreach (var candidate in FindEqualAnchorGapCandidates(sourceObjects, baselineObjects, mappings))
+                {
+                    if (!StructureSafePair(candidate.Source, candidate.Baseline)) continue;
+                    mappings[candidate.Source.Id] = new TemplateMigrationMapping(
+                        candidate.Source.Id,
+                        candidate.Baseline.Id,
+                        "copy-text",
+                        "structure-safe-anchor-gap");
+                }
+            }
+        }
+
+        ResolvePrefixCompatibleTableMappings(analysis, mappings);
+
+        var baselineMedia = analysis.Baseline.Objects
+            .Where(item => item.Kind == "media" && item.Provenance.ContainsKey("sha256"))
+            .GroupBy(item => $"{item.Scope}\u001F{item.Provenance["sha256"]}", StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var copiedRelationships = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var sourceMedia in analysis.Source.Objects.Where(item => item.Kind == "media" && item.Provenance.ContainsKey("sha256")))
+        {
+            var key = $"{sourceMedia.Scope}\u001F{sourceMedia.Provenance["sha256"]}";
+            if (!baselineMedia.TryGetValue(key, out var candidates) || candidates.Count != 1) continue;
+            mappings[sourceMedia.Id] = new TemplateMigrationMapping(sourceMedia.Id, candidates[0].Id, "copy-media", "structure-safe-media-hash");
+            if (sourceMedia.Provenance.TryGetValue("relationshipId", out var relationshipId)) copiedRelationships.Add(relationshipId);
+        }
+        foreach (var drawing in analysis.Source.Objects.Where(item => item.Kind == "drawing"))
+        {
+            if (drawing.Provenance.TryGetValue("embedRelationshipId", out var relationshipId) && copiedRelationships.Contains(relationshipId)) mappings.Remove(drawing.Id);
+        }
+
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v1",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            mappings.Values.OrderBy(mapping => mapping.SourceObjectId, StringComparer.Ordinal).ToList());
+        var build = BuildOperations(source, baseline, plan);
+        var unresolved = new List<TemplateMigrationPlanFailure>(build.Failures);
+        unresolved.AddRange(plan.Mappings
+            .Where(mapping => string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal))
+            .Select(mapping => new TemplateMigrationPlanFailure(mapping.Reason ?? "template-migration-review-required", mapping.SourceObjectId, mapping.BaselineObjectId)));
+        return new TemplateMigrationMappingDerivation(
+            "tiwater.docx.template-migration-structure-safe-plan/v1",
+            build.Pass && unresolved.Count == 0,
+            plan,
+            unresolved);
+    }
+
+    private static bool StructureSafePair(TemplateMigrationObject source, TemplateMigrationObject baseline)
+    {
+        if (!string.Equals(source.Kind, baseline.Kind, StringComparison.Ordinal)
+            || !string.Equals(source.Scope, baseline.Scope, StringComparison.Ordinal)) return false;
+        if (source.Kind == "paragraph") return true;
+        if (source.Kind != "table-cell") return false;
+        return TableCellCoordinates(source.Id) is { } sourceCoordinates
+            && TableCellCoordinates(baseline.Id) is { } baselineCoordinates
+            && sourceCoordinates == baselineCoordinates;
+    }
+
+    private static void ResolvePrefixCompatibleTableMappings(
+        TemplateMigrationAnalysis analysis,
+        IDictionary<string, TemplateMigrationMapping> mappings)
+    {
+        var sourceById = analysis.Source.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var baselineById = analysis.Baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var sourceTables = analysis.Source.Objects.Where(item => item.Kind == "table").ToList();
+        var baselineTables = analysis.Baseline.Objects.Where(item => item.Kind == "table").ToList();
+        var scores = new Dictionary<(string Source, string Baseline), int>();
+        foreach (var mapping in mappings.Values.Where(mapping => mapping.Disposition == "copy-text" && mapping.BaselineObjectId is not null))
+        {
+            if (!sourceById.TryGetValue(mapping.SourceObjectId, out var sourceCell) || sourceCell.Kind != "table-cell"
+                || !baselineById.TryGetValue(mapping.BaselineObjectId!, out var baselineCell) || baselineCell.Kind != "table-cell") continue;
+            var sourceTable = AncestorTable(sourceById, sourceCell);
+            var baselineTable = AncestorTable(baselineById, baselineCell);
+            if (sourceTable is null || baselineTable is null || sourceTable.Scope != baselineTable.Scope) continue;
+            var key = (sourceTable.Id, baselineTable.Id);
+            scores[key] = scores.GetValueOrDefault(key) + 1;
+        }
+
+        foreach (var sourceTable in sourceTables)
+        {
+            var ranked = baselineTables
+                .Where(candidate => candidate.Scope == sourceTable.Scope)
+                .Select(candidate => (Table: candidate, Score: scores.GetValueOrDefault((sourceTable.Id, candidate.Id))))
+                .OrderByDescending(candidate => candidate.Score)
+                .ThenBy(candidate => candidate.Table.Id, StringComparer.Ordinal)
+                .ToList();
+            if (ranked.Count == 0 || ranked[0].Score == 0 || (ranked.Count > 1 && ranked[0].Score == ranked[1].Score)) continue;
+            var baselineTable = ranked[0].Table;
+            var reverse = sourceTables
+                .Where(candidate => candidate.Scope == baselineTable.Scope)
+                .Select(candidate => (Table: candidate, Score: scores.GetValueOrDefault((candidate.Id, baselineTable.Id))))
+                .OrderByDescending(candidate => candidate.Score)
+                .ThenBy(candidate => candidate.Table.Id, StringComparer.Ordinal)
+                .ToList();
+            if (reverse.Count == 0 || reverse[0].Table.Id != sourceTable.Id || (reverse.Count > 1 && reverse[0].Score == reverse[1].Score)) continue;
+
+            var sourceCells = DescendantTableCells(analysis.Source.Objects, sourceTable.Id);
+            var baselineCells = DescendantTableCells(analysis.Baseline.Objects, baselineTable.Id);
+            var sourceShape = sourceCells.GroupBy(CellRow).ToDictionary(group => group.Key, group => group.Select(CellColumn).Order().ToArray());
+            var baselineShape = baselineCells.GroupBy(CellRow).ToDictionary(group => group.Key, group => group.Select(CellColumn).Order().ToArray());
+            if (sourceShape.Count > baselineShape.Count || sourceShape.Any(entry => !baselineShape.TryGetValue(entry.Key, out var target) || !entry.Value.SequenceEqual(target))) continue;
+            var baselineByCoordinate = baselineCells.ToDictionary(cell => (CellRow(cell), CellColumn(cell)));
+            var claimed = mappings.Values.Where(mapping => mapping.BaselineObjectId is not null && mapping.Disposition == "copy-text").Select(mapping => mapping.BaselineObjectId!).ToHashSet(StringComparer.Ordinal);
+            foreach (var sourceCell in sourceCells)
+            {
+                if (!mappings.TryGetValue(sourceCell.Id, out var existing) || existing.Disposition != "review-required") continue;
+                var target = baselineByCoordinate[(CellRow(sourceCell), CellColumn(sourceCell))];
+                if (!claimed.Add(target.Id)) continue;
+                mappings[sourceCell.Id] = new TemplateMigrationMapping(sourceCell.Id, target.Id, "copy-text", "structure-safe-table-prefix");
+            }
+        }
+    }
+
+    private static TemplateMigrationObject? AncestorTable(
+        IReadOnlyDictionary<string, TemplateMigrationObject> objects,
+        TemplateMigrationObject item)
+    {
+        var current = item;
+        while (current.ParentId is not null && objects.TryGetValue(current.ParentId, out var parent))
+        {
+            if (parent.Kind == "table") return parent;
+            current = parent;
+        }
+        return null;
+    }
+
+    private static List<TemplateMigrationObject> DescendantTableCells(IReadOnlyList<TemplateMigrationObject> objects, string tableId)
+    {
+        var byId = objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        return objects.Where(item => item.Kind == "table-cell" && TableCellCoordinates(item.Id) is not null && AncestorTable(byId, item)?.Id == tableId).ToList();
+    }
+
+    private static int CellRow(TemplateMigrationObject cell)
+        => TableCellCoordinates(cell.Id)?.Row ?? throw new InvalidOperationException($"template-migration-table-cell-coordinate-invalid:{cell.Id}");
+
+    private static int CellColumn(TemplateMigrationObject cell)
+        => TableCellCoordinates(cell.Id)?.Cell ?? throw new InvalidOperationException($"template-migration-table-cell-coordinate-invalid:{cell.Id}");
+
+    private static (int Row, int Cell)? TableCellCoordinates(string id)
+    {
+        foreach (var expression in new[] { BodyTableCellId, HeaderTableCellId, FooterTableCellId })
+        {
+            var match = expression.Match(id);
+            if (match.Success) return (int.Parse(match.Groups["row"].Value), int.Parse(match.Groups["cell"].Value));
+        }
+        return null;
+    }
+
     /// <summary>
     /// Derives review-required semantic candidates only when two consecutive
     /// exact-text anchors enclose equally sized paragraph gaps in the same
@@ -303,7 +490,7 @@ public static class TemplateMigration
     {
         ValidateSemanticCandidate(candidate);
         var analysis = Analyze(source, baseline);
-        var automatic = DeriveExactTextPlan(source, baseline);
+        var automatic = DeriveStructureSafePlan(source, baseline);
         var mappings = automatic.Plan.Mappings.ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
         var failures = new List<TemplateMigrationPlanFailure>();
         var bodyAppends = new List<TemplateMigrationBodyAppend>();
@@ -362,6 +549,38 @@ public static class TemplateMigration
             bodyAppends.Add(new TemplateMigrationBodyAppend(starts[0].Id, ends[0].Id));
         }
 
+        foreach (var exclusion in candidate.SourceExclusions ?? [])
+        {
+            var starts = ResolveSelector(analysis.Source.Objects, exclusion.SourceStart);
+            var ends = ResolveSelector(analysis.Source.Objects, exclusion.SourceEnd);
+            if (starts.Count != 1 || ends.Count != 1)
+            {
+                failures.Add(new TemplateMigrationPlanFailure(starts.Count != 1
+                    ? starts.Count == 0 ? "template-migration-semantic-exclusion-start-missing" : "template-migration-semantic-exclusion-start-ambiguous"
+                    : ends.Count == 0 ? "template-migration-semantic-exclusion-end-missing" : "template-migration-semantic-exclusion-end-ambiguous"));
+                continue;
+            }
+            var range = BodyRange(analysis.Source.Objects, starts[0].Id, ends[0].Id);
+            if (range is null)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-exclusion-range-invalid", starts[0].Id, ends[0].Id));
+                continue;
+            }
+            foreach (var objectId in DescendantsOf(analysis.Source.Objects, range))
+            {
+                var item = analysis.Source.Objects.Single(candidateObject => candidateObject.Id == objectId);
+                if (IsMigrationRequired(item)) mappings[objectId] = new TemplateMigrationMapping(objectId, null, "out-of-scope", exclusion.Reason);
+            }
+        }
+
+        foreach (var exclusion in candidate.ScopeExclusions ?? [])
+        {
+            foreach (var item in analysis.Source.Objects.Where(item => IsMigrationRequired(item) && ScopeMatches(item.Scope, exclusion.Scope)))
+            {
+                mappings[item.Id] = new TemplateMigrationMapping(item.Id, null, "out-of-scope", exclusion.Reason);
+            }
+        }
+
         var copiedMediaRelationships = mappings.Values
             .Where(mapping => string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal))
             .Select(mapping => analysis.Source.Objects.Single(item => item.Id == mapping.SourceObjectId))
@@ -405,7 +624,7 @@ public static class TemplateMigration
 
     private static void ValidateSemanticCandidateJson(JsonElement root)
     {
-        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings", "bodyAppends"], StringComparer.Ordinal), "template-migration-semantic-candidate");
+        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings", "bodyAppends", "sourceExclusions", "scopeExclusions"], StringComparer.Ordinal), "template-migration-semantic-candidate");
         if (!root.TryGetProperty("mappings", out var mappings) || mappings.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-mappings-invalid");
         foreach (var mapping in mappings.EnumerateArray())
         {
@@ -429,6 +648,24 @@ public static class TemplateMigration
                 }
             }
         }
+        if (root.TryGetProperty("sourceExclusions", out var exclusions))
+        {
+            if (exclusions.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-source-exclusions-invalid");
+            foreach (var exclusion in exclusions.EnumerateArray())
+            {
+                RequireOnlyFields(exclusion, new HashSet<string>(["sourceStart", "sourceEnd", "reason"], StringComparer.Ordinal), "template-migration-semantic-candidate-source-exclusion");
+                foreach (var side in new[] { "sourceStart", "sourceEnd" })
+                {
+                    if (!exclusion.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
+                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                }
+            }
+        }
+        if (root.TryGetProperty("scopeExclusions", out var scopeExclusions))
+        {
+            if (scopeExclusions.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-scope-exclusions-invalid");
+            foreach (var exclusion in scopeExclusions.EnumerateArray()) RequireOnlyFields(exclusion, new HashSet<string>(["scope", "reason"], StringComparer.Ordinal), "template-migration-semantic-candidate-scope-exclusion");
+        }
     }
 
     private static void RequireOnlyFields(JsonElement element, IReadOnlySet<string> allowed, string label)
@@ -440,7 +677,10 @@ public static class TemplateMigration
     private static void ValidateSemanticCandidate(TemplateMigrationSemanticCandidate candidate)
     {
         if (!string.Equals(candidate.Schema, "tiwater.docx.template-migration-semantic-candidate/v1", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
-        if ((candidate.Mappings is null || candidate.Mappings.Count == 0) && (candidate.BodyAppends is null || candidate.BodyAppends.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
+        if ((candidate.Mappings is null || candidate.Mappings.Count == 0)
+            && (candidate.BodyAppends is null || candidate.BodyAppends.Count == 0)
+            && (candidate.SourceExclusions is null || candidate.SourceExclusions.Count == 0)
+            && (candidate.ScopeExclusions is null || candidate.ScopeExclusions.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
         foreach (var mapping in candidate.Mappings ?? [])
         {
             ValidateSemanticSelector(mapping.Source, "source");
@@ -451,6 +691,16 @@ public static class TemplateMigration
         {
             ValidateSemanticSelector(append.SourceStart, "source-start");
             ValidateSemanticSelector(append.SourceEnd, "source-end");
+        }
+        foreach (var exclusion in candidate.SourceExclusions ?? [])
+        {
+            ValidateSemanticSelector(exclusion.SourceStart, "source-exclusion-start");
+            ValidateSemanticSelector(exclusion.SourceEnd, "source-exclusion-end");
+            if (exclusion.SourceStart.Scope != "body" || exclusion.SourceEnd.Scope != "body" || string.IsNullOrWhiteSpace(exclusion.Reason)) throw new InvalidOperationException("template-migration-semantic-source-exclusion-invalid");
+        }
+        foreach (var exclusion in candidate.ScopeExclusions ?? [])
+        {
+            if (exclusion.Scope is not ("header" or "footer") || string.IsNullOrWhiteSpace(exclusion.Reason)) throw new InvalidOperationException("template-migration-semantic-scope-exclusion-invalid");
         }
     }
 
@@ -508,6 +758,9 @@ public static class TemplateMigration
         return neighbor >= 0 && neighbor < siblings.Count
             && string.Equals(NormalizeMappingText(siblings[neighbor].Text), expected, StringComparison.Ordinal);
     }
+
+    private static bool ScopeMatches(string actual, string requested)
+        => string.Equals(actual, requested, StringComparison.Ordinal) || actual.StartsWith($"{requested}:", StringComparison.Ordinal);
 
     private static IReadOnlyList<string>? BodyRange(IReadOnlyList<TemplateMigrationObject> objects, string startId, string endId)
     {
