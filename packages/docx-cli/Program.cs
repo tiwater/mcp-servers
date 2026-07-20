@@ -24,17 +24,13 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", "0.10.2", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", "0.10.2", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", "0.10.5", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", "0.10.5", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
                 "validate-openxml" => Task.FromResult(OpenXmlValidation.Run(args[1..])),
                 "analyze-template-migration" => Task.FromResult(TemplateMigration.RunAnalyze(args[1..])),
-                "derive-template-migration-exact-text-plan" => Task.FromResult(TemplateMigration.RunDeriveExactTextPlan(args[1..])),
-                "derive-template-migration-anchor-gap-plan" => Task.FromResult(TemplateMigration.RunDeriveAnchorGapPlan(args[1..])),
-                "derive-template-migration-structure-safe-plan" => Task.FromResult(TemplateMigration.RunDeriveStructureSafePlan(args[1..])),
-                "resolve-template-migration-semantic-candidate" => Task.FromResult(TemplateMigration.RunResolveSemanticCandidate(args[1..])),
                 "build-template-migration-operations" => Task.FromResult(TemplateMigration.RunBuildOperations(args[1..])),
                 "apply-template-migration" => Task.FromResult(TemplateMigration.RunApply(args[1..])),
                 "validate-template-migration-output" => Task.FromResult(TemplateMigration.RunValidateOutput(args[1..])),
@@ -149,10 +145,6 @@ internal static class Cli
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("  analyze-template-migration <source.docx> <baseline.docx> [--json]");
-        Console.WriteLine("  derive-template-migration-exact-text-plan <source.docx> <baseline.docx>");
-        Console.WriteLine("  derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>");
-        Console.WriteLine("  derive-template-migration-structure-safe-plan <source.docx> <baseline.docx>");
-        Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
         Console.WriteLine("  apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>");
         Console.WriteLine("  validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>");

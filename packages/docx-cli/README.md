@@ -59,16 +59,6 @@ modify either document.
 tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
 ```
 
-### 3aa. Derive an Exact-Text Mapping Candidate
-
-Produces a plan only for content that is unique within both source and baseline
-for the same object kind. Repeated, absent, or otherwise ambiguous content is
-emitted as `review-required`; it is never matched by position.
-
-```bash
-tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
-```
-
 ### 3b. Build Cross-Template Operations
 
 Compiles a hash-bound, caller-declared object mapping into deterministic edit
@@ -79,14 +69,14 @@ an attested `run` as well as a paragraph or table cell; run operations preserve
 the target template's surrounding labels and formatting while replacing only
 the mapped run's text. Object ids are accepted only from the current
 hash-attested inventories, never as caller-supplied document coordinates.
-For a mixed label/value parent, a semantic candidate may use `retain-target`
+For a mixed label/value parent, a caller-declared plan may use `retain-target`
 for the attested target parent only together with at least one mapped child
 run. Readback verifies that every untargeted target run remains unchanged.
 For an explicitly selected label-only parent, `retain-target-label` records
 that target label retention without inferring semantic equivalence or accepting
 coordinates; it emits no edit and readback verifies every target run unchanged.
 
-A semantic candidate may also declare one or more source body ranges to append.
+A caller-declared plan may also declare one or more source body ranges to append.
 Each range is bounded by unique current paragraph/table selectors (a table may
 be selected by a unique descendant header). The runtime resolves those selectors
 to the current inventories, copies only plain body paragraph/table blocks after

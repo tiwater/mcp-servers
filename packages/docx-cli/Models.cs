@@ -194,7 +194,14 @@ public sealed record TemplateMigrationObject(
     string? ParentId,
     string? Text,
     string? Style,
-    IReadOnlyDictionary<string, string> Provenance);
+    IReadOnlyDictionary<string, string> Provenance,
+    int Ordinal,
+    TemplateMigrationTopology? Topology = null);
+
+public sealed record TemplateMigrationTopology(
+    string ContainerObjectId,
+    int Row,
+    int Column);
 
 public sealed record TemplateMigrationInventory(
     string File,
@@ -236,47 +243,6 @@ public sealed record TemplateMigrationPlan(
     string BaselineSha256,
     IReadOnlyList<TemplateMigrationMapping> Mappings,
     IReadOnlyList<TemplateMigrationBodyAppend>? BodyAppends = null);
-
-public sealed record TemplateMigrationSemanticSelector(
-    string Kind,
-    string? Scope = null,
-    string? Text = null,
-    string? Sha256 = null,
-    string? ParentText = null,
-    string? PreviousText = null,
-    string? NextText = null,
-    string? DescendantText = null);
-
-public sealed record TemplateMigrationSemanticCandidateMapping(
-    TemplateMigrationSemanticSelector Source,
-    TemplateMigrationSemanticSelector Baseline,
-    string Disposition);
-
-public sealed record TemplateMigrationSemanticCandidateBodyAppend(
-    TemplateMigrationSemanticSelector SourceStart,
-    TemplateMigrationSemanticSelector SourceEnd);
-
-public sealed record TemplateMigrationSemanticCandidateSourceExclusion(
-    TemplateMigrationSemanticSelector SourceStart,
-    TemplateMigrationSemanticSelector SourceEnd,
-    string Reason);
-
-public sealed record TemplateMigrationSemanticCandidateScopeExclusion(
-    string Scope,
-    string Reason);
-
-public sealed record TemplateMigrationSemanticCandidate(
-    string Schema,
-    IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings,
-    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null,
-    IReadOnlyList<TemplateMigrationSemanticCandidateSourceExclusion>? SourceExclusions = null,
-    IReadOnlyList<TemplateMigrationSemanticCandidateScopeExclusion>? ScopeExclusions = null);
-
-public sealed record TemplateMigrationMappingDerivation(
-    string Schema,
-    bool Pass,
-    TemplateMigrationPlan Plan,
-    IReadOnlyList<TemplateMigrationPlanFailure> Unresolved);
 
 public sealed record TemplateMigrationPlanFailure(
     string Reason,
