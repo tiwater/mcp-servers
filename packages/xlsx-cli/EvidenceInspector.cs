@@ -41,7 +41,8 @@ public static class EvidenceInspector
                 var numId = format?.NumberFormatId?.Value ?? baseFormat?.NumberFormatId?.Value ?? 0U;
                 var formatCode = customFormats.GetValueOrDefault(numId) ?? BuiltInFormat(numId) ?? $"builtin:{numId}";
                 var normalizedFormat = NormalizeNumberFormat(numId, formatCode, customFormats.ContainsKey(numId));
-                var alignment = format?.Alignment ?? baseFormat?.Alignment;
+                var alignment = format?.Alignment;
+                var baseAlignment = baseFormat?.Alignment;
                 var formula = cell.CellFormula;
                 var rawValue = cell.CellValue?.Text ?? cell.InlineString?.InnerText;
                 var reference = cell.CellReference?.Value;
@@ -61,8 +62,11 @@ public static class EvidenceInspector
                         numberFormatId = numId,
                         numberFormat = formatCode,
                         numberFormatEvidence = normalizedFormat,
-                        horizontalAlignment = alignment?.Horizontal?.InnerText, verticalAlignment = alignment?.Vertical?.InnerText,
-                        wrapText = alignment?.WrapText?.Value, shrinkToFit = alignment?.ShrinkToFit?.Value, textRotation = alignment?.TextRotation?.Value
+                        horizontalAlignment = alignment?.Horizontal?.InnerText ?? baseAlignment?.Horizontal?.InnerText,
+                        verticalAlignment = alignment?.Vertical?.InnerText ?? baseAlignment?.Vertical?.InnerText,
+                        wrapText = alignment?.WrapText?.Value ?? baseAlignment?.WrapText?.Value,
+                        shrinkToFit = alignment?.ShrinkToFit?.Value ?? baseAlignment?.ShrinkToFit?.Value,
+                        textRotation = alignment?.TextRotation?.Value ?? baseAlignment?.TextRotation?.Value
                     },
                     normalizedValue,
                     formula = formula is null ? null : new { text = formula.Text, type = formula.FormulaType?.InnerText, sharedIndex = formula.SharedIndex?.Value, reference = formula.Reference?.Value },

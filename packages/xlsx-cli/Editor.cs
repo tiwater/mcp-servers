@@ -11,7 +11,7 @@ public static class Editor
     private static readonly Regex NumericTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", RegexOptions.Compiled);
     private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
     private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
-    private static readonly Regex PrintAreaRangePattern = new(@"(?<start>\$?[A-Za-z]{1,3}\$?\d+):(?<end>\$?[A-Za-z]{1,3}\$?\d+)", RegexOptions.Compiled);
+    private static readonly Regex PrintAreaRangePattern = new(@"^\$?(?<startColumn>[A-Za-z]{1,3})\$?(?<startRow>[1-9]\d*):\$?(?<endColumn>[A-Za-z]{1,3})\$?(?<endRow>[1-9]\d*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static int RunEdit(string[] args)
     {
@@ -26,7 +26,7 @@ public static class Editor
         var request = LoadOperations(operationsPath);
         var result = Apply(input, output, request.Operations);
         Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
-        return 0;
+        return result.AppliedOperations.All(operation => operation.Applied) ? 0 : 1;
     }
 
     public static XlsxEditResult Apply(string input, string output, IReadOnlyList<XlsxEditOperation> operations)
@@ -111,13 +111,13 @@ public static class Editor
         {
             ApplyCellBold(workbookPart, cell, operation.Bold.Value);
         }
-        if (operation.ShrinkToFit.HasValue)
+        if (operation.ShrinkToFit.HasValue || operation.WrapText.HasValue)
         {
-            ApplyCellShrinkToFit(workbookPart, cell, operation.ShrinkToFit.Value);
-        }
-        if (operation.WrapText.HasValue)
-        {
-            ApplyCellWrapText(workbookPart, cell, operation.WrapText.Value);
+            ApplyCellAlignment(workbookPart, cell, alignment =>
+            {
+                if (operation.ShrinkToFit.HasValue) alignment.ShrinkToFit = operation.ShrinkToFit.Value;
+                if (operation.WrapText.HasValue) alignment.WrapText = operation.WrapText.Value;
+            });
         }
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated {operation.Sheet}!{operation.Cell}");
@@ -126,7 +126,7 @@ public static class Editor
     private static XlsxEditAppliedOperation SetPrintAreaOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
     {
         if (string.IsNullOrWhiteSpace(operation.Sheet) || string.IsNullOrWhiteSpace(operation.Range)
-            || !TryParseRangeReference(operation.Range, out var startCell, out var endCell))
+            || !TryParsePrintAreaRange(operation.Range, out var startCell, out var endCell))
             return new XlsxEditAppliedOperation(operation.Type, false, "sheet and a valid A1 range are required");
         var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>().ToList() ?? [];
         var sheetIndex = sheets.FindIndex(sheet => string.Equals(sheet.Name?.Value, operation.Sheet, StringComparison.Ordinal));
@@ -891,6 +891,39 @@ public static class Editor
         return false;
     }
 
+    private static bool TryParsePrintAreaRange(string reference, out string startCell, out string endCell)
+    {
+        var match = PrintAreaRangePattern.Match(reference);
+        if (!match.Success)
+        {
+            startCell = string.Empty;
+            endCell = string.Empty;
+            return false;
+        }
+
+        var startColumn = GetColumnIndex(match.Groups["startColumn"].Value);
+        var endColumn = GetColumnIndex(match.Groups["endColumn"].Value);
+        if (!int.TryParse(match.Groups["startRow"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var startRow)
+            || !int.TryParse(match.Groups["endRow"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var endRow))
+        {
+            startCell = string.Empty;
+            endCell = string.Empty;
+            return false;
+        }
+        if (startColumn is < 1 or > 16384 || endColumn is < 1 or > 16384
+            || startRow is < 1 or > 1048576 || endRow is < 1 or > 1048576
+            || startColumn > endColumn || startRow > endRow)
+        {
+            startCell = string.Empty;
+            endCell = string.Empty;
+            return false;
+        }
+
+        startCell = $"{match.Groups["startColumn"].Value.ToUpperInvariant()}{startRow}";
+        endCell = $"{match.Groups["endColumn"].Value.ToUpperInvariant()}{endRow}";
+        return true;
+    }
+
     private static string TranslateFormulaRows(string formula, int rowDelta)
     {
         if (!TryTranslateFormulaReferences(formula, rowDelta, columnDelta: 0, out var translatedFormula, out _))
@@ -1308,16 +1341,12 @@ public static class Editor
         targetFormat.FontId = fontIndex;
         var formatIndex = (uint)stylesheet.CellFormats!.Count();
         stylesheet.CellFormats!.Append(targetFormat);
+        stylesheet.CellFormats.Count = (uint)stylesheet.CellFormats.Elements<CellFormat>().Count();
+        stylesheet.Fonts.Count = (uint)stylesheet.Fonts.Elements<Font>().Count();
         stylesPart.Stylesheet.Save();
 
         cell.StyleIndex = formatIndex;
     }
-
-    private static void ApplyCellShrinkToFit(WorkbookPart workbookPart, Cell cell, bool shrinkToFit)
-        => ApplyCellAlignment(workbookPart, cell, alignment => alignment.ShrinkToFit = shrinkToFit);
-
-    private static void ApplyCellWrapText(WorkbookPart workbookPart, Cell cell, bool wrapText)
-        => ApplyCellAlignment(workbookPart, cell, alignment => alignment.WrapText = wrapText);
 
     private static void ApplyCellAlignment(WorkbookPart workbookPart, Cell cell, Action<Alignment> mutate)
     {
@@ -1336,13 +1365,41 @@ public static class Editor
         var sourceFormat = formats.Elements<CellFormat>().ElementAtOrDefault((int)sourceStyleIndex)
             ?? formats.Elements<CellFormat>().First();
         var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
-        targetFormat.Alignment ??= new Alignment();
+        var baseFormatIndex = sourceFormat.FormatId?.Value;
+        var baseFormat = baseFormatIndex is not null
+            ? stylesPart.Stylesheet.CellStyleFormats?.Elements<CellFormat>().ElementAtOrDefault((int)baseFormatIndex.Value)
+            : null;
+        targetFormat.Alignment = MaterializeAlignment(baseFormat?.Alignment, sourceFormat.Alignment);
         mutate(targetFormat.Alignment);
         targetFormat.ApplyAlignment = true;
-        var formatIndex = (uint)formats.Count();
-        formats.Append(targetFormat);
+        var existingFormats = formats.Elements<CellFormat>().ToList();
+        var equivalentIndex = existingFormats.FindIndex(format => format.OuterXml == targetFormat.OuterXml);
+        uint formatIndex;
+        if (equivalentIndex >= 0)
+        {
+            formatIndex = (uint)equivalentIndex;
+        }
+        else
+        {
+            formatIndex = (uint)existingFormats.Count;
+            formats.Append(targetFormat);
+        }
+        formats.Count = (uint)formats.Elements<CellFormat>().Count();
         stylesPart.Stylesheet.Save();
         cell.StyleIndex = formatIndex;
+    }
+
+    private static Alignment MaterializeAlignment(Alignment? inherited, Alignment? explicitAlignment)
+    {
+        var effective = inherited is null ? new Alignment() : (Alignment)inherited.CloneNode(true);
+        if (explicitAlignment is null) return effective;
+        foreach (var attribute in explicitAlignment.GetAttributes()) effective.SetAttribute(attribute);
+        foreach (var child in explicitAlignment.ChildElements)
+        {
+            foreach (var existing in effective.ChildElements.Where(candidate => candidate.GetType() == child.GetType()).ToList()) existing.Remove();
+            effective.Append(child.CloneNode(true));
+        }
+        return effective;
     }
 
     private static bool IsTextFormattedCell(Cell cell, WorkbookPart workbookPart)
