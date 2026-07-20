@@ -99,6 +99,9 @@ public class EvidenceTests
         using (var document = SpreadsheetDocument.Open(path, false))
         {
             var raw = document.WorkbookPart!.WorkbookStylesPart!.Stylesheet.CellFormats!.Elements<CellFormat>().ElementAt(1);
+            var rawCells = document.WorkbookPart.WorksheetParts.Single().Worksheet.Descendants<Cell>().ToList();
+            Assert.Equal(1U, rawCells[0].StyleIndex!.Value);
+            Assert.Equal(2U, rawCells[1].StyleIndex!.Value);
             Assert.Equal(2U, raw.FontId!.Value);
             Assert.Equal(2U, raw.FillId!.Value);
             Assert.Equal(2U, raw.BorderId!.Value);
@@ -116,7 +119,7 @@ public class EvidenceTests
         Assert.Equal(1U, inherited.GetProperty("fillId").GetUInt32());
         Assert.Equal(1U, inherited.GetProperty("borderId").GetUInt32());
         Assert.Equal(164U, inherited.GetProperty("numberFormatId").GetUInt32());
-        foreach (var component in new[] { "font", "fill", "border", "protection", "numberFormat" })
+        foreach (var component in new[] { "font", "fill", "border", "protection", "numberFormat", "alignment" })
             Assert.Equal(inherited.GetProperty($"{component}Fingerprint").GetString(), direct.GetProperty($"{component}Fingerprint").GetString());
         Assert.False(inherited.GetProperty("protection").GetProperty("applyProtection").GetBoolean());
         Assert.True(direct.GetProperty("protection").GetProperty("applyProtection").GetBoolean());
@@ -134,6 +137,28 @@ public class EvidenceTests
         Assert.Equal(baseline.GetProperty("numberFormatFingerprint").GetString(), renumbered.GetProperty("numberFormatFingerprint").GetString());
         Assert.NotEqual(baseline.GetProperty("numberFormatFingerprint").GetString(), literalCaseChanged.GetProperty("numberFormatFingerprint").GetString());
         Assert.NotEqual(baseline.GetProperty("numberFormatFingerprint").GetString(), trailingSpaceChanged.GetProperty("numberFormatFingerprint").GetString());
+    }
+
+    [Theory]
+    [InlineData("horizontal")]
+    [InlineData("vertical")]
+    [InlineData("textRotation")]
+    [InlineData("wrapText")]
+    [InlineData("shrinkToFit")]
+    [InlineData("indent")]
+    [InlineData("relativeIndent")]
+    [InlineData("justifyLastLine")]
+    [InlineData("readingOrder")]
+    [InlineData("mergeCell")]
+    public void Alignment_fingerprint_detects_every_openxml_alignment_semantic(string changedProperty)
+    {
+        var baseline = CellStyleEvidence(AlignmentFixture());
+        var changed = CellStyleEvidence(AlignmentFixture(changedProperty));
+
+        Assert.NotEqual(baseline.GetProperty("alignmentFingerprint").GetString(), changed.GetProperty("alignmentFingerprint").GetString());
+        var alignment = baseline.GetProperty("alignment");
+        foreach (var property in new[] { "horizontal", "vertical", "textRotation", "wrapText", "shrinkToFit", "indent", "relativeIndent", "justifyLastLine", "readingOrder", "mergeCell" })
+            Assert.True(alignment.TryGetProperty(property, out _), $"Missing alignment semantic: {property}");
     }
 
     [Fact]
@@ -254,6 +279,7 @@ public class EvidenceTests
                 new CellFormat(),
                 new CellFormat {
                     FontId = 1, FillId = 1, BorderId = 1, NumberFormatId = 164,
+                    Alignment = AlignmentValue(),
                     Protection = new Protection { Locked = false, Hidden = true }
                 }) { Count = 2 },
             new CellFormats(
@@ -261,11 +287,13 @@ public class EvidenceTests
                 new CellFormat {
                     FormatId = 1, FontId = 2, FillId = 2, BorderId = 2, NumberFormatId = 165,
                     ApplyFont = false, ApplyFill = false, ApplyBorder = false, ApplyNumberFormat = false,
+                    ApplyAlignment = false, Alignment = AlignmentValue("horizontal"),
                     ApplyProtection = false, Protection = new Protection { Locked = true, Hidden = false }
                 },
                 new CellFormat {
                     FontId = 1, FillId = 1, BorderId = 1, NumberFormatId = 164,
                     ApplyFont = true, ApplyFill = true, ApplyBorder = true, ApplyNumberFormat = true,
+                    ApplyAlignment = true, Alignment = AlignmentValue(),
                     ApplyProtection = true, Protection = new Protection { Locked = false, Hidden = true }
                 }) { Count = 3 });
         var ws = wb.AddNewPart<WorksheetPart>();
@@ -276,6 +304,42 @@ public class EvidenceTests
         wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
         return path;
     }
+
+    private static string AlignmentFixture(string? changedProperty = null)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-alignment-{Guid.NewGuid():N}.xlsx");
+        using var doc = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var wb = doc.AddWorkbookPart();
+        wb.Workbook = new Workbook();
+        var styles = wb.AddNewPart<WorkbookStylesPart>();
+        styles.Stylesheet = new Stylesheet(
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellStyleFormats(new CellFormat()) { Count = 1 },
+            new CellFormats(
+                new CellFormat(),
+                new CellFormat { ApplyAlignment = true, Alignment = AlignmentValue(changedProperty) }) { Count = 2 });
+        var ws = wb.AddNewPart<WorksheetPart>();
+        ws.Worksheet = new Worksheet(new SheetData(new Row(new Cell { CellReference = "A1", StyleIndex = 1, CellValue = new CellValue("1") }) { RowIndex = 1 }));
+        wb.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Alignment" });
+        wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
+        return path;
+    }
+
+    private static Alignment AlignmentValue(string? changedProperty = null) => new()
+    {
+        Horizontal = changedProperty == "horizontal" ? HorizontalAlignmentValues.Left : HorizontalAlignmentValues.Center,
+        Vertical = changedProperty == "vertical" ? VerticalAlignmentValues.Top : VerticalAlignmentValues.Center,
+        TextRotation = changedProperty == "textRotation" ? 30U : 15U,
+        WrapText = changedProperty != "wrapText",
+        ShrinkToFit = changedProperty != "shrinkToFit",
+        Indent = changedProperty == "indent" ? 3U : 2U,
+        RelativeIndent = changedProperty == "relativeIndent" ? 2 : 1,
+        JustifyLastLine = changedProperty != "justifyLastLine",
+        ReadingOrder = changedProperty == "readingOrder" ? 2U : 1U,
+        MergeCell = changedProperty == "mergeCell" ? "0" : "1"
+    };
 
     private static string NumberFormatFixture(uint id, string code)
     {
