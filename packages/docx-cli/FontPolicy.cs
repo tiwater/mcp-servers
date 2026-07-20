@@ -10,7 +10,7 @@ public static class FontPolicy
 {
     public const string Schema = "tiwater.docx-font-policy/v1";
     private const string ReportSchema = "tiwater.docx-font-validation/v1";
-    private const string ToolVersion = "0.10.9";
+    private const string ToolVersion = "0.10.10";
 
     public static int RunValidate(string[] args)
     {
@@ -53,11 +53,14 @@ public static class FontPolicy
     {
         var properties = run.RunProperties ?? run.PrependChild(new RunProperties());
         properties.RemoveAllChildren<RunFonts>();
-        properties.RemoveAllChildren<FontSize>();
-        properties.RemoveAllChildren<FontSizeComplexScript>();
         properties.PrependChild(new RunFonts { Ascii = rule.Latin, HighAnsi = rule.Latin, EastAsia = rule.EastAsia, ComplexScript = rule.Latin });
-        properties.AppendChild(new FontSize { Val = rule.Size });
-        properties.AppendChild(new FontSizeComplexScript { Val = rule.Size });
+        if (rule.Size != "preserve")
+        {
+            properties.RemoveAllChildren<FontSize>();
+            properties.RemoveAllChildren<FontSizeComplexScript>();
+            properties.AppendChild(new FontSize { Val = rule.Size });
+            properties.AppendChild(new FontSizeComplexScript { Val = rule.Size });
+        }
     }
 
     public static DocxFontValidationReport Validate(string input, DocxFontPolicy policy, string policySha256)
@@ -76,7 +79,8 @@ public static class FontPolicy
             var fonts = properties?.RunFonts;
             var size = properties?.FontSize?.Val?.Value;
             var complexSize = properties?.FontSizeComplexScript?.Val?.Value;
-            if (fonts?.Ascii?.Value == rule.Latin && fonts.HighAnsi?.Value == rule.Latin && fonts.EastAsia?.Value == rule.EastAsia && fonts.ComplexScript?.Value == rule.Latin && size == rule.Size && complexSize == rule.Size) continue;
+            var sizeMatches = rule.Size == "preserve" || size == rule.Size && complexSize == rule.Size;
+            if (fonts?.Ascii?.Value == rule.Latin && fonts.HighAnsi?.Value == rule.Latin && fonts.EastAsia?.Value == rule.EastAsia && fonts.ComplexScript?.Value == rule.Latin && sizeMatches) continue;
             findings.Add(new DocxFontFinding(inTable ? "table" : "body", ordinal, "font-policy-mismatch", fonts?.Ascii?.Value, fonts?.HighAnsi?.Value, fonts?.EastAsia?.Value, fonts?.ComplexScript?.Value, size, complexSize));
         }
         return new DocxFontValidationReport(ReportSchema, ToolVersion, findings.Count == 0, Path.GetFullPath(input), Sha256(input), policySha256, bodyOrdinal, tableOrdinal, findings);
@@ -103,7 +107,14 @@ public static class FontPolicy
     private static bool TryRule(DocxFontRule rule, out DocxFontRule normalized)
     {
         normalized = rule;
-        if (string.IsNullOrWhiteSpace(rule.EastAsia) || string.IsNullOrWhiteSpace(rule.Latin) || !TryHalfPoints(rule.Size, out var halfPoints)) return false;
+        var size = rule.Size?.Trim();
+        if (string.Equals(size, "preserve", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(rule.EastAsia) || string.IsNullOrWhiteSpace(rule.Latin)) return false;
+            normalized = rule with { EastAsia = rule.EastAsia.Trim(), Latin = rule.Latin.Trim(), Size = "preserve" };
+            return true;
+        }
+        if (string.IsNullOrWhiteSpace(rule.EastAsia) || string.IsNullOrWhiteSpace(rule.Latin) || size is null || !TryHalfPoints(size, out var halfPoints)) return false;
         normalized = rule with { EastAsia = rule.EastAsia.Trim(), Latin = rule.Latin.Trim(), Size = halfPoints };
         return true;
     }
