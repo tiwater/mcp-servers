@@ -9,7 +9,8 @@ public static class Inspector
         System.Text.Json.JsonSerializer.SerializeToElement(new
         {
             workbook = Inspect(path),
-            export = Extractor.Export(path)
+            export = Extractor.Export(path),
+            evidence = EvidenceInspector.Inspect(path)
         }, Json.Options);
 
     public static WorkbookReport Inspect(string path)
