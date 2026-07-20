@@ -3,11 +3,19 @@ using Dockit.Xlsx;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using DocumentFormat.OpenXml.Validation;
 
 namespace Dockit.Xlsx.Tests;
 
 public class EditorTests
 {
+    [Fact]
+    public void Operation_positional_value_parameter_remains_compatible_with_pre_range_api()
+    {
+        var operation = new XlsxEditOperation("setCellValue", "Sheet1", "A1", "legacy-value");
+        Assert.Equal("legacy-value", operation.Value);
+        Assert.Null(operation.Range);
+    }
     [Fact]
     public void Inspect_reports_no_placeholders_for_fixed_layout_fixture()
     {
@@ -84,6 +92,48 @@ public class EditorTests
         Assert.Equal<uint>(0, definedName.LocalSheetId!.Value);
         Assert.Equal("'Sheet1'!$A$1:$F$3", definedName.Text);
         Assert.Equal("'Sheet1'!$A$1:$F$3", Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print").GetProperty("area").GetString());
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Theory]
+    [InlineData("A0")]
+    [InlineData("XFE1")]
+    [InlineData("A1048577")]
+    [InlineData("Sheet1!A1")]
+    public void Edit_rejects_unbounded_cell_coordinates_before_mutation(string cell)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-cell-{Guid.NewGuid():N}.xlsx");
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: cell, Value: "must-not-write")]);
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void Edit_rejects_range_values_whose_derived_end_exceeds_sheet_bounds()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-derived-range-{Guid.NewGuid():N}.xlsx");
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setRangeValues", Sheet: "Sheet1", StartCell: "XFD1048576", Values: [["one", "overflow"]])]);
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void Edit_preflights_the_entire_batch_without_overwriting_an_existing_output()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-preflight-existing-{Guid.NewGuid():N}.xlsx");
+        var marker = new byte[] { 1, 2, 3, 4 };
+        File.WriteAllBytes(output, marker);
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "A1", Value: "would-be-partial"),
+            new XlsxEditOperation("setPrintArea", Sheet: "Sheet1", Range: "F3:A1")
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.False(operation.Applied));
+        Assert.Equal(marker, File.ReadAllBytes(output));
     }
 
     [Theory]
@@ -443,9 +493,9 @@ public class EditorTests
             }) { Count = 1 },
             new CellFormats(new CellFormat {
                 FormatId = 0,
-                Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Center },
+                Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Right },
                 Protection = new Protection { Locked = true },
-                ApplyAlignment = true,
+                ApplyAlignment = false,
                 ApplyProtection = true
             }) { Count = 1 }
         );

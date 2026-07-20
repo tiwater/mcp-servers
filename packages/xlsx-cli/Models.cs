@@ -8,6 +8,13 @@ using System.Text.Unicode;
 
 namespace Dockit.Xlsx;
 
+internal static class XlsxToolVersion
+{
+    internal static readonly string Current = typeof(XlsxToolVersion).Assembly
+        .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion.Split('+', 2)[0];
+}
+
 public record WorkbookReport(
     string File,
     int SheetCount,

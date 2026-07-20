@@ -18,7 +18,7 @@ public class InspectionDetailTests
     }
 
     [Fact]
-    public async Task Published_inspection_evidence_attests_xlsx_0_2_14_for_producer_and_validator()
+    public async Task Published_inspection_evidence_attests_package_semver_for_producer_validator_and_nested_evidence()
     {
         var source = CreateAna14LikeWorkbook();
         var root = Path.Combine(Path.GetTempPath(), $"xlsx-versioned-evidence-{Guid.NewGuid():N}");
@@ -39,8 +39,9 @@ public class InspectionDetailTests
         Assert.Equal(0, await Dockit.Xlsx.Cli.Cli.RunAsync(["validate-inspect-evidence", "--request", request, "--evidence", evidence, "--output", verdict]));
         using var produced = JsonDocument.Parse(File.ReadAllText(evidence));
         using var validated = JsonDocument.Parse(File.ReadAllText(verdict));
-        Assert.Equal("0.2.14", produced.RootElement.GetProperty("provider").GetProperty("toolVersion").GetString());
-        Assert.Equal("0.2.14", validated.RootElement.GetProperty("validator").GetProperty("toolVersion").GetString());
+        Assert.Equal("0.2.15", produced.RootElement.GetProperty("provider").GetProperty("toolVersion").GetString());
+        Assert.Equal("0.2.15", validated.RootElement.GetProperty("validator").GetProperty("toolVersion").GetString());
+        Assert.Equal("0.2.15", produced.RootElement.GetProperty("observations")[0].GetProperty("value").GetProperty("evidence").GetProperty("toolVersion").GetString());
         Assert.True(validated.RootElement.GetProperty("pass").GetBoolean());
     }
 

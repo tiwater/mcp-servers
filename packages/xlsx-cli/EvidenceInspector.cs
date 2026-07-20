@@ -1,7 +1,6 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System.Globalization;
-using System.Reflection;
 
 namespace Dockit.Xlsx;
 
@@ -41,7 +40,7 @@ public static class EvidenceInspector
                 var numId = format?.NumberFormatId?.Value ?? baseFormat?.NumberFormatId?.Value ?? 0U;
                 var formatCode = customFormats.GetValueOrDefault(numId) ?? BuiltInFormat(numId) ?? $"builtin:{numId}";
                 var normalizedFormat = NormalizeNumberFormat(numId, formatCode, customFormats.ContainsKey(numId));
-                var alignment = format?.Alignment;
+                var alignment = format?.ApplyAlignment?.Value == false ? null : format?.Alignment;
                 var baseAlignment = baseFormat?.Alignment;
                 var formula = cell.CellFormula;
                 var rawValue = cell.CellValue?.Text ?? cell.InlineString?.InnerText;
@@ -85,7 +84,7 @@ public static class EvidenceInspector
                 cells
             };
         }).ToList();
-        return new { schema = "tiwater.xlsx.evidence/v1", toolVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(), file = Path.GetFullPath(path), dateSystem = uses1904Dates ? "1904" : "1900", sheets };
+        return new { schema = "tiwater.xlsx.evidence/v1", toolVersion = XlsxToolVersion.Current, file = Path.GetFullPath(path), dateSystem = uses1904Dates ? "1904" : "1900", sheets };
     }
 
     private static object NormalizeValue(string? rawValue, string? dataType, string formatKind, bool uses1904Dates)
