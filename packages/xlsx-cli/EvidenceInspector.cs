@@ -78,7 +78,9 @@ public static class EvidenceInspector
                         numberFormatId = numId,
                         numberFormat = formatCode,
                         numberFormatEvidence = normalizedFormat,
-                        numberFormatFingerprint = NumberFormatFingerprint(formatCode, normalizedFormat.Kind),
+                        numberFormatFingerprint = NumberFormatFingerprint(
+                            NumberFormatFingerprintCode(numId, formatCode, customFormats.ContainsKey(numId)),
+                            normalizedFormat.Kind),
                         alignmentFingerprint = AlignmentFingerprint(alignmentEvidence),
                         alignment = alignmentEvidence,
                         horizontalAlignment = alignment?.Horizontal?.InnerText,
@@ -196,6 +198,9 @@ public static class EvidenceInspector
         return Sha256(canonical.ToString());
     }
 
+    private static string NumberFormatFingerprintCode(uint id, string exactCode, bool custom)
+        => !custom && id is 14 or 58 ? "wps-locale-short-date" : exactCode;
+
     private static string AlignmentFingerprint(AlignmentEvidence alignment)
     {
         var canonical = new StringBuilder();
@@ -288,7 +293,9 @@ public static class EvidenceInspector
 
     private static NumberFormatEvidence NormalizeNumberFormat(uint id, string code, bool custom)
     {
-        var normalizedCode = string.Concat(code.Where(c => !char.IsWhiteSpace(c))).ToLowerInvariant();
+        var normalizedCode = !custom && id is 14 or 58
+            ? "wps-locale-short-date"
+            : string.Concat(code.Where(c => !char.IsWhiteSpace(c))).ToLowerInvariant();
         var kind = ClassifyNumberFormat(id, code);
         return new NumberFormatEvidence(id, code, normalizedCode, custom ? "custom" : "builtIn", kind, kind is "date" or "time" or "datetime");
     }
@@ -296,6 +303,7 @@ public static class EvidenceInspector
     private static string ClassifyNumberFormat(uint id, string code)
     {
         if (id == 49 || code == "@") return "text";
+        if (id is 14 or 58) return "date";
         var semantic = StripLiteralsAndConditions(code).ToLowerInvariant();
         if (id == 0 || string.Equals(semantic, "general", StringComparison.Ordinal)) return "general";
         var hasDate = semantic.IndexOfAny(['y', 'd']) >= 0;
@@ -358,6 +366,7 @@ public static class EvidenceInspector
         18 => "h:mm AM/PM", 19 => "h:mm:ss AM/PM", 20 => "h:mm", 21 => "h:mm:ss",
         22 => "m/d/yy h:mm", 37 => "#,##0 ;(#,##0)", 38 => "#,##0 ;[Red](#,##0)",
         39 => "#,##0.00;(#,##0.00)", 40 => "#,##0.00;[Red](#,##0.00)", 45 => "mm:ss",
-        46 => "[h]:mm:ss", 47 => "mmss.0", 48 => "##0.0E+0", 49 => "@", _ => null
+        46 => "[h]:mm:ss", 47 => "mmss.0", 48 => "##0.0E+0", 49 => "@",
+        58 => "builtin:58", _ => null
     };
 }

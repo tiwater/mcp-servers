@@ -139,6 +139,25 @@ public class EvidenceTests
         Assert.NotEqual(baseline.GetProperty("numberFormatFingerprint").GetString(), trailingSpaceChanged.GetProperty("numberFormatFingerprint").GetString());
     }
 
+    [Fact]
+    public void Wps_locale_short_date_ids_share_semantics_without_hiding_general_drift()
+    {
+        var shortDate = CellStyleEvidence(BuiltInNumberFormatFixture(14));
+        var wpsSavedShortDate = CellStyleEvidence(BuiltInNumberFormatFixture(58));
+        var general = CellStyleEvidence(BuiltInNumberFormatFixture(0));
+
+        Assert.Equal(14U, shortDate.GetProperty("numberFormatId").GetUInt32());
+        Assert.Equal(58U, wpsSavedShortDate.GetProperty("numberFormatId").GetUInt32());
+        Assert.Equal("m/d/yy", shortDate.GetProperty("numberFormat").GetString());
+        Assert.Equal("builtin:58", wpsSavedShortDate.GetProperty("numberFormat").GetString());
+        Assert.Equal("date", shortDate.GetProperty("numberFormatEvidence").GetProperty("kind").GetString());
+        Assert.Equal("date", wpsSavedShortDate.GetProperty("numberFormatEvidence").GetProperty("kind").GetString());
+        Assert.Equal("wps-locale-short-date", shortDate.GetProperty("numberFormatEvidence").GetProperty("normalizedCode").GetString());
+        Assert.Equal("wps-locale-short-date", wpsSavedShortDate.GetProperty("numberFormatEvidence").GetProperty("normalizedCode").GetString());
+        Assert.Equal(shortDate.GetProperty("numberFormatFingerprint").GetString(), wpsSavedShortDate.GetProperty("numberFormatFingerprint").GetString());
+        Assert.NotEqual(shortDate.GetProperty("numberFormatFingerprint").GetString(), general.GetProperty("numberFormatFingerprint").GetString());
+    }
+
     [Theory]
     [InlineData("horizontal")]
     [InlineData("vertical")]
@@ -357,6 +376,26 @@ public class EvidenceTests
             new CellFormats(new CellFormat(), new CellFormat { NumberFormatId = id, ApplyNumberFormat = true }) { Count = 2 });
         var ws = wb.AddNewPart<WorksheetPart>();
         ws.Worksheet = new Worksheet(new SheetData(new Row(new Cell { CellReference = "A1", StyleIndex = 1, CellValue = new CellValue("1") }) { RowIndex = 1 }));
+        wb.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Formats" });
+        wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
+        return path;
+    }
+
+    private static string BuiltInNumberFormatFixture(uint id)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-builtin-number-format-{Guid.NewGuid():N}.xlsx");
+        using var doc = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var wb = doc.AddWorkbookPart();
+        wb.Workbook = new Workbook();
+        var styles = wb.AddNewPart<WorkbookStylesPart>();
+        styles.Stylesheet = new Stylesheet(
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellStyleFormats(new CellFormat()) { Count = 1 },
+            new CellFormats(new CellFormat(), new CellFormat { NumberFormatId = id, ApplyNumberFormat = true }) { Count = 2 });
+        var ws = wb.AddNewPart<WorksheetPart>();
+        ws.Worksheet = new Worksheet(new SheetData(new Row(new Cell { CellReference = "A1", StyleIndex = 1 }) { RowIndex = 1 }));
         wb.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Formats" });
         wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
         return path;
