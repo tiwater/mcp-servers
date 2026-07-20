@@ -1,7 +1,9 @@
 using Dockit.Xlsx;
+using Dockit.Convert;
 using NPOI.HSSF.UserModel;
 using NPOI.HSSF.Util;
 using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
 using System.Text.Json;
 using Xunit;
 
@@ -9,6 +11,51 @@ namespace Dockit.Xlsx.Tests;
 
 public class LegacyXlsTests
 {
+    [Fact]
+    public void Published_evidence_rejects_non_authoritative_legacy_conversion()
+    {
+        var path = CreateLegacyXlsFixture();
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            Inspector.InspectPublishedEvidence(path, (_, _) =>
+                new WorkbookConverter.ConversionResult("libreoffice", "WPS unavailable")));
+
+        Assert.Contains("requires authoritative WPS Spreadsheet conversion without fallback", error.Message);
+    }
+
+    [Fact]
+    public void Published_evidence_propagates_authoritative_conversion_failure()
+    {
+        var path = CreateLegacyXlsFixture();
+
+        var error = Assert.Throws<TimeoutException>(() =>
+            Inspector.InspectPublishedEvidence(path, (_, _) =>
+                throw new TimeoutException("WPS spreadsheet runtime remained busy")));
+
+        Assert.Contains("remained busy", error.Message);
+    }
+
+    [Fact]
+    public void Published_evidence_accepts_authoritative_legacy_conversion()
+    {
+        var path = CreateLegacyXlsFixture();
+        var called = false;
+
+        var evidence = Inspector.InspectPublishedEvidence(path, (_, output) =>
+        {
+            called = true;
+            using var workbook = new XSSFWorkbook();
+            var sheet = workbook.CreateSheet("Plan");
+            sheet.CreateRow(0).CreateCell(0).SetCellValue("Condition");
+            using var stream = File.Create(output);
+            workbook.Write(stream);
+            return new WorkbookConverter.ConversionResult("wps-spreadsheet");
+        });
+
+        Assert.True(called);
+        Assert.Equal("wps-spreadsheet", evidence.GetProperty("conversion").GetProperty("backend").GetString());
+    }
+
     [Fact]
     public void Inspect_reads_legacy_xls_workbooks()
     {

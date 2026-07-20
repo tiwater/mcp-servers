@@ -14,11 +14,17 @@ internal static class LimaWpsWriterPdfConverter
             && !string.IsNullOrWhiteSpace(InstanceName())
             && !string.IsNullOrWhiteSpace(FindOnPath("limactl"));
 
+    internal static IDisposable AcquireSpreadsheetHostLease(TimeSpan? timeout = null, string? lockPath = null)
+        => WpsRpcSession.AcquireSpreadsheetLease(timeout, lockPath);
+
     internal static NativeRenderProvenance ConvertToPdf(string input, string output)
         => ConvertToPdf(input, output, "wps-writer");
 
     internal static NativeRenderProvenance ConvertSpreadsheetToPdf(string input, string output)
-        => ConvertToPdf(input, output, "wps-spreadsheet");
+    {
+        using var lease = AcquireSpreadsheetHostLease();
+        return ConvertToPdf(input, output, "wps-spreadsheet");
+    }
 
     internal static NativeRenderProvenance ConvertPresentationToPdf(string input, string output)
         => ConvertToPdf(input, output, "wps-presentation");
@@ -47,7 +53,10 @@ internal static class LimaWpsWriterPdfConverter
 
         try
         {
-            RunSpreadsheetConversion(limactl, instance, stagedInput, stagedOutput, requireLegacyInput ? "xls-to-xlsx" : "recalculate-xlsx");
+            using (AcquireSpreadsheetHostLease())
+            {
+                RunSpreadsheetConversion(limactl, instance, stagedInput, stagedOutput, requireLegacyInput ? "xls-to-xlsx" : "recalculate-xlsx");
+            }
             ValidateXlsx(stagedOutput);
             var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
             if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);

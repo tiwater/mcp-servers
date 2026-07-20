@@ -23,6 +23,7 @@ public static class WpsSpreadsheetRecalculator
         var helper = Path.Combine(root, "recalculate_xlsx_wps.py"); File.WriteAllText(helper, WpsHelperScript);
         try
         {
+            using var lease = WpsRpcSession.AcquireSpreadsheetLease();
             using var process = Process.Start(WpsRpcSession.CreateProcessStartInfo(dbus, xvfb, python, helper, input, output, root)) ?? throw new InvalidOperationException("Failed to start WPS XLSX recalculation.");
             var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(TimeSpan.FromMinutes(10))) { try { process.Kill(entireProcessTree: true); } catch { } throw new TimeoutException("WPS XLSX recalculation timed out after 600 seconds."); }

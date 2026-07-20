@@ -20,5 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../convert-cli/convert.csproj" />
+    <ProjectReference Include="../convert-cli.lease-probe/WpsLeaseProbe.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>
