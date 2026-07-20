@@ -8,13 +8,14 @@ namespace Tiwater.FormatEvidence;
 public static class FormatEvidenceCommand
 {
     public sealed record AdditionalObservation(string ObservationId, string SemanticField, string Use, object Value, string Pointer);
-    public static int RunProducer(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null)
-        => Run(args, false, tool, version, format, inspect, additionalObservations, acceptedSourceFormats);
+    public sealed record ErrorClassification(string Code, string Category, bool Retryable);
+    public static int RunProducer(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null)
+        => Run(args, false, tool, version, format, inspect, additionalObservations, acceptedSourceFormats, classifyError);
 
-    public static int RunValidator(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null)
-        => Run(args, true, tool, version, format, inspect, additionalObservations, acceptedSourceFormats);
+    public static int RunValidator(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null)
+        => Run(args, true, tool, version, format, inspect, additionalObservations, acceptedSourceFormats, classifyError);
 
-    private static int Run(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations, IReadOnlySet<string>? acceptedSourceFormats)
+    private static int Run(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations, IReadOnlySet<string>? acceptedSourceFormats, Func<Exception, ErrorClassification?>? classifyError)
     {
         var values = ParseArgs(args, validator);
         var request = JsonNode.Parse(File.ReadAllText(values["request"]))!.AsObject();
@@ -50,15 +51,17 @@ public static class FormatEvidenceCommand
         {
             Console.Error.WriteLine(error.Message);
             var artifact = request["artifact"] as JsonObject;
+            var classification = classifyError?.Invoke(error)
+                ?? new ErrorClassification("inspect-evidence-invalid", "evidence", false);
             var result = new JsonObject
             {
                 ["schema"] = "tiwater.format-evidence-error/v1",
                 ["requestId"] = request["requestId"]?.GetValue<string>() ?? "unknown",
                 ["subject"] = request["subject"]?.DeepClone() ?? new JsonObject { ["kind"] = "input", ["inputId"] = "unknown" },
                 ["artifactVersionId"] = artifact?["artifactVersionId"]?.GetValue<string>() ?? "unknown",
-                ["code"] = "inspect-evidence-invalid",
-                ["category"] = "evidence",
-                ["retryable"] = false,
+                ["code"] = classification.Code,
+                ["category"] = classification.Category,
+                ["retryable"] = classification.Retryable,
                 ["provider"] = new JsonObject { ["tool"] = tool, ["toolVersion"] = version, ["capabilityId"] = validator ? "validate-inspect-evidence" : "inspect-evidence" },
                 ["refs"] = new JsonArray(),
                 ["message"] = error.Message

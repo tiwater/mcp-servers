@@ -4,6 +4,12 @@ using NPOI.XSSF.UserModel;
 
 namespace Dockit.Convert;
 
+public sealed class AuthoritativeSpreadsheetRuntimeException : Exception
+{
+    public AuthoritativeSpreadsheetRuntimeException(string message, Exception? innerException = null)
+        : base(message, innerException) { }
+}
+
 public static class WorkbookConverter
 {
     public sealed record ConversionResult(string Backend, string? FallbackReason = null);
@@ -39,7 +45,7 @@ public static class WorkbookConverter
             {
                 if (requireWps)
                 {
-                    throw new InvalidOperationException($"Required WPS Spreadsheet XLS conversion failed: {ex.Message}", ex);
+                    throw new AuthoritativeSpreadsheetRuntimeException($"Required WPS Spreadsheet XLS conversion failed: {ex.Message}", ex);
                 }
                 var fallbackReason = $"WPS RPC conversion failed: {ex.Message}";
                 var fallback = ConvertXlsToXlsxWithoutWps(input, output);
@@ -63,7 +69,7 @@ public static class WorkbookConverter
             {
                 if (requireWps)
                 {
-                    throw new InvalidOperationException($"Required Lima WPS Spreadsheet XLS conversion failed: {ex.Message}", ex);
+                    throw new AuthoritativeSpreadsheetRuntimeException($"Required Lima WPS Spreadsheet XLS conversion failed: {ex.Message}", ex);
                 }
                 var fallbackReason = $"Lima WPS RPC conversion failed: {ex.Message}";
                 var fallback = ConvertXlsToXlsxWithoutWps(input, output);
@@ -78,7 +84,7 @@ public static class WorkbookConverter
 
         if (requireWps)
         {
-            throw new InvalidOperationException(
+            throw new AuthoritativeSpreadsheetRuntimeException(
                 "WPS Spreadsheet XLS conversion was required but neither local WPS RPC nor a configured Lima WPS runtime is available.");
         }
 
