@@ -2,23 +2,11 @@ namespace Dockit.Xlsx;
 
 public static class Extractor
 {
-    public static int RunExportJson(string[] args)
+    public static IReadOnlyList<object> Export(string input, bool resolveMergedCells = false)
     {
-        var resolveMergedCells = args.Contains("--resolve-merged-cells", StringComparer.OrdinalIgnoreCase) || args.Contains("-r", StringComparer.OrdinalIgnoreCase);
-        var cleanArgs = args.Where(arg => !string.Equals(arg, "--resolve-merged-cells", StringComparison.OrdinalIgnoreCase) && !string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase)).ToArray();
-
-        if (cleanArgs.Length < 1)
-        {
-            throw new InvalidOperationException("export-json requires <input.xlsx> [<output.json>]");
-        }
-
-        var input = Path.GetFullPath(cleanArgs[0]);
-        var output = cleanArgs.Length > 1 ? Path.GetFullPath(cleanArgs[1]) : null;
-
         var workbook = WorkbookLoader.Load(input, resolveMergedCells);
         var inspected = Inspector.Inspect(input);
         var result = new List<object>();
-
         foreach (var sheet in workbook.Sheets)
         {
             var inspectedCells = inspected.Sheets.Single(item => item.Name == sheet.Name).Cells ?? [];
@@ -34,6 +22,23 @@ public static class Extractor
                 })
             });
         }
+        return result;
+    }
+
+    public static int RunExportJson(string[] args)
+    {
+        var resolveMergedCells = args.Contains("--resolve-merged-cells", StringComparer.OrdinalIgnoreCase) || args.Contains("-r", StringComparer.OrdinalIgnoreCase);
+        var cleanArgs = args.Where(arg => !string.Equals(arg, "--resolve-merged-cells", StringComparison.OrdinalIgnoreCase) && !string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase)).ToArray();
+
+        if (cleanArgs.Length < 1)
+        {
+            throw new InvalidOperationException("export-json requires <input.xlsx> [<output.json>]");
+        }
+
+        var input = Path.GetFullPath(cleanArgs[0]);
+        var output = cleanArgs.Length > 1 ? Path.GetFullPath(cleanArgs[1]) : null;
+
+        var result = Export(input, resolveMergedCells);
 
         var json = System.Text.Json.JsonSerializer.Serialize(result, Json.Options);
         if (output != null)

@@ -5,6 +5,13 @@ namespace Dockit.Xlsx;
 
 public static class Inspector
 {
+    public static System.Text.Json.JsonElement InspectEvidence(string path) =>
+        System.Text.Json.JsonSerializer.SerializeToElement(new
+        {
+            workbook = Inspect(path),
+            export = Extractor.Export(path)
+        }, Json.Options);
+
     public static WorkbookReport Inspect(string path)
     {
         var workbook = WorkbookLoader.Load(path);
