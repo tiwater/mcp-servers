@@ -349,6 +349,7 @@ public sealed record DocxEditOperation(
     int? TableIndex = null,
     int? RowIndex = null,
     int? CellIndex = null,
+    int? GridColumn = null,
     IReadOnlyList<IReadOnlyList<DocxTableCellInput>>? Rows = null,
     IReadOnlyList<string>? CommentIds = null,
     int? StartCellIndex = null,
