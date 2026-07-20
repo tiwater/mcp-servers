@@ -6,8 +6,7 @@ public static class WpsSpreadsheetPdfConverter
 {
     public static bool IsAvailable()
         => !string.IsNullOrWhiteSpace(FindWpsRpcPython())
-            && !string.IsNullOrWhiteSpace(FindOnPath("xvfb-run"))
-            && !string.IsNullOrWhiteSpace(FindOnPath("dbus-run-session"))
+            && WpsRpcSession.IsAvailable()
             && !string.IsNullOrWhiteSpace(FindOnPath("et"));
 
     public static void ConvertToPdf(string input, string output)
@@ -16,10 +15,8 @@ public static class WpsSpreadsheetPdfConverter
 
         var python = FindWpsRpcPython()
             ?? throw new InvalidOperationException("WPS RPC python is required for WPS Spreadsheets PDF conversion. Set TIWATER_WPSRPC_PYTHON or LUCID_WPSRPC_PYTHON.");
-        var xvfb = FindOnPath("xvfb-run")
-            ?? throw new InvalidOperationException("xvfb-run is required for WPS Spreadsheets PDF conversion.");
-        var dbusRunSession = FindOnPath("dbus-run-session")
-            ?? throw new InvalidOperationException("dbus-run-session is required for WPS Spreadsheets PDF conversion.");
+        var xvfb = WpsRpcSession.RequireCommand("xvfb-run", "WPS Spreadsheets PDF conversion");
+        var dbusRunSession = WpsRpcSession.RequireCommand("dbus-run-session", "WPS Spreadsheets PDF conversion");
         if (string.IsNullOrWhiteSpace(FindOnPath("et"))) throw new InvalidOperationException("WPS Spreadsheets command not found: et");
 
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
@@ -31,7 +28,8 @@ public static class WpsSpreadsheetPdfConverter
 
         try
         {
-            var startInfo = CreateProcessStartInfo(dbusRunSession, xvfb, python, helperPath, input, output, temporaryRoot);
+            var startInfo = WpsRpcSession.CreateProcessStartInfo(
+                dbusRunSession, xvfb, python, helperPath, input, output, temporaryRoot);
             using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Failed to start WPS Spreadsheets RPC conversion.");
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
@@ -55,36 +53,6 @@ public static class WpsSpreadsheetPdfConverter
         {
             try { Directory.Delete(temporaryRoot, recursive: true); } catch { }
         }
-    }
-
-    internal static ProcessStartInfo CreateProcessStartInfo(
-        string dbusRunSession,
-        string xvfb,
-        string python,
-        string helperPath,
-        string input,
-        string output,
-        string isolatedWorkingDirectory)
-    {
-        var workingDirectory = Path.GetFullPath(isolatedWorkingDirectory);
-        var cacheDirectory = Path.Combine(workingDirectory, "cache");
-        var runtimeDirectory = Path.Combine(workingDirectory, "runtime");
-        Directory.CreateDirectory(cacheDirectory);
-        Directory.CreateDirectory(runtimeDirectory);
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(runtimeDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = dbusRunSession,
-            WorkingDirectory = workingDirectory,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-        };
-        startInfo.Environment["XDG_CACHE_HOME"] = cacheDirectory;
-        startInfo.Environment["XDG_RUNTIME_DIR"] = runtimeDirectory;
-        foreach (var argument in new[] { "--", xvfb, "-a", python, helperPath, Path.GetFullPath(input), Path.GetFullPath(output) }) startInfo.ArgumentList.Add(argument);
-        return startInfo;
     }
 
     private static bool IsPdf(string path)
