@@ -224,6 +224,7 @@ public static class Inspector
             var declaredGridWidths = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Select(column => (string?)column.Width?.Value).ToList() ?? [];
             var gridColumnCount = Math.Max(columnCount, declaredGridWidths.Count);
             while (declaredGridWidths.Count < gridColumnCount) declaredGridWidths.Add(null);
+            var tableWidth = table.GetFirstChild<TableProperties>()?.GetFirstChild<TableWidth>();
             details.Add(new TableDetail(
                 TableIndex: tableIndex,
                 ContainmentPath: containmentPath,
@@ -232,6 +233,8 @@ public static class Inspector
                 ColumnCount: gridColumnCount,
                 GridColumnCount: gridColumnCount,
                 GridColumnWidths: declaredGridWidths,
+                Width: tableWidth?.Width?.Value,
+                WidthType: tableWidth?.GetAttributes().FirstOrDefault(attribute => attribute.LocalName == "type").Value,
                 Rows: rowDetails));
 
             for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)

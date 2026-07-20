@@ -1115,6 +1115,9 @@ public class AnnotationToolsTests
         ]);
 
         Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        var inspection = Inspector.InspectTables(output);
+        Assert.Equal("5000", inspection.Tables.Single().Width);
+        Assert.Equal("pct", inspection.Tables.Single().WidthType);
         using var edited = WordprocessingDocument.Open(output, false);
         var properties = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().GetFirstChild<TableProperties>()!;
         Assert.Equal("5000", properties.GetFirstChild<TableWidth>()!.Width!.Value);
