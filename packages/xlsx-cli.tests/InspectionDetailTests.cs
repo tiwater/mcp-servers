@@ -39,9 +39,9 @@ public class InspectionDetailTests
         Assert.Equal(0, await Dockit.Xlsx.Cli.Cli.RunAsync(["validate-inspect-evidence", "--request", request, "--evidence", evidence, "--output", verdict]));
         using var produced = JsonDocument.Parse(File.ReadAllText(evidence));
         using var validated = JsonDocument.Parse(File.ReadAllText(verdict));
-        Assert.Equal("0.2.17", produced.RootElement.GetProperty("provider").GetProperty("toolVersion").GetString());
-        Assert.Equal("0.2.17", validated.RootElement.GetProperty("validator").GetProperty("toolVersion").GetString());
-        Assert.Equal("0.2.17", produced.RootElement.GetProperty("observations")[0].GetProperty("value").GetProperty("evidence").GetProperty("toolVersion").GetString());
+        Assert.Equal("0.2.18", produced.RootElement.GetProperty("provider").GetProperty("toolVersion").GetString());
+        Assert.Equal("0.2.18", validated.RootElement.GetProperty("validator").GetProperty("toolVersion").GetString());
+        Assert.Equal("0.2.18", produced.RootElement.GetProperty("observations")[0].GetProperty("value").GetProperty("evidence").GetProperty("toolVersion").GetString());
         Assert.True(validated.RootElement.GetProperty("pass").GetBoolean());
     }
 
