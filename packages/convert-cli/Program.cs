@@ -1,10 +1,15 @@
 using System.Text.Json;
+using System.Reflection;
 using Dockit.Convert;
 
 namespace Dockit.Convert.Cli;
 
 internal static class Program
 {
+    private static readonly string ToolVersion =
+        (typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown")
+        .Split('+', 2)[0];
+
     public static int Main(string[] args)
     {
         if (args.Length < 3)
@@ -26,6 +31,7 @@ internal static class Program
                         output = Path.GetFullPath(args[2]),
                         source_format = "xls",
                         target_format = "xlsx",
+                        version = ToolVersion,
                         backend = result.Backend,
                         fallback_reason = result.FallbackReason,
                     }));
@@ -42,6 +48,7 @@ internal static class Program
                             output = Path.GetFullPath(args[2]),
                             source_format = sourceFormat.ToLowerInvariant(),
                             target_format = "pdf",
+                            version = ToolVersion,
                             backend = pdfResult.Backend,
                             fallback_reason = pdfResult.FallbackReason,
                         }));
