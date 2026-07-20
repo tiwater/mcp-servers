@@ -221,6 +221,24 @@ public class EvidenceTests
         Assert.NotEqual(baseline, visibilityChanged);
     }
 
+    [Fact]
+    public void Defined_name_evidence_preserves_raw_text_and_normalizes_optional_sheet_quotes()
+    {
+        using var quoted = JsonDocument.Parse(JsonSerializer.Serialize(EvidenceInspector.Inspect(
+            DefinedNamesFixture(localText: "'Second'!$A$1")), Options));
+        using var unquoted = JsonDocument.Parse(JsonSerializer.Serialize(EvidenceInspector.Inspect(
+            DefinedNamesFixture(localText: "Second!$A$1")), Options));
+        using var differentRange = JsonDocument.Parse(JsonSerializer.Serialize(EvidenceInspector.Inspect(
+            DefinedNamesFixture(localText: "Second!$B$1")), Options));
+
+        static JsonElement LocalName(JsonDocument document) => document.RootElement.GetProperty("definedNames")
+            .EnumerateArray().Single(name => name.GetProperty("name").GetString() == "LocalInput");
+        Assert.Equal("'Second'!$A$1", LocalName(quoted).GetProperty("text").GetString());
+        Assert.Equal("Second!$A$1", LocalName(unquoted).GetProperty("text").GetString());
+        Assert.Equal(LocalName(quoted).GetProperty("normalizedText").GetString(), LocalName(unquoted).GetProperty("normalizedText").GetString());
+        Assert.NotEqual(LocalName(quoted).GetProperty("normalizedText").GetString(), LocalName(differentRange).GetProperty("normalizedText").GetString());
+    }
+
     private static JsonElement CellStyleEvidence(string path)
     {
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(EvidenceInspector.Inspect(path), Options));

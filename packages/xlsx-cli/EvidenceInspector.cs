@@ -101,13 +101,15 @@ public static class EvidenceInspector
             var view = ws.SheetViews?.Elements<SheetView>().FirstOrDefault();
             var setup = ws.GetFirstChild<PageSetup>();
             var margins = ws.GetFirstChild<PageMargins>();
+            var printArea = wb.Workbook.DefinedNames?.Elements<DefinedName>()
+                .FirstOrDefault(x => x.Name?.Value == "_xlnm.Print_Area" && x.LocalSheetId?.Value == (uint)sheetIndex)?.Text;
             return new {
                 name = sheet.Name?.Value, state = sheet.State?.InnerText, dimension = ws.SheetDimension?.Reference?.Value,
                 mergedRanges = ws.Elements<MergeCells>().SelectMany(x => x.Elements<MergeCell>()).Select(x => x.Reference?.Value).Where(x => x is not null).ToList(),
                 rowDimensions = ws.Descendants<Row>().Where(x => x.CustomHeight?.Value == true || x.Hidden?.Value == true).Select(x => new { row = x.RowIndex?.Value, height = x.Height?.Value, hidden = x.Hidden?.Value }).ToList(),
                 columnDimensions = ws.Elements<Columns>().SelectMany(x => x.Elements<Column>()).Select(x => new { min = x.Min?.Value, max = x.Max?.Value, width = x.Width?.Value, hidden = x.Hidden?.Value }).ToList(),
                 sheetView = view is null ? null : new { workbookViewId = view.WorkbookViewId?.Value, view = view.View?.InnerText, showGridLines = view.ShowGridLines?.Value, zoomScale = view.ZoomScale?.Value, topLeftCell = view.TopLeftCell?.Value },
-                print = new { area = wb.Workbook.DefinedNames?.Elements<DefinedName>().FirstOrDefault(x => x.Name?.Value == "_xlnm.Print_Area" && x.LocalSheetId?.Value == (uint)sheetIndex)?.Text, orientation = setup?.Orientation?.InnerText, paperSize = setup?.PaperSize?.Value, scale = setup?.Scale?.Value, fitToWidth = setup?.FitToWidth?.Value, fitToHeight = setup?.FitToHeight?.Value, margins = margins is null ? null : new { left = margins.Left?.Value, right = margins.Right?.Value, top = margins.Top?.Value, bottom = margins.Bottom?.Value, header = margins.Header?.Value, footer = margins.Footer?.Value } },
+                print = new { area = printArea, normalizedArea = NormalizeDefinedNameText(printArea), orientation = setup?.Orientation?.InnerText, paperSize = setup?.PaperSize?.Value, scale = setup?.Scale?.Value, fitToWidth = setup?.FitToWidth?.Value, fitToHeight = setup?.FitToHeight?.Value, margins = margins is null ? null : new { left = margins.Left?.Value, right = margins.Right?.Value, top = margins.Top?.Value, bottom = margins.Bottom?.Value, header = margins.Header?.Value, footer = margins.Footer?.Value } },
                 cells
             };
         }).ToList();
@@ -119,6 +121,7 @@ public static class EvidenceInspector
                 name = name.Name?.Value ?? throw new InvalidDataException("Workbook defined name is missing its name."),
                 localSheetName = LocalSheetName(name.LocalSheetId?.Value, sheetNames),
                 text = name.Text ?? string.Empty,
+                normalizedText = NormalizeDefinedNameText(name.Text ?? string.Empty),
                 hidden = name.Hidden?.Value ?? false
             })
             .OrderBy(name => name.name, StringComparer.Ordinal)
@@ -127,6 +130,40 @@ public static class EvidenceInspector
             .ThenBy(name => name.hidden)
             .ToList() ?? [];
         return new { schema = "tiwater.xlsx.evidence/v1", toolVersion = XlsxToolVersion.Current, file = Path.GetFullPath(path), dateSystem = uses1904Dates ? "1904" : "1900", definedNames, sheets };
+    }
+
+    private static string? NormalizeDefinedNameText(string? text)
+    {
+        if (text is null) return null;
+        var value = text.Trim();
+        var prefix = value.StartsWith('=') ? "=" : string.Empty;
+        var body = prefix.Length == 0 ? value : value[1..];
+        string sheet;
+        string reference;
+        if (body.StartsWith('\''))
+        {
+            var decoded = new StringBuilder();
+            var index = 1;
+            for (; index < body.Length; index++)
+            {
+                if (body[index] != '\'') { decoded.Append(body[index]); continue; }
+                if (index + 1 < body.Length && body[index + 1] == '\'') { decoded.Append('\''); index++; continue; }
+                break;
+            }
+            if (index + 1 >= body.Length || body[index + 1] != '!') return value;
+            sheet = decoded.ToString();
+            reference = body[(index + 2)..];
+        }
+        else
+        {
+            var separator = body.IndexOf('!');
+            if (separator <= 0) return value;
+            sheet = body[..separator];
+            if (sheet.Any(character => !(char.IsLetterOrDigit(character) || character is '_' or '.'))) return value;
+            reference = body[(separator + 1)..];
+        }
+        if (sheet.Length == 0 || reference.Length == 0) return value;
+        return $"{prefix}'{sheet.Replace("'", "''", StringComparison.Ordinal)}'!{reference}";
     }
 
     private static string? LocalSheetName(uint? localSheetId, IReadOnlyList<string> sheetNames)
