@@ -70,11 +70,21 @@ slide to an explicitly selected inspected template layout. It preserves current
 slide shapes and content, removes superseded masters after complete assignment,
 and copies the approved template slide size.
 
+Optional content fitting is scoped, never slide-wide. When `contentBounds` is
+present, `contentShapeIds` must explicitly identify the current-slide shapes to
+fit. Supplying either field without the other is rejected before that slide is
+mutated.
+
 ```json
 {
   "targetMasterPath": "ppt/slideMasters/slideMaster1.xml",
   "slides": [
-    { "slideNumber": 1, "targetLayoutPath": "ppt/slideLayouts/slideLayout1.xml" }
+    {
+      "slideNumber": 1,
+      "targetLayoutPath": "ppt/slideLayouts/slideLayout1.xml",
+      "contentBounds": { "x": 608400, "y": 1490400, "cx": 10969200, "cy": 4759200 },
+      "contentShapeIds": [2, 3]
+    }
   ]
 }
 ```

@@ -161,6 +161,54 @@ public class PptxCliTests
     }
 
     [Fact]
+    public void ApplyTemplate_rejects_unscoped_content_fitting_before_mutating_slide()
+    {
+        var source = CreateFixture();
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var before = Inspector.InspectDetail(source).Slides[0];
+
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout, new TransformInfo(0, 0, 1000000, 1000000))]), output);
+
+        Assert.Equal(0, result.ChangedSlideCount);
+        Assert.Equal("content shape ids are required when content bounds are specified", Assert.Single(result.Issues).Message);
+        var after = Inspector.InspectDetail(output).Slides[0];
+        Assert.Equal(before.LayoutPath, after.LayoutPath);
+        Assert.Equal(before.Shapes.Select(shape => (shape.ShapeId, shape.Text, shape.Transform)), after.Shapes.Select(shape => (shape.ShapeId, shape.Text, shape.Transform)));
+    }
+
+    [Fact]
+    public void ApplyTemplate_fits_only_explicitly_selected_shapes()
+    {
+        var source = CreateFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            var slide = presentation.PresentationPart!.SlideParts.First().Slide;
+            slide.CommonSlideData!.ShapeTree!.Append(CreateTextShape(3U, "Fixed logo", 7000000L, 100000L, 1000000L, 300000L));
+            slide.Save();
+        }
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var fixedBefore = Inspector.InspectDetail(source).Slides[0].Shapes.Single(shape => shape.ShapeId == 3U);
+
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout, new TransformInfo(1000000, 1000000, 2000000, 1000000), [2U])]), output);
+
+        Assert.Empty(result.Issues);
+        var after = Inspector.InspectDetail(output).Slides[0];
+        Assert.Equal(new TransformInfo(1000000, 1375000, 2000000, 250000), after.Shapes.Single(shape => shape.ShapeId == 2U).Transform);
+        var fixedAfter = after.Shapes.Single(shape => shape.ShapeId == 3U);
+        Assert.Equal((fixedBefore.ShapeId, fixedBefore.Text, fixedBefore.Transform), (fixedAfter.ShapeId, fixedAfter.Text, fixedAfter.Transform));
+    }
+
+    [Fact]
     public void InspectDetail_includes_top_level_group_geometry_and_descendant_text()
     {
         var source = CreateFixture();
@@ -306,6 +354,18 @@ public class PptxCliTests
                                 new A.Run(new A.Text(text))))))),
             new P.ColorMapOverride(new A.MasterColorMapping()));
     }
+
+    private static P.Shape CreateTextShape(uint id, string text, long x, long y, long cx, long cy) =>
+        new(
+            new P.NonVisualShapeProperties(
+                new P.NonVisualDrawingProperties { Id = id, Name = text },
+                new P.NonVisualShapeDrawingProperties(),
+                new P.ApplicationNonVisualDrawingProperties()),
+            new P.ShapeProperties(
+                new A.Transform2D(
+                    new A.Offset { X = x, Y = y },
+                    new A.Extents { Cx = cx, Cy = cy })),
+            new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text(text)))));
 
     private static P.NotesSlide CreateNotesSlide(string text)
     {

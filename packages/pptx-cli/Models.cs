@@ -173,7 +173,8 @@ public sealed record TemplateApplicationPlan(
 public sealed record SlideLayoutAssignment(
     int SlideNumber,
     string TargetLayoutPath,
-    TransformInfo? ContentBounds = null
+    TransformInfo? ContentBounds = null,
+    IReadOnlyList<uint>? ContentShapeIds = null
 );
 
 public sealed record TemplateApplicationResult(
