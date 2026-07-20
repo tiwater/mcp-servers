@@ -69,6 +69,7 @@ public static class Editor
         return operation.Type switch
         {
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
+            "setPrintArea" => SetPrintAreaOperation(workbookPart, operation),
             "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
             "insertRows" => InsertRowsOperation(workbookPart, operation),
@@ -114,8 +115,33 @@ public static class Editor
         {
             ApplyCellShrinkToFit(workbookPart, cell, operation.ShrinkToFit.Value);
         }
+        if (operation.WrapText.HasValue)
+        {
+            ApplyCellWrapText(workbookPart, cell, operation.WrapText.Value);
+        }
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated {operation.Sheet}!{operation.Cell}");
+    }
+
+    private static XlsxEditAppliedOperation SetPrintAreaOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || string.IsNullOrWhiteSpace(operation.Range)
+            || !TryParseRangeReference(operation.Range, out var startCell, out var endCell))
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet and a valid A1 range are required");
+        var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>().ToList() ?? [];
+        var sheetIndex = sheets.FindIndex(sheet => string.Equals(sheet.Name?.Value, operation.Sheet, StringComparison.Ordinal));
+        if (sheetIndex < 0) return new XlsxEditAppliedOperation(operation.Type, false, $"Worksheet not found: {operation.Sheet}");
+        workbookPart.Workbook.DefinedNames ??= new DefinedNames();
+        foreach (var existing in workbookPart.Workbook.DefinedNames.Elements<DefinedName>()
+            .Where(name => name.Name?.Value == "_xlnm.Print_Area" && name.LocalSheetId?.Value == (uint)sheetIndex).ToList()) existing.Remove();
+        static string absolute(string reference) => Regex.Replace(reference.ToUpperInvariant(), "^([A-Z]+)([0-9]+)$", "$$$1$$$2");
+        var escapedSheet = operation.Sheet.Replace("'", "''", StringComparison.Ordinal);
+        workbookPart.Workbook.DefinedNames.Append(new DefinedName($"'{escapedSheet}'!{absolute(startCell)}:{absolute(endCell)}")
+        {
+            Name = "_xlnm.Print_Area", LocalSheetId = (uint)sheetIndex,
+        });
+        workbookPart.Workbook.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Set print area {operation.Sheet}!{operation.Range}");
     }
 
     private static XlsxEditAppliedOperation SetRangeValuesOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -1288,6 +1314,12 @@ public static class Editor
     }
 
     private static void ApplyCellShrinkToFit(WorkbookPart workbookPart, Cell cell, bool shrinkToFit)
+        => ApplyCellAlignment(workbookPart, cell, alignment => alignment.ShrinkToFit = shrinkToFit);
+
+    private static void ApplyCellWrapText(WorkbookPart workbookPart, Cell cell, bool wrapText)
+        => ApplyCellAlignment(workbookPart, cell, alignment => alignment.WrapText = wrapText);
+
+    private static void ApplyCellAlignment(WorkbookPart workbookPart, Cell cell, Action<Alignment> mutate)
     {
         var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
         stylesPart.Stylesheet ??= new Stylesheet
@@ -1305,7 +1337,7 @@ public static class Editor
             ?? formats.Elements<CellFormat>().First();
         var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
         targetFormat.Alignment ??= new Alignment();
-        targetFormat.Alignment.ShrinkToFit = shrinkToFit;
+        mutate(targetFormat.Alignment);
         targetFormat.ApplyAlignment = true;
         var formatIndex = (uint)formats.Count();
         formats.Append(targetFormat);

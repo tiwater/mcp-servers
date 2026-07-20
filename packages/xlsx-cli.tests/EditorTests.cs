@@ -43,6 +43,50 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_can_enable_text_fitting_while_preserving_existing_cell_styles_and_read_it_back()
+    {
+        var path = CreateFormattedWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-wrap-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "A2", Value: "complete customer text", WrapText: true),
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "B2", Value: "complete compact text", ShrinkToFit: true)
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied));
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var workbookPart = spreadsheet.WorkbookPart!;
+        var cell = GetCell(workbookPart.WorksheetParts.Single().Worksheet, "A2");
+        var style = workbookPart.WorkbookStylesPart!.Stylesheet.CellFormats!
+            .Elements<CellFormat>().ElementAt((int)cell.StyleIndex!.Value);
+        Assert.True(style.Alignment!.WrapText!.Value);
+        Assert.Equal<UInt32Value>(164, style.NumberFormatId!);
+        var evidence = Inspector.InspectEvidence(output);
+        var cells = evidence.GetProperty("evidence").GetProperty("sheets")[0].GetProperty("cells");
+        Assert.True(cells.EnumerateArray().Single(item => item.GetProperty("reference").GetString() == "A2").GetProperty("style").GetProperty("wrapText").GetBoolean());
+        Assert.True(cells.EnumerateArray().Single(item => item.GetProperty("reference").GetString() == "B2").GetProperty("style").GetProperty("shrinkToFit").GetBoolean());
+    }
+
+    [Fact]
+    public void Edit_sets_a_sheet_local_print_area()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-print-area-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPrintArea", Sheet: "Sheet1", Range: "A1:F3")
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var definedName = Assert.Single(spreadsheet.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>());
+        Assert.Equal("_xlnm.Print_Area", definedName.Name!.Value);
+        Assert.Equal<uint>(0, definedName.LocalSheetId!.Value);
+        Assert.Equal("'Sheet1'!$A$1:$F$3", definedName.Text);
+        Assert.Equal("'Sheet1'!$A$1:$F$3", Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print").GetProperty("area").GetString());
+    }
+
+    [Fact]
     public void Edit_sets_one_rich_text_value_and_explicitly_clears_bold_on_every_run()
     {
         var path = CreateWorkbookFixture();
