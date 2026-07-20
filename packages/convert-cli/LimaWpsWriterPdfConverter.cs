@@ -13,15 +13,24 @@ internal static class LimaWpsWriterPdfConverter
             && !string.IsNullOrWhiteSpace(FindOnPath("limactl"));
 
     internal static void ConvertToPdf(string input, string output)
+        => ConvertToPdf(input, output, "wps-writer");
+
+    internal static void ConvertSpreadsheetToPdf(string input, string output)
+        => ConvertToPdf(input, output, "wps-spreadsheet");
+
+    internal static void ConvertPresentationToPdf(string input, string output)
+        => ConvertToPdf(input, output, "wps-presentation");
+
+    private static void ConvertToPdf(string input, string output, string backend)
     {
         var instance = InstanceName()
-            ?? throw new InvalidOperationException($"{InstanceEnvironment} is required for the Lima WPS Writer PDF backend.");
+            ?? throw new InvalidOperationException($"{InstanceEnvironment} is required for the Lima WPS PDF backend.");
         var limactl = FindOnPath("limactl")
-            ?? throw new InvalidOperationException("limactl is required for the Lima WPS Writer PDF backend.");
+            ?? throw new InvalidOperationException("limactl is required for the Lima WPS PDF backend.");
         var extension = Path.GetExtension(input);
-        if (string.IsNullOrWhiteSpace(extension)) throw new InvalidOperationException("WPS Writer PDF input must have an extension.");
+        if (string.IsNullOrWhiteSpace(extension)) throw new InvalidOperationException("Lima WPS PDF input must have an extension.");
 
-        var staging = Path.Combine(SharedRoot, $"tiwater-convert-wps-writer-{Guid.NewGuid():N}");
+        var staging = Path.Combine(SharedRoot, $"tiwater-convert-{backend}-{Guid.NewGuid():N}");
         var stagedInput = Path.Combine(staging, $"input{extension}");
         var stagedOutput = Path.Combine(staging, "output.pdf");
         Directory.CreateDirectory(staging);
@@ -29,8 +38,8 @@ internal static class LimaWpsWriterPdfConverter
 
         try
         {
-            Run(limactl, instance, stagedInput, stagedOutput);
-            if (!IsPdf(stagedOutput)) throw new InvalidOperationException("Lima WPS Writer did not produce a valid PDF.");
+            Run(limactl, instance, stagedInput, stagedOutput, backend);
+            if (!IsPdf(stagedOutput)) throw new InvalidOperationException($"Lima {backend} did not produce a valid PDF.");
             var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
             if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
             File.Copy(stagedOutput, output, overwrite: true);
@@ -41,17 +50,17 @@ internal static class LimaWpsWriterPdfConverter
         }
     }
 
-    private static void Run(string limactl, string instance, string input, string output)
+    private static void Run(string limactl, string instance, string input, string output, string backend)
     {
-        var startInfo = CreateProcessStartInfo(limactl, instance, input, output);
+        var startInfo = CreateProcessStartInfo(limactl, instance, input, output, backend);
         using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start Lima WPS Writer PDF conversion.");
+            ?? throw new InvalidOperationException($"Failed to start Lima {backend} PDF conversion.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
         {
             try { process.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException("Lima WPS Writer PDF conversion timed out after 180 seconds.");
+            throw new TimeoutException($"Lima {backend} PDF conversion timed out after 180 seconds.");
         }
 
         var stdout = stdoutTask.GetAwaiter().GetResult();
@@ -59,11 +68,14 @@ internal static class LimaWpsWriterPdfConverter
         if (process.ExitCode != 0)
         {
             var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));
-            throw new InvalidOperationException("Lima WPS Writer PDF conversion failed." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+            throw new InvalidOperationException($"Lima {backend} PDF conversion failed." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
         }
     }
 
     internal static ProcessStartInfo CreateProcessStartInfo(string limactl, string instance, string input, string output)
+        => CreateProcessStartInfo(limactl, instance, input, output, "wps-writer");
+
+    private static ProcessStartInfo CreateProcessStartInfo(string limactl, string instance, string input, string output, string backend)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -72,19 +84,22 @@ internal static class LimaWpsWriterPdfConverter
             RedirectStandardOutput = true,
             UseShellExecute = false,
         };
-        foreach (var argument in new[] { "shell", instance, "--", "bash", "-lc", RemoteCommand(input, output) }) startInfo.ArgumentList.Add(argument);
+        foreach (var argument in new[] { "shell", instance, "--", "bash", "-lc", RemoteCommand(input, output, backend) }) startInfo.ArgumentList.Add(argument);
         return startInfo;
     }
 
-    private static string RemoteCommand(string input, string output)
-        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND=wps-writer; tiwater-convert {SourceFormat(input)}-to-pdf '{input}' '{output}'";
+    private static string RemoteCommand(string input, string output, string backend)
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
 
-    private static string SourceFormat(string input)
+    private static string SourceFormat(string input, string backend)
     {
         var format = Path.GetExtension(input).TrimStart('.').ToLowerInvariant();
-        return format is "doc" or "docx" or "odt" or "rtf"
-            ? format
-            : throw new InvalidOperationException($"Unsupported Lima WPS Writer PDF source format: {format}");
+        var supported = backend == "wps-writer"
+            ? format is "doc" or "docx" or "odt" or "rtf"
+            : backend == "wps-spreadsheet"
+                ? format is "xls" or "xlsx"
+                : backend == "wps-presentation" && format is "ppt" or "pptx" or "odp";
+        return supported ? format : throw new InvalidOperationException($"Unsupported Lima {backend} PDF source format: {format}");
     }
 
     private static string? InstanceName()

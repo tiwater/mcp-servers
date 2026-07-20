@@ -8,21 +8,21 @@ namespace Tiwater.FormatEvidence;
 public static class FormatEvidenceCommand
 {
     public sealed record AdditionalObservation(string ObservationId, string SemanticField, string Use, object Value, string Pointer);
-    public static int RunProducer(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null)
-        => Run(args, false, tool, version, format, inspect, additionalObservations);
+    public static int RunProducer(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null)
+        => Run(args, false, tool, version, format, inspect, additionalObservations, acceptedSourceFormats);
 
-    public static int RunValidator(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null)
-        => Run(args, true, tool, version, format, inspect, additionalObservations);
+    public static int RunValidator(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null)
+        => Run(args, true, tool, version, format, inspect, additionalObservations, acceptedSourceFormats);
 
-    private static int Run(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations)
+    private static int Run(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations, IReadOnlySet<string>? acceptedSourceFormats)
     {
         var values = ParseArgs(args, validator);
         var request = JsonNode.Parse(File.ReadAllText(values["request"]))!.AsObject();
         var output = Path.GetFullPath(values["output"]);
         try
         {
-            ValidateRequest(request, output, format, validator);
-            var expected = BuildEvidence(request, tool, version, format, inspect, additionalObservations);
+            var sourceFormat = ValidateRequest(request, output, format, validator, acceptedSourceFormats);
+            var expected = BuildEvidence(request, tool, version, format, sourceFormat, inspect, additionalObservations);
             JsonObject result;
             if (!validator) result = expected;
             else
@@ -81,17 +81,19 @@ public static class FormatEvidenceCommand
         return values;
     }
 
-    private static void ValidateRequest(JsonObject request, string output, string format, bool validator)
+    private static string ValidateRequest(JsonObject request, string output, string format, bool validator, IReadOnlySet<string>? acceptedSourceFormats)
     {
         var required = new[] { "schema", "requestId", "runId", "subject", "artifact", "extraction", "expectedEvidenceSchema", "outputPath" };
         if (request.Count != required.Length || required.Any(name => !request.ContainsKey(name)) || request["schema"]!.GetValue<string>() != "tiwater.format-evidence-request/v1" || request["expectedEvidenceSchema"]!.GetValue<string>() != "lucid.published-format-evidence/v1") throw new InvalidOperationException("request contract invalid");
         if (!validator && Path.GetFullPath(request["outputPath"]!.GetValue<string>()) != output) throw new InvalidOperationException("output path mismatch");
-        var artifact = request["artifact"]!.AsObject(); var file = artifact["path"]!.GetValue<string>();
-        if (!Path.IsPathFullyQualified(file) || artifact["format"]!.GetValue<string>() != format || FileSha(file) != artifact["bytesSha256"]!.GetValue<string>()) throw new InvalidOperationException("artifact authority mismatch");
+        var artifact = request["artifact"]!.AsObject(); var file = artifact["path"]!.GetValue<string>(); var sourceFormat = artifact["format"]!.GetValue<string>();
+        var allowedFormats = acceptedSourceFormats ?? new HashSet<string>(StringComparer.Ordinal) { format };
+        if (!Path.IsPathFullyQualified(file) || !allowedFormats.Contains(sourceFormat) || FileSha(file) != artifact["bytesSha256"]!.GetValue<string>()) throw new InvalidOperationException("artifact authority mismatch");
         var extraction = request["extraction"]!.AsObject(); if (Sha(Canonical(extraction["options"]!)) != extraction["optionsSha256"]!.GetValue<string>()) throw new InvalidOperationException("extraction options mismatch");
+        return sourceFormat;
     }
 
-    private static JsonObject BuildEvidence(JsonObject request, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations)
+    private static JsonObject BuildEvidence(JsonObject request, string tool, string version, string format, string sourceFormat, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations)
     {
         var artifact = request["artifact"]!.AsObject(); var extraction = request["extraction"]!.AsObject(); var artifactPath = artifact["path"]!.GetValue<string>(); var inspection = JsonSerializer.SerializeToNode(inspect(artifactPath))!;
         var entity = new JsonObject { ["entityId"] = "document-1", ["kind"] = $"{format}-document", ["provenance"] = new JsonObject { ["source"] = "runtime", ["pointer"] = "/inspection" } };
@@ -99,7 +101,7 @@ public static class FormatEvidenceCommand
         var observations = new JsonArray(observation);
         foreach (var item in additionalObservations?.Invoke(artifactPath) ?? []) observations.Add(new JsonObject { ["observationId"] = item.ObservationId, ["entityId"] = "document-1", ["semanticField"] = item.SemanticField, ["use"] = item.Use, ["value"] = JsonSerializer.SerializeToNode(item.Value), ["parentObservationIds"] = new JsonArray("inspection-1"), ["provenance"] = new JsonObject { ["source"] = "runtime", ["pointer"] = item.Pointer } });
         var epochMaterial = new JsonObject { ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["runtimeTool"] = tool, ["runtimeSchema"] = extraction["schema"]!.GetValue<string>(), ["runtimeVersion"] = version, ["extractionOptions"] = extraction["options"]!.DeepClone() };
-        var evidence = new JsonObject { ["schema"] = "lucid.published-format-evidence/v1", ["requestId"] = request["requestId"]!.GetValue<string>(), ["subject"] = request["subject"]!.DeepClone(), ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(), ["provider"] = new JsonObject { ["tool"] = tool, ["toolVersion"] = version, ["capabilityId"] = "inspect-evidence", ["capabilityVersion"] = "1", ["outputSchema"] = "lucid.published-format-evidence/v1" }, ["source"] = new JsonObject { ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["format"] = format }, ["extraction"] = extraction.DeepClone(), ["epoch"] = new JsonObject { ["epochId"] = $"ep-{Sha(Canonical(epochMaterial))}", ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["runtimeTool"] = tool, ["runtimeSchema"] = extraction["schema"]!.GetValue<string>(), ["runtimeVersion"] = version, ["extractionOptionsSha256"] = extraction["optionsSha256"]!.GetValue<string>() }, ["entities"] = new JsonArray(entity), ["observations"] = observations };
+        var evidence = new JsonObject { ["schema"] = "lucid.published-format-evidence/v1", ["requestId"] = request["requestId"]!.GetValue<string>(), ["subject"] = request["subject"]!.DeepClone(), ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(), ["provider"] = new JsonObject { ["tool"] = tool, ["toolVersion"] = version, ["capabilityId"] = "inspect-evidence", ["capabilityVersion"] = "1", ["outputSchema"] = "lucid.published-format-evidence/v1" }, ["source"] = new JsonObject { ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["format"] = sourceFormat }, ["extraction"] = extraction.DeepClone(), ["epoch"] = new JsonObject { ["epochId"] = $"ep-{Sha(Canonical(epochMaterial))}", ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(), ["runtimeTool"] = tool, ["runtimeSchema"] = extraction["schema"]!.GetValue<string>(), ["runtimeVersion"] = version, ["extractionOptionsSha256"] = extraction["optionsSha256"]!.GetValue<string>() }, ["entities"] = new JsonArray(entity), ["observations"] = observations };
         evidence["evidenceId"] = $"evidence-{Sha(Canonical(evidence))}"; return evidence;
     }
 

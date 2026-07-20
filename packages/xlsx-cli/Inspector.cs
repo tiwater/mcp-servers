@@ -5,6 +5,20 @@ namespace Dockit.Xlsx;
 
 public static class Inspector
 {
+    public static System.Text.Json.JsonElement InspectPublishedEvidence(string path)
+    {
+        var workbook = Inspect(path);
+        var export = Extractor.Export(path);
+        return WorkbookLoader.IsLegacyXls(path)
+            ? System.Text.Json.JsonSerializer.SerializeToElement(new { workbook, export }, Json.Options)
+            : System.Text.Json.JsonSerializer.SerializeToElement(new
+            {
+                workbook,
+                export,
+                evidence = EvidenceInspector.Inspect(path)
+            }, Json.Options);
+    }
+
     public static System.Text.Json.JsonElement InspectEvidence(string path) =>
         System.Text.Json.JsonSerializer.SerializeToElement(new
         {
