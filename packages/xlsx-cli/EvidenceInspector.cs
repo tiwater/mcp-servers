@@ -1,6 +1,9 @@
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Dockit.Xlsx;
 
@@ -17,6 +20,9 @@ public static class EvidenceInspector
             .GroupBy(x => x.NumberFormatId!.Value)
             .ToDictionary(x => x.Key, x => x.Last().FormatCode?.Value) ?? [];
         var baseFormats = styles?.CellStyleFormats?.Elements<CellFormat>().ToList() ?? [];
+        var fonts = styles?.Fonts?.Elements<Font>().ToList() ?? [];
+        var fills = styles?.Fills?.Elements<Fill>().ToList() ?? [];
+        var borders = styles?.Borders?.Elements<Border>().ToList() ?? [];
         var formattedCellsBySheet = WorkbookLoader.Load(path).Sheets.ToDictionary(
             x => x.Name,
             x => x.Cells.ToDictionary(cell => cell.Reference, cell => cell.FormattedValue, StringComparer.OrdinalIgnoreCase),
@@ -37,11 +43,18 @@ public static class EvidenceInspector
                 var baseFormat = baseFormatIndex is not null && baseFormatIndex.Value < baseFormats.Count
                     ? baseFormats[(int)baseFormatIndex.Value]
                     : null;
-                var numId = format?.NumberFormatId?.Value ?? baseFormat?.NumberFormatId?.Value ?? 0U;
+                var numId = EffectiveComponentId(format?.NumberFormatId?.Value, format?.ApplyNumberFormat?.Value, baseFormat?.NumberFormatId?.Value);
+                var fontId = EffectiveComponentId(format?.FontId?.Value, format?.ApplyFont?.Value, baseFormat?.FontId?.Value);
+                var fillId = EffectiveComponentId(format?.FillId?.Value, format?.ApplyFill?.Value, baseFormat?.FillId?.Value);
+                var borderId = EffectiveComponentId(format?.BorderId?.Value, format?.ApplyBorder?.Value, baseFormat?.BorderId?.Value);
                 var formatCode = customFormats.GetValueOrDefault(numId) ?? BuiltInFormat(numId) ?? $"builtin:{numId}";
                 var normalizedFormat = NormalizeNumberFormat(numId, formatCode, customFormats.ContainsKey(numId));
                 var alignment = format?.ApplyAlignment?.Value == false ? null : format?.Alignment;
                 var baseAlignment = baseFormat?.Alignment;
+                var protection = EffectiveProtection(format, baseFormat);
+                var applyProtection = format?.ApplyProtection?.Value ?? false;
+                var locked = protection?.Locked?.Value ?? true;
+                var hidden = protection?.Hidden?.Value ?? false;
                 var formula = cell.CellFormula;
                 var rawValue = cell.CellValue?.Text ?? cell.InlineString?.InnerText;
                 var reference = cell.CellReference?.Value;
@@ -55,17 +68,27 @@ public static class EvidenceInspector
                     styleIndex,
                     style = new {
                         baseStyleIndex = baseFormatIndex,
-                        fontId = format?.FontId?.Value ?? baseFormat?.FontId?.Value ?? 0U,
-                        fillId = format?.FillId?.Value ?? baseFormat?.FillId?.Value ?? 0U,
-                        borderId = format?.BorderId?.Value ?? baseFormat?.BorderId?.Value ?? 0U,
+                        fontId,
+                        fillId,
+                        borderId,
+                        fontFingerprint = ComponentFingerprint(fonts, fontId, "font"),
+                        fillFingerprint = ComponentFingerprint(fills, fillId, "fill"),
+                        borderFingerprint = ComponentFingerprint(borders, borderId, "border"),
+                        protectionFingerprint = ProtectionFingerprint(locked, hidden),
                         numberFormatId = numId,
                         numberFormat = formatCode,
                         numberFormatEvidence = normalizedFormat,
+                        numberFormatFingerprint = NumberFormatFingerprint(formatCode, normalizedFormat.Kind),
                         horizontalAlignment = alignment?.Horizontal?.InnerText ?? baseAlignment?.Horizontal?.InnerText,
                         verticalAlignment = alignment?.Vertical?.InnerText ?? baseAlignment?.Vertical?.InnerText,
                         wrapText = alignment?.WrapText?.Value ?? baseAlignment?.WrapText?.Value,
                         shrinkToFit = alignment?.ShrinkToFit?.Value ?? baseAlignment?.ShrinkToFit?.Value,
-                        textRotation = alignment?.TextRotation?.Value ?? baseAlignment?.TextRotation?.Value
+                        textRotation = alignment?.TextRotation?.Value ?? baseAlignment?.TextRotation?.Value,
+                        protection = new {
+                            applyProtection,
+                            locked,
+                            hidden
+                        }
                     },
                     normalizedValue,
                     formula = formula is null ? null : new { text = formula.Text, type = formula.FormulaType?.InnerText, sharedIndex = formula.SharedIndex?.Value, reference = formula.Reference?.Value },
@@ -84,8 +107,105 @@ public static class EvidenceInspector
                 cells
             };
         }).ToList();
-        return new { schema = "tiwater.xlsx.evidence/v1", toolVersion = XlsxToolVersion.Current, file = Path.GetFullPath(path), dateSystem = uses1904Dates ? "1904" : "1900", sheets };
+        var sheetNames = sheets.Select(sheet => sheet.name ?? string.Empty).ToList();
+        // v1 attests the validator-required name/scope/text/visibility semantics.
+        // Macro/function metadata is intentionally outside this evidence contract.
+        var definedNames = wb.Workbook.DefinedNames?.Elements<DefinedName>()
+            .Select(name => new {
+                name = name.Name?.Value ?? throw new InvalidDataException("Workbook defined name is missing its name."),
+                localSheetName = LocalSheetName(name.LocalSheetId?.Value, sheetNames),
+                text = name.Text ?? string.Empty,
+                hidden = name.Hidden?.Value ?? false
+            })
+            .OrderBy(name => name.name, StringComparer.Ordinal)
+            .ThenBy(name => name.localSheetName, StringComparer.Ordinal)
+            .ThenBy(name => name.text, StringComparer.Ordinal)
+            .ThenBy(name => name.hidden)
+            .ToList() ?? [];
+        return new { schema = "tiwater.xlsx.evidence/v1", toolVersion = XlsxToolVersion.Current, file = Path.GetFullPath(path), dateSystem = uses1904Dates ? "1904" : "1900", definedNames, sheets };
     }
+
+    private static string? LocalSheetName(uint? localSheetId, IReadOnlyList<string> sheetNames)
+    {
+        if (localSheetId is null) return null;
+        if (localSheetId.Value >= sheetNames.Count)
+            throw new InvalidDataException($"Defined name localSheetId is out of range: {localSheetId.Value}");
+        return sheetNames[(int)localSheetId.Value];
+    }
+
+    private static uint EffectiveComponentId(uint? directId, bool? applyDirect, uint? baseId)
+    {
+        if (applyDirect == false) return baseId ?? 0U;
+        if (directId is not null) return directId.Value;
+        return applyDirect == true ? 0U : baseId ?? 0U;
+    }
+
+    private static Protection? EffectiveProtection(CellFormat? format, CellFormat? baseFormat)
+    {
+        if (format?.ApplyProtection?.Value == false) return baseFormat?.Protection;
+        if (format?.Protection is not null) return format.Protection;
+        return format?.ApplyProtection?.Value == true ? null : baseFormat?.Protection;
+    }
+
+    private static string ComponentFingerprint<T>(IReadOnlyList<T> components, uint id, string kind) where T : OpenXmlElement
+    {
+        if (components.Count == 0 && id == 0) return Sha256($"implicit:{kind}:default");
+        if (id >= components.Count) throw new InvalidDataException($"Workbook {kind} id is out of range: {id}");
+        var canonical = new StringBuilder();
+        AppendCanonicalElement(canonical, components[(int)id]);
+        return Sha256(canonical.ToString());
+    }
+
+    private static string ProtectionFingerprint(bool locked, bool hidden)
+        => Sha256($"protection:locked={(locked ? 1 : 0)};hidden={(hidden ? 1 : 0)}");
+
+    private static string NumberFormatFingerprint(string exactCode, string kind)
+    {
+        var canonical = new StringBuilder();
+        AppendToken(canonical, "number-format");
+        AppendToken(canonical, exactCode);
+        AppendToken(canonical, kind);
+        return Sha256(canonical.ToString());
+    }
+
+    private static void AppendCanonicalElement(StringBuilder output, OpenXmlElement element)
+    {
+        AppendToken(output, "element");
+        AppendToken(output, element.NamespaceUri);
+        AppendToken(output, element.LocalName);
+        foreach (var attribute in element.GetAttributes()
+            .OrderBy(attribute => attribute.NamespaceUri, StringComparer.Ordinal)
+            .ThenBy(attribute => attribute.LocalName, StringComparer.Ordinal))
+        {
+            AppendToken(output, "attribute");
+            AppendToken(output, attribute.NamespaceUri);
+            AppendToken(output, attribute.LocalName);
+            AppendToken(output, NormalizeAttributeValue(attribute.Value ?? string.Empty));
+        }
+        if (!element.HasChildren && !string.IsNullOrEmpty(element.InnerText))
+        {
+            AppendToken(output, "text");
+            AppendToken(output, element.InnerText);
+        }
+        foreach (var child in element.ChildElements) AppendCanonicalElement(output, child);
+        AppendToken(output, "end");
+    }
+
+    private static string NormalizeAttributeValue(string value) => value switch
+    {
+        "true" => "1",
+        "false" => "0",
+        _ => value
+    };
+
+    private static void AppendToken(StringBuilder output, string? value)
+    {
+        value ??= string.Empty;
+        output.Append(value.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(value);
+    }
+
+    private static string Sha256(string value)
+        => System.Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     private static object NormalizeValue(string? rawValue, string? dataType, string formatKind, bool uses1904Dates)
     {
