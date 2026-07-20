@@ -22,6 +22,35 @@ internal static class LimaWpsWriterPdfConverter
     internal static NativeRenderProvenance ConvertPresentationToPdf(string input, string output)
         => ConvertToPdf(input, output, "wps-presentation");
 
+    internal static void ConvertSpreadsheetToXlsx(string input, string output)
+    {
+        var instance = InstanceName()
+            ?? throw new InvalidOperationException($"{InstanceEnvironment} is required for the Lima WPS Spreadsheet backend.");
+        var limactl = FindOnPath("limactl")
+            ?? throw new InvalidOperationException("limactl is required for the Lima WPS Spreadsheet backend.");
+        if (!string.Equals(Path.GetExtension(input), ".xls", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Lima WPS Spreadsheet input must be an XLS file.");
+
+        var staging = Path.Combine(SharedRoot, $"tiwater-convert-wps-spreadsheet-{Guid.NewGuid():N}");
+        var stagedInput = Path.Combine(staging, "input.xls");
+        var stagedOutput = Path.Combine(staging, "output.xlsx");
+        Directory.CreateDirectory(staging);
+        File.Copy(input, stagedInput, overwrite: false);
+
+        try
+        {
+            RunSpreadsheetConversion(limactl, instance, stagedInput, stagedOutput);
+            ValidateXlsx(stagedOutput);
+            var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
+            if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
+            File.Copy(stagedOutput, output, overwrite: true);
+        }
+        finally
+        {
+            try { Directory.Delete(staging, recursive: true); } catch { }
+        }
+    }
+
     private static NativeRenderProvenance ConvertToPdf(string input, string output, string backend)
     {
         var instance = InstanceName()
@@ -89,6 +118,19 @@ internal static class LimaWpsWriterPdfConverter
     internal static ProcessStartInfo CreateProcessStartInfo(string limactl, string instance, string input, string output)
         => CreateProcessStartInfo(limactl, instance, input, output, "wps-writer");
 
+    internal static ProcessStartInfo CreateSpreadsheetConversionStartInfo(string limactl, string instance, string input, string output)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = limactl,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in new[] { "shell", instance, "--", "bash", "-lc", SpreadsheetConversionCommand(input, output) }) startInfo.ArgumentList.Add(argument);
+        return startInfo;
+    }
+
     private static ProcessStartInfo CreateProcessStartInfo(string limactl, string instance, string input, string output, string backend)
     {
         var startInfo = new ProcessStartInfo
@@ -104,6 +146,50 @@ internal static class LimaWpsWriterPdfConverter
 
     private static string RemoteCommand(string input, string output, string backend)
         => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
+
+    private static string SpreadsheetConversionCommand(string input, string output)
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_XLSX_BACKEND=wps-spreadsheet; tiwater-convert xls-to-xlsx '{input}' '{output}'";
+
+    private static void RunSpreadsheetConversion(string limactl, string instance, string input, string output)
+    {
+        using var process = Process.Start(CreateSpreadsheetConversionStartInfo(limactl, instance, input, output))
+            ?? throw new InvalidOperationException("Failed to start Lima WPS Spreadsheet conversion.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            throw new TimeoutException("Lima WPS Spreadsheet conversion timed out after 180 seconds.");
+        }
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+        if (process.ExitCode != 0)
+        {
+            var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));
+            throw new InvalidOperationException("Lima WPS Spreadsheet conversion failed." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+        }
+        try
+        {
+            using var document = JsonDocument.Parse(stdout);
+            var root = document.RootElement;
+            if (root.GetProperty("status").GetString() != "ok"
+                || root.GetProperty("backend").GetString() != "wps-spreadsheet"
+                || root.GetProperty("fallback_reason").ValueKind != JsonValueKind.Null)
+                throw new InvalidOperationException();
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException("Lima WPS Spreadsheet conversion evidence is missing or invalid.", error);
+        }
+    }
+
+    private static void ValidateXlsx(string path)
+    {
+        if (!File.Exists(path) || new FileInfo(path).Length < 4) throw new InvalidOperationException("Lima WPS Spreadsheet did not produce an XLSX file.");
+        using var stream = File.OpenRead(path);
+        Span<byte> header = stackalloc byte[4];
+        if (stream.Read(header) != 4 || !header.SequenceEqual("PK\u0003\u0004"u8)) throw new InvalidOperationException("Lima WPS Spreadsheet output is not an XLSX package.");
+    }
 
     private static string SourceFormat(string input, string backend)
     {
