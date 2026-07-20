@@ -43,13 +43,23 @@ public static class TemplateApplicator
             var targetRelationshipId = targetMaster.GetIdOfPart(targetLayout);
             if (importedMaster.GetPartById(targetRelationshipId) is not SlideLayoutPart importedLayout) { issues.Add(new(assignment.SlideNumber, "imported target layout not found")); continue; }
             var slide = slides[assignment.SlideNumber - 1];
-            if (slide.SlideLayoutPart is { } oldLayout) slide.DeletePart(oldLayout);
-            slide.AddPart(importedLayout);
+            if (assignment.ContentBounds is not null && (assignment.ContentShapeIds is null || assignment.ContentShapeIds.Count == 0))
+            {
+                issues.Add(new(assignment.SlideNumber, "content shape ids are required when content bounds are specified"));
+                continue;
+            }
+            if (assignment.ContentBounds is null && assignment.ContentShapeIds is { Count: > 0 })
+            {
+                issues.Add(new(assignment.SlideNumber, "content bounds are required when content shape ids are specified"));
+                continue;
+            }
             if (assignment.ContentBounds is { } contentBounds)
             {
-                try { FitSlideContent(slide, contentBounds); }
+                try { FitSlideContent(slide, contentBounds, assignment.ContentShapeIds!); }
                 catch (InvalidOperationException error) { issues.Add(new(assignment.SlideNumber, error.Message)); continue; }
             }
+            if (slide.SlideLayoutPart is { } oldLayout) slide.DeletePart(oldLayout);
+            slide.AddPart(importedLayout);
             changed++;
         }
         if (issues.Count == 0 && changed == slides.Count)
@@ -69,11 +79,19 @@ public static class TemplateApplicator
 
     private static string PartPath(OpenXmlPart part) => part.Uri.OriginalString.TrimStart('/');
 
-    private static void FitSlideContent(SlidePart slidePart, TransformInfo target)
+    private static void FitSlideContent(SlidePart slidePart, TransformInfo target, IReadOnlyList<uint> contentShapeIds)
     {
         if (target.X < 0 || target.Y < 0 || target.Cx <= 0 || target.Cy <= 0)
             throw new InvalidOperationException("content bounds are invalid");
-        var transforms = VisualChildren(slidePart.Slide?.CommonSlideData?.ShapeTree)
+        var requestedIds = contentShapeIds.ToHashSet();
+        if (requestedIds.Count != contentShapeIds.Count) throw new InvalidOperationException("content shape ids contain duplicates");
+        var selectedElements = VisualChildren(slidePart.Slide?.CommonSlideData?.ShapeTree)
+            .Where(element => ShapeIdFor(element) is { } shapeId && requestedIds.Contains(shapeId))
+            .ToList();
+        var selectedIds = selectedElements.Select(ShapeIdFor).OfType<uint>().ToHashSet();
+        var missingIds = requestedIds.Except(selectedIds).Order().ToList();
+        if (missingIds.Count > 0) throw new InvalidOperationException($"content shapes not found: {string.Join(",", missingIds)}");
+        var transforms = selectedElements
             .Select(MutableTransformFor)
             .Where(value => value is not null)
             .Cast<MutableTransform>()
@@ -103,21 +121,21 @@ public static class TemplateApplicator
                 Math.Max(1, Round(transform.Cx * scale)),
                 Math.Max(1, Round(transform.Cy * scale)));
         }
-        ScaleTableGeometry(slidePart.Slide, scale);
-        ScaleExplicitFontSizes(slidePart.Slide, scale);
+        ScaleTableGeometry(selectedElements, scale);
+        ScaleExplicitFontSizes(selectedElements, scale);
         slidePart.Slide?.Save();
     }
 
-    private static void ScaleTableGeometry(Slide? slide, double scale)
+    private static void ScaleTableGeometry(IReadOnlyList<DocumentFormat.OpenXml.OpenXmlElement> selectedElements, double scale)
     {
-        if (slide is null || Math.Abs(scale - 1d) < 0.0000001d) return;
+        if (Math.Abs(scale - 1d) < 0.0000001d) return;
         var scalableAttributes = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
         {
             ["gridCol"] = new(StringComparer.Ordinal) { "w" },
             ["tr"] = new(StringComparer.Ordinal) { "h" },
             ["tcPr"] = new(StringComparer.Ordinal) { "marL", "marR", "marT", "marB" },
         };
-        foreach (var element in slide.Descendants().Where(value => scalableAttributes.ContainsKey(value.LocalName)))
+        foreach (var element in selectedElements.SelectMany(SelfAndDescendants).Where(value => scalableAttributes.ContainsKey(value.LocalName)))
         {
             var attributeNames = scalableAttributes[element.LocalName];
             foreach (var attribute in element.GetAttributes().Where(value => attributeNames.Contains(value.LocalName)).ToList())
@@ -129,11 +147,11 @@ public static class TemplateApplicator
         }
     }
 
-    private static void ScaleExplicitFontSizes(Slide? slide, double scale)
+    private static void ScaleExplicitFontSizes(IReadOnlyList<DocumentFormat.OpenXml.OpenXmlElement> selectedElements, double scale)
     {
-        if (slide is null || Math.Abs(scale - 1d) < 0.0000001d) return;
+        if (Math.Abs(scale - 1d) < 0.0000001d) return;
         var runPropertyNames = new HashSet<string>(StringComparer.Ordinal) { "rPr", "defRPr", "endParaRPr", "defaultRPr" };
-        foreach (var element in slide.Descendants().Where(value => runPropertyNames.Contains(value.LocalName)))
+        foreach (var element in selectedElements.SelectMany(SelfAndDescendants).Where(value => runPropertyNames.Contains(value.LocalName)))
         {
             var attribute = element.GetAttributes().FirstOrDefault(value => value.LocalName == "sz");
             if (string.IsNullOrWhiteSpace(attribute.Value) || !int.TryParse(attribute.Value, out var size) || size <= 0) continue;
@@ -165,6 +183,21 @@ public static class TemplateApplicator
         if (element is GroupShape group && group.GroupShapeProperties?.TransformGroup is { } groupTransform)
             return FromTransform(groupTransform);
         return null;
+    }
+
+    private static uint? ShapeIdFor(DocumentFormat.OpenXml.OpenXmlElement element) => element switch
+    {
+        Shape shape => shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value,
+        Picture picture => picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value,
+        GraphicFrame frame => frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value,
+        GroupShape group => group.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value,
+        _ => null,
+    };
+
+    private static IEnumerable<DocumentFormat.OpenXml.OpenXmlElement> SelfAndDescendants(DocumentFormat.OpenXml.OpenXmlElement element)
+    {
+        yield return element;
+        foreach (var descendant in element.Descendants()) yield return descendant;
     }
 
     private static MutableTransform? FromTransform(A.Transform2D transform)
