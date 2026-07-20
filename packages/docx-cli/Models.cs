@@ -404,6 +404,10 @@ public sealed record DocxFontValidationReport(
 public sealed record DocxFontRunObservation(
     string Scope,
     int RunOrdinal,
+    string Container,
+    int RunIndex,
+    string Text,
+    bool HasText,
     string? FontAscii,
     string? FontHighAnsi,
     string? FontEastAsia,

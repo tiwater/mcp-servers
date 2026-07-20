@@ -27,7 +27,9 @@ public sealed class FontPolicyTests
                             new FontSizeComplexScript { Val = "26" },
                             new Bold()),
                         new Text("正文 Body"))),
-                    new Table(new TableRow(new TableCell(new Paragraph(new Run(
+                    new Table(new TableRow(new TableCell(new Paragraph(
+                        new Run(new RunProperties(new FontSize { Val = "17" })),
+                        new Run(
                         new RunProperties(
                             new RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "黑体", ComplexScript = "Arial" },
                             new FontSize { Val = "19" },
@@ -47,15 +49,40 @@ public sealed class FontPolicyTests
             using (var document = WordprocessingDocument.Open(output, false))
             {
                 var runs = document.MainDocumentPart!.Document!.Body!.Descendants<Run>().ToList();
-                Assert.Equal(2, runs.Count);
+                Assert.Equal(3, runs.Count);
                 AssertRun(runs[0], "24", "26");
                 Assert.NotNull(runs[0].RunProperties!.Bold);
-                AssertRun(runs[1], "19", "21");
-                Assert.NotNull(runs[1].RunProperties!.Italic);
+                Assert.Equal("17", runs[1].RunProperties!.FontSize!.Val!.Value);
+                AssertRun(runs[2], "19", "21");
+                Assert.NotNull(runs[2].RunProperties!.Italic);
             }
 
             Assert.True(FontPolicy.Validate(output, policy, "policy-hash").Pass);
             Assert.False(FontPolicy.Validate(input, policy, "policy-hash").Pass);
+            var inspection = FontPolicy.Inspect(output);
+            Assert.Equal("tiwater.docx-font-inspection/v2", inspection.Schema);
+            Assert.Collection(inspection.Runs,
+                run =>
+                {
+                    Assert.Equal("body:paragraph:0", run.Container);
+                    Assert.Equal(0, run.RunIndex);
+                    Assert.Equal("正文 Body", run.Text);
+                    Assert.True(run.HasText);
+                },
+                run =>
+                {
+                    Assert.Equal("table:0:row:0:cell:0:paragraph:0", run.Container);
+                    Assert.Equal(0, run.RunIndex);
+                    Assert.Equal(string.Empty, run.Text);
+                    Assert.False(run.HasText);
+                },
+                run =>
+                {
+                    Assert.Equal("table:0:row:0:cell:0:paragraph:0", run.Container);
+                    Assert.Equal(1, run.RunIndex);
+                    Assert.Equal("表格 Table", run.Text);
+                    Assert.True(run.HasText);
+                });
         }
         finally
         {

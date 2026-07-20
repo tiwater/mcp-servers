@@ -10,7 +10,7 @@ public static class FontPolicy
 {
     public const string Schema = "tiwater.docx-font-policy/v1";
     private const string ReportSchema = "tiwater.docx-font-validation/v1";
-    private const string ToolVersion = "0.10.10";
+    private const string ToolVersion = "0.10.11";
 
     public static int RunValidate(string[] args)
     {
@@ -91,17 +91,32 @@ public static class FontPolicy
         using var document = WordprocessingDocument.Open(input, false);
         var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
         var runs = new List<DocxFontRunObservation>();
+        var bodyParagraphs = body.Descendants<Paragraph>().Where(paragraph => !paragraph.Ancestors<Table>().Any()).ToList();
+        var tables = body.Descendants<Table>().ToList();
         var bodyOrdinal = 0;
         var tableOrdinal = 0;
-        foreach (var run in body.Descendants<Run>().Where(HasText))
+        foreach (var run in body.Descendants<Run>())
         {
             var inTable = run.Ancestors<Table>().Any();
             var ordinal = inTable ? tableOrdinal++ : bodyOrdinal++;
+            var paragraph = run.Ancestors<Paragraph>().First();
+            var paragraphRuns = paragraph.Descendants<Run>().ToList();
+            var runIndex = paragraphRuns.IndexOf(run);
+            string container;
+            if (inTable)
+            {
+                var table = run.Ancestors<Table>().First();
+                var row = run.Ancestors<TableRow>().First();
+                var cell = run.Ancestors<TableCell>().First();
+                container = $"table:{tables.IndexOf(table)}:row:{table.Elements<TableRow>().ToList().IndexOf(row)}:cell:{row.Elements<TableCell>().ToList().IndexOf(cell)}:paragraph:{cell.Descendants<Paragraph>().ToList().IndexOf(paragraph)}";
+            }
+            else container = $"body:paragraph:{bodyParagraphs.IndexOf(paragraph)}";
             var properties = run.RunProperties;
             var fonts = properties?.RunFonts;
-            runs.Add(new DocxFontRunObservation(inTable ? "table" : "body", ordinal, fonts?.Ascii?.Value, fonts?.HighAnsi?.Value, fonts?.EastAsia?.Value, fonts?.ComplexScript?.Value, properties?.FontSize?.Val?.Value, properties?.FontSizeComplexScript?.Val?.Value));
+            var runText = string.Concat(run.Descendants<Text>().Select(value => value.Text));
+            runs.Add(new DocxFontRunObservation(inTable ? "table" : "body", ordinal, container, runIndex, runText, HasText(run), fonts?.Ascii?.Value, fonts?.HighAnsi?.Value, fonts?.EastAsia?.Value, fonts?.ComplexScript?.Value, properties?.FontSize?.Val?.Value, properties?.FontSizeComplexScript?.Val?.Value));
         }
-        return new DocxFontInspectionReport("tiwater.docx-font-inspection/v1", ToolVersion, bodyOrdinal, tableOrdinal, runs);
+        return new DocxFontInspectionReport("tiwater.docx-font-inspection/v2", ToolVersion, bodyOrdinal, tableOrdinal, runs);
     }
 
     private static bool TryRule(DocxFontRule rule, out DocxFontRule normalized)
