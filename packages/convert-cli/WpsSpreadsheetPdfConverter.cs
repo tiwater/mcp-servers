@@ -4,6 +4,9 @@ namespace Dockit.Convert;
 
 public static class WpsSpreadsheetPdfConverter
 {
+    internal static IDisposable AcquireRuntimeLease(TimeSpan? timeout = null, string? lockPath = null)
+        => WpsRpcSession.AcquireSpreadsheetLease(timeout, lockPath);
+
     public static bool IsAvailable()
         => !string.IsNullOrWhiteSpace(FindWpsRpcPython())
             && WpsRpcSession.IsAvailable()
@@ -28,6 +31,7 @@ public static class WpsSpreadsheetPdfConverter
 
         try
         {
+            using var lease = AcquireRuntimeLease();
             var startInfo = WpsRpcSession.CreateProcessStartInfo(
                 dbusRunSession, xvfb, python, helperPath, input, output, temporaryRoot);
             using var process = Process.Start(startInfo)

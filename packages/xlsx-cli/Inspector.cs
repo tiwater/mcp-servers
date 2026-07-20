@@ -7,6 +7,11 @@ namespace Dockit.Xlsx;
 public static class Inspector
 {
     public static System.Text.Json.JsonElement InspectPublishedEvidence(string path)
+        => InspectPublishedEvidence(path, WorkbookConverter.ConvertXlsToXlsxForInspection);
+
+    internal static System.Text.Json.JsonElement InspectPublishedEvidence(
+        string path,
+        Func<string, string, WorkbookConverter.ConversionResult> convertLegacyWorkbook)
     {
         if (WorkbookLoader.IsLegacyXls(path))
         {
@@ -15,7 +20,10 @@ public static class Inspector
             Directory.CreateDirectory(root);
             try
             {
-                var conversion = WorkbookConverter.ConvertXlsToXlsx(path, converted);
+                var conversion = convertLegacyWorkbook(path, converted);
+                if (!string.Equals(conversion.Backend, "wps-spreadsheet", StringComparison.Ordinal)
+                    || !string.IsNullOrWhiteSpace(conversion.FallbackReason))
+                    throw new InvalidOperationException("Published XLS inspection requires authoritative WPS Spreadsheet conversion without fallback.");
                 var convertedWorkbook = Inspect(converted) with { File = Path.GetFullPath(path) };
                 var convertedExport = Extractor.Export(converted);
                 var convertedEvidence = System.Text.Json.JsonSerializer.SerializeToNode(EvidenceInspector.Inspect(converted), Json.Options)!.AsObject();

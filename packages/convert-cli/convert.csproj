@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-convert</ToolCommandName>
     <PackageId>tiwater.convert.cli</PackageId>
-    <Version>0.9.10</Version>
+    <Version>0.9.11</Version>
     <Authors>Tiwater</Authors>
     <Description>Generic office format conversion CLI.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -32,6 +32,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="convert-cli.tests" />
+    <InternalsVisibleTo Include="WpsLeaseProbe" />
   </ItemGroup>
 
   <ItemGroup>

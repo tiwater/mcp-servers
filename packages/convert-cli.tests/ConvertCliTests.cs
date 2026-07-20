@@ -8,11 +8,112 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Diagnostics;
 
 namespace Dockit.Convert.Tests;
 
 public class ConvertCliTests
 {
+    [Fact]
+    public async Task Wps_spreadsheet_lease_serializes_four_processes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"wps-lease-{Guid.NewGuid():N}");
+        var lockPath = Path.Combine(root, "spreadsheet.lock");
+        Directory.CreateDirectory(root);
+        var eventLog = Path.Combine(root, "events.log");
+        try
+        {
+            var processes = Enumerable.Range(0, 4).Select(_ => StartLeaseProbe(lockPath, eventLog, 150, 5_000)).ToArray();
+            await Task.WhenAll(processes.Select(WaitForExit));
+            Assert.All(processes, process => Assert.Equal(0, process.ExitCode));
+            var active = 0;
+            var maximumActive = 0;
+            foreach (var line in File.ReadAllLines(eventLog))
+            {
+                active += line[0] == '+' ? 1 : -1;
+                maximumActive = Math.Max(maximumActive, active);
+                Assert.InRange(active, 0, 1);
+            }
+            Assert.Equal(0, active);
+            Assert.Equal(1, maximumActive);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Wps_spreadsheet_lease_is_released_when_the_holding_process_is_killed()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"wps-lease-{Guid.NewGuid():N}");
+        var lockPath = Path.Combine(root, "spreadsheet.lock");
+        Directory.CreateDirectory(root);
+        var eventLog = Path.Combine(root, "events.log");
+        try
+        {
+            using var killed = StartLeaseProbe(lockPath, eventLog, 60_000, 5_000);
+            await WaitForEvent(eventLog, '+', TimeSpan.FromSeconds(5));
+            killed.Kill(entireProcessTree: true);
+            await WaitForExit(killed);
+            using var successor = StartLeaseProbe(lockPath, eventLog, 0, 2_000);
+            await WaitForExit(successor);
+            Assert.Equal(0, successor.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Wps_spreadsheet_lease_reports_a_bounded_busy_timeout_across_processes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"wps-lease-{Guid.NewGuid():N}");
+        var lockPath = Path.Combine(root, "spreadsheet.lock");
+        var eventLog = Path.Combine(root, "events.log");
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var holder = StartLeaseProbe(lockPath, eventLog, 60_000, 5_000);
+            await WaitForEvent(eventLog, '+', TimeSpan.FromSeconds(5));
+            using var blocked = StartLeaseProbe(lockPath, eventLog, 0, 150);
+            await WaitForExit(blocked);
+            Assert.Equal(23, blocked.ExitCode);
+            Assert.Contains(File.ReadAllLines(eventLog), line => line.StartsWith('!'));
+            holder.Kill(entireProcessTree: true);
+            await WaitForExit(holder);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Local_and_lima_spreadsheet_routes_share_one_host_lease_without_nested_acquisition()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"wps-lease-{Guid.NewGuid():N}");
+        var lockPath = Path.Combine(root, "spreadsheet.lock");
+        Directory.CreateDirectory(root);
+        try
+        {
+            using (WpsSpreadsheetPdfConverter.AcquireRuntimeLease(TimeSpan.FromSeconds(1), lockPath))
+            {
+                Assert.Throws<TimeoutException>(() =>
+                    LimaWpsWriterPdfConverter.AcquireSpreadsheetHostLease(TimeSpan.FromMilliseconds(150), lockPath));
+            }
+
+            using var limaLease = LimaWpsWriterPdfConverter.AcquireSpreadsheetHostLease(TimeSpan.FromSeconds(1), lockPath);
+            Assert.Throws<TimeoutException>(() =>
+                WpsSpreadsheetPdfConverter.AcquireRuntimeLease(TimeSpan.FromMilliseconds(150), lockPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void Wps_xlsx_recalculation_is_writable_full_calculation_and_fresh_save()
     {
@@ -263,6 +364,43 @@ public class ConvertCliTests
         Assert.NotNull(helperScript);
         Assert.Contains("document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatPDF)", helperScript);
         Assert.DoesNotContain("ExportAsFixedFormat", helperScript);
+    }
+
+    private static Process StartLeaseProbe(string lockPath, string eventLog, int holdMilliseconds, int timeoutMilliseconds)
+    {
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent?.Name
+            ?? throw new InvalidOperationException("Test configuration directory is unavailable.");
+        var probe = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../convert-cli.lease-probe/bin",
+            configuration,
+            "net9.0",
+            "WpsLeaseProbe.dll"));
+        if (!File.Exists(probe)) throw new InvalidOperationException($"WPS lease probe is unavailable: {probe}");
+        var start = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            UseShellExecute = false,
+        };
+        foreach (var argument in new[] { probe, lockPath, eventLog, holdMilliseconds.ToString(), timeoutMilliseconds.ToString() })
+            start.ArgumentList.Add(argument);
+        return Process.Start(start) ?? throw new InvalidOperationException("Failed to start WPS lease probe.");
+    }
+
+    private static async Task WaitForExit(Process process)
+    {
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private static async Task WaitForEvent(string eventLog, char prefix, TimeSpan timeout)
+    {
+        var started = Stopwatch.StartNew();
+        while (started.Elapsed < timeout)
+        {
+            if (File.Exists(eventLog) && File.ReadAllLines(eventLog).Any(line => line.StartsWith(prefix))) return;
+            await Task.Delay(25);
+        }
+        throw new TimeoutException($"Lease probe did not publish {prefix} within {timeout}.");
     }
 
     private static string CreateLegacyXlsFixture()

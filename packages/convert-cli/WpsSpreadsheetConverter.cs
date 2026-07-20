@@ -43,6 +43,7 @@ public static class WpsSpreadsheetConverter
 
         try
         {
+            using var lease = WpsRpcSession.AcquireSpreadsheetLease();
             var startInfo = WpsRpcSession.CreateProcessStartInfo(
                 dbusRunSession, xvfb, python, helperPath, input, output, tempRoot);
 

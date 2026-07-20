@@ -9,6 +9,12 @@ public static class WorkbookConverter
     public sealed record ConversionResult(string Backend, string? FallbackReason = null);
 
     public static ConversionResult ConvertXlsToXlsx(string input, string output)
+        => ConvertXlsToXlsx(input, output, requireWpsForAuthority: false);
+
+    public static ConversionResult ConvertXlsToXlsxForInspection(string input, string output)
+        => ConvertXlsToXlsx(input, output, requireWpsForAuthority: true);
+
+    private static ConversionResult ConvertXlsToXlsx(string input, string output, bool requireWpsForAuthority)
     {
         if (!File.Exists(input))
         {
@@ -16,7 +22,7 @@ public static class WorkbookConverter
         }
 
         var requiredBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_XLSX_BACKEND")?.Trim();
-        var requireWps = string.Equals(requiredBackend, "wps-spreadsheet", StringComparison.OrdinalIgnoreCase);
+        var requireWps = requireWpsForAuthority || string.Equals(requiredBackend, "wps-spreadsheet", StringComparison.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(requiredBackend) && !requireWps)
         {
             throw new InvalidOperationException($"Unsupported required XLSX backend: {requiredBackend}");
