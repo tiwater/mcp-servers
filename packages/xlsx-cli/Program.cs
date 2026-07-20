@@ -24,8 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", "0.2.5", "xlsx", input => Inspector.InspectEvidence(input), _ => WorkbookTargetObservations())),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", "0.2.5", "xlsx", input => Inspector.InspectEvidence(input), _ => WorkbookTargetObservations())),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", "0.2.6", "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats)),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", "0.2.6", "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats)),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -41,8 +41,11 @@ internal static class Cli
         }
     }
 
-    private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> WorkbookTargetObservations() =>
-    [
+    private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };
+
+    private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> WorkbookTargetObservations(string path) =>
+        WorkbookLoader.IsLegacyXls(path) ? [] :
+        [
         new("workbook-target-1", "document.semantic-target", "structure", new
         {
             candidateId = "xlsx-workbook-root",
@@ -52,7 +55,7 @@ internal static class Cli
             resourceSet = new[] { new { resourceKey = "xlsx-workbook", access = "write" } },
             writeSet = new[] { new { resourceKey = "xlsx-workbook", writeKey = "workbook-cells" } }
         }, "/inspection/workbook")
-    ];
+        ];
 
     private static Task<int> RunEvidenceAsync(string[] args)
     {

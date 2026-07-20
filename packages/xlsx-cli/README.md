@@ -34,6 +34,10 @@ tiwater-xlsx inspect-evidence --request request.json --output evidence.json
 tiwater-xlsx validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
 ```
 
+The published inspection ports accept current `.xls` and `.xlsx` sources. Evidence
+keeps the uploaded source format and byte hash while exposing the same normalized
+`xlsx.inspection` observation; editing and delivery remain `.xlsx` only.
+
 ### 2. Fill a Template
 `tiwater-xlsx evidence <input.xlsx>` emits the versioned `tiwater.xlsx.evidence/v1`
 readback envelope. It includes typed raw cells, style identity and alignment,
