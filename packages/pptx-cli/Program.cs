@@ -24,8 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", "0.2.1", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", "0.2.1", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", "0.2.2", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", "0.2.2", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
@@ -39,6 +39,19 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> PresentationTargetObservations() =>
+    [
+        new("presentation-target-1", "document.semantic-target", "structure", new
+        {
+            candidateId = "pptx-presentation-root",
+            semanticIdentity = new { format = "pptx", scope = "presentation" },
+            runtimeLocator = new { kind = "pptx-presentation" },
+            capabilities = new[] { "pptx.edit" },
+            resourceSet = new[] { new { resourceKey = "pptx-presentation", access = "write" } },
+            writeSet = new[] { new { resourceKey = "pptx-presentation", writeKey = "presentation-format" } }
+        }, "/inspection/presentation")
+    ];
 
     private static Task<int> RunInspectAsync(string[] args)
     {
