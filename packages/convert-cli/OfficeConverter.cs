@@ -91,9 +91,14 @@ public static class OfficeConverter
                 WpsSpreadsheetPdfConverter.ConvertToPdf(input, output);
                 return new OfficePdfConversionResult("wps-spreadsheet");
             }
+            if (LimaWpsWriterPdfConverter.IsAvailable())
+            {
+                LimaWpsWriterPdfConverter.ConvertSpreadsheetToPdf(input, output);
+                return new OfficePdfConversionResult("wps-spreadsheet");
+            }
             if (requestedBackend == "wps-spreadsheet")
             {
-                throw new InvalidOperationException("WPS Spreadsheets PDF backend was required but WPS Spreadsheets, xvfb-run, dbus-run-session, or pywpsrpc is unavailable.");
+                throw new InvalidOperationException("WPS Spreadsheets PDF backend was required but neither a local WPS Spreadsheets runtime nor a configured Lima WPS instance is available.");
             }
         }
 
