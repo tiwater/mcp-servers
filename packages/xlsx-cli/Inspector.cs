@@ -139,6 +139,7 @@ public static class Inspector
             var rowHeights = new List<RowHeightReport>();
             var columnWidths = new List<ColumnWidthReport>();
             var cells = new List<CellEvidenceReport>();
+            var significantColumn = WorksheetEvidenceBounds.SignificantColumn(worksheetPart);
 
             foreach (var column in worksheet.Elements<Columns>().SelectMany(columns => columns.Elements<Column>()))
             {
@@ -148,7 +149,7 @@ public static class Inspector
                 }
 
                 var min = column.Min?.Value ?? 1;
-                var max = column.Max?.Value ?? min;
+                var max = Math.Min(column.Max?.Value ?? min, (uint)significantColumn);
                 for (var index = min; index <= max; index++)
                 {
                     columnWidths.Add(new ColumnWidthReport(index, width));
@@ -169,6 +170,7 @@ public static class Inspector
 
                     foreach (var cell in row.Elements<Cell>())
                     {
+                        if (!WorksheetEvidenceBounds.Include(cell, significantColumn)) continue;
                         var reference = cell.CellReference?.Value;
                         if (string.IsNullOrWhiteSpace(reference))
                         {

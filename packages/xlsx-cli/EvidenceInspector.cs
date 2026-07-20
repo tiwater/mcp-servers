@@ -27,9 +27,10 @@ public static class EvidenceInspector
         {
             var part = (WorksheetPart)wb.GetPartById(sheet.Id!);
             var ws = part.Worksheet;
+            var significantColumn = WorksheetEvidenceBounds.SignificantColumn(part);
             var formattedCells = formattedCellsBySheet.GetValueOrDefault(sheet.Name?.Value ?? string.Empty)
                 ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var cells = ws.Descendants<Cell>().Select(cell =>
+            var cells = ws.Descendants<Cell>().Where(cell => WorksheetEvidenceBounds.Include(cell, significantColumn)).Select(cell =>
             {
                 var styleIndex = cell.StyleIndex?.Value ?? 0U;
                 var format = styleIndex < formats.Count ? formats[(int)styleIndex] : null;
