@@ -80,6 +80,22 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_accepts_numeric_json_value_without_stringifying_it_upstream()
+    {
+        var path = CreateFormattedWorkbookFixture();
+        var operations = Path.Combine(Path.GetTempPath(), $"xlsx-numeric-operations-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-number-json-{Guid.NewGuid():N}.xlsx");
+        File.WriteAllText(operations, "[{\"type\":\"setCellValue\",\"sheet\":\"Sheet1\",\"cell\":\"A2\",\"value\":11}]");
+
+        Assert.Equal(0, Editor.RunEdit([path, operations, output]));
+
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var cell = GetCell(spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet, "A2");
+        Assert.Null(cell.DataType);
+        Assert.Equal("11", cell.CellValue!.Text);
+    }
+
+    [Fact]
     public void Edit_writes_iso_date_as_excel_serial_while_preserving_target_style()
     {
         var path = CreateFormattedWorkbookFixture();

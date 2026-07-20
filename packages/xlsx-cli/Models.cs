@@ -1,7 +1,9 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Unicode;
 
 namespace Dockit.Xlsx;
@@ -71,7 +73,7 @@ public sealed record XlsxEditOperation(
     string Type,
     string? Sheet = null,
     string? Cell = null,
-    string? Value = null,
+    [property: JsonConverter(typeof(PrimitiveJsonValueConverter))] string? Value = null,
     string? ValueType = null,
     string? StartCell = null,
     IReadOnlyList<IReadOnlyList<string>>? Values = null,
@@ -87,6 +89,25 @@ public sealed record XlsxEditOperation(
     bool? PreserveStyle = null,
     bool? PreserveFormulas = null,
     bool? PreserveMergedRanges = null);
+
+internal sealed class PrimitiveJsonValueConverter : JsonConverter<string?>
+{
+    public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.TokenType switch
+    {
+        JsonTokenType.Null => null,
+        JsonTokenType.String => reader.GetString(),
+        JsonTokenType.Number => reader.GetDecimal().ToString(CultureInfo.InvariantCulture),
+        JsonTokenType.True => bool.TrueString.ToLowerInvariant(),
+        JsonTokenType.False => bool.FalseString.ToLowerInvariant(),
+        _ => throw new JsonException("XLSX edit value must be a JSON string, number, boolean, or null."),
+    };
+
+    public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options)
+    {
+        if (value is null) writer.WriteNullValue();
+        else writer.WriteStringValue(value);
+    }
+}
 
 public sealed record XlsxEditDocument(
     IReadOnlyList<XlsxEditOperation> Operations
