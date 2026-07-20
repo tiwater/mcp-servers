@@ -24,8 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", "0.2.4", "xlsx", input => Inspector.InspectEvidence(input))),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", "0.2.4", "xlsx", input => Inspector.InspectEvidence(input))),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", "0.2.4", "xlsx", input => Inspector.InspectEvidence(input), _ => WorkbookTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", "0.2.4", "xlsx", input => Inspector.InspectEvidence(input), _ => WorkbookTargetObservations())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -40,6 +40,19 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> WorkbookTargetObservations() =>
+    [
+        new("workbook-target-1", "document.semantic-target", "structure", new
+        {
+            candidateId = "xlsx-workbook-root",
+            semanticIdentity = new { format = "xlsx", scope = "workbook" },
+            runtimeLocator = new { kind = "xlsx-workbook" },
+            capabilities = new[] { "xlsx.edit" },
+            resourceSet = new[] { new { resourceKey = "xlsx-workbook", access = "write" } },
+            writeSet = new[] { new { resourceKey = "xlsx-workbook", writeKey = "workbook-cells" } }
+        }, "/inspection/workbook")
+    ];
 
     private static Task<int> RunEvidenceAsync(string[] args)
     {
