@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Reflection;
 using Dockit.Xlsx;
 using Tiwater.FormatEvidence;
 
@@ -11,6 +12,10 @@ internal static class Program
 
 internal static class Cli
 {
+    private static readonly string ToolVersion = typeof(Cli).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        .Split('+', 2)[0] ?? throw new InvalidOperationException("Assembly informational version is missing.");
+
     public static Task<int> RunAsync(string[] args)
     {
         if (args.Length == 0)
@@ -24,8 +29,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", "0.2.12", "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats)),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", "0.2.12", "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats)),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", ToolVersion, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats)),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", ToolVersion, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats)),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),

@@ -73,7 +73,6 @@ public sealed record XlsxEditOperation(
     string Type,
     string? Sheet = null,
     string? Cell = null,
-    string? Range = null,
     [property: JsonConverter(typeof(PrimitiveJsonValueConverter))] string? Value = null,
     string? ValueType = null,
     string? StartCell = null,
@@ -91,7 +90,8 @@ public sealed record XlsxEditOperation(
     int? TargetRows = null,
     bool? PreserveStyle = null,
     bool? PreserveFormulas = null,
-    bool? PreserveMergedRanges = null);
+    bool? PreserveMergedRanges = null,
+    string? Range = null);
 
 internal sealed class PrimitiveJsonValueConverter : JsonConverter<string?>
 {

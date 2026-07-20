@@ -16,6 +16,34 @@ public class InspectionDetailTests
     {
         var source=CreateAna14LikeWorkbook();var root=Path.Combine(Path.GetTempPath(),$"xlsx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="xlsx"},extraction=new{schema="tiwater.xlsx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));Func<string,object> inspect=input=>Inspector.InspectEvidence(input);Func<string,IReadOnlyList<FormatEvidenceCommand.AdditionalObservation>> targets=_=>[new("workbook-target-1","document.semantic-target","structure",new{candidateId="xlsx-workbook-root",semanticIdentity=new{format="xlsx",scope="workbook"},runtimeLocator=new{kind="xlsx-workbook"},capabilities=new[]{"xlsx.edit"},resourceSet=new[]{new{resourceKey="xlsx-workbook",access="write"}},writeSet=new[]{new{resourceKey="xlsx-workbook",writeKey="workbook-cells"}}},"/inspection/workbook")];Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-xlsx","0.2.5","xlsx",inspect,targets));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-xlsx","0.2.5","xlsx",inspect,targets));using var published=JsonDocument.Parse(File.ReadAllText(evidence));var observations=published.RootElement.GetProperty("observations");var value=observations[0].GetProperty("value");Assert.Equal("RP",value.GetProperty("export")[0].GetProperty("sheet").GetString());Assert.Contains(value.GetProperty("export")[0].GetProperty("cells").EnumerateArray(),cell=>cell.GetProperty("reference").GetString()=="E5"&&cell.GetProperty("row").GetInt32()==5&&cell.GetProperty("column").GetInt32()==5);Assert.Equal("tiwater.xlsx.evidence/v1",value.GetProperty("evidence").GetProperty("schema").GetString());Assert.Contains(value.GetProperty("evidence").GetProperty("sheets")[0].GetProperty("cells").EnumerateArray(),cell=>cell.GetProperty("reference").GetString()=="E5"&&cell.GetProperty("style").TryGetProperty("numberFormatEvidence",out _));Assert.Contains(observations.EnumerateArray(),item=>item.GetProperty("semanticField").GetString()=="document.semantic-target"&&item.GetProperty("value").GetProperty("capabilities")[0].GetString()=="xlsx.edit");Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
     }
+
+    [Fact]
+    public async Task Published_inspection_evidence_attests_xlsx_0_2_14_for_producer_and_validator()
+    {
+        var source = CreateAna14LikeWorkbook();
+        var root = Path.Combine(Path.GetTempPath(), $"xlsx-versioned-evidence-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var evidence = Path.Combine(root, "evidence.json");
+        var verdict = Path.Combine(root, "verdict.json");
+        var request = Path.Combine(root, "request.json");
+        var hash = System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();
+        File.WriteAllText(request, JsonSerializer.Serialize(new {
+            schema = "tiwater.format-evidence-request/v1", requestId = "request-version", runId = "run-version",
+            subject = new { kind = "input", inputId = "input-version" },
+            artifact = new { artifactVersionId = "av-version", path = source, bytesSha256 = hash, format = "xlsx" },
+            extraction = new { schema = "tiwater.xlsx.inspect/v1", options = new { }, optionsSha256 = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" },
+            expectedEvidenceSchema = "lucid.published-format-evidence/v1", outputPath = evidence
+        }));
+
+        Assert.Equal(0, await Dockit.Xlsx.Cli.Cli.RunAsync(["inspect-evidence", "--request", request, "--output", evidence]));
+        Assert.Equal(0, await Dockit.Xlsx.Cli.Cli.RunAsync(["validate-inspect-evidence", "--request", request, "--evidence", evidence, "--output", verdict]));
+        using var produced = JsonDocument.Parse(File.ReadAllText(evidence));
+        using var validated = JsonDocument.Parse(File.ReadAllText(verdict));
+        Assert.Equal("0.2.14", produced.RootElement.GetProperty("provider").GetProperty("toolVersion").GetString());
+        Assert.Equal("0.2.14", validated.RootElement.GetProperty("validator").GetProperty("toolVersion").GetString());
+        Assert.True(validated.RootElement.GetProperty("pass").GetBoolean());
+    }
+
     [Fact]
     public void Inspect_exposes_visible_text_formulas_dimensions_and_merges()
     {

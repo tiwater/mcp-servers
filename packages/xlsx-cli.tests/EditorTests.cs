@@ -86,6 +86,89 @@ public class EditorTests
         Assert.Equal("'Sheet1'!$A$1:$F$3", Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print").GetProperty("area").GetString());
     }
 
+    [Theory]
+    [InlineData("Sheet1!A1:F3")]
+    [InlineData("A0:F3")]
+    [InlineData("A1:XFE3")]
+    [InlineData("A1:F1048577")]
+    [InlineData("A1:F999999999999999999999999")]
+    [InlineData("F3:A1")]
+    [InlineData("B1:A3")]
+    [InlineData("A3:B1")]
+    [InlineData("A1")]
+    [InlineData("A1:")]
+    [InlineData(" A1:F3")]
+    public void Edit_rejects_invalid_print_areas_and_cli_returns_nonzero(string range)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-print-area-{Guid.NewGuid():N}.xlsx");
+        var operations = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-print-area-{Guid.NewGuid():N}.json");
+        File.WriteAllText(operations, $$"""[{"type":"setPrintArea","sheet":"Sheet1","range":"{{range}}"}]""");
+
+        Assert.Equal(1, Editor.RunEdit([path, operations, output]));
+    }
+
+    [Fact]
+    public void Edit_replaces_only_the_target_sheet_print_area_and_quotes_sheet_names()
+    {
+        var path = CreateWorkbookFixture();
+        using (var spreadsheet = SpreadsheetDocument.Open(path, true))
+        {
+            var workbookPart = spreadsheet.WorkbookPart!;
+            var secondPart = workbookPart.AddNewPart<WorksheetPart>();
+            secondPart.Worksheet = new Worksheet(new SheetData(CreateRow(1, ("A1", "Other"))));
+            workbookPart.Workbook.Sheets!.Append(new Sheet { Id = workbookPart.GetIdOfPart(secondPart), SheetId = 2, Name = "O'Brien" });
+            workbookPart.Workbook.DefinedNames = new DefinedNames(
+                new DefinedName("'Sheet1'!$A$1:$B$2") { Name = "_xlnm.Print_Area", LocalSheetId = 0 },
+                new DefinedName("'O''Brien'!$A$1:$C$3") { Name = "_xlnm.Print_Area", LocalSheetId = 1 },
+                new DefinedName("'Sheet1'!$A$1") { Name = "keep_me" });
+            workbookPart.Workbook.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-print-area-replace-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setPrintArea", Sheet: "O'Brien", Range: "$B$2:D4")]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var edited = SpreadsheetDocument.Open(output, false);
+        var names = edited.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>().ToList();
+        Assert.Equal(3, names.Count);
+        Assert.Contains(names, name => name.Name!.Value == "keep_me");
+        Assert.Contains(names, name => name.LocalSheetId?.Value == 0 && name.Text == "'Sheet1'!$A$1:$B$2");
+        Assert.Contains(names, name => name.LocalSheetId?.Value == 1 && name.Text == "'O''Brien'!$B$2:$D$4");
+    }
+
+    [Fact]
+    public void Edit_materializes_inherited_alignment_preserves_other_style_and_reuses_equivalent_cell_xf()
+    {
+        var path = CreateInheritedAlignmentWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-inherited-alignment-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "A2", Value: "one", WrapText: false),
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "B2", Value: "two", WrapText: false)
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var styles = spreadsheet.WorkbookPart!.WorkbookStylesPart!.Stylesheet;
+        var formats = styles.CellFormats!;
+        Assert.Equal((uint)2, formats.Count!.Value);
+        Assert.Equal(2, formats.Elements<CellFormat>().Count());
+        var worksheet = spreadsheet.WorkbookPart.WorksheetParts.Single().Worksheet;
+        Assert.Equal(GetCell(worksheet, "A2").StyleIndex!.Value, GetCell(worksheet, "B2").StyleIndex!.Value);
+        var target = formats.Elements<CellFormat>().ElementAt(1);
+        Assert.Equal(HorizontalAlignmentValues.Center, target.Alignment!.Horizontal!.Value);
+        Assert.Equal(VerticalAlignmentValues.Top, target.Alignment.Vertical!.Value);
+        Assert.False(target.Alignment.WrapText!.Value);
+        Assert.True(target.Protection!.Locked!.Value);
+
+        var cells = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("cells");
+        var cell = cells.EnumerateArray().Single(item => item.GetProperty("reference").GetString() == "A2");
+        Assert.Equal("center", cell.GetProperty("style").GetProperty("horizontalAlignment").GetString());
+        Assert.Equal("top", cell.GetProperty("style").GetProperty("verticalAlignment").GetString());
+        Assert.False(cell.GetProperty("style").GetProperty("wrapText").GetBoolean());
+    }
+
     [Fact]
     public void Edit_sets_one_rich_text_value_and_explicitly_clears_bold_on_every_run()
     {
@@ -339,6 +422,40 @@ public class EditorTests
         ));
         var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
         sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateInheritedAlignmentWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-inherited-alignment-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellStyleFormats(new CellFormat {
+                Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Center, Vertical = VerticalAlignmentValues.Top, WrapText = true }
+            }) { Count = 1 },
+            new CellFormats(new CellFormat {
+                FormatId = 0,
+                Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Center },
+                Protection = new Protection { Locked = true },
+                ApplyAlignment = true,
+                ApplyProtection = true
+            }) { Count = 1 }
+        );
+        stylesPart.Stylesheet.Save();
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        worksheetPart.Worksheet = new Worksheet(new SheetData(
+            CreateRow(1, ("A1", "A"), ("B1", "B")),
+            new Row(new Cell { CellReference = "A2", StyleIndex = 0 }, new Cell { CellReference = "B2", StyleIndex = 0 }) { RowIndex = 2 }
+        ));
+        workbookPart.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = workbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
         workbookPart.Workbook.Save();
         worksheetPart.Worksheet.Save();
         return path;
