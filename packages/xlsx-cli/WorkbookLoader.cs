@@ -70,6 +70,7 @@ internal static class WorkbookLoader
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .Cast<string>()
                 .ToList() ?? [];
+            var significantColumn = WorksheetEvidenceBounds.SignificantColumn(sheetPart);
 
             if (sheetData is not null)
             {
@@ -96,17 +97,18 @@ internal static class WorkbookLoader
                             {
                                 cellColumn = GetColumnIndex(match.Value);
                                 cellRow = ParseCellReference(cellReference).Row;
-                                while (!resolveMergedCells && currentColumn < cellColumn)
-                                {
-                                    rowData.Add(string.Empty);
-                                    formattedRowData.Add(string.Empty);
-                                    currentColumn++;
-                                }
                             }
                         }
 
                         var rawValue = GetOpenXmlRawCellValue(cell, sharedStringTable) ?? string.Empty;
                         var formattedValue = GetOpenXmlFormattedCellValue(cell, sharedStringTable, stylesPart) ?? string.Empty;
+                        if (!WorksheetEvidenceBounds.Include(cell, significantColumn)) continue;
+                        while (!resolveMergedCells && currentColumn < cellColumn)
+                        {
+                            rowData.Add(string.Empty);
+                            formattedRowData.Add(string.Empty);
+                            currentColumn++;
+                        }
                         var richTextRuns = OpenXmlRichText.GetCellRichTextRuns(cell, sharedStringTable);
                         if (!resolveMergedCells)
                         {

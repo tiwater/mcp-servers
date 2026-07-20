@@ -11,6 +11,7 @@ public static class Editor
     private static readonly Regex NumericTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", RegexOptions.Compiled);
     private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
     private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
+    private static readonly Regex PrintAreaRangePattern = new(@"(?<start>\$?[A-Za-z]{1,3}\$?\d+):(?<end>\$?[A-Za-z]{1,3}\$?\d+)", RegexOptions.Compiled);
 
     public static int RunEdit(string[] args)
     {
@@ -109,6 +110,10 @@ public static class Editor
         {
             ApplyCellBold(workbookPart, cell, operation.Bold.Value);
         }
+        if (operation.ShrinkToFit.HasValue)
+        {
+            ApplyCellShrinkToFit(workbookPart, cell, operation.ShrinkToFit.Value);
+        }
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated {operation.Sheet}!{operation.Cell}");
     }
@@ -142,7 +147,7 @@ public static class Editor
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated range from {operation.Sheet}!{operation.StartCell}");
     }
 
-    private static XlsxEditAppliedOperation InsertRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation, bool preserveMergedRanges = true)
+    private static XlsxEditAppliedOperation InsertRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation, bool preserveMergedRanges = true, bool expandAdjacentPrintArea = false)
     {
         var startRow = operation.StartRow ?? operation.TargetRow;
         var legacyTemplateSourceRow = operation.StartRow is null ? operation.SourceRow : null;
@@ -206,6 +211,7 @@ public static class Editor
         {
             ShiftMergedRanges(worksheet, startRow.Value, operation.Count.Value);
         }
+        ShiftPrintAreasForInsertedRows(workbookPart, operation.Sheet, startRow.Value, operation.Count.Value, expandAdjacentPrintArea);
         ShiftFormulasForInsertedRows(workbookPart, operation.Sheet, startRow.Value, operation.Count.Value);
 
         if (legacyTemplateRow is not null && sheetData is not null && legacyTemplateSourceRow is not null)
@@ -352,7 +358,7 @@ public static class Editor
             Type = "insertRows",
             StartRow = firstInsertedRow,
             Count = rowsToInsert
-        }, preserveMergedRanges);
+        }, preserveMergedRanges, expandAdjacentPrintArea: true);
         if (!insertOperation.Applied)
         {
             return new XlsxEditAppliedOperation(operation.Type, false, insertOperation.Detail, operation.Sheet);
@@ -729,6 +735,55 @@ public static class Editor
 
             mergeCell.Reference = $"{GetCellReference(startColumn, mergeStartRow)}:{GetCellReference(endColumn, mergeEndRow)}";
         }
+    }
+
+    private static void ShiftPrintAreasForInsertedRows(WorkbookPart workbookPart, string sheetName, int startRow, int rowDelta, bool expandAdjacentPrintArea)
+    {
+        var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>().ToList() ?? [];
+        var sheetIndex = sheets.FindIndex(sheet => string.Equals(sheet.Name?.Value, sheetName, StringComparison.Ordinal));
+        if (sheetIndex < 0)
+        {
+            return;
+        }
+
+        var printAreas = workbookPart.Workbook.DefinedNames?.Elements<DefinedName>()
+            .Where(name => name.Name?.Value == "_xlnm.Print_Area" && name.LocalSheetId?.Value == (uint)sheetIndex)
+            .ToList() ?? [];
+        foreach (var printArea in printAreas)
+        {
+            if (string.IsNullOrWhiteSpace(printArea.Text))
+            {
+                continue;
+            }
+
+            printArea.Text = PrintAreaRangePattern.Replace(printArea.Text, match =>
+            {
+                var startReference = match.Groups["start"].Value;
+                var endReference = match.Groups["end"].Value;
+                var (_, rangeStartRow) = ParseCellReference(startReference.Replace("$", string.Empty, StringComparison.Ordinal));
+                var (_, rangeEndRow) = ParseCellReference(endReference.Replace("$", string.Empty, StringComparison.Ordinal));
+                if (rangeStartRow >= startRow)
+                {
+                    rangeStartRow += rowDelta;
+                    rangeEndRow += rowDelta;
+                }
+                else if (rangeEndRow >= startRow || (expandAdjacentPrintArea && rangeEndRow == startRow - 1))
+                {
+                    rangeEndRow += rowDelta;
+                }
+                else
+                {
+                    return match.Value;
+                }
+
+                return $"{ReplaceReferenceRow(startReference, rangeStartRow)}:{ReplaceReferenceRow(endReference, rangeEndRow)}";
+            });
+        }
+    }
+
+    private static string ReplaceReferenceRow(string reference, int row)
+    {
+        return Regex.Replace(reference, @"\d+$", row.ToString(CultureInfo.InvariantCulture));
     }
 
     private static IEnumerable<(int Row, int StartColumn, int EndColumn)> GetHorizontalMergedRangesOnRows(Worksheet worksheet, int firstRow, int rowCount)
@@ -1229,6 +1284,32 @@ public static class Editor
         stylesheet.CellFormats!.Append(targetFormat);
         stylesPart.Stylesheet.Save();
 
+        cell.StyleIndex = formatIndex;
+    }
+
+    private static void ApplyCellShrinkToFit(WorkbookPart workbookPart, Cell cell, bool shrinkToFit)
+    {
+        var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet ??= new Stylesheet
+        {
+            Fonts = new Fonts(new Font()),
+            Fills = new Fills(new Fill()),
+            Borders = new Borders(new Border()),
+            CellStyleFormats = new CellStyleFormats(new CellFormat()),
+            CellFormats = new CellFormats(new CellFormat()),
+        };
+        stylesPart.Stylesheet.CellFormats ??= new CellFormats(new CellFormat());
+        var formats = stylesPart.Stylesheet.CellFormats;
+        var sourceStyleIndex = cell.StyleIndex?.Value ?? 0U;
+        var sourceFormat = formats.Elements<CellFormat>().ElementAtOrDefault((int)sourceStyleIndex)
+            ?? formats.Elements<CellFormat>().First();
+        var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
+        targetFormat.Alignment ??= new Alignment();
+        targetFormat.Alignment.ShrinkToFit = shrinkToFit;
+        targetFormat.ApplyAlignment = true;
+        var formatIndex = (uint)formats.Count();
+        formats.Append(targetFormat);
+        stylesPart.Stylesheet.Save();
         cell.StyleIndex = formatIndex;
     }
 

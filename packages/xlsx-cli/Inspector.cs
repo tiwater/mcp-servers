@@ -1,5 +1,6 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using Dockit.Convert;
 
 namespace Dockit.Xlsx;
 
@@ -7,16 +8,39 @@ public static class Inspector
 {
     public static System.Text.Json.JsonElement InspectPublishedEvidence(string path)
     {
+        if (WorkbookLoader.IsLegacyXls(path))
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"tiwater-xls-observation-{Guid.NewGuid():N}");
+            var converted = Path.Combine(root, "normalized.xlsx");
+            Directory.CreateDirectory(root);
+            try
+            {
+                var conversion = WorkbookConverter.ConvertXlsToXlsx(path, converted);
+                var convertedWorkbook = Inspect(converted) with { File = Path.GetFullPath(path) };
+                var convertedExport = Extractor.Export(converted);
+                var convertedEvidence = System.Text.Json.JsonSerializer.SerializeToNode(EvidenceInspector.Inspect(converted), Json.Options)!.AsObject();
+                convertedEvidence["file"] = Path.GetFullPath(path);
+                return System.Text.Json.JsonSerializer.SerializeToElement(new
+                {
+                    workbook = convertedWorkbook,
+                    export = convertedExport,
+                    evidence = convertedEvidence,
+                    conversion = new { sourceFormat = "xls", observationFormat = "xlsx", conversion.Backend, conversion.FallbackReason }
+                }, Json.Options);
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
         var workbook = Inspect(path);
         var export = Extractor.Export(path);
-        return WorkbookLoader.IsLegacyXls(path)
-            ? System.Text.Json.JsonSerializer.SerializeToElement(new { workbook, export }, Json.Options)
-            : System.Text.Json.JsonSerializer.SerializeToElement(new
-            {
-                workbook,
-                export,
-                evidence = EvidenceInspector.Inspect(path)
-            }, Json.Options);
+        return System.Text.Json.JsonSerializer.SerializeToElement(new
+        {
+            workbook,
+            export,
+            evidence = EvidenceInspector.Inspect(path)
+        }, Json.Options);
     }
 
     public static System.Text.Json.JsonElement InspectEvidence(string path) =>
@@ -118,6 +142,7 @@ public static class Inspector
             var rowHeights = new List<RowHeightReport>();
             var columnWidths = new List<ColumnWidthReport>();
             var cells = new List<CellEvidenceReport>();
+            var significantColumn = WorksheetEvidenceBounds.SignificantColumn(worksheetPart);
 
             foreach (var column in worksheet.Elements<Columns>().SelectMany(columns => columns.Elements<Column>()))
             {
@@ -127,7 +152,7 @@ public static class Inspector
                 }
 
                 var min = column.Min?.Value ?? 1;
-                var max = column.Max?.Value ?? min;
+                var max = Math.Min(column.Max?.Value ?? min, (uint)significantColumn);
                 for (var index = min; index <= max; index++)
                 {
                     columnWidths.Add(new ColumnWidthReport(index, width));
@@ -148,6 +173,7 @@ public static class Inspector
 
                     foreach (var cell in row.Elements<Cell>())
                     {
+                        if (!WorksheetEvidenceBounds.Include(cell, significantColumn)) continue;
                         var reference = cell.CellReference?.Value;
                         if (string.IsNullOrWhiteSpace(reference))
                         {
