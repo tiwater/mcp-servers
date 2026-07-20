@@ -186,7 +186,9 @@ public static class Inspector
                 if (!seen.Add(("graphicFrame", shapeId))) continue;
                 shapes.Add(new ShapeDetail(shapeId,
                     frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "graphicFrame", zOrder++,
-                    GetAttributeValue(app?.PlaceholderShape, "type"), null, null, string.Empty, ExtractTransform(frame.Transform), [], []));
+                    GetAttributeValue(app?.PlaceholderShape, "type"), null, null,
+                    string.Concat(frame.Descendants<A.Text>().Select(value => value.Text)), ExtractTransform(frame.Transform),
+                    ExtractDescendantParagraphs(frame), ExtractDescendantRuns(frame), ExtractTable(frame)));
             }
         }
         return shapes;
@@ -282,6 +284,55 @@ public static class Inspector
 
         return runs;
     }
+
+    private static List<ParagraphDetail> ExtractDescendantParagraphs(OpenXmlElement owner)
+    {
+        var result = new List<ParagraphDetail>();
+        foreach (var textBody in owner.Descendants().Where(value => value.LocalName == "txBody"))
+            foreach (var paragraph in ExtractParagraphs(textBody))
+                result.Add(paragraph with { ParagraphIndex = result.Count });
+        return result;
+    }
+
+    private static List<TextRunDetail> ExtractDescendantRuns(OpenXmlElement owner)
+    {
+        var result = new List<TextRunDetail>();
+        var paragraphOffset = 0;
+        foreach (var textBody in owner.Descendants().Where(value => value.LocalName == "txBody"))
+        {
+            var paragraphs = ExtractParagraphs(textBody);
+            foreach (var run in ExtractRuns(textBody))
+                result.Add(run with { RunIndex = result.Count, ParagraphIndex = paragraphOffset + run.ParagraphIndex });
+            paragraphOffset += paragraphs.Count;
+        }
+        return result;
+    }
+
+    private static TableDetail? ExtractTable(GraphicFrame frame)
+    {
+        var table = frame.Descendants<A.Table>().SingleOrDefault();
+        if (table is null) return null;
+        var columnWidths = table.TableGrid?.Elements<A.GridColumn>()
+            .Select(column => ParseLongAttribute(column, "w") ?? 0L).ToList() ?? [];
+        var rows = table.Elements<A.TableRow>().ToList();
+        var rowHeights = rows.Select(row => ParseLongAttribute(row, "h") ?? 0L).ToList();
+        var cells = new List<TableCellDetail>();
+        for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        {
+            var rowCells = rows[rowIndex].Elements<A.TableCell>().ToList();
+            for (var columnIndex = 0; columnIndex < rowCells.Count; columnIndex++)
+            {
+                var properties = rowCells[columnIndex].TableCellProperties;
+                cells.Add(new TableCellDetail(rowIndex, columnIndex,
+                    ParseLongAttribute(properties, "marL"), ParseLongAttribute(properties, "marR"),
+                    ParseLongAttribute(properties, "marT"), ParseLongAttribute(properties, "marB")));
+            }
+        }
+        return new TableDetail(columnWidths, rowHeights, cells);
+    }
+
+    private static long? ParseLongAttribute(OpenXmlElement? element, string localName)
+        => long.TryParse(GetAttributeValue(element, localName), out var value) ? value : null;
 
     private static string? ExtractFontFamily(params OpenXmlElement?[] propertyCandidates)
     {

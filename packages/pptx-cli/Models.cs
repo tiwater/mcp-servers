@@ -92,7 +92,23 @@ public sealed record ShapeDetail(
     string Text,
     TransformInfo? Transform,
     IReadOnlyList<ParagraphDetail> Paragraphs,
-    IReadOnlyList<TextRunDetail> Runs
+    IReadOnlyList<TextRunDetail> Runs,
+    TableDetail? Table = null
+);
+
+public sealed record TableDetail(
+    IReadOnlyList<long> ColumnWidths,
+    IReadOnlyList<long> RowHeights,
+    IReadOnlyList<TableCellDetail> Cells
+);
+
+public sealed record TableCellDetail(
+    int RowIndex,
+    int ColumnIndex,
+    long? MarginLeft,
+    long? MarginRight,
+    long? MarginTop,
+    long? MarginBottom
 );
 
 public sealed record TransformInfo(long X, long Y, long Cx, long Cy);
