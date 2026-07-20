@@ -370,7 +370,51 @@ public sealed record DocxEditOperation(
     string? HeightRule = null,
     bool? NoWrap = null,
     bool? CantSplit = null,
-    IReadOnlyList<DocxRichTextSegment>? RichText = null);
+    IReadOnlyList<DocxRichTextSegment>? RichText = null,
+    DocxFontPolicy? FontPolicy = null);
+
+public sealed record DocxFontRule(string EastAsia, string Latin, string Size);
+
+public sealed record DocxFontPolicy(string Schema, DocxFontRule Body, DocxFontRule Table);
+
+public sealed record DocxFontFinding(
+    string Scope,
+    int RunOrdinal,
+    string Reason,
+    string? FontAscii,
+    string? FontHighAnsi,
+    string? FontEastAsia,
+    string? FontComplexScript,
+    string? FontSize,
+    string? FontSizeComplexScript);
+
+public sealed record DocxFontValidationReport(
+    string Schema,
+    string ToolVersion,
+    bool Pass,
+    string File,
+    string FileSha256,
+    string PolicySha256,
+    int BodyRunCount,
+    int TableRunCount,
+    IReadOnlyList<DocxFontFinding> Findings);
+
+public sealed record DocxFontRunObservation(
+    string Scope,
+    int RunOrdinal,
+    string? FontAscii,
+    string? FontHighAnsi,
+    string? FontEastAsia,
+    string? FontComplexScript,
+    string? FontSize,
+    string? FontSizeComplexScript);
+
+public sealed record DocxFontInspectionReport(
+    string Schema,
+    string ToolVersion,
+    int BodyRunCount,
+    int TableRunCount,
+    IReadOnlyList<DocxFontRunObservation> Runs);
 
 public sealed record DocxTableCellInput(
     string? Text = null,

@@ -179,6 +179,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `setTableCellAlignment`
 - `setTableCellNoWrap`
 - `setTableCellFontSize`
+- `applyDocumentFontPolicy`
 - `setTableRowHeight`
 - `setTableRowCantSplit`
 - `mergeTableCells`
@@ -205,6 +206,11 @@ When the target cell is empty, the generated runs inherit font-related formattin
 `setTableWidth` accepts `width` and `widthType` (`pct`, `dxa`, `auto`, `nil`) and preserves the template table layout (`fixed`, `autofit`, or absent) instead of changing it.
 `setTableCellNoWrap` accepts optional `noWrap`; `true` or omitted writes Word `w:noWrap`, and `false` removes it.
 `setTableCellFontSize` accepts `fontSize` as OpenXML half-points (`18`) or points (`9pt`).
+`applyDocumentFontPolicy` accepts a closed `fontPolicy` with independent `body` and `table`
+rules. Each rule declares `eastAsia`, `latin`, and `size` (half-points or `pt`) without document
+coordinates. It applies the rule to every text-bearing main-document run in the corresponding scope.
+`validate-font-policy <input.docx> <policy.json>` independently reads back every text-bearing run
+and exits non-zero when any font channel or size differs.
 `setTableRowHeight` accepts `height` in twips and optional `heightRule` (`atLeast`, `exact`, `auto`).
 `setTableRowCantSplit` accepts `cantSplit: true|false` and controls the Word table-row `w:cantSplit` property. `inspect-tables` reports the row property as `CantSplit`.
 `mergeTableCells` merges a horizontal cell range when `rowIndex/startCellIndex/endCellIndex` are provided, or a vertical row range when `startRowIndex/endRowIndex` and exactly one of `cellIndex` or logical `gridColumn` are provided. Prefer `gridColumn` when rows may have different horizontal spans.
