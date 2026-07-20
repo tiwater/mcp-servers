@@ -81,7 +81,8 @@ public static class Inspector
                     NormalizePartPath(layout.Uri),
                     layout.SlideLayout?.CommonSlideData?.Name?.Value ?? string.Empty,
                     GetAttributeValue(layout.SlideLayout, "type"),
-                    HashText(layout.SlideLayout?.OuterXml ?? string.Empty))).OrderBy(layout => layout.Path, StringComparer.Ordinal).ToList()))
+                    HashText(layout.SlideLayout?.OuterXml ?? string.Empty),
+                    ExtractShapes(layout, layout.SlideLayout?.CommonSlideData?.ShapeTree))).OrderBy(layout => layout.Path, StringComparer.Ordinal).ToList()))
             .OrderBy(master => master.Path, StringComparer.Ordinal).ToList();
 
         return new PresentationDetailReport(

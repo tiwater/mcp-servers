@@ -63,7 +63,13 @@ public sealed record MasterDetail(
     IReadOnlyList<LayoutDetail> Layouts
 );
 
-public sealed record LayoutDetail(string Path, string Name, string? Type, string XmlSha256);
+public sealed record LayoutDetail(
+    string Path,
+    string Name,
+    string? Type,
+    string XmlSha256,
+    IReadOnlyList<ShapeDetail> Shapes
+);
 
 public sealed record SlideSizeInfo(long Cx, long Cy);
 
