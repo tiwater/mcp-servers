@@ -18,6 +18,22 @@ namespace Dockit.Docx.Tests;
 public class AnnotationToolsTests
 {
     [Fact]
+    public void Edit_command_exits_nonzero_when_any_operation_is_not_applied()
+    {
+        var source = CreateSemanticTableFixture();
+        var root = Path.Combine(Path.GetTempPath(), $"docx-edit-fail-closed-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var operations = Path.Combine(root, "operations.json");
+        var output = Path.Combine(root, "output.docx");
+        File.WriteAllText(operations, JsonSerializer.Serialize(new DocxEditDocument([
+            new DocxEditOperation("replaceTableCellText", TableIndex: 99, RowIndex: 0, CellIndex: 0, Text: "unreachable")
+        ]), Json.Options));
+
+        Assert.Equal(1, Editor.RunEdit([source, operations, output]));
+        Assert.True(File.Exists(output));
+    }
+
+    [Fact]
     public void Published_inspection_evidence_is_recomputed_from_docx_bytes()
     {
         var source=CreateAnnotatedFixture();var root=Path.Combine(Path.GetTempPath(),$"docx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="docx"},extraction=new{schema="tiwater.docx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-docx","0.9.1","docx",input=>new{document=Inspector.Inspect(input),tables=Inspector.InspectTables(input)}));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-docx","0.9.1","docx",input=>new{document=Inspector.Inspect(input),tables=Inspector.InspectTables(input)}));Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
