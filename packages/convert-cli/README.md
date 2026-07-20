@@ -44,10 +44,10 @@ as WPS Spreadsheet proof.
 
 On macOS, set `TIWATER_WPS_WRITER_LIMA_INSTANCE` to the name of a configured
 Lima Linux instance that exposes the documented `/tmp/lucid-wps-render` shared
-directory and has the published WPS Writer runtime installed. The converter
+directory and has the published WPS Writer and Spreadsheets runtimes installed. The converter
 then stages each input and output in a unique shared directory and invokes
-`limactl shell <instance>` itself; it still reports `backend: "wps-writer"` and
-fails closed if the configured instance cannot render. This is an explicit
+`limactl shell <instance>` itself; it reports the requested `wps-writer` or
+`wps-spreadsheet` backend and fails closed if the configured instance cannot render. This is an explicit
 runtime configuration, not an arbitrary command hook.
 
 LibreOffice-backed PDF conversion requires `soffice`. If it is not on `PATH`, set one of:
