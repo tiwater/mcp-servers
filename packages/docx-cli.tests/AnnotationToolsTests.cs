@@ -1882,6 +1882,38 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_vertical_merge_resolves_logical_grid_column_across_different_row_spans()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-grid-merge-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(new Table(
+                new TableRow(
+                    new TableCell(new TableCellProperties(new GridSpan { Val = 2 }), new Paragraph(new Run(new Text("wide")))),
+                    new TableCell(new Paragraph(new Run(new Text("top"))))),
+                new TableRow(
+                    new TableCell(new Paragraph(new Run(new Text("a")))),
+                    new TableCell(new Paragraph(new Run(new Text("b")))),
+                    new TableCell(new Paragraph(new Run(new Text("bottom"))))))));
+            mainPart.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"grid-merged-{Guid.NewGuid():N}.docx");
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation("mergeTableCells", TableIndex: 0, GridColumn: 2, StartRowIndex: 0, EndRowIndex: 1)
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var rows = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ToList();
+        var top = rows[0].Elements<TableCell>().ElementAt(1).GetFirstChild<TableCellProperties>()!.GetFirstChild<VerticalMerge>();
+        var bottom = rows[1].Elements<TableCell>().ElementAt(2).GetFirstChild<TableCellProperties>()!.GetFirstChild<VerticalMerge>();
+        Assert.Equal(MergedCellValues.Restart, top!.Val!.Value);
+        Assert.Equal(MergedCellValues.Continue, bottom!.Val!.Value);
+    }
+
+    [Fact]
     public void Edit_vertical_merge_promotes_continuation_with_owner_paragraph_properties()
     {
         var path = Path.Combine(Path.GetTempPath(), $"fixture-merge-properties-{Guid.NewGuid():N}.docx");

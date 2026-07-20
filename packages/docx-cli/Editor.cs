@@ -2056,9 +2056,13 @@ public static class Editor
 
             return new DocxEditAppliedOperation(operation.Type, true, $"Merged table[{operation.TableIndex}].row[{rowIndex}].cells[{startCellIndex}..{endCellIndex}]");
         }
-        else if (operation.CellIndex is not null)
+        else if (operation.CellIndex is not null || operation.GridColumn is not null)
         {
-            var cellIndex = operation.CellIndex.Value;
+            if (operation.CellIndex is not null && operation.GridColumn is not null)
+            {
+                return new DocxEditAppliedOperation(operation.Type, false, "cellIndex and gridColumn are mutually exclusive");
+            }
+            var cellIndex = operation.CellIndex ?? -1;
             var startRowIndex = operation.StartRowIndex ?? 0;
             var endRowIndex = operation.EndRowIndex ?? (rows.Count - 1);
 
@@ -2067,22 +2071,31 @@ public static class Editor
                 return new DocxEditAppliedOperation(operation.Type, false, $"Invalid row range {startRowIndex} to {endRowIndex}");
             }
 
+            var selectedCells = new List<(TableCell Cell, int CellIndex)>();
             for (var rIdx = startRowIndex; rIdx <= endRowIndex; rIdx++)
             {
                 var rCells = rows[rIdx].Elements<TableCell>().ToList();
-                if (cellIndex >= rCells.Count)
+                var selected = operation.GridColumn is not null
+                    ? CellAtGridColumn(rows[rIdx], operation.GridColumn.Value)
+                    : cellIndex >= 0 && cellIndex < rCells.Count ? (rCells[cellIndex], cellIndex) : ((TableCell, int)?)null;
+                if (selected is null)
                 {
-                    return new DocxEditAppliedOperation(operation.Type, false, $"cellIndex {cellIndex} is out of range in row {rIdx}");
+                    var selector = operation.GridColumn is not null ? $"gridColumn {operation.GridColumn}" : $"cellIndex {cellIndex}";
+                    return new DocxEditAppliedOperation(operation.Type, false, $"{selector} is out of range in row {rIdx}");
                 }
+                selectedCells.Add(selected.Value);
             }
 
             for (var rIdx = startRowIndex; rIdx <= endRowIndex; rIdx++)
             {
-                var cell = rows[rIdx].Elements<TableCell>().ElementAt(cellIndex);
+                var selected = selectedCells[rIdx - startRowIndex];
+                var cell = selected.Cell;
                 var properties = cell.GetFirstChild<TableCellProperties>() ?? cell.PrependChild(new TableCellProperties());
                 if (rIdx == startRowIndex && IsVerticalMergeContinuation(properties))
                 {
-                    var ownerCell = FindPreviousVerticalMergeOwner(rows, startRowIndex, cellIndex);
+                    var ownerCell = operation.GridColumn is not null
+                        ? FindPreviousVerticalMergeOwnerByGridColumn(rows, startRowIndex, operation.GridColumn.Value)
+                        : FindPreviousVerticalMergeOwner(rows, startRowIndex, selected.CellIndex);
                     CopyMissingParagraphProperties(ownerCell, cell);
                 }
                 properties.RemoveAllChildren<VerticalMerge>();
@@ -2096,10 +2109,38 @@ public static class Editor
                 }
             }
 
-            return new DocxEditAppliedOperation(operation.Type, true, $"Vertically merged table[{operation.TableIndex}].cell[{cellIndex}].rows[{startRowIndex}..{endRowIndex}]");
+            var detailSelector = operation.GridColumn is not null ? $"gridColumn[{operation.GridColumn}]" : $"cell[{cellIndex}]";
+            return new DocxEditAppliedOperation(operation.Type, true, $"Vertically merged table[{operation.TableIndex}].{detailSelector}.rows[{startRowIndex}..{endRowIndex}]");
         }
 
-        return new DocxEditAppliedOperation(operation.Type, false, "Either rowIndex (horizontal) or cellIndex (vertical) must be specified for merge");
+        return new DocxEditAppliedOperation(operation.Type, false, "Either rowIndex (horizontal) or cellIndex/gridColumn (vertical) must be specified for merge");
+    }
+
+    private static (TableCell Cell, int CellIndex)? CellAtGridColumn(TableRow row, int gridColumn)
+    {
+        if (gridColumn < 0) return null;
+        var cursor = 0;
+        var cells = row.Elements<TableCell>().ToList();
+        for (var cellIndex = 0; cellIndex < cells.Count; cellIndex++)
+        {
+            var span = GetCellGridSpan(cells[cellIndex]);
+            if (gridColumn >= cursor && gridColumn < cursor + span) return (cells[cellIndex], cellIndex);
+            cursor += span;
+        }
+        return null;
+    }
+
+    private static TableCell? FindPreviousVerticalMergeOwnerByGridColumn(IReadOnlyList<TableRow> rows, int startRowIndex, int gridColumn)
+    {
+        for (var rowIndex = startRowIndex - 1; rowIndex >= 0; rowIndex--)
+        {
+            var selected = CellAtGridColumn(rows[rowIndex], gridColumn);
+            if (selected is null) return null;
+            var merge = selected.Value.Cell.GetFirstChild<TableCellProperties>()?.GetFirstChild<VerticalMerge>();
+            if (merge?.Val?.Value == MergedCellValues.Restart) return selected.Value.Cell;
+            if (merge is null) return null;
+        }
+        return null;
     }
 
     private static bool IsVerticalMergeContinuation(TableCellProperties properties)
