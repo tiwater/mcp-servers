@@ -110,6 +110,10 @@ public static class Editor
         {
             ApplyCellBold(workbookPart, cell, operation.Bold.Value);
         }
+        if (operation.ShrinkToFit.HasValue)
+        {
+            ApplyCellShrinkToFit(workbookPart, cell, operation.ShrinkToFit.Value);
+        }
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated {operation.Sheet}!{operation.Cell}");
     }
@@ -1280,6 +1284,32 @@ public static class Editor
         stylesheet.CellFormats!.Append(targetFormat);
         stylesPart.Stylesheet.Save();
 
+        cell.StyleIndex = formatIndex;
+    }
+
+    private static void ApplyCellShrinkToFit(WorkbookPart workbookPart, Cell cell, bool shrinkToFit)
+    {
+        var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet ??= new Stylesheet
+        {
+            Fonts = new Fonts(new Font()),
+            Fills = new Fills(new Fill()),
+            Borders = new Borders(new Border()),
+            CellStyleFormats = new CellStyleFormats(new CellFormat()),
+            CellFormats = new CellFormats(new CellFormat()),
+        };
+        stylesPart.Stylesheet.CellFormats ??= new CellFormats(new CellFormat());
+        var formats = stylesPart.Stylesheet.CellFormats;
+        var sourceStyleIndex = cell.StyleIndex?.Value ?? 0U;
+        var sourceFormat = formats.Elements<CellFormat>().ElementAtOrDefault((int)sourceStyleIndex)
+            ?? formats.Elements<CellFormat>().First();
+        var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
+        targetFormat.Alignment ??= new Alignment();
+        targetFormat.Alignment.ShrinkToFit = shrinkToFit;
+        targetFormat.ApplyAlignment = true;
+        var formatIndex = (uint)formats.Count();
+        formats.Append(targetFormat);
+        stylesPart.Stylesheet.Save();
         cell.StyleIndex = formatIndex;
     }
 

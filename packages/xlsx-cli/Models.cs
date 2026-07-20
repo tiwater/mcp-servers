@@ -78,6 +78,7 @@ public sealed record XlsxEditOperation(
     string? StartCell = null,
     IReadOnlyList<IReadOnlyList<string>>? Values = null,
     bool? Bold = null,
+    bool? ShrinkToFit = null,
     int? StartRow = null,
     int? Count = null,
     int? SourceRow = null,
