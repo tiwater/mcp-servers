@@ -19,6 +19,15 @@ tiwater-convert xlsx-to-pdf <input.xlsx> <output.pdf>
 tiwater-convert pptx-to-pdf <input.pptx> <output.pdf>
 ```
 
+Successful native WPS PDF conversions include
+`native_render_provenance` conforming to
+`tiwater.convert-native-render-provenance/v1`. The provider records the WPS
+package build and executable hash, OS/.NET runtime identity, a count/hash-only
+fontconfig inventory based on font family, style, and font bytes, input/output
+SHA-256 identities, and PDF page count. Native conversion fails closed when
+any required provenance cannot be collected. Consumers should retain this
+provider-owned object unchanged rather than probing the host independently.
+
 XLS conversion prefers WPS Spreadsheets through `pywpsrpc` when available,
 because WPS generally preserves legacy workbook formatting better on Linux. Set
 `TIWATER_WPSRPC_PYTHON` or `LUCID_WPSRPC_PYTHON` to the pywpsrpc venv Python if

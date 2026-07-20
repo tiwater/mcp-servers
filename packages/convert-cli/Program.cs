@@ -48,12 +48,16 @@ internal static class Program
                         {
                             status = "ok",
                             input = Path.GetFullPath(args[1]),
+                            input_sha256 = FileSha256(args[1]),
                             output = Path.GetFullPath(args[2]),
+                            output_sha256 = FileSha256(args[2]),
                             source_format = sourceFormat.ToLowerInvariant(),
                             target_format = "pdf",
                             version = ToolVersion,
                             backend = pdfResult.Backend,
                             fallback_reason = pdfResult.FallbackReason,
+                            page_count = pdfResult.NativeRenderProvenance?.PageCount,
+                            native_render_provenance = pdfResult.NativeRenderProvenance,
                         }));
                         return 0;
                     }
