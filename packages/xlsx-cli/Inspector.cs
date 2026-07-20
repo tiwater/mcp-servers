@@ -1,5 +1,6 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using Dockit.Convert;
 
 namespace Dockit.Xlsx;
 
@@ -7,16 +8,36 @@ public static class Inspector
 {
     public static System.Text.Json.JsonElement InspectPublishedEvidence(string path)
     {
+        if (WorkbookLoader.IsLegacyXls(path))
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"tiwater-xls-observation-{Guid.NewGuid():N}");
+            var converted = Path.Combine(root, "normalized.xlsx");
+            Directory.CreateDirectory(root);
+            try
+            {
+                var conversion = WorkbookConverter.ConvertXlsToXlsx(path, converted);
+                var convertedWorkbook = Inspect(converted) with { File = Path.GetFullPath(path) };
+                var convertedExport = Extractor.Export(converted);
+                return System.Text.Json.JsonSerializer.SerializeToElement(new
+                {
+                    workbook = convertedWorkbook,
+                    export = convertedExport,
+                    conversion = new { sourceFormat = "xls", observationFormat = "xlsx", conversion.Backend, conversion.FallbackReason }
+                }, Json.Options);
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
         var workbook = Inspect(path);
         var export = Extractor.Export(path);
-        return WorkbookLoader.IsLegacyXls(path)
-            ? System.Text.Json.JsonSerializer.SerializeToElement(new { workbook, export }, Json.Options)
-            : System.Text.Json.JsonSerializer.SerializeToElement(new
-            {
-                workbook,
-                export,
-                evidence = EvidenceInspector.Inspect(path)
-            }, Json.Options);
+        return System.Text.Json.JsonSerializer.SerializeToElement(new
+        {
+            workbook,
+            export,
+            evidence = EvidenceInspector.Inspect(path)
+        }, Json.Options);
     }
 
     public static System.Text.Json.JsonElement InspectEvidence(string path) =>
