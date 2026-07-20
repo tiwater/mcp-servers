@@ -49,8 +49,8 @@ public static class EvidenceInspector
                 var borderId = EffectiveComponentId(format?.BorderId?.Value, format?.ApplyBorder?.Value, baseFormat?.BorderId?.Value);
                 var formatCode = customFormats.GetValueOrDefault(numId) ?? BuiltInFormat(numId) ?? $"builtin:{numId}";
                 var normalizedFormat = NormalizeNumberFormat(numId, formatCode, customFormats.ContainsKey(numId));
-                var alignment = format?.ApplyAlignment?.Value == false ? null : format?.Alignment;
-                var baseAlignment = baseFormat?.Alignment;
+                var alignment = EffectiveAlignment(format, baseFormat);
+                var alignmentEvidence = ResolveAlignment(alignment);
                 var protection = EffectiveProtection(format, baseFormat);
                 var applyProtection = format?.ApplyProtection?.Value ?? false;
                 var locked = protection?.Locked?.Value ?? true;
@@ -79,11 +79,13 @@ public static class EvidenceInspector
                         numberFormat = formatCode,
                         numberFormatEvidence = normalizedFormat,
                         numberFormatFingerprint = NumberFormatFingerprint(formatCode, normalizedFormat.Kind),
-                        horizontalAlignment = alignment?.Horizontal?.InnerText ?? baseAlignment?.Horizontal?.InnerText,
-                        verticalAlignment = alignment?.Vertical?.InnerText ?? baseAlignment?.Vertical?.InnerText,
-                        wrapText = alignment?.WrapText?.Value ?? baseAlignment?.WrapText?.Value,
-                        shrinkToFit = alignment?.ShrinkToFit?.Value ?? baseAlignment?.ShrinkToFit?.Value,
-                        textRotation = alignment?.TextRotation?.Value ?? baseAlignment?.TextRotation?.Value,
+                        alignmentFingerprint = AlignmentFingerprint(alignmentEvidence),
+                        alignment = alignmentEvidence,
+                        horizontalAlignment = alignment?.Horizontal?.InnerText,
+                        verticalAlignment = alignment?.Vertical?.InnerText,
+                        wrapText = alignment?.WrapText?.Value,
+                        shrinkToFit = alignment?.ShrinkToFit?.Value,
+                        textRotation = alignment?.TextRotation?.Value,
                         protection = new {
                             applyProtection,
                             locked,
@@ -147,6 +149,32 @@ public static class EvidenceInspector
         return format?.ApplyProtection?.Value == true ? null : baseFormat?.Protection;
     }
 
+    private static Alignment? EffectiveAlignment(CellFormat? format, CellFormat? baseFormat)
+    {
+        if (format?.ApplyAlignment?.Value == false) return baseFormat?.Alignment;
+        if (format?.Alignment is not null) return format.Alignment;
+        return format?.ApplyAlignment?.Value == true ? null : baseFormat?.Alignment;
+    }
+
+    private static AlignmentEvidence ResolveAlignment(Alignment? alignment) => new(
+        alignment?.Horizontal?.InnerText ?? "general",
+        alignment?.Vertical?.InnerText ?? "bottom",
+        alignment?.TextRotation?.Value ?? 0U,
+        alignment?.WrapText?.Value ?? false,
+        alignment?.ShrinkToFit?.Value ?? false,
+        alignment?.Indent?.Value ?? 0U,
+        alignment?.RelativeIndent?.Value ?? 0,
+        alignment?.JustifyLastLine?.Value ?? false,
+        alignment?.ReadingOrder?.Value ?? 0U,
+        ParseBoolean(alignment?.MergeCell?.Value));
+
+    private static bool ParseBoolean(string? value) => value switch
+    {
+        null or "0" or "false" => false,
+        "1" or "true" => true,
+        _ => throw new InvalidDataException($"Invalid OpenXML boolean value: {value}")
+    };
+
     private static string ComponentFingerprint<T>(IReadOnlyList<T> components, uint id, string kind) where T : OpenXmlElement
     {
         if (components.Count == 0 && id == 0) return Sha256($"implicit:{kind}:default");
@@ -165,6 +193,23 @@ public static class EvidenceInspector
         AppendToken(canonical, "number-format");
         AppendToken(canonical, exactCode);
         AppendToken(canonical, kind);
+        return Sha256(canonical.ToString());
+    }
+
+    private static string AlignmentFingerprint(AlignmentEvidence alignment)
+    {
+        var canonical = new StringBuilder();
+        AppendToken(canonical, "alignment");
+        AppendToken(canonical, alignment.Horizontal);
+        AppendToken(canonical, alignment.Vertical);
+        AppendToken(canonical, alignment.TextRotation.ToString(CultureInfo.InvariantCulture));
+        AppendToken(canonical, alignment.WrapText ? "1" : "0");
+        AppendToken(canonical, alignment.ShrinkToFit ? "1" : "0");
+        AppendToken(canonical, alignment.Indent.ToString(CultureInfo.InvariantCulture));
+        AppendToken(canonical, alignment.RelativeIndent.ToString(CultureInfo.InvariantCulture));
+        AppendToken(canonical, alignment.JustifyLastLine ? "1" : "0");
+        AppendToken(canonical, alignment.ReadingOrder.ToString(CultureInfo.InvariantCulture));
+        AppendToken(canonical, alignment.MergeCell ? "1" : "0");
         return Sha256(canonical.ToString());
     }
 
@@ -292,6 +337,18 @@ public static class EvidenceInspector
     }
 
     private sealed record NumberFormatEvidence(uint Id, string Code, string NormalizedCode, string Source, string Kind, bool IsDateLike);
+
+    private sealed record AlignmentEvidence(
+        string Horizontal,
+        string Vertical,
+        uint TextRotation,
+        bool WrapText,
+        bool ShrinkToFit,
+        uint Indent,
+        int RelativeIndent,
+        bool JustifyLastLine,
+        uint ReadingOrder,
+        bool MergeCell);
 
     private static string? BuiltInFormat(uint id) => id switch
     {
