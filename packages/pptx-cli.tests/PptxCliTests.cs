@@ -15,7 +15,7 @@ public class PptxCliTests
     [Fact]
     public void Published_inspection_evidence_is_recomputed_from_pptx_bytes()
     {
-        var source=CreateFixture();var root=Path.Combine(Path.GetTempPath(),$"pptx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="pptx"},extraction=new{schema="tiwater.pptx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));var observations=new[]{new FormatEvidenceCommand.AdditionalObservation("presentation-target-1","document.semantic-target","structure",new{candidateId="pptx-presentation-root",semanticIdentity=new{format="pptx",scope="presentation"},runtimeLocator=new{kind="pptx-presentation"},capabilities=new[]{"pptx.edit"},resourceSet=new[]{new{resourceKey="pptx-presentation",access="write"}},writeSet=new[]{new{resourceKey="pptx-presentation",writeKey="presentation-format"}}},"/inspection/presentation")};Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-pptx","0.2.2","pptx",input=>new{presentation=Inspector.Inspect(input),detail=Inspector.InspectDetail(input)},_=>observations));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-pptx","0.2.2","pptx",input=>new{presentation=Inspector.Inspect(input),detail=Inspector.InspectDetail(input)},_=>observations));using var evidenceDocument=JsonDocument.Parse(File.ReadAllText(evidence));Assert.Contains(evidenceDocument.RootElement.GetProperty("observations").EnumerateArray(),entry=>entry.GetProperty("observationType").GetString()=="document.semantic-target");Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+        var source=CreateFixture();var root=Path.Combine(Path.GetTempPath(),$"pptx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="pptx"},extraction=new{schema="tiwater.pptx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));var observations=new[]{new FormatEvidenceCommand.AdditionalObservation("presentation-target-1","document.semantic-target","structure",new{candidateId="pptx-presentation-root",semanticIdentity=new{format="pptx",scope="presentation"},runtimeLocator=new{kind="pptx-presentation"},capabilities=new[]{"pptx.edit"},resourceSet=new[]{new{resourceKey="pptx-presentation",access="write"}},writeSet=new[]{new{resourceKey="pptx-presentation",writeKey="presentation-format"}}},"/inspection/presentation")};Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-pptx","0.2.6","pptx",input=>new{presentation=Inspector.Inspect(input),detail=Inspector.InspectDetail(input)},_=>observations));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-pptx","0.2.6","pptx",input=>new{presentation=Inspector.Inspect(input),detail=Inspector.InspectDetail(input)},_=>observations));using var evidenceDocument=JsonDocument.Parse(File.ReadAllText(evidence));Assert.Contains(evidenceDocument.RootElement.GetProperty("observations").EnumerateArray(),entry=>entry.GetProperty("semanticField").GetString()=="document.semantic-target");Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
     }
     [Fact]
     public void Inspect_reports_slide_metrics_and_placeholders()
@@ -158,6 +158,39 @@ public class PptxCliTests
         var after = Inspector.InspectDetail(output);
         Assert.All(after.Slides, slide => Assert.Equal("Approved Master", after.Masters.Single(master => master.Path == slide.MasterPath).Name));
         Assert.Equal(before, after.Slides.SelectMany(slide => slide.Shapes).Select(shape => shape.Text).ToList());
+    }
+
+    [Fact]
+    public void InspectDetail_includes_top_level_group_geometry_and_descendant_text()
+    {
+        var source = CreateFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            var slide = presentation.PresentationPart!.SlideParts.First().Slide;
+            slide.CommonSlideData!.ShapeTree!.Append(new P.GroupShape(
+                new P.NonVisualGroupShapeProperties(
+                    new P.NonVisualDrawingProperties { Id = 99U, Name = "Grouped content" },
+                    new P.NonVisualGroupShapeDrawingProperties(),
+                    new P.ApplicationNonVisualDrawingProperties()),
+                new P.GroupShapeProperties(new A.TransformGroup(
+                    new A.Offset { X = -1090367L, Y = 1696710L },
+                    new A.Extents { Cx = 4738136L, Cy = 4400065L },
+                    new A.ChildOffset { X = 0L, Y = 0L },
+                    new A.ChildExtents { Cx = 1000L, Cy = 1000L })),
+                new P.Shape(
+                    new P.NonVisualShapeProperties(
+                        new P.NonVisualDrawingProperties { Id = 100U, Name = "Child" },
+                        new P.NonVisualShapeDrawingProperties(),
+                        new P.ApplicationNonVisualDrawingProperties()),
+                    new P.ShapeProperties(),
+                    new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Grouped text")))))));
+            slide.Save();
+        }
+
+        var group = Assert.Single(Inspector.InspectDetail(source).Slides[0].Shapes, shape => shape.Kind == "groupShape");
+        Assert.Equal(99U, group.ShapeId);
+        Assert.Equal("Grouped text", group.Text);
+        Assert.Equal(new TransformInfo(-1090367L, 1696710L, 4738136L, 4400065L), group.Transform);
     }
 
     [Fact]
