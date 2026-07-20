@@ -1,6 +1,7 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using System.Text.Json;
+using A = DocumentFormat.OpenXml.Drawing;
 
 namespace Dockit.Pptx;
 
@@ -44,6 +45,11 @@ public static class TemplateApplicator
             var slide = slides[assignment.SlideNumber - 1];
             if (slide.SlideLayoutPart is { } oldLayout) slide.DeletePart(oldLayout);
             slide.AddPart(importedLayout);
+            if (assignment.ContentBounds is { } contentBounds)
+            {
+                try { FitSlideContent(slide, contentBounds); }
+                catch (InvalidOperationException error) { issues.Add(new(assignment.SlideNumber, error.Message)); continue; }
+            }
             changed++;
         }
         if (issues.Count == 0 && changed == slides.Count)
@@ -62,6 +68,134 @@ public static class TemplateApplicator
     }
 
     private static string PartPath(OpenXmlPart part) => part.Uri.OriginalString.TrimStart('/');
+
+    private static void FitSlideContent(SlidePart slidePart, TransformInfo target)
+    {
+        if (target.X < 0 || target.Y < 0 || target.Cx <= 0 || target.Cy <= 0)
+            throw new InvalidOperationException("content bounds are invalid");
+        var transforms = VisualChildren(slidePart.Slide?.CommonSlideData?.ShapeTree)
+            .Select(MutableTransformFor)
+            .Where(value => value is not null)
+            .Cast<MutableTransform>()
+            .Where(value => value.Cx > 0 && value.Cy > 0)
+            .ToList();
+        if (transforms.Count == 0) throw new InvalidOperationException("slide has no transformable content");
+
+        var sourceX = transforms.Min(value => value.X);
+        var sourceY = transforms.Min(value => value.Y);
+        var sourceRight = transforms.Max(value => checked(value.X + value.Cx));
+        var sourceBottom = transforms.Max(value => checked(value.Y + value.Cy));
+        var sourceWidth = sourceRight - sourceX;
+        var sourceHeight = sourceBottom - sourceY;
+        if (sourceWidth <= 0 || sourceHeight <= 0) throw new InvalidOperationException("slide content bounds are empty");
+
+        var scale = Math.Min((double)target.Cx / sourceWidth, (double)target.Cy / sourceHeight);
+        if (!double.IsFinite(scale) || scale <= 0) throw new InvalidOperationException("slide content scale is invalid");
+        var fittedWidth = Round(sourceWidth * scale);
+        var fittedHeight = Round(sourceHeight * scale);
+        var offsetX = target.X + (target.Cx - fittedWidth) / 2;
+        var offsetY = target.Y + (target.Cy - fittedHeight) / 2;
+        foreach (var transform in transforms)
+        {
+            transform.Apply(
+                offsetX + Round((transform.X - sourceX) * scale),
+                offsetY + Round((transform.Y - sourceY) * scale),
+                Math.Max(1, Round(transform.Cx * scale)),
+                Math.Max(1, Round(transform.Cy * scale)));
+        }
+        ScaleTableGeometry(slidePart.Slide, scale);
+        ScaleExplicitFontSizes(slidePart.Slide, scale);
+        slidePart.Slide?.Save();
+    }
+
+    private static void ScaleTableGeometry(Slide? slide, double scale)
+    {
+        if (slide is null || Math.Abs(scale - 1d) < 0.0000001d) return;
+        var scalableAttributes = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+        {
+            ["gridCol"] = new(StringComparer.Ordinal) { "w" },
+            ["tr"] = new(StringComparer.Ordinal) { "h" },
+            ["tcPr"] = new(StringComparer.Ordinal) { "marL", "marR", "marT", "marB" },
+        };
+        foreach (var element in slide.Descendants().Where(value => scalableAttributes.ContainsKey(value.LocalName)))
+        {
+            var attributeNames = scalableAttributes[element.LocalName];
+            foreach (var attribute in element.GetAttributes().Where(value => attributeNames.Contains(value.LocalName)).ToList())
+            {
+                if (!long.TryParse(attribute.Value, out var value) || value < 0) continue;
+                var scaled = Math.Max(0, Round(value * scale));
+                element.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute(attribute.Prefix, attribute.LocalName, attribute.NamespaceUri, scaled.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            }
+        }
+    }
+
+    private static void ScaleExplicitFontSizes(Slide? slide, double scale)
+    {
+        if (slide is null || Math.Abs(scale - 1d) < 0.0000001d) return;
+        var runPropertyNames = new HashSet<string>(StringComparer.Ordinal) { "rPr", "defRPr", "endParaRPr", "defaultRPr" };
+        foreach (var element in slide.Descendants().Where(value => runPropertyNames.Contains(value.LocalName)))
+        {
+            var attribute = element.GetAttributes().FirstOrDefault(value => value.LocalName == "sz");
+            if (string.IsNullOrWhiteSpace(attribute.Value) || !int.TryParse(attribute.Value, out var size) || size <= 0) continue;
+            var scaled = Math.Max(100, checked((int)Math.Round(size * scale, MidpointRounding.AwayFromZero)));
+            element.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute(attribute.Prefix, attribute.LocalName, attribute.NamespaceUri, scaled.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+    }
+
+    private static long Round(double value) => checked((long)Math.Round(value, MidpointRounding.AwayFromZero));
+
+    private static IEnumerable<DocumentFormat.OpenXml.OpenXmlElement> VisualChildren(ShapeTree? shapeTree)
+    {
+        foreach (var child in shapeTree?.ChildElements ?? [])
+        {
+            if (child.LocalName != "AlternateContent") { yield return child; continue; }
+            foreach (var descendant in child.Descendants().Where(value => value is Shape or Picture or GraphicFrame or GroupShape))
+                yield return descendant;
+        }
+    }
+
+    private static MutableTransform? MutableTransformFor(DocumentFormat.OpenXml.OpenXmlElement element)
+    {
+        if (element is Shape shape && shape.ShapeProperties?.Transform2D is { } shapeTransform)
+            return FromTransform(shapeTransform);
+        if (element is Picture picture && picture.ShapeProperties?.Transform2D is { } pictureTransform)
+            return FromTransform(pictureTransform);
+        if (element is GraphicFrame frame && frame.Transform is { } frameTransform)
+            return FromTransform(frameTransform);
+        if (element is GroupShape group && group.GroupShapeProperties?.TransformGroup is { } groupTransform)
+            return FromTransform(groupTransform);
+        return null;
+    }
+
+    private static MutableTransform? FromTransform(A.Transform2D transform)
+    {
+        if (transform.Offset is not { } offset || transform.Extents is not { } extents) return null;
+        return new(offset.X ?? 0L, offset.Y ?? 0L, extents.Cx ?? 0L, extents.Cy ?? 0L, (x, y, cx, cy) =>
+        {
+            offset.X = x; offset.Y = y; extents.Cx = cx; extents.Cy = cy;
+        });
+    }
+
+    private static MutableTransform? FromTransform(Transform transform)
+    {
+        if (transform.Offset is not { } offset || transform.Extents is not { } extents) return null;
+        return new(offset.X ?? 0L, offset.Y ?? 0L, extents.Cx ?? 0L, extents.Cy ?? 0L, (x, y, cx, cy) =>
+        {
+            offset.X = x; offset.Y = y; extents.Cx = cx; extents.Cy = cy;
+        });
+    }
+
+    private static MutableTransform? FromTransform(A.TransformGroup transform)
+    {
+        if (transform.Offset is not { } offset || transform.Extents is not { } extents) return null;
+        return new(offset.X ?? 0L, offset.Y ?? 0L, extents.Cx ?? 0L, extents.Cy ?? 0L, (x, y, cx, cy) =>
+        {
+            offset.X = x; offset.Y = y; extents.Cx = cx; extents.Cy = cy;
+        });
+    }
+
+    private sealed record MutableTransform(long X, long Y, long Cx, long Cy, Action<long, long, long, long> Apply);
+
     private static IEnumerable<SlidePart> EnumerateSlides(PresentationPart presentationPart)
     {
         foreach (var slideId in presentationPart.Presentation.SlideIdList?.Elements<SlideId>() ?? [])

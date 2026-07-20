@@ -59,6 +59,7 @@ public sealed record MasterDetail(
     string XmlSha256,
     string? ThemePath,
     string? ThemeSha256,
+    IReadOnlyList<ShapeDetail> Shapes,
     IReadOnlyList<LayoutDetail> Layouts
 );
 
@@ -147,7 +148,11 @@ public sealed record TemplateApplicationPlan(
     IReadOnlyList<SlideLayoutAssignment> Slides
 );
 
-public sealed record SlideLayoutAssignment(int SlideNumber, string TargetLayoutPath);
+public sealed record SlideLayoutAssignment(
+    int SlideNumber,
+    string TargetLayoutPath,
+    TransformInfo? ContentBounds = null
+);
 
 public sealed record TemplateApplicationResult(
     string Input,

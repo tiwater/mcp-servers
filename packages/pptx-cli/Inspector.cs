@@ -76,10 +76,11 @@ public static class Inspector
                 HashText(master.SlideMaster?.OuterXml ?? string.Empty),
                 master.ThemePart is null ? null : NormalizePartPath(master.ThemePart.Uri),
                 master.ThemePart is null ? null : HashPart(master.ThemePart),
+                ExtractShapes(master, master.SlideMaster?.CommonSlideData?.ShapeTree),
                 master.SlideLayoutParts.Select(layout => new LayoutDetail(
                     NormalizePartPath(layout.Uri),
                     layout.SlideLayout?.CommonSlideData?.Name?.Value ?? string.Empty,
-                    layout.SlideLayout?.Type?.Value.ToString(),
+                    GetAttributeValue(layout.SlideLayout, "type"),
                     HashText(layout.SlideLayout?.OuterXml ?? string.Empty))).OrderBy(layout => layout.Path, StringComparer.Ordinal).ToList()))
             .OrderBy(master => master.Path, StringComparer.Ordinal).ToList();
 
@@ -142,48 +143,62 @@ public static class Inspector
     }
 
     private static List<ShapeDetail> ExtractShapes(SlidePart slidePart)
-    {
-        var slide = slidePart.Slide;
-        if (slide is null)
-        {
-            return [];
-        }
+        => ExtractShapes(slidePart, slidePart.Slide?.CommonSlideData?.ShapeTree);
 
+    private static List<ShapeDetail> ExtractShapes(OpenXmlPart ownerPart, ShapeTree? shapeTree)
+    {
         var shapes = new List<ShapeDetail>();
         var zOrder = 0;
-        foreach (var child in slide.CommonSlideData?.ShapeTree?.ChildElements ?? [])
+        var seen = new HashSet<(string Kind, uint Id)>();
+        foreach (var child in VisualChildren(shapeTree))
         {
             if (child is Shape shape)
             {
                 var app = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties;
-                shapes.Add(new ShapeDetail(shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U,
+                var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
+                if (!seen.Add(("shape", shapeId))) continue;
+                shapes.Add(new ShapeDetail(shapeId,
                     shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "shape", zOrder++,
-                    app?.PlaceholderShape?.Type?.Value.ToString(), null, null,
+                    GetAttributeValue(app?.PlaceholderShape, "type"), null, null,
                     string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody), ExtractRuns(shape.TextBody)));
             }
             else if (child is Picture picture)
             {
+                var shapeId = picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
+                if (!seen.Add(("picture", shapeId))) continue;
                 string? mediaPath = null; string? mediaHash = null;
                 var relationshipId = picture.BlipFill?.Blip?.Embed?.Value;
-                if (!string.IsNullOrWhiteSpace(relationshipId) && slidePart.GetPartById(relationshipId) is OpenXmlPart media)
+                if (!string.IsNullOrWhiteSpace(relationshipId) && ownerPart.GetPartById(relationshipId) is OpenXmlPart media)
                 {
                     mediaPath = NormalizePartPath(media.Uri); using var stream = media.GetStream(); mediaHash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
                 }
                 var app = picture.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties;
-                shapes.Add(new ShapeDetail(picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U,
+                shapes.Add(new ShapeDetail(shapeId,
                     picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "picture", zOrder++,
-                    app?.PlaceholderShape?.Type?.Value.ToString(), mediaPath, mediaHash, string.Empty,
+                    GetAttributeValue(app?.PlaceholderShape, "type"), mediaPath, mediaHash, string.Empty,
                     ExtractTransform(picture.ShapeProperties?.Transform2D), [], []));
             }
             else if (child is GraphicFrame frame)
             {
                 var app = frame.NonVisualGraphicFrameProperties?.ApplicationNonVisualDrawingProperties;
-                shapes.Add(new ShapeDetail(frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U,
+                var shapeId = frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
+                if (!seen.Add(("graphicFrame", shapeId))) continue;
+                shapes.Add(new ShapeDetail(shapeId,
                     frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "graphicFrame", zOrder++,
-                    app?.PlaceholderShape?.Type?.Value.ToString(), null, null, string.Empty, ExtractTransform(frame.Transform), [], []));
+                    GetAttributeValue(app?.PlaceholderShape, "type"), null, null, string.Empty, ExtractTransform(frame.Transform), [], []));
             }
         }
         return shapes;
+    }
+
+    private static IEnumerable<OpenXmlElement> VisualChildren(ShapeTree? shapeTree)
+    {
+        foreach (var child in shapeTree?.ChildElements ?? [])
+        {
+            if (child.LocalName != "AlternateContent") { yield return child; continue; }
+            foreach (var descendant in child.Descendants().Where(value => value is Shape or Picture or GraphicFrame or GroupShape))
+                yield return descendant;
+        }
     }
 
     private static TransformInfo? ExtractTransform(A.Transform2D? transform)
