@@ -7,7 +7,8 @@ A generic CLI for loss-aware office format conversion.
 - `.xls` -> `.xlsx`
 - Writer documents -> `.pdf` through WPS Writer RPC when available
 - XLS/XLSX workbooks -> `.pdf` through WPS Spreadsheets RPC when available
-- Other Office document/workbook/presentation formats -> `.pdf` through a local LibreOffice/soffice install
+- PPT/PPTX/ODP presentations -> `.pdf` through WPS Presentation RPC when available
+- Other Office formats -> `.pdf` through a local LibreOffice/soffice install
 
 ## Usage
 
@@ -42,12 +43,18 @@ Python are available. Set `TIWATER_OFFICE_PDF_BACKEND=wps-spreadsheet` to
 require that native backend and fail closed; it never treats LibreOffice output
 as WPS Spreadsheet proof.
 
+PPT, PPTX, and ODP PDF conversion prefers WPS Presentation through `pywpsrpc`
+when `wpp`, `xvfb-run`, `dbus-run-session`, and the configured RPC Python are
+available. Set `TIWATER_OFFICE_PDF_BACKEND=wps-presentation` to require that
+native backend and fail closed; it never treats LibreOffice output as WPS
+Presentation proof.
+
 On macOS, set `TIWATER_WPS_WRITER_LIMA_INSTANCE` to the name of a configured
 Lima Linux instance that exposes the documented `/tmp/lucid-wps-render` shared
-directory and has the published WPS Writer and Spreadsheets runtimes installed. The converter
+directory and has the published WPS Writer, Spreadsheets, and Presentation runtimes installed. The converter
 then stages each input and output in a unique shared directory and invokes
 `limactl shell <instance>` itself; it reports the requested `wps-writer` or
-`wps-spreadsheet` backend and fails closed if the configured instance cannot render. This is an explicit
+`wps-spreadsheet`, or `wps-presentation` backend and fails closed if the configured instance cannot render. This is an explicit
 runtime configuration, not an arbitrary command hook.
 
 LibreOffice-backed PDF conversion requires `soffice`. If it is not on `PATH`, set one of:

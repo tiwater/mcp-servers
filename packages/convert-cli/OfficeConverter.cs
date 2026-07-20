@@ -55,8 +55,9 @@ public static class OfficeConverter
 
         var writerFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "doc", "docx", "odt", "rtf" };
         var spreadsheetFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "xls", "xlsx" };
+        var presentationFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ppt", "pptx", "odp" };
         var requestedBackend = (Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND") ?? "auto").Trim().ToLowerInvariant();
-        if (!new[] { "auto", "wps-writer", "wps-spreadsheet", "libreoffice" }.Contains(requestedBackend))
+        if (!new[] { "auto", "wps-writer", "wps-spreadsheet", "wps-presentation", "libreoffice" }.Contains(requestedBackend))
         {
             throw new InvalidOperationException($"Unsupported TIWATER_OFFICE_PDF_BACKEND: {requestedBackend}");
         }
@@ -65,6 +66,8 @@ public static class OfficeConverter
             throw new InvalidOperationException($"WPS Writer PDF backend does not support {normalizedFormat} input.");
         if (requestedBackend == "wps-spreadsheet" && !spreadsheetFormats.Contains(normalizedFormat))
             throw new InvalidOperationException($"WPS Spreadsheets PDF backend does not support {normalizedFormat} input.");
+        if (requestedBackend == "wps-presentation" && !presentationFormats.Contains(normalizedFormat))
+            throw new InvalidOperationException($"WPS Presentation PDF backend does not support {normalizedFormat} input.");
 
         if (writerFormats.Contains(normalizedFormat) && requestedBackend != "libreoffice")
         {
@@ -102,10 +105,30 @@ public static class OfficeConverter
             }
         }
 
+        if (presentationFormats.Contains(normalizedFormat) && requestedBackend != "libreoffice")
+        {
+            if (WpsPresentationPdfConverter.IsAvailable())
+            {
+                WpsPresentationPdfConverter.ConvertToPdf(input, output);
+                return new OfficePdfConversionResult("wps-presentation");
+            }
+            if (LimaWpsWriterPdfConverter.IsAvailable())
+            {
+                LimaWpsWriterPdfConverter.ConvertPresentationToPdf(input, output);
+                return new OfficePdfConversionResult("wps-presentation");
+            }
+            if (requestedBackend == "wps-presentation")
+            {
+                throw new InvalidOperationException("WPS Presentation PDF backend was required but neither a local WPS Presentation runtime nor a configured Lima WPS instance is available.");
+            }
+        }
+
         ConvertWithSoffice(input, output, "pdf", sofficePath);
         var fallbackReason = writerFormats.Contains(normalizedFormat)
             ? "wps-writer-unavailable"
-            : spreadsheetFormats.Contains(normalizedFormat) ? "wps-spreadsheet-unavailable" : null;
+            : spreadsheetFormats.Contains(normalizedFormat)
+                ? "wps-spreadsheet-unavailable"
+                : presentationFormats.Contains(normalizedFormat) ? "wps-presentation-unavailable" : null;
         return new OfficePdfConversionResult("libreoffice", fallbackReason);
     }
 

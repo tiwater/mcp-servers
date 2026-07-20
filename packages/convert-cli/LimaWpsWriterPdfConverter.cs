@@ -18,6 +18,9 @@ internal static class LimaWpsWriterPdfConverter
     internal static void ConvertSpreadsheetToPdf(string input, string output)
         => ConvertToPdf(input, output, "wps-spreadsheet");
 
+    internal static void ConvertPresentationToPdf(string input, string output)
+        => ConvertToPdf(input, output, "wps-presentation");
+
     private static void ConvertToPdf(string input, string output, string backend)
     {
         var instance = InstanceName()
@@ -86,14 +89,16 @@ internal static class LimaWpsWriterPdfConverter
     }
 
     private static string RemoteCommand(string input, string output, string backend)
-        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
 
     private static string SourceFormat(string input, string backend)
     {
         var format = Path.GetExtension(input).TrimStart('.').ToLowerInvariant();
         var supported = backend == "wps-writer"
             ? format is "doc" or "docx" or "odt" or "rtf"
-            : backend == "wps-spreadsheet" && format is "xls" or "xlsx";
+            : backend == "wps-spreadsheet"
+                ? format is "xls" or "xlsx"
+                : backend == "wps-presentation" && format is "ppt" or "pptx" or "odp";
         return supported ? format : throw new InvalidOperationException($"Unsupported Lima {backend} PDF source format: {format}");
     }
 
