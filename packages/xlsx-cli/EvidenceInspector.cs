@@ -43,17 +43,15 @@ public static class EvidenceInspector
                 var baseFormat = baseFormatIndex is not null && baseFormatIndex.Value < baseFormats.Count
                     ? baseFormats[(int)baseFormatIndex.Value]
                     : null;
-                var numId = format?.NumberFormatId?.Value ?? baseFormat?.NumberFormatId?.Value ?? 0U;
-                var fontId = format?.FontId?.Value ?? baseFormat?.FontId?.Value ?? 0U;
-                var fillId = format?.FillId?.Value ?? baseFormat?.FillId?.Value ?? 0U;
-                var borderId = format?.BorderId?.Value ?? baseFormat?.BorderId?.Value ?? 0U;
+                var numId = EffectiveComponentId(format?.NumberFormatId?.Value, format?.ApplyNumberFormat?.Value, baseFormat?.NumberFormatId?.Value);
+                var fontId = EffectiveComponentId(format?.FontId?.Value, format?.ApplyFont?.Value, baseFormat?.FontId?.Value);
+                var fillId = EffectiveComponentId(format?.FillId?.Value, format?.ApplyFill?.Value, baseFormat?.FillId?.Value);
+                var borderId = EffectiveComponentId(format?.BorderId?.Value, format?.ApplyBorder?.Value, baseFormat?.BorderId?.Value);
                 var formatCode = customFormats.GetValueOrDefault(numId) ?? BuiltInFormat(numId) ?? $"builtin:{numId}";
                 var normalizedFormat = NormalizeNumberFormat(numId, formatCode, customFormats.ContainsKey(numId));
                 var alignment = format?.ApplyAlignment?.Value == false ? null : format?.Alignment;
                 var baseAlignment = baseFormat?.Alignment;
-                var protection = format?.ApplyProtection?.Value == true
-                    ? format.Protection
-                    : baseFormat?.Protection ?? format?.Protection;
+                var protection = EffectiveProtection(format, baseFormat);
                 var applyProtection = format?.ApplyProtection?.Value ?? false;
                 var locked = protection?.Locked?.Value ?? true;
                 var hidden = protection?.Hidden?.Value ?? false;
@@ -76,11 +74,11 @@ public static class EvidenceInspector
                         fontFingerprint = ComponentFingerprint(fonts, fontId, "font"),
                         fillFingerprint = ComponentFingerprint(fills, fillId, "fill"),
                         borderFingerprint = ComponentFingerprint(borders, borderId, "border"),
-                        protectionFingerprint = ProtectionFingerprint(applyProtection, locked, hidden),
+                        protectionFingerprint = ProtectionFingerprint(locked, hidden),
                         numberFormatId = numId,
                         numberFormat = formatCode,
                         numberFormatEvidence = normalizedFormat,
-                        numberFormatFingerprint = NumberFormatFingerprint(normalizedFormat),
+                        numberFormatFingerprint = NumberFormatFingerprint(formatCode, normalizedFormat.Kind),
                         horizontalAlignment = alignment?.Horizontal?.InnerText ?? baseAlignment?.Horizontal?.InnerText,
                         verticalAlignment = alignment?.Vertical?.InnerText ?? baseAlignment?.Vertical?.InnerText,
                         wrapText = alignment?.WrapText?.Value ?? baseAlignment?.WrapText?.Value,
@@ -110,6 +108,8 @@ public static class EvidenceInspector
             };
         }).ToList();
         var sheetNames = sheets.Select(sheet => sheet.name ?? string.Empty).ToList();
+        // v1 attests the validator-required name/scope/text/visibility semantics.
+        // Macro/function metadata is intentionally outside this evidence contract.
         var definedNames = wb.Workbook.DefinedNames?.Elements<DefinedName>()
             .Select(name => new {
                 name = name.Name?.Value ?? throw new InvalidDataException("Workbook defined name is missing its name."),
@@ -133,6 +133,20 @@ public static class EvidenceInspector
         return sheetNames[(int)localSheetId.Value];
     }
 
+    private static uint EffectiveComponentId(uint? directId, bool? applyDirect, uint? baseId)
+    {
+        if (applyDirect == false) return baseId ?? 0U;
+        if (directId is not null) return directId.Value;
+        return applyDirect == true ? 0U : baseId ?? 0U;
+    }
+
+    private static Protection? EffectiveProtection(CellFormat? format, CellFormat? baseFormat)
+    {
+        if (format?.ApplyProtection?.Value == false) return baseFormat?.Protection;
+        if (format?.Protection is not null) return format.Protection;
+        return format?.ApplyProtection?.Value == true ? null : baseFormat?.Protection;
+    }
+
     private static string ComponentFingerprint<T>(IReadOnlyList<T> components, uint id, string kind) where T : OpenXmlElement
     {
         if (components.Count == 0 && id == 0) return Sha256($"implicit:{kind}:default");
@@ -142,11 +156,17 @@ public static class EvidenceInspector
         return Sha256(canonical.ToString());
     }
 
-    private static string ProtectionFingerprint(bool applyProtection, bool locked, bool hidden)
-        => Sha256($"protection:apply={(applyProtection ? 1 : 0)};locked={(locked ? 1 : 0)};hidden={(hidden ? 1 : 0)}");
+    private static string ProtectionFingerprint(bool locked, bool hidden)
+        => Sha256($"protection:locked={(locked ? 1 : 0)};hidden={(hidden ? 1 : 0)}");
 
-    private static string NumberFormatFingerprint(NumberFormatEvidence format)
-        => Sha256($"number-format:code={format.NormalizedCode};kind={format.Kind}");
+    private static string NumberFormatFingerprint(string exactCode, string kind)
+    {
+        var canonical = new StringBuilder();
+        AppendToken(canonical, "number-format");
+        AppendToken(canonical, exactCode);
+        AppendToken(canonical, kind);
+        return Sha256(canonical.ToString());
+    }
 
     private static void AppendCanonicalElement(StringBuilder output, OpenXmlElement element)
     {

@@ -93,6 +93,50 @@ public class EvidenceTests
     }
 
     [Fact]
+    public void Effective_style_components_inherit_from_base_xf_when_apply_flags_are_false()
+    {
+        var path = InheritedStyleFixture();
+        using (var document = SpreadsheetDocument.Open(path, false))
+        {
+            var raw = document.WorkbookPart!.WorkbookStylesPart!.Stylesheet.CellFormats!.Elements<CellFormat>().ElementAt(1);
+            Assert.Equal(2U, raw.FontId!.Value);
+            Assert.Equal(2U, raw.FillId!.Value);
+            Assert.Equal(2U, raw.BorderId!.Value);
+            Assert.Equal(165U, raw.NumberFormatId!.Value);
+            Assert.False(raw.ApplyFont!.Value);
+            Assert.False(raw.ApplyFill!.Value);
+            Assert.False(raw.ApplyBorder!.Value);
+            Assert.False(raw.ApplyNumberFormat!.Value);
+        }
+        var styles = CellStylesEvidence(path);
+        var inherited = styles["A1"];
+        var direct = styles["B1"];
+
+        Assert.Equal(1U, inherited.GetProperty("fontId").GetUInt32());
+        Assert.Equal(1U, inherited.GetProperty("fillId").GetUInt32());
+        Assert.Equal(1U, inherited.GetProperty("borderId").GetUInt32());
+        Assert.Equal(164U, inherited.GetProperty("numberFormatId").GetUInt32());
+        foreach (var component in new[] { "font", "fill", "border", "protection", "numberFormat" })
+            Assert.Equal(inherited.GetProperty($"{component}Fingerprint").GetString(), direct.GetProperty($"{component}Fingerprint").GetString());
+        Assert.False(inherited.GetProperty("protection").GetProperty("applyProtection").GetBoolean());
+        Assert.True(direct.GetProperty("protection").GetProperty("applyProtection").GetBoolean());
+    }
+
+    [Fact]
+    public void Number_format_fingerprint_ignores_id_but_preserves_literal_case_and_whitespace()
+    {
+        var baseline = CellStyleEvidence(NumberFormatFixture(164, "0 \"KG\""));
+        var renumbered = CellStyleEvidence(NumberFormatFixture(200, "0 \"KG\""));
+        var literalCaseChanged = CellStyleEvidence(NumberFormatFixture(201, "0 \"kg\""));
+        var trailingSpaceChanged = CellStyleEvidence(NumberFormatFixture(202, "0 \"KG\" "));
+
+        Assert.NotEqual(baseline.GetProperty("numberFormatId").GetUInt32(), renumbered.GetProperty("numberFormatId").GetUInt32());
+        Assert.Equal(baseline.GetProperty("numberFormatFingerprint").GetString(), renumbered.GetProperty("numberFormatFingerprint").GetString());
+        Assert.NotEqual(baseline.GetProperty("numberFormatFingerprint").GetString(), literalCaseChanged.GetProperty("numberFormatFingerprint").GetString());
+        Assert.NotEqual(baseline.GetProperty("numberFormatFingerprint").GetString(), trailingSpaceChanged.GetProperty("numberFormatFingerprint").GetString());
+    }
+
+    [Fact]
     public void Evidence_exposes_all_global_and_sheet_local_defined_names()
     {
         var path = DefinedNamesFixture();
@@ -116,10 +160,40 @@ public class EvidenceTests
             && name.GetProperty("text").GetString() == "'First'!$A$1:$B$2");
     }
 
+    [Fact]
+    public void Defined_name_evidence_is_order_stable_and_detects_text_or_visibility_changes()
+    {
+        var baseline = DefinedNamesEvidence(DefinedNamesFixture());
+        var reordered = DefinedNamesEvidence(DefinedNamesFixture(reversed: true));
+        var nameChanged = DefinedNamesEvidence(DefinedNamesFixture(localName: "LocalOutput"));
+        var scopeChanged = DefinedNamesEvidence(DefinedNamesFixture(localSheetId: 0));
+        var textChanged = DefinedNamesEvidence(DefinedNamesFixture(localText: "'Second'!$B$2"));
+        var visibilityChanged = DefinedNamesEvidence(DefinedNamesFixture(localHidden: false));
+
+        Assert.Equal(baseline, reordered);
+        Assert.NotEqual(baseline, nameChanged);
+        Assert.NotEqual(baseline, scopeChanged);
+        Assert.NotEqual(baseline, textChanged);
+        Assert.NotEqual(baseline, visibilityChanged);
+    }
+
     private static JsonElement CellStyleEvidence(string path)
     {
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(EvidenceInspector.Inspect(path), Options));
         return json.RootElement.GetProperty("sheets")[0].GetProperty("cells")[0].GetProperty("style").Clone();
+    }
+
+    private static Dictionary<string, JsonElement> CellStylesEvidence(string path)
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(EvidenceInspector.Inspect(path), Options));
+        return json.RootElement.GetProperty("sheets")[0].GetProperty("cells").EnumerateArray()
+            .ToDictionary(cell => cell.GetProperty("reference").GetString()!, cell => cell.GetProperty("style").Clone());
+    }
+
+    private static string DefinedNamesEvidence(string path)
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(EvidenceInspector.Inspect(path), Options));
+        return json.RootElement.GetProperty("definedNames").GetRawText();
     }
 
     private static string StyleFixture(bool reordered, bool changed)
@@ -162,7 +236,74 @@ public class EvidenceTests
         return path;
     }
 
-    private static string DefinedNamesFixture()
+    private static string InheritedStyleFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-inherited-style-{Guid.NewGuid():N}.xlsx");
+        using var doc = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var wb = doc.AddWorkbookPart();
+        wb.Workbook = new Workbook();
+        var styles = wb.AddNewPart<WorkbookStylesPart>();
+        styles.Stylesheet = new Stylesheet(
+            new NumberingFormats(
+                new NumberingFormat { NumberFormatId = 164, FormatCode = "0 \"BASE\"" },
+                new NumberingFormat { NumberFormatId = 165, FormatCode = "0 \"DIRECT\"" }) { Count = 2 },
+            new Fonts(new Font(), new Font(new Bold()), new Font(new Italic())) { Count = 3 },
+            new Fills(new Fill(), new Fill(new PatternFill { PatternType = PatternValues.Solid }), new Fill(new PatternFill { PatternType = PatternValues.Gray125 })) { Count = 3 },
+            new Borders(new Border(), new Border(new BottomBorder { Style = BorderStyleValues.Thin }), new Border(new TopBorder { Style = BorderStyleValues.Dashed })) { Count = 3 },
+            new CellStyleFormats(
+                new CellFormat(),
+                new CellFormat {
+                    FontId = 1, FillId = 1, BorderId = 1, NumberFormatId = 164,
+                    Protection = new Protection { Locked = false, Hidden = true }
+                }) { Count = 2 },
+            new CellFormats(
+                new CellFormat(),
+                new CellFormat {
+                    FormatId = 1, FontId = 2, FillId = 2, BorderId = 2, NumberFormatId = 165,
+                    ApplyFont = false, ApplyFill = false, ApplyBorder = false, ApplyNumberFormat = false,
+                    ApplyProtection = false, Protection = new Protection { Locked = true, Hidden = false }
+                },
+                new CellFormat {
+                    FontId = 1, FillId = 1, BorderId = 1, NumberFormatId = 164,
+                    ApplyFont = true, ApplyFill = true, ApplyBorder = true, ApplyNumberFormat = true,
+                    ApplyProtection = true, Protection = new Protection { Locked = false, Hidden = true }
+                }) { Count = 3 });
+        var ws = wb.AddNewPart<WorksheetPart>();
+        ws.Worksheet = new Worksheet(new SheetData(new Row(
+            new Cell { CellReference = "A1", StyleIndex = 1, CellValue = new CellValue("1") },
+            new Cell { CellReference = "B1", StyleIndex = 2, CellValue = new CellValue("1") }) { RowIndex = 1 }));
+        wb.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Styles" });
+        wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
+        return path;
+    }
+
+    private static string NumberFormatFixture(uint id, string code)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-number-format-{Guid.NewGuid():N}.xlsx");
+        using var doc = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var wb = doc.AddWorkbookPart();
+        wb.Workbook = new Workbook();
+        var styles = wb.AddNewPart<WorkbookStylesPart>();
+        styles.Stylesheet = new Stylesheet(
+            new NumberingFormats(new NumberingFormat { NumberFormatId = id, FormatCode = code }) { Count = 1 },
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellStyleFormats(new CellFormat()) { Count = 1 },
+            new CellFormats(new CellFormat(), new CellFormat { NumberFormatId = id, ApplyNumberFormat = true }) { Count = 2 });
+        var ws = wb.AddNewPart<WorksheetPart>();
+        ws.Worksheet = new Worksheet(new SheetData(new Row(new Cell { CellReference = "A1", StyleIndex = 1, CellValue = new CellValue("1") }) { RowIndex = 1 }));
+        wb.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Formats" });
+        wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
+        return path;
+    }
+
+    private static string DefinedNamesFixture(
+        bool reversed = false,
+        string localName = "LocalInput",
+        uint localSheetId = 1,
+        string localText = "'Second'!$A$1",
+        bool localHidden = true)
     {
         var path = Path.Combine(Path.GetTempPath(), $"xlsx-defined-names-{Guid.NewGuid():N}.xlsx");
         using var doc = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
@@ -172,14 +313,17 @@ public class EvidenceTests
         first.Worksheet = new Worksheet(new SheetData());
         var second = wb.AddNewPart<WorksheetPart>();
         second.Worksheet = new Worksheet(new SheetData());
+        var definedNames = new[] {
+            new DefinedName("0.25") { Name = "GlobalRate" },
+            new DefinedName(localText) { Name = localName, LocalSheetId = localSheetId, Hidden = localHidden },
+            new DefinedName("'First'!$A$1:$B$2") { Name = "_xlnm.Print_Area", LocalSheetId = 0 }
+        };
+        if (reversed) Array.Reverse(definedNames);
         wb.Workbook.Append(
             new Sheets(
                 new Sheet { Id = wb.GetIdOfPart(first), SheetId = 1, Name = "First" },
                 new Sheet { Id = wb.GetIdOfPart(second), SheetId = 2, Name = "Second" }),
-            new DefinedNames(
-                new DefinedName("0.25") { Name = "GlobalRate" },
-                new DefinedName("'Second'!$A$1") { Name = "LocalInput", LocalSheetId = 1, Hidden = true },
-                new DefinedName("'First'!$A$1:$B$2") { Name = "_xlnm.Print_Area", LocalSheetId = 0 }));
+            new DefinedNames(definedNames));
         wb.Workbook.Save();
         first.Worksheet.Save();
         second.Worksheet.Save();
