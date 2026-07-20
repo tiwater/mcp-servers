@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Dockit.Convert;
 using Dockit.Xlsx;
 using Tiwater.FormatEvidence;
 
@@ -24,8 +25,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats)),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats)),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -42,6 +43,11 @@ internal static class Cli
     }
 
     private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };
+
+    internal static FormatEvidenceCommand.ErrorClassification? ClassifyWorkbookEvidenceFailure(Exception error)
+        => error is AuthoritativeSpreadsheetRuntimeException
+            ? new("inspect-evidence-runtime-unavailable", "runtime", true)
+            : null;
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> WorkbookTargetObservations(string path) =>
         WorkbookLoader.IsLegacyXls(path) ? [] :
