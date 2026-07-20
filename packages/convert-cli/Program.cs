@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Reflection;
+using System.Security.Cryptography;
 using Dockit.Convert;
 
 namespace Dockit.Convert.Cli;
@@ -28,7 +29,9 @@ internal static class Program
                     {
                         status = "ok",
                         input = Path.GetFullPath(args[1]),
+                        input_sha256 = FileSha256(args[1]),
                         output = Path.GetFullPath(args[2]),
+                        output_sha256 = FileSha256(args[2]),
                         source_format = "xls",
                         target_format = "xlsx",
                         version = ToolVersion,
@@ -72,5 +75,11 @@ internal static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>");
         Console.WriteLine("  tiwater-convert <docx|xlsx|pptx|doc|xls|ppt|odt|ods|odp|rtf>-to-pdf <input> <output.pdf>");
+    }
+
+    private static string FileSha256(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return System.Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 }

@@ -15,15 +15,26 @@ public static class WorkbookConverter
             throw new InvalidOperationException($"Input file not found: {input}");
         }
 
+        var requiredBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_XLSX_BACKEND")?.Trim();
+        var requireWps = string.Equals(requiredBackend, "wps-spreadsheet", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(requiredBackend) && !requireWps)
+        {
+            throw new InvalidOperationException($"Unsupported required XLSX backend: {requiredBackend}");
+        }
+
         if (WpsSpreadsheetConverter.IsAvailable())
         {
             try
             {
                 WpsSpreadsheetConverter.ConvertXlsToXlsx(input, output);
-                return new ConversionResult("wps");
+                return new ConversionResult("wps-spreadsheet");
             }
             catch (Exception ex)
             {
+                if (requireWps)
+                {
+                    throw new InvalidOperationException($"Required WPS Spreadsheet XLS conversion failed: {ex.Message}", ex);
+                }
                 var fallbackReason = $"WPS RPC conversion failed: {ex.Message}";
                 var fallback = ConvertXlsToXlsxWithoutWps(input, output);
                 return fallback with
@@ -33,6 +44,12 @@ public static class WorkbookConverter
                         : $"{fallbackReason}; {fallback.FallbackReason}",
                 };
             }
+        }
+
+        if (requireWps)
+        {
+            throw new InvalidOperationException(
+                "WPS Spreadsheet XLS conversion was required but WPS Spreadsheets, xvfb-run, dbus-run-session, or pywpsrpc is unavailable.");
         }
 
         return ConvertXlsToXlsxWithoutWps(input, output);

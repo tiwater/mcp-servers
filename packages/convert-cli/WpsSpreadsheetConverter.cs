@@ -7,7 +7,7 @@ public static class WpsSpreadsheetConverter
 {
     public static bool IsAvailable()
         => !string.IsNullOrWhiteSpace(FindWpsRpcPython())
-            && !string.IsNullOrWhiteSpace(FindOnPath("xvfb-run"))
+            && WpsRpcSession.IsAvailable()
             && !string.IsNullOrWhiteSpace(FindOnPath("et"));
 
     public static void ConvertXlsToXlsx(string input, string output)
@@ -23,8 +23,8 @@ public static class WpsSpreadsheetConverter
             throw new InvalidOperationException(
                 "WPS RPC python is required for WPS XLS conversion. Set TIWATER_WPSRPC_PYTHON or LUCID_WPSRPC_PYTHON.");
         }
-        var xvfb = FindOnPath("xvfb-run")
-            ?? throw new InvalidOperationException("xvfb-run is required for WPS XLS conversion.");
+        var xvfb = WpsRpcSession.RequireCommand("xvfb-run", "WPS XLS conversion");
+        var dbusRunSession = WpsRpcSession.RequireCommand("dbus-run-session", "WPS XLS conversion");
         if (string.IsNullOrWhiteSpace(FindOnPath("et")))
         {
             throw new InvalidOperationException("WPS Spreadsheets command not found: et");
@@ -43,19 +43,8 @@ public static class WpsSpreadsheetConverter
 
         try
         {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = xvfb,
-                WorkingDirectory = tempRoot,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-            };
-            startInfo.ArgumentList.Add("-a");
-            startInfo.ArgumentList.Add(python);
-            startInfo.ArgumentList.Add(helperPath);
-            startInfo.ArgumentList.Add(Path.GetFullPath(input));
-            startInfo.ArgumentList.Add(Path.GetFullPath(output));
+            var startInfo = WpsRpcSession.CreateProcessStartInfo(
+                dbusRunSession, xvfb, python, helperPath, input, output, tempRoot);
 
             using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Failed to start WPS RPC conversion.");
