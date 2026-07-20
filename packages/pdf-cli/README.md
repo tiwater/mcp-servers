@@ -51,6 +51,13 @@ Provides a high-level inspection of the PDF's structural layout and tables to de
 tiwater-pdf inspect <report.pdf>
 ```
 
+Published evidence uses the same PDF metadata and detailed-table inspectors. The validator re-opens the PDF and independently recomputes the evidence.
+
+```bash
+tiwater-pdf inspect-evidence --request request.json --output evidence.json
+tiwater-pdf validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
+```
+
 ### 5. OCR Scanned PDFs With a Vision LLM
 Extracts text from scanned or image-only PDFs using an OpenAI-compatible vision model.
 
@@ -92,6 +99,25 @@ This keeps source evidence stable when an OCR model represents repeated visual
 rows either as separate markdown rows or as `<br>`-separated values in one
 cell.
 
+Non-tabular labeled values and checkbox conclusions are exposed as
+`form_fields[]`. Each field retains a stable page-local `field_id`, label,
+value, raw visible text, every declared option, selected options, and a
+`selection_status`. Exactly one visibly selected option is `selected`; zero is
+`unselected`; multiple selected options are `ambiguous`. The runtime does not
+rewrite an ambiguous choice or infer a missing selection. Identifiers are
+requested character-by-character and uncertain transcription remains a warning;
+downstream exact-identity validation still owns acceptance.
+
+Vision OCR also detects pages whose rendered text is sideways or inverted. The
+model may declare the clockwise correction as `orientation_degrees` (0, 90,
+180, or 270); the runtime then re-renders the original page at the cumulative
+declared rotation and repeats OCR through a bounded four-orientation search. A
+corrected page must report orientation 0 within that bound or the page fails.
+Successful page evidence records the applied
+`orientation_correction_degrees` and request-attempt counts for both detection
+and correction, so downstream workflows can audit the extra pass without
+guessing from the extracted text.
+
 Configuration is read from explicit flags first, then environment variables:
 
 - `--api-key`, `SUPEN_LLM_TOKEN`, `SUPEN_LLM_API_KEY`, `TIWATER_LLM_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`
@@ -108,7 +134,10 @@ In `auto` mode, bare Alibaba Model Studio Qwen3.5/Qwen3.6/Qwen3.7 model ids such
 Each vision page request retries a bounded three times for transient gateway
 timeouts, throttling, server errors, the gateway's intermittent invalid-URL
 response, and malformed or incomplete model response objects. Parsing and
-table normalization happen inside the retry boundary. If any selected page
+table normalization happen inside the retry boundary. If a provider aborts
+structured JSON generation with a `response_format` error, the next bounded
+attempt omits that provider hint while retaining the JSON-only prompt and strict
+JSON-object parser. If any selected page
 still fails, the PDF and its batch status fail instead of returning a partial
 document marked successful. Successful page JSON records `request_attempts`
 for auditability.

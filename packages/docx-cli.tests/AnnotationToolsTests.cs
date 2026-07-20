@@ -9,11 +9,19 @@ using A = DocumentFormat.OpenXml.Drawing;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using W14 = DocumentFormat.OpenXml.Office2010.Word;
+using Tiwater.FormatEvidence;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Dockit.Docx.Tests;
 
 public class AnnotationToolsTests
 {
+    [Fact]
+    public void Published_inspection_evidence_is_recomputed_from_docx_bytes()
+    {
+        var source=CreateAnnotatedFixture();var root=Path.Combine(Path.GetTempPath(),$"docx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="docx"},extraction=new{schema="tiwater.docx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-docx","0.9.1","docx",input=>new{document=Inspector.Inspect(input),tables=Inspector.InspectTables(input)}));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-docx","0.9.1","docx",input=>new{document=Inspector.Inspect(input),tables=Inspector.InspectTables(input)}));Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+    }
     [Fact]
     public void OpenXmlValidation_accepts_a_valid_document()
     {

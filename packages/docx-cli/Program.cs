@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Dockit.Docx;
+using Tiwater.FormatEvidence;
 
 namespace Dockit.Docx.Cli;
 
@@ -23,6 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", "0.10.2", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", "0.10.2", "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input) }, _ => DocumentTargetObservations())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -50,6 +53,19 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>
+    [
+        new("document-target-1", "document.semantic-target", "structure", new
+        {
+            candidateId = "docx-document-root",
+            semanticIdentity = new { format = "docx", scope = "document" },
+            runtimeLocator = new { kind = "docx-document" },
+            capabilities = new[] { "docx.edit" },
+            resourceSet = new[] { new { resourceKey = "docx-main-document", access = "write" } },
+            writeSet = new[] { new { resourceKey = "docx-main-document", writeKey = "document-content" } }
+        }, "/inspection/document")
+    ];
 
     private static Task<int> RunInspectAsync(string[] args)
     {
@@ -125,6 +141,8 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
+        Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
+        Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");

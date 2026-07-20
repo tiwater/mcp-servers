@@ -28,6 +28,13 @@ Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version 
 tiwater-docx inspect-tables <input.docx> [--json]
 ```
 
+Published runtimes also expose the closed Lucid evidence ports. Both commands re-use the DOCX inspectors above; the validator re-reads the source bytes and recomputes the evidence independently.
+
+```bash
+tiwater-docx inspect-evidence --request request.json --output evidence.json
+tiwater-docx validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
+```
+
 ### 2. Compare Two Documents
 Compares a baseline and an updated document. Reports on differences in package structure, overall metrics, and paragraph style usage changes.
 

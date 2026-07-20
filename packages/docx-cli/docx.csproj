@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-docx</ToolCommandName>
     <PackageId>tiwater.docx.cli</PackageId>
-    <Version>0.9.0</Version>
+    <Version>0.10.2</Version>
     <Authors>Tiwater</Authors>
     <Description>Inspect, compare, export, and transform DOCX documents from the command line.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.2.0" />
+    <Compile Include="../format-evidence/FormatEvidenceCommand.cs" Link="FormatEvidenceCommand.cs" />
   </ItemGroup>
 
   <ItemGroup>

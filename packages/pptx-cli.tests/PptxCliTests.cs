@@ -4,11 +4,19 @@ using DocumentFormat.OpenXml.Packaging;
 using Xunit;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
+using Tiwater.FormatEvidence;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Dockit.Pptx.Tests;
 
 public class PptxCliTests
 {
+    [Fact]
+    public void Published_inspection_evidence_is_recomputed_from_pptx_bytes()
+    {
+        var source=CreateFixture();var root=Path.Combine(Path.GetTempPath(),$"pptx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="pptx"},extraction=new{schema="tiwater.pptx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-pptx","0.2.1","pptx",input=>new{presentation=Inspector.Inspect(input),detail=Inspector.InspectDetail(input)}));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-pptx","0.2.1","pptx",input=>new{presentation=Inspector.Inspect(input),detail=Inspector.InspectDetail(input)}));Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+    }
     [Fact]
     public void Inspect_reports_slide_metrics_and_placeholders()
     {
@@ -118,6 +126,38 @@ public class PptxCliTests
         Assert.Equal(16d, run.FontSize);
         Assert.Equal("287341", run.Color);
         Assert.True(run.Bold);
+        Assert.Single(report.Masters);
+        Assert.Equal("ppt/slideMasters/slideMaster1.xml", report.Masters[0].Path);
+        Assert.Equal("ppt/slideLayouts/slideLayout1.xml", report.Masters[0].Layouts[0].Path);
+        Assert.Equal(report.Masters[0].Path, report.Slides[0].MasterPath);
+        Assert.Equal(report.Masters[0].Layouts[0].Path, report.Slides[0].LayoutPath);
+        Assert.Equal(0, firstShape.ZOrder);
+    }
+
+    [Fact]
+    public void ApplyTemplate_preserves_slide_content_and_switches_every_slide_to_target_master()
+    {
+        var source = CreateFixture();
+        var template = CreateFixture();
+        using (var target = PresentationDocument.Open(template, true))
+        {
+            target.PresentationPart!.SlideMasterParts.Single().SlideMaster.CommonSlideData!.Name = "Approved Master";
+            target.PresentationPart.SlideMasterParts.Single().SlideMaster.Save();
+        }
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var before = Inspector.InspectDetail(source).Slides.SelectMany(slide => slide.Shapes).Select(shape => shape.Text).ToList();
+
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)]), output);
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(2, result.ChangedSlideCount);
+        var after = Inspector.InspectDetail(output);
+        Assert.All(after.Slides, slide => Assert.Equal("Approved Master", after.Masters.Single(master => master.Path == slide.MasterPath).Name));
+        Assert.Equal(before, after.Slides.SelectMany(slide => slide.Shapes).Select(shape => shape.Text).ToList());
     }
 
     [Fact]
@@ -175,6 +215,7 @@ public class PptxCliTests
             new P.SlideLayoutIdList(new P.SlideLayoutId { Id = 1U, RelationshipId = "rIdLayout1" }),
             new P.TextStyles());
         slideMasterPart.SlideMaster.Save();
+        slideLayoutPart.AddPart(slideMasterPart, "rIdMaster");
 
         var slidePart1 = presentationPart.AddNewPart<SlidePart>("rIdSlide1");
         slidePart1.Slide = CreateSlide("Project {{title}} 峰面积");

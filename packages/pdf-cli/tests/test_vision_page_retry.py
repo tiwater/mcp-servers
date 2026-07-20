@@ -3,9 +3,12 @@ import unittest
 from types import SimpleNamespace
 
 from tiwater_pdf.cli import (
+    _VisionResponseFormatError,
+    _call_vision_page_with_retry,
     _call_vision_with_retry,
     _is_retryable_vision_page_error,
     _parse_vision_page_response,
+    _run_with_orientation_correction,
 )
 
 
@@ -16,6 +19,43 @@ def response_with(content):
 
 
 class VisionPageRetryTest(unittest.TestCase):
+    def test_response_format_gateway_error_is_classified_for_compatible_retry(self):
+        response = SimpleNamespace(
+            choices=None,
+            error={
+                "code": "invalid_parameter_error",
+                "message": "Model output became abnormal while generating a JSON response for response_format.",
+            },
+        )
+
+        with self.assertRaises(_VisionResponseFormatError):
+            _parse_vision_page_response(response, 2)
+
+    def test_response_format_error_retries_without_response_format(self):
+        uses_response_format = []
+
+        def request(use_response_format):
+            uses_response_format.append(use_response_format)
+            if use_response_format:
+                return SimpleNamespace(
+                    choices=None,
+                    error={
+                        "code": "invalid_parameter_error",
+                        "message": "JSON generation failed for response_format",
+                    },
+                )
+            return response_with(json.dumps({"text": "251", "tables": [], "warnings": []}))
+
+        page, attempts = _call_vision_page_with_retry(
+            request,
+            lambda response: _parse_vision_page_response(response, 2),
+            sleep_fn=lambda _seconds: None,
+        )
+
+        self.assertEqual(uses_response_format, [True, False])
+        self.assertEqual(attempts, 2)
+        self.assertEqual(page["text"], "251")
+
     def test_malformed_page_response_is_retried_then_preserves_valid_evidence(self):
         responses = iter([
             SimpleNamespace(choices=None),
@@ -39,6 +79,94 @@ class VisionPageRetryTest(unittest.TestCase):
         self.assertEqual(page["text"], "Sample 240471-01")
         self.assertEqual(page["table_rows"][1]["cells"], ["240471-01", "69.8"])
 
+    def test_preserves_non_tabular_checked_result_as_stable_form_field_evidence(self):
+        page = _parse_vision_page_response(response_with(json.dumps({
+            "text": "Sample Result: Consistent with the standard ☑ Yes ☐ No",
+            "tables": [],
+            "fields": [{
+                "label": "供试品结果 (Sample Result)",
+                "value": "与标准品一致 (Consistent with the standard)",
+                "options": [
+                    {"label": "是 Yes", "selected": True},
+                    {"label": "否 No", "selected": False},
+                ],
+                "raw_text": "与标准品一致(Consistent with the standard) ☑ 是 Yes ☐ 否 No",
+            }],
+            "warnings": [],
+        })), 15)
+
+        self.assertEqual(page["form_fields"], [{
+            "field_id": "page-15-field-0",
+            "page": 15,
+            "field_index": 0,
+            "label": "供试品结果 (Sample Result)",
+            "value": "与标准品一致 (Consistent with the standard)",
+            "options": [
+                {"label": "是 Yes", "selected": True},
+                {"label": "否 No", "selected": False},
+            ],
+            "selected_options": ["是 Yes"],
+            "selection_status": "selected",
+            "raw_text": "与标准品一致(Consistent with the standard) ☑ 是 Yes ☐ 否 No",
+        }])
+
+    def test_marks_multiple_selected_options_ambiguous_without_rewriting_them(self):
+        page = _parse_vision_page_response(response_with(json.dumps({
+            "text": "Result ☑ Yes ☑ No",
+            "tables": [],
+            "fields": [{
+                "label": "Result",
+                "value": "visible source value",
+                "options": [
+                    {"label": "Yes", "selected": True},
+                    {"label": "No", "selected": True},
+                ],
+                "raw_text": "Result ☑ Yes ☑ No",
+            }],
+            "warnings": [],
+        })), 3)
+
+        self.assertEqual(page["form_fields"][0]["selection_status"], "ambiguous")
+        self.assertEqual(page["form_fields"][0]["selected_options"], ["Yes", "No"])
+
+    def test_preserves_declared_clockwise_orientation_correction(self):
+        page = _parse_vision_page_response(response_with(json.dumps({
+            "text": "sideways page",
+            "tables": [],
+            "fields": [],
+            "orientation_degrees": 90,
+            "warnings": [],
+        })), 10)
+
+        self.assertEqual(page["orientation_degrees"], 90)
+
+    def test_rejects_an_unsupported_orientation_value(self):
+        with self.assertRaisesRegex(ValueError, "orientation_degrees"):
+            _parse_vision_page_response(response_with(json.dumps({
+                "text": "page",
+                "tables": [],
+                "fields": [],
+                "orientation_degrees": 45,
+                "warnings": [],
+            })), 1)
+
+    def test_accumulates_bounded_orientation_corrections_until_upright(self):
+        rotations = []
+        responses = iter([90, 180, 0])
+
+        def run_orientation(rotation_degrees):
+            rotations.append(rotation_degrees)
+            return {"orientation_degrees": next(responses)}, 1
+
+        page, correction_degrees, attempts = _run_with_orientation_correction(
+            run_orientation,
+        )
+
+        self.assertEqual(rotations, [0, 90, 270])
+        self.assertEqual(page["orientation_degrees"], 0)
+        self.assertEqual(correction_degrees, 270)
+        self.assertEqual(attempts, [1, 1, 1])
+
     def test_persistently_malformed_page_response_fails_after_bound(self):
         calls = 0
 
@@ -47,7 +175,7 @@ class VisionPageRetryTest(unittest.TestCase):
             calls += 1
             return _parse_vision_page_response(SimpleNamespace(choices=None), 10)
 
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(ValueError, "vision response contains no choices"):
             _call_vision_with_retry(
                 malformed,
                 attempts=3,

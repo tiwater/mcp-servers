@@ -111,6 +111,49 @@ public static class Inspector
                 RunsWithDirectFormatting: allRoots.SelectMany(root => root.Descendants<Run>()).Count(HasRunDirectFormatting)));
     }
 
+    public static IReadOnlyList<object> InspectDocumentFlow(string input)
+    {
+        var path = Path.GetFullPath(input);
+        using var doc = WordprocessingDocument.Open(path, false);
+        var body = doc.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+        var nodes = new List<object>();
+        var headerIndex = 0;
+        foreach (var headerPart in doc.MainDocumentPart?.HeaderParts ?? [])
+        {
+            if (headerPart.Header is null) continue;
+            var paragraphIndex = 0;
+            foreach (var paragraph in headerPart.Header.Elements<Paragraph>())
+            {
+                var text = GetParagraphText(paragraph).Trim();
+                var style = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+                if (!string.IsNullOrEmpty(text)) nodes.Add(new { type = "headerParagraph", headerIndex, paragraphIndex, style, text });
+                paragraphIndex += 1;
+            }
+            headerIndex += 1;
+        }
+
+        var bodyParagraphIndex = 0;
+        var tableIndex = 0;
+        foreach (var element in body.ChildElements)
+        {
+            if (element is Paragraph paragraph)
+            {
+                var text = GetParagraphText(paragraph).Trim();
+                var style = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+                if (!string.IsNullOrEmpty(text)) nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, text });
+                bodyParagraphIndex += 1;
+            }
+            else if (element is Table table)
+            {
+                var rows = table.Descendants<TableRow>().Select(row => row.Descendants<TableCell>()
+                    .Select(cell => string.Concat(cell.Descendants<Text>().Select(value => value.Text)).Trim()).ToList()).ToList();
+                nodes.Add(new { type = "table", tableIndex, rows });
+                tableIndex += 1;
+            }
+        }
+        return nodes;
+    }
+
     public static TableInspectionReport InspectTables(string input)
     {
         var path = Path.GetFullPath(input);

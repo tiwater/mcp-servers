@@ -129,65 +129,7 @@ public static class Transforms
         var input = Path.GetFullPath(args[0]);
         var output = args.Length > 1 ? Path.GetFullPath(args[1]) : null;
 
-        using var doc = WordprocessingDocument.Open(input, false);
-        var body = doc.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
-
-        var nodes = new List<object>();
-
-        var paragraphIndex = 0;
-        var tableIndex = 0;
-
-        var headerIndex = 0;
-        foreach (var headerPart in doc.MainDocumentPart?.HeaderParts ?? [])
-        {
-            if (headerPart.Header is null)
-            {
-                continue;
-            }
-
-            var headerParagraphIndex = 0;
-            foreach (var paragraph in headerPart.Header.Elements<Paragraph>())
-            {
-                var text = string.Concat(paragraph.Descendants<Text>().Select(t => t.Text)).Trim();
-                var style = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-                if (!string.IsNullOrEmpty(text))
-                {
-                    nodes.Add(new { Type = "headerParagraph", HeaderIndex = headerIndex, ParagraphIndex = headerParagraphIndex, Style = style, Text = text });
-                }
-                headerParagraphIndex++;
-            }
-
-            headerIndex++;
-        }
-
-        foreach (var element in body.ChildElements)
-        {
-            if (element is Paragraph p)
-            {
-                var text = string.Concat(p.Descendants<Text>().Select(t => t.Text)).Trim();
-                var style = p.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-                if (!string.IsNullOrEmpty(text))
-                {
-                    nodes.Add(new { Type = "paragraph", ParagraphIndex = paragraphIndex, Style = style, Text = text });
-                }
-                paragraphIndex += 1;
-            }
-            else if (element is Table t)
-            {
-                var tableData = new List<List<string>>();
-                foreach (var row in t.Descendants<TableRow>())
-                {
-                    var rowData = new List<string>();
-                    foreach (var cell in row.Descendants<TableCell>())
-                    {
-                        rowData.Add(string.Concat(cell.Descendants<Text>().Select(x => x.Text)).Trim());
-                    }
-                    tableData.Add(rowData);
-                }
-                nodes.Add(new { Type = "table", TableIndex = tableIndex, Rows = tableData });
-                tableIndex += 1;
-            }
-        }
+        var nodes = Inspector.InspectDocumentFlow(input);
 
         var json = JsonSerializer.Serialize(nodes, Json.CamelCaseOptions);
         if (output != null)

@@ -43,6 +43,20 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_sets_one_rich_text_value_and_explicitly_clears_bold_on_every_run()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-rich-value-{Guid.NewGuid():N}.xlsx");
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setRichTextCellValue", Sheet: "Sheet1", Cell: "D2", Value: "current value", Bold: false)]);
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var cell = GetCell(spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet, "D2");
+        var run = Assert.Single(cell.InlineString!.Elements<Run>());
+        Assert.Equal("current value", run.Text!.Text);
+        Assert.False(run.RunProperties!.GetFirstChild<Bold>()!.Val!.Value);
+    }
+
+    [Fact]
     public void Edit_stores_numeric_text_as_number_while_preserving_target_style()
     {
         var path = CreateFormattedWorkbookFixture();

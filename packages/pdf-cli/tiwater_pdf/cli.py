@@ -15,10 +15,28 @@ import time
 from pathlib import Path
 
 import fitz
+from .format_evidence import run as run_format_evidence
 
 DEFAULT_OCR_MODEL = "qwen3.7-plus"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 DEFAULT_VISION_REQUEST_ATTEMPTS = 3
+
+OCR_PAGE_PROMPT = (
+    "Extract the visible text from this PDF page image with high fidelity. "
+    "Preserve Chinese and English text, numbers, units, tables, row labels, form fields, checkbox marks, and reading order. "
+    "Transcribe identifiers character by character exactly as visible; never repair an uncertain digit from context, and add a warning when uncertain. "
+    "Use markdown tables when the page contains clear tables. "
+    "For labeled values or checkbox conclusions outside a clear table, return fields as an array of objects with label, value, raw_text, and options. "
+    "Each option must have label and a boolean selected that reflects only its visible mark; retain every option and never infer a selection. "
+    "Set orientation_degrees to the clockwise rotation required to make the supplied image text upright: exactly 0, 90, 180, or 270. "
+    "Do not summarize and do not infer missing values. "
+    "Return one JSON object with keys text, tables, fields, orientation_degrees, warnings. "
+    "tables should be an array of markdown table strings or empty if no table is visible; fields should be an array or empty."
+)
+
+
+class _VisionResponseFormatError(ValueError):
+    """The gateway rejected or aborted structured JSON response generation."""
 
 
 def _is_retryable_vision_error(error: Exception) -> bool:
@@ -50,6 +68,26 @@ def _is_retryable_vision_page_error(error: Exception) -> bool:
     return _is_retryable_vision_error(error) or isinstance(
         error,
         (AttributeError, IndexError, KeyError, TypeError, ValueError),
+    )
+
+
+def _call_vision_page_with_retry(request, parse, attempts: int = DEFAULT_VISION_REQUEST_ATTEMPTS, sleep_fn=time.sleep):
+    """Retry one page and fall back from provider-side response_format failures."""
+    use_response_format = True
+
+    def request_and_parse():
+        nonlocal use_response_format
+        try:
+            return parse(request(use_response_format))
+        except _VisionResponseFormatError:
+            use_response_format = False
+            raise
+
+    return _call_vision_with_retry(
+        request_and_parse,
+        attempts=attempts,
+        sleep_fn=sleep_fn,
+        retryable=_is_retryable_vision_page_error,
     )
 
 
@@ -479,9 +517,10 @@ def _llm_extract_table(image_bytes: bytes, api_key: str | None = None, llm_model
         return [], []
 
 
-def _render_page_image(doc, page_num: int, zoom: float = 2.5) -> bytes:
+def _render_page_image(doc, page_num: int, zoom: float = 2.5, rotation_degrees: int = 0) -> bytes:
     page = doc[page_num]
-    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+    matrix = fitz.Matrix(zoom, zoom).prerotate(rotation_degrees)
+    pix = page.get_pixmap(matrix=matrix, alpha=False)
     return pix.tobytes("png")
 
 
@@ -676,6 +715,37 @@ def _drop_globally_empty_markdown_columns(rows: list[list[str]]) -> list[list[st
     ]
 
 
+def _drop_merged_cell_suffix_fragments(rows: list[list[str]]) -> list[list[str]]:
+    """Treat a short suffix repeated below its full cell text as continuation noise.
+
+    Vision OCR occasionally emits the final glyph or word of a visually merged
+    cell in the next physical row.  A value is removed only when it is a strict
+    suffix of the nearest preceding non-empty value in the same column and is
+    no more than one third of that owner value.  The blank then preserves the
+    runtime's normal merged-cell continuation semantics.
+    """
+    normalized = [list(cells) for cells in rows]
+    previous_by_column: dict[int, str] = {}
+    for cells in normalized:
+        if _is_markdown_separator_row(cells):
+            continue
+        for index, raw_cell in enumerate(cells):
+            value = _normalize_markdown_cell(raw_cell)
+            if not value:
+                continue
+            previous = previous_by_column.get(index, "")
+            if (
+                previous
+                and value != previous
+                and previous.endswith(value)
+                and len(value) <= max(1, len(previous) // 3)
+            ):
+                cells[index] = ""
+                continue
+            previous_by_column[index] = value
+    return normalized
+
+
 def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
     """Expose model-returned markdown table rows as stable runtime evidence."""
     rows: list[dict] = []
@@ -684,6 +754,7 @@ def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
             continue
         parsed = [_split_markdown_table_row(line) for line in table.splitlines() if "|" in line]
         parsed = _drop_globally_empty_markdown_columns(parsed)
+        parsed = _drop_merged_cell_suffix_fragments(parsed)
         separator_index = next((index for index, cells in enumerate(parsed) if _is_markdown_separator_row(cells)), None)
         data_index = 0
         for raw_index, cells in enumerate(parsed):
@@ -819,12 +890,74 @@ def _extract_table_logical_rows(pages: list[dict]) -> list[dict]:
     return logical
 
 
+def _normalize_form_fields(fields: list, page_number: int) -> list[dict]:
+    """Preserve model-extracted non-tabular fields with stable page provenance."""
+    normalized: list[dict] = []
+    for source in fields:
+        if not isinstance(source, dict):
+            continue
+        label = str(source.get("label", "")).strip()
+        value = str(source.get("value", "")).strip()
+        raw_text = str(source.get("raw_text", "")).strip()
+        if not any((label, value, raw_text)):
+            continue
+        options = []
+        for option in source.get("options", []) if isinstance(source.get("options", []), list) else []:
+            if not isinstance(option, dict):
+                continue
+            option_label = str(option.get("label", "")).strip()
+            if not option_label or not isinstance(option.get("selected"), bool):
+                continue
+            options.append({"label": option_label, "selected": option["selected"]})
+        selected_options = [option["label"] for option in options if option["selected"]]
+        selection_status = (
+            "not-applicable" if not options
+            else "selected" if len(selected_options) == 1
+            else "unselected" if not selected_options
+            else "ambiguous"
+        )
+        field_index = len(normalized)
+        normalized.append({
+            "field_id": f"page-{page_number}-field-{field_index}",
+            "page": page_number,
+            "field_index": field_index,
+            "label": label,
+            "value": value,
+            "options": options,
+            "selected_options": selected_options,
+            "selection_status": selection_status,
+            "raw_text": raw_text,
+        })
+    return normalized
+
+
 def _parse_vision_page_response(response, page_number: int) -> dict:
     """Parse one model response into complete page-level runtime evidence."""
-    content = response.choices[0].message.content or ""
+    choices = getattr(response, "choices", None)
+    if not isinstance(choices, list) or not choices:
+        error = getattr(response, "error", None)
+        if not isinstance(error, dict):
+            error = (getattr(response, "model_extra", None) or {}).get("error")
+        code = str((error or {}).get("code", "")) if isinstance(error, dict) else ""
+        message = str((error or {}).get("message", "")) if isinstance(error, dict) else ""
+        if code == "invalid_parameter_error" and "response_format" in message.lower():
+            raise _VisionResponseFormatError(message)
+        raise ValueError("vision response contains no choices")
+    message = getattr(choices[0], "message", None)
+    content = getattr(message, "content", None) or ""
     parsed = _extract_json_object(content)
     page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
     page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
+    page_fields = parsed.get("fields", []) if isinstance(parsed.get("fields", []), list) else []
+    raw_orientation = parsed.get("orientation_degrees", 0)
+    if isinstance(raw_orientation, bool):
+        raise ValueError("orientation_degrees must be one of 0, 90, 180, 270")
+    try:
+        orientation_degrees = int(raw_orientation)
+    except (TypeError, ValueError) as error:
+        raise ValueError("orientation_degrees must be one of 0, 90, 180, 270") from error
+    if orientation_degrees not in {0, 90, 180, 270}:
+        raise ValueError("orientation_degrees must be one of 0, 90, 180, 270")
     page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
     return {
         "page": page_number,
@@ -833,8 +966,28 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
         "table_rows": page_table_rows,
         "table_cell_lines": _extract_table_cell_lines(page_table_rows),
         "table_cell_units": _extract_table_cell_units(page_table_rows),
+        "form_fields": _normalize_form_fields(page_fields, page_number),
+        "orientation_degrees": orientation_degrees,
         "warnings": page_warnings,
     }
+
+
+def _run_with_orientation_correction(run_orientation, max_passes: int = 4):
+    """Repeat OCR from the original page at cumulative declared rotations."""
+    cumulative_rotation = 0
+    request_attempts = []
+    last_orientation = None
+    for _pass_index in range(max_passes):
+        page_result, attempts = run_orientation(cumulative_rotation)
+        request_attempts.append(attempts)
+        last_orientation = page_result["orientation_degrees"]
+        if last_orientation == 0:
+            return page_result, cumulative_rotation, request_attempts
+        cumulative_rotation = (cumulative_rotation + last_orientation) % 360
+    raise ValueError(
+        "orientation correction did not produce upright text after "
+        f"{max_passes} passes: cumulative={cumulative_rotation}, remaining={last_orientation}"
+    )
 
 
 def llm_ocr(
@@ -865,45 +1018,51 @@ def llm_ocr(
             if not page_numbers or page_index + 1 in page_numbers
         ]
 
-    prompt = (
-        "Extract the visible text from this PDF page image with high fidelity. "
-        "Preserve Chinese and English text, numbers, units, tables, row labels, and reading order. "
-        "Use markdown tables when the page contains clear tables. "
-        "Do not summarize and do not infer missing values. "
-        "Return one JSON object with keys text, tables, warnings. "
-        "tables should be an array of markdown table strings or empty if no table is visible."
-    )
-
     def ocr_page(page_index: int) -> dict:
         page_number = page_index + 1
-        # Each worker opens its own document because PyMuPDF document/page
-        # objects are not safe to share across threads.
-        with fitz.open(pdf_path) as page_doc:
-            image_bytes = _render_page_image(page_doc, page_index, zoom=zoom)
-        b64_image = base64.b64encode(image_bytes).decode("utf-8")
         request_kwargs = {}
         if resolved_enable_thinking is not None:
             request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
-        def request_and_parse_page():
-            response = client.chat.completions.create(
-                model=llm_model, response_format={"type": "json_object"}, max_tokens=max_tokens,
-                messages=[{"role": "user", "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
-                ]}], temperature=0.0, **request_kwargs,
+
+        def run_orientation(rotation_degrees: int):
+            # Each worker opens its own document because PyMuPDF document/page
+            # objects are not safe to share across threads.
+            with fitz.open(pdf_path) as page_doc:
+                image_bytes = _render_page_image(
+                    page_doc, page_index, zoom=zoom, rotation_degrees=rotation_degrees,
+                )
+            b64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+            def request_page(use_response_format: bool):
+                completion_kwargs = {}
+                if use_response_format:
+                    completion_kwargs["response_format"] = {"type": "json_object"}
+                return client.chat.completions.create(
+                    model=llm_model, max_tokens=max_tokens,
+                    messages=[{"role": "user", "content": [
+                        {"type": "text", "text": OCR_PAGE_PROMPT},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
+                    ]}], temperature=0.0, **request_kwargs, **completion_kwargs,
+                )
+
+            return _call_vision_page_with_retry(
+                request_page,
+                lambda response: _parse_vision_page_response(response, page_number),
             )
-            return _parse_vision_page_response(response, page_number)
 
         try:
-            page_result, request_attempts = _call_vision_with_retry(
-                request_and_parse_page,
-                retryable=_is_retryable_vision_page_error,
+            page_result, correction_degrees, orientation_attempts = (
+                _run_with_orientation_correction(run_orientation)
             )
         except Exception as error:
             raise RuntimeError(
                 f"OCR page {page_number} failed: {type(error).__name__}: {error}"
             ) from error
-        page_result["request_attempts"] = request_attempts
+        page_result["orientation_correction_degrees"] = correction_degrees
+        page_result["orientation_detection_request_attempts"] = orientation_attempts[0]
+        page_result["orientation_correction_request_attempts"] = sum(orientation_attempts[1:])
+        page_result["orientation_correction_passes"] = len(orientation_attempts) - 1
+        page_result["request_attempts"] = sum(orientation_attempts)
         return page_result
 
     with ThreadPoolExecutor(max_workers=min(max_page_parallel, len(selected_page_indexes) or 1)) as executor:
@@ -922,6 +1081,7 @@ def llm_ocr(
         "table_cell_lines": [line for page in pages for line in page.get("table_cell_lines", [])],
         "table_cell_units": [unit for page in pages for unit in page.get("table_cell_units", [])],
         "table_logical_rows": table_logical_rows,
+        "form_fields": [field for page in pages for field in page.get("form_fields", [])],
     }
 
 
@@ -1608,6 +1768,15 @@ def main() -> int:
     inspect_parser.add_argument("input", type=Path, help="PDF file to inspect")
     inspect_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
+    evidence_parser = subparsers.add_parser("inspect-evidence", help="Produce hash-bound published inspection evidence")
+    evidence_parser.add_argument("--request", type=Path, required=True)
+    evidence_parser.add_argument("--output", type=Path, required=True)
+
+    evidence_validator_parser = subparsers.add_parser("validate-inspect-evidence", help="Independently recompute published inspection evidence")
+    evidence_validator_parser.add_argument("--request", type=Path, required=True)
+    evidence_validator_parser.add_argument("--evidence", type=Path, required=True)
+    evidence_validator_parser.add_argument("--output", type=Path, required=True)
+
     # extract-tables command
     extract_parser = subparsers.add_parser("extract-tables", help="Extract tables from PDF")
     extract_parser.add_argument("input", type=Path, help="PDF file to extract from")
@@ -1673,7 +1842,13 @@ def main() -> int:
         return 1
 
     try:
-        if args.command == "inspect":
+        if args.command == "inspect-evidence":
+            return run_format_evidence(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, "0.21.1")
+
+        elif args.command == "validate-inspect-evidence":
+            return run_format_evidence(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, "0.21.1", args.evidence)
+
+        elif args.command == "inspect":
             result = inspect(args.input)
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))

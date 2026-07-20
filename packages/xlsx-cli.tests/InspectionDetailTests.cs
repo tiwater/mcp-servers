@@ -4,11 +4,18 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System.Text.Json;
 using Xunit;
+using Tiwater.FormatEvidence;
+using System.Security.Cryptography;
 
 namespace Dockit.Xlsx.Tests;
 
 public class InspectionDetailTests
 {
+    [Fact]
+    public void Published_inspection_evidence_is_recomputed_from_xlsx_bytes()
+    {
+        var source=CreateAna14LikeWorkbook();var root=Path.Combine(Path.GetTempPath(),$"xlsx-evidence-{Guid.NewGuid():N}");Directory.CreateDirectory(root);var evidence=Path.Combine(root,"evidence.json");var verdict=Path.Combine(root,"verdict.json");var request=Path.Combine(root,"request.json");var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();File.WriteAllText(request,JsonSerializer.Serialize(new{schema="tiwater.format-evidence-request/v1",requestId="request-1",runId="run-1",subject=new{kind="input",inputId="input-1"},artifact=new{artifactVersionId="av-1",path=source,bytesSha256=hash,format="xlsx"},extraction=new{schema="tiwater.xlsx.inspect/v1",options=new{},optionsSha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},expectedEvidenceSchema="lucid.published-format-evidence/v1",outputPath=evidence}));Assert.Equal(0,FormatEvidenceCommand.RunProducer(["--request",request,"--output",evidence],"tiwater-xlsx","0.2.1","xlsx",Inspector.Inspect));Assert.Equal(0,FormatEvidenceCommand.RunValidator(["--request",request,"--evidence",evidence,"--output",verdict],"tiwater-xlsx","0.2.1","xlsx",Inspector.Inspect));Assert.True(JsonDocument.Parse(File.ReadAllText(verdict)).RootElement.GetProperty("pass").GetBoolean());
+    }
     [Fact]
     public void Inspect_exposes_visible_text_formulas_dimensions_and_merges()
     {
@@ -36,6 +43,12 @@ public class InspectionDetailTests
         Assert.Contains(sheet.RowHeights!, row => row.Row == 15 && row.Height == 42);
         Assert.DoesNotContain(sheet.RowHeights!, row => row.Row == 16);
         Assert.Contains(sheet.ColumnWidths!, column => column.Column == 1 && column.Width > 20);
+        var numericCell = Assert.Single(sheet.Cells!, cell => cell.Reference == "E5");
+        Assert.Equal(1U, numericCell.Style.StyleIndex);
+        Assert.Equal(164U, numericCell.Style.NumberFormatId);
+        Assert.Equal("0.000", numericCell.Style.NumberFormatCode);
+        Assert.Equal("center", numericCell.Style.HorizontalAlignment);
+        Assert.True(numericCell.Style.WrapText);
     }
 
     [Fact]
@@ -61,6 +74,9 @@ public class InspectionDetailTests
             run.GetProperty("text").GetString() == "N" &&
             run.GetProperty("color").GetString() == "FFFF0000" &&
             run.GetProperty("underline").GetString() == "single");
+        var numericCell = cells.Single(cell => cell.GetProperty("reference").GetString() == "E5");
+        Assert.Equal(164U, numericCell.GetProperty("style").GetProperty("numberFormatId").GetUInt32());
+        Assert.Equal("center", numericCell.GetProperty("style").GetProperty("horizontalAlignment").GetString());
     }
 
     private static string CreateAna14LikeWorkbook()
@@ -74,6 +90,16 @@ public class InspectionDetailTests
             new SharedStringItem(new Text("shared label")),
             CreateRichSharedString());
         var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new NumberingFormats(new NumberingFormat { NumberFormatId = 164, FormatCode = "0.000" }),
+            new Fonts(new Font()), new Fills(new Fill()), new Borders(new Border()),
+            new CellStyleFormats(new CellFormat()),
+            new CellFormats(new CellFormat(), new CellFormat {
+                NumberFormatId = 164, ApplyNumberFormat = true,
+                Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Center, WrapText = true }
+            }));
+        stylesPart.Stylesheet.Save();
 
         var sheetData = new SheetData(
             CreateMixedValueRow(),
@@ -109,7 +135,7 @@ public class InspectionDetailTests
             new Cell { CellReference = "A5", DataType = CellValues.InlineString, InlineString = new InlineString(new Text("280 nm峰面积")) },
             new Cell { CellReference = "C5", DataType = CellValues.SharedString, CellValue = new CellValue("0") },
             new Cell { CellReference = "D5", DataType = CellValues.Boolean, CellValue = new CellValue("1") },
-            new Cell { CellReference = "E5", CellValue = new CellValue("123.45") },
+            new Cell { CellReference = "E5", StyleIndex = 1, CellValue = new CellValue("123.45") },
             new Cell { CellReference = "F5", DataType = CellValues.InlineString, InlineString = CreateRichInlineString() },
             new Cell { CellReference = "G5", DataType = CellValues.SharedString, CellValue = new CellValue("1") })
         { RowIndex = 5 };

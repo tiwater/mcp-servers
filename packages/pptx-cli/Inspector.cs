@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
@@ -53,21 +54,45 @@ public static class Inspector
         var slideSize = presentationPart.Presentation.SlideSize;
         var slides = new List<SlideDetailReport>();
         var slideParts = EnumerateSlides(presentationPart).ToList();
+        var layoutOwners = presentationPart.SlideMasterParts
+            .SelectMany(master => master.SlideLayoutParts.Select(layout => (LayoutPath: NormalizePartPath(layout.Uri), MasterPath: NormalizePartPath(master.Uri))))
+            .ToDictionary(item => item.LayoutPath, item => item.MasterPath, StringComparer.Ordinal);
         for (var i = 0; i < slideParts.Count; i++)
         {
             var slidePart = slideParts[i];
+            var layoutPath = slidePart.SlideLayoutPart is { } layout ? NormalizePartPath(layout.Uri) : null;
             slides.Add(new SlideDetailReport(
                 SlideNumber: i + 1,
                 Path: NormalizePartPath(slidePart.Uri),
-                Shapes: ExtractShapes(slidePart.Slide)));
+                MasterPath: layoutPath is not null && layoutOwners.TryGetValue(layoutPath, out var masterPath) ? masterPath : null,
+                LayoutPath: layoutPath,
+                Shapes: ExtractShapes(slidePart)));
         }
+
+        var masters = presentationPart.SlideMasterParts
+            .Select(master => new MasterDetail(
+                NormalizePartPath(master.Uri),
+                master.SlideMaster?.CommonSlideData?.Name?.Value ?? string.Empty,
+                HashText(master.SlideMaster?.OuterXml ?? string.Empty),
+                master.ThemePart is null ? null : NormalizePartPath(master.ThemePart.Uri),
+                master.ThemePart is null ? null : HashPart(master.ThemePart),
+                master.SlideLayoutParts.Select(layout => new LayoutDetail(
+                    NormalizePartPath(layout.Uri),
+                    layout.SlideLayout?.CommonSlideData?.Name?.Value ?? string.Empty,
+                    layout.SlideLayout?.Type?.Value.ToString(),
+                    HashText(layout.SlideLayout?.OuterXml ?? string.Empty))).OrderBy(layout => layout.Path, StringComparer.Ordinal).ToList()))
+            .OrderBy(master => master.Path, StringComparer.Ordinal).ToList();
 
         return new PresentationDetailReport(
             File: path,
             SlideCount: slides.Count,
             SlideSize: new SlideSizeInfo(slideSize?.Cx ?? 0L, slideSize?.Cy ?? 0L),
+            Masters: masters,
             Slides: slides);
     }
+
+    private static string HashText(string value) => Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+    private static string HashPart(OpenXmlPart part) { using var stream = part.GetStream(); return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant(); }
 
     internal static List<string> ExtractTexts(OpenXmlPartRootElement? root)
     {
@@ -116,57 +141,49 @@ public static class Inspector
         return path.StartsWith('/') ? path[1..] : path;
     }
 
-    private static List<ShapeDetail> ExtractShapes(Slide? slide)
+    private static List<ShapeDetail> ExtractShapes(SlidePart slidePart)
     {
+        var slide = slidePart.Slide;
         if (slide is null)
         {
             return [];
         }
 
         var shapes = new List<ShapeDetail>();
-        foreach (var shape in slide.Descendants<Shape>())
+        var zOrder = 0;
+        foreach (var child in slide.CommonSlideData?.ShapeTree?.ChildElements ?? [])
         {
-            var id = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
-            var name = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty;
-            shapes.Add(new ShapeDetail(
-                ShapeId: id,
-                Name: name,
-                Kind: "shape",
-                Text: string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []),
-                Transform: ExtractTransform(shape.ShapeProperties?.Transform2D),
-                Paragraphs: ExtractParagraphs(shape.TextBody),
-                Runs: ExtractRuns(shape.TextBody)));
+            if (child is Shape shape)
+            {
+                var app = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties;
+                shapes.Add(new ShapeDetail(shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U,
+                    shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "shape", zOrder++,
+                    app?.PlaceholderShape?.Type?.Value.ToString(), null, null,
+                    string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody), ExtractRuns(shape.TextBody)));
+            }
+            else if (child is Picture picture)
+            {
+                string? mediaPath = null; string? mediaHash = null;
+                var relationshipId = picture.BlipFill?.Blip?.Embed?.Value;
+                if (!string.IsNullOrWhiteSpace(relationshipId) && slidePart.GetPartById(relationshipId) is OpenXmlPart media)
+                {
+                    mediaPath = NormalizePartPath(media.Uri); using var stream = media.GetStream(); mediaHash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+                }
+                var app = picture.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties;
+                shapes.Add(new ShapeDetail(picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U,
+                    picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "picture", zOrder++,
+                    app?.PlaceholderShape?.Type?.Value.ToString(), mediaPath, mediaHash, string.Empty,
+                    ExtractTransform(picture.ShapeProperties?.Transform2D), [], []));
+            }
+            else if (child is GraphicFrame frame)
+            {
+                var app = frame.NonVisualGraphicFrameProperties?.ApplicationNonVisualDrawingProperties;
+                shapes.Add(new ShapeDetail(frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U,
+                    frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "graphicFrame", zOrder++,
+                    app?.PlaceholderShape?.Type?.Value.ToString(), null, null, string.Empty, ExtractTransform(frame.Transform), [], []));
+            }
         }
-
-        foreach (var picture in slide.Descendants<Picture>())
-        {
-            var id = picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
-            var name = picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty;
-            shapes.Add(new ShapeDetail(
-                ShapeId: id,
-                Name: name,
-                Kind: "picture",
-                Text: string.Empty,
-                Transform: ExtractTransform(picture.ShapeProperties?.Transform2D),
-                Paragraphs: [],
-                Runs: []));
-        }
-
-        foreach (var frame in slide.Descendants<GraphicFrame>())
-        {
-            var id = frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
-            var name = frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty;
-            shapes.Add(new ShapeDetail(
-                ShapeId: id,
-                Name: name,
-                Kind: "graphicFrame",
-                Text: string.Empty,
-                Transform: ExtractTransform(frame.Transform),
-                Paragraphs: [],
-                Runs: []));
-        }
-
-        return shapes.OrderBy(shape => shape.ShapeId).ToList();
+        return shapes;
     }
 
     private static TransformInfo? ExtractTransform(A.Transform2D? transform)
