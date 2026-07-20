@@ -10,7 +10,7 @@ public static class FontPolicy
 {
     public const string Schema = "tiwater.docx-font-policy/v1";
     private const string ReportSchema = "tiwater.docx-font-validation/v1";
-    private const string ToolVersion = "0.10.7";
+    private const string ToolVersion = "0.10.9";
 
     public static int RunValidate(string[] args)
     {
@@ -115,7 +115,7 @@ public static class FontPolicy
         if (text.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
         {
             if (!decimal.TryParse(text[..^2].Trim(), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var points) || points <= 0 || points * 2 != decimal.Truncate(points * 2)) return false;
-            normalized = (points * 2).ToString(CultureInfo.InvariantCulture);
+            normalized = decimal.Truncate(points * 2).ToString("0", CultureInfo.InvariantCulture);
             return true;
         }
         if (!uint.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var halfPoints) || halfPoints == 0) return false;
