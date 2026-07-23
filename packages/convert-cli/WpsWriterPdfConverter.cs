@@ -6,9 +6,8 @@ public static class WpsWriterPdfConverter
 {
     public static bool IsAvailable()
         => !string.IsNullOrWhiteSpace(FindWpsRpcPython())
-            && !string.IsNullOrWhiteSpace(FindOnPath("xvfb-run"))
-            && !string.IsNullOrWhiteSpace(FindOnPath("dbus-run-session"))
-            && !string.IsNullOrWhiteSpace(FindOnPath("wps"));
+            && WpsRpcSession.IsAvailable()
+            && !string.IsNullOrWhiteSpace(WpsRpcSession.FindOnPath("wps"));
 
     public static void ConvertToPdf(string input, string output)
     {
@@ -19,11 +18,9 @@ public static class WpsWriterPdfConverter
 
         var python = FindWpsRpcPython()
             ?? throw new InvalidOperationException("WPS RPC python is required for WPS Writer PDF conversion. Set TIWATER_WPSRPC_PYTHON or LUCID_WPSRPC_PYTHON.");
-        var xvfb = FindOnPath("xvfb-run")
-            ?? throw new InvalidOperationException("xvfb-run is required for WPS Writer PDF conversion.");
-        var dbusRunSession = FindOnPath("dbus-run-session")
-            ?? throw new InvalidOperationException("dbus-run-session is required for WPS Writer PDF conversion.");
-        if (string.IsNullOrWhiteSpace(FindOnPath("wps")))
+        var xvfb = WpsRpcSession.RequireCommand("xvfb-run", "WPS Writer PDF conversion");
+        var dbusRunSession = WpsRpcSession.RequireCommand("dbus-run-session", "WPS Writer PDF conversion");
+        if (string.IsNullOrWhiteSpace(WpsRpcSession.FindOnPath("wps")))
         {
             throw new InvalidOperationException("WPS Writer command not found: wps");
         }
@@ -64,8 +61,7 @@ public static class WpsWriterPdfConverter
 
     private static void RunWpsHelper(string xvfb, string dbusRunSession, string python, string helperPath, string input, string output, string tempRoot)
     {
-        var startInfo = CreateProcessStartInfo(xvfb, tempRoot);
-        foreach (var arg in CreateHelperArguments(dbusRunSession, python, helperPath, input, output)) startInfo.ArgumentList.Add(arg);
+        var startInfo = WpsRpcSession.CreateProcessStartInfo(dbusRunSession, xvfb, python, helperPath, input, output, tempRoot);
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start WPS Writer RPC conversion.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
@@ -82,43 +78,6 @@ public static class WpsWriterPdfConverter
             throw new InvalidOperationException($"WPS Writer RPC failed to convert {input} to PDF." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
         }
     }
-
-    internal static ProcessStartInfo CreateProcessStartInfo(string executable, string isolatedWorkingDirectory)
-    {
-        var workingDirectory = Path.GetFullPath(isolatedWorkingDirectory);
-        var cacheDirectory = Path.Combine(workingDirectory, "cache");
-        var runtimeDirectory = Path.Combine(workingDirectory, "runtime");
-        Directory.CreateDirectory(cacheDirectory);
-        Directory.CreateDirectory(runtimeDirectory);
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(runtimeDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executable,
-            WorkingDirectory = workingDirectory,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-        };
-        startInfo.Environment["XDG_CACHE_HOME"] = cacheDirectory;
-        startInfo.Environment["XDG_RUNTIME_DIR"] = runtimeDirectory;
-        return startInfo;
-    }
-
-    internal static string[] CreateHelperArguments(string dbusRunSession, string python, string helperPath, string input, string output)
-        => new[]
-        {
-            "-a",
-            dbusRunSession,
-            "--",
-            python,
-            helperPath,
-            Path.GetFullPath(input),
-            Path.GetFullPath(output),
-        };
 
     public static bool IsTransientStartupFailure(string message)
         => message.Contains("getWpsApplication failed", StringComparison.OrdinalIgnoreCase)
@@ -142,17 +101,6 @@ public static class WpsWriterPdfConverter
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var candidate = Path.Combine(home, ".local", "share", "lucid-docs", "wpsrpc-venv", "bin", "python");
         return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;
-    }
-
-    private static string? FindOnPath(string command)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var candidate = Path.Combine(directory, OperatingSystem.IsWindows() ? $"{command}.exe" : command);
-            if (File.Exists(candidate)) return Path.GetFullPath(candidate);
-        }
-        return null;
     }
 
     private const string WpsHelperScript = """

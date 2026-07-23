@@ -179,39 +179,35 @@ public class ConvertCliTests
     }
 
     [Fact]
-    public void Wps_writer_runs_in_an_isolated_working_directory()
+    public void Wps_rpc_session_uses_writable_isolated_xdg_directories()
     {
-        var isolated = Path.Combine(Path.GetTempPath(), $"wps-working-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(isolated);
+        var isolated = Path.Combine(Path.GetTempPath(), $"wps-session-{Guid.NewGuid():N}");
+        var startInfo = WpsRpcSession.CreateProcessStartInfo(
+            "/usr/bin/dbus-run-session",
+            "/usr/bin/xvfb-run",
+            "/venv/bin/python",
+            Path.Combine(isolated, "helper.py"),
+            Path.Combine(isolated, "input.docx"),
+            Path.Combine(isolated, "output.pdf"),
+            isolated);
 
-        var startInfo = WpsWriterPdfConverter.CreateProcessStartInfo("xvfb-run", isolated);
-
-        Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
-        Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
         Assert.Equal(Path.Combine(Path.GetFullPath(isolated), "cache"), startInfo.Environment["XDG_CACHE_HOME"]);
         Assert.Equal(Path.Combine(Path.GetFullPath(isolated), "runtime"), startInfo.Environment["XDG_RUNTIME_DIR"]);
-    }
-
-    [Fact]
-    public void Wps_writer_starts_an_isolated_dbus_session()
-    {
-        var arguments = WpsWriterPdfConverter.CreateHelperArguments(
-            "dbus-run-session",
-            "/tmp/wpsrpc-python",
-            "/tmp/writer_to_pdf_wps.py",
-            "/tmp/input.docx",
-            "/tmp/output.pdf");
-
+        Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
+        Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
+        Assert.True(Directory.Exists(startInfo.Environment["XDG_CACHE_HOME"]));
+        Assert.True(Directory.Exists(startInfo.Environment["XDG_RUNTIME_DIR"]));
+        Assert.Equal("/usr/bin/dbus-run-session", startInfo.FileName);
         Assert.Equal(new[]
         {
-            "-a",
-            "dbus-run-session",
             "--",
-            "/tmp/wpsrpc-python",
-            "/tmp/writer_to_pdf_wps.py",
-            "/tmp/input.docx",
-            "/tmp/output.pdf",
-        }, arguments);
+            "/usr/bin/xvfb-run",
+            "-a",
+            "/venv/bin/python",
+            Path.Combine(isolated, "helper.py"),
+            Path.Combine(isolated, "input.docx"),
+            Path.Combine(isolated, "output.pdf"),
+        }, startInfo.ArgumentList);
     }
 
     [Fact]
