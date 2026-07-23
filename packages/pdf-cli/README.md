@@ -134,7 +134,11 @@ In `auto` mode, bare Alibaba Model Studio Qwen3.5/Qwen3.6/Qwen3.7 model ids such
 Each vision page request retries a bounded three times for transient gateway
 timeouts, throttling, server errors, the gateway's intermittent invalid-URL
 response, and malformed or incomplete model response objects. Parsing and
-table normalization happen inside the retry boundary. If a provider aborts
+table normalization happen inside the retry boundary. The base prompt requires
+strict JSON-compatible backslash escaping. After a malformed response, the
+remaining bounded attempts add an explicit JSON-escape correction prompt rather
+than repeating the same deterministic request. Failed file status records the
+failed page and exhausted request-attempt count. If a provider aborts
 structured JSON generation with a `response_format` error, the next bounded
 attempt omits that provider hint while retaining the JSON-only prompt and strict
 JSON-object parser. If any selected page
