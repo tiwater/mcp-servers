@@ -30,8 +30,15 @@ OCR_PAGE_PROMPT = (
     "Each option must have label and a boolean selected that reflects only its visible mark; retain every option and never infer a selection. "
     "Set orientation_degrees to the clockwise rotation required to make the supplied image text upright: exactly 0, 90, 180, or 270. "
     "Do not summarize and do not infer missing values. "
+    r"Return strict JSON: encode every literal backslash inside a JSON string as \\ and never emit invalid JSON escapes such as \|. "
+    r"When markdown requires an escaped pipe, encode it as \\| in the JSON source. "
     "Return one JSON object with keys text, tables, fields, orientation_degrees, warnings. "
     "tables should be an array of markdown table strings or empty if no table is visible; fields should be an array or empty."
+)
+
+OCR_PAGE_JSON_RETRY_PROMPT = (
+    "The previous response could not be decoded as strict JSON. Regenerate the full object rather than explaining or repairing it. "
+    r"All JSON string backslashes must be escaped as \\; never emit \|, and encode a markdown escaped pipe as \\| in the JSON source."
 )
 
 
@@ -59,6 +66,10 @@ def _call_vision_with_retry(
             return call(), attempt
         except Exception as error:
             if attempt >= attempts or not retryable(error):
+                try:
+                    error.request_attempts = attempt
+                except Exception:
+                    pass
                 raise
             sleep_fn(attempt * 2)
 
@@ -71,7 +82,13 @@ def _is_retryable_vision_page_error(error: Exception) -> bool:
     )
 
 
-def _call_vision_page_with_retry(request, parse, attempts: int = DEFAULT_VISION_REQUEST_ATTEMPTS, sleep_fn=time.sleep):
+def _call_vision_page_with_retry(
+    request,
+    parse,
+    attempts: int = DEFAULT_VISION_REQUEST_ATTEMPTS,
+    sleep_fn=time.sleep,
+    on_malformed_response=None,
+):
     """Retry one page and fall back from provider-side response_format failures."""
     use_response_format = True
 
@@ -81,6 +98,10 @@ def _call_vision_page_with_retry(request, parse, attempts: int = DEFAULT_VISION_
             return parse(request(use_response_format))
         except _VisionResponseFormatError:
             use_response_format = False
+            raise
+        except ValueError:
+            if on_malformed_response is not None:
+                on_malformed_response()
             raise
 
     return _call_vision_with_retry(
@@ -1032,15 +1053,23 @@ def llm_ocr(
                     page_doc, page_index, zoom=zoom, rotation_degrees=rotation_degrees,
                 )
             b64_image = base64.b64encode(image_bytes).decode("utf-8")
+            use_json_retry_prompt = False
+
+            def mark_malformed_response():
+                nonlocal use_json_retry_prompt
+                use_json_retry_prompt = True
 
             def request_page(use_response_format: bool):
                 completion_kwargs = {}
                 if use_response_format:
                     completion_kwargs["response_format"] = {"type": "json_object"}
+                page_prompt = OCR_PAGE_PROMPT
+                if use_json_retry_prompt:
+                    page_prompt = f"{page_prompt} {OCR_PAGE_JSON_RETRY_PROMPT}"
                 return client.chat.completions.create(
                     model=llm_model, max_tokens=max_tokens,
                     messages=[{"role": "user", "content": [
-                        {"type": "text", "text": OCR_PAGE_PROMPT},
+                        {"type": "text", "text": page_prompt},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
                     ]}], temperature=0.0, **request_kwargs, **completion_kwargs,
                 )
@@ -1048,6 +1077,7 @@ def llm_ocr(
             return _call_vision_page_with_retry(
                 request_page,
                 lambda response: _parse_vision_page_response(response, page_number),
+                on_malformed_response=mark_malformed_response,
             )
 
         try:
@@ -1055,9 +1085,12 @@ def llm_ocr(
                 _run_with_orientation_correction(run_orientation)
             )
         except Exception as error:
-            raise RuntimeError(
+            page_error = RuntimeError(
                 f"OCR page {page_number} failed: {type(error).__name__}: {error}"
-            ) from error
+            )
+            page_error.page_number = page_number
+            page_error.request_attempts = getattr(error, "request_attempts", None)
+            raise page_error from error
         page_result["orientation_correction_degrees"] = correction_degrees
         page_result["orientation_detection_request_attempts"] = orientation_attempts[0]
         page_result["orientation_correction_request_attempts"] = sum(orientation_attempts[1:])
@@ -1203,6 +1236,10 @@ def _run_ocr_batch(
             item["status"] = "failed"
             item["exit_code"] = 1
             item["error"] = f"{type(error).__name__}: {error}"
+            if getattr(error, "page_number", None) is not None:
+                item["failed_page"] = error.page_number
+            if getattr(error, "request_attempts", None) is not None:
+                item["request_attempts"] = error.request_attempts
             job["stderr"].write_text(item["error"] + "\n", encoding="utf-8")
         finally:
             item["duration_ms"] = int((time.monotonic() - started) * 1000)
