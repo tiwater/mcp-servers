@@ -77,6 +77,8 @@ public static class Editor
             "replaceParagraphText" => ReplaceParagraphText(body, operation),
             "replaceParagraphRunText" => ReplaceParagraphRunText(body, operation),
             "replaceBodyText" => ReplaceBodyText(body, operation),
+            "deleteBodyParagraph" => DeleteBodyParagraph(body, operation),
+            "deleteBodyRange" => DeleteBodyRange(body, operation),
             "startSectionBeforeParagraph" => StartSectionBeforeParagraph(body, operation),
             "replaceAllHeaderParagraphText" => ReplaceAllHeaderParagraphText(doc, operation),
             "replaceHeaderParagraphText" => ReplaceHeaderParagraphText(doc, operation),
@@ -282,6 +284,149 @@ public static class Editor
         }
 
         return new DocxEditAppliedOperation(operation.Type, true, $"Replaced body text in {replaced} paragraph(s)");
+    }
+
+    private static DocxEditAppliedOperation DeleteBodyParagraph(Body body, DocxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.FindText))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "findText is required");
+        }
+
+        if (!TryResolveParagraphMatchMode(operation.MatchMode, out var matchMode, out var modeError))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, modeError);
+        }
+
+        var matches = body.Descendants<Paragraph>()
+            .Where(paragraph => ParagraphMatches(paragraph, operation.FindText, matchMode, operation.ParagraphStyle))
+            .ToList();
+        if (matches.Count != 1)
+        {
+            return new DocxEditAppliedOperation(
+                operation.Type,
+                false,
+                $"Expected exactly one body paragraph for {matchMode} selector '{operation.FindText}', found {matches.Count}");
+        }
+
+        matches[0].Remove();
+        return new DocxEditAppliedOperation(operation.Type, true, $"Deleted body paragraph matching: {operation.FindText}");
+    }
+
+    private static DocxEditAppliedOperation DeleteBodyRange(Body body, DocxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.FindText))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "findText is required");
+        }
+
+        if (!TryResolveParagraphMatchMode(operation.MatchMode, out var startMatchMode, out var startModeError))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, startModeError);
+        }
+
+        var deleteToBodyEnd = operation.DeleteToBodyEnd == true;
+        if (deleteToBodyEnd == !string.IsNullOrWhiteSpace(operation.EndFindText))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "exactly one of endFindText or deleteToBodyEnd=true is required");
+        }
+
+        var children = body.ChildElements.ToList();
+        var startMatches = children
+            .Select((child, index) => (child, index))
+            .Where(candidate => candidate.child is Paragraph paragraph
+                && ParagraphMatches(paragraph, operation.FindText, startMatchMode, operation.ParagraphStyle))
+            .ToList();
+        if (startMatches.Count != 1)
+        {
+            return new DocxEditAppliedOperation(
+                operation.Type,
+                false,
+                $"Expected exactly one direct body paragraph for {startMatchMode} selector '{operation.FindText}', found {startMatches.Count}");
+        }
+
+        var startIndex = startMatches[0].index;
+        var endIndex = children.Count;
+        if (!deleteToBodyEnd)
+        {
+            if (!TryResolveParagraphMatchMode(operation.EndMatchMode, out var endMatchMode, out var endModeError))
+            {
+                return new DocxEditAppliedOperation(operation.Type, false, endModeError);
+            }
+
+            var endMatches = children
+                .Select((child, index) => (child, index))
+                .Where(candidate => candidate.index > startIndex
+                    && candidate.child is Paragraph paragraph
+                    && ParagraphMatches(paragraph, operation.EndFindText!, endMatchMode, operation.EndParagraphStyle))
+                .ToList();
+            if (endMatches.Count != 1)
+            {
+                return new DocxEditAppliedOperation(
+                    operation.Type,
+                    false,
+                    $"Expected exactly one following direct body paragraph for {endMatchMode} selector '{operation.EndFindText}', found {endMatches.Count}");
+            }
+            endIndex = endMatches[0].index;
+        }
+        else
+        {
+            var finalSectionProperties = children.FindLastIndex(child => child is SectionProperties);
+            if (finalSectionProperties >= startIndex)
+            {
+                endIndex = finalSectionProperties;
+            }
+        }
+
+        if (endIndex <= startIndex)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "body range is empty or reversed");
+        }
+
+        var selected = children.Skip(startIndex).Take(endIndex - startIndex).ToList();
+        if (selected.Any(child => child is SectionProperties))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "body range cannot delete document-level section properties");
+        }
+
+        foreach (var child in selected)
+        {
+            child.Remove();
+        }
+
+        return new DocxEditAppliedOperation(
+            operation.Type,
+            true,
+            $"Deleted {selected.Count} direct body element(s) beginning at paragraph: {operation.FindText}");
+    }
+
+    private static bool TryResolveParagraphMatchMode(string? requested, out string mode, out string error)
+    {
+        mode = string.IsNullOrWhiteSpace(requested) ? "exact" : requested.Trim();
+        if (mode is "exact" or "startsWith")
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        error = $"Unsupported paragraph matchMode: {mode}";
+        return false;
+    }
+
+    private static bool ParagraphMatches(Paragraph paragraph, string expected, string mode, string? expectedStyle)
+    {
+        var actual = GetParagraphText(paragraph).Trim();
+        var selector = expected.Trim();
+        var textMatches = mode == "startsWith"
+            ? actual.StartsWith(selector, StringComparison.Ordinal)
+            : string.Equals(actual, selector, StringComparison.Ordinal);
+        if (!textMatches || string.IsNullOrWhiteSpace(expectedStyle))
+        {
+            return textMatches;
+        }
+
+        var actualStyle = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        return string.Equals(actualStyle, expectedStyle.Trim(), StringComparison.Ordinal);
     }
 
     private static DocxEditAppliedOperation ReplaceHeaderParagraphText(WordprocessingDocument doc, DocxEditOperation operation)
