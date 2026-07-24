@@ -1,6 +1,8 @@
 using NPOI.HSSF.UserModel;
 using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Dockit.Convert;
 
@@ -12,13 +14,120 @@ public sealed class AuthoritativeSpreadsheetRuntimeException : Exception
 
 public static class WorkbookConverter
 {
+    private const string InspectionCacheSchema = "tiwater.xls-to-xlsx-cache/v1";
+
     public sealed record ConversionResult(string Backend, string? FallbackReason = null);
+    private sealed record InspectionCacheManifest(string Schema, string InputSha256, string OutputSha256, string Backend);
 
     public static ConversionResult ConvertXlsToXlsx(string input, string output)
         => ConvertXlsToXlsx(input, output, requireWpsForAuthority: false);
 
     public static ConversionResult ConvertXlsToXlsxForInspection(string input, string output)
-        => ConvertXlsToXlsx(input, output, requireWpsForAuthority: true);
+    {
+        input = Path.GetFullPath(input);
+        output = Path.GetFullPath(output);
+        if (!File.Exists(input)) throw new InvalidOperationException($"Input file not found: {input}");
+
+        var inputSha256 = FileSha256(input);
+        var cacheDirectory = Path.Combine(InspectionCacheRoot(), "xls-to-xlsx", "wps-spreadsheet", "v1", inputSha256);
+        var cachedWorkbook = Path.Combine(cacheDirectory, "normalized.xlsx");
+        var manifestPath = Path.Combine(cacheDirectory, "manifest.json");
+        Directory.CreateDirectory(cacheDirectory);
+
+        using (WpsRpcSession.AcquireContentLease(Path.Combine(cacheDirectory, "conversion.lock"), TimeSpan.FromMinutes(5)))
+        {
+            if (!ValidInspectionCache(cachedWorkbook, manifestPath, inputSha256))
+            {
+                File.Delete(cachedWorkbook);
+                File.Delete(manifestPath);
+                var candidate = Path.Combine(cacheDirectory, $"normalized-{Guid.NewGuid():N}.xlsx");
+                try
+                {
+                    var conversion = ConvertXlsToXlsx(input, candidate, requireWpsForAuthority: true);
+                    if (!string.Equals(conversion.Backend, "wps-spreadsheet", StringComparison.Ordinal)
+                        || !string.IsNullOrWhiteSpace(conversion.FallbackReason))
+                        throw new InvalidOperationException("Authoritative XLS inspection cache requires WPS Spreadsheet conversion without fallback.");
+                    ValidateXlsxPackage(candidate);
+                    var outputSha256 = FileSha256(candidate);
+                    File.Move(candidate, cachedWorkbook, overwrite: true);
+                    AtomicWrite(
+                        manifestPath,
+                        JsonSerializer.Serialize(new InspectionCacheManifest(
+                            InspectionCacheSchema,
+                            inputSha256,
+                            outputSha256,
+                            conversion.Backend)));
+                }
+                finally
+                {
+                    File.Delete(candidate);
+                }
+            }
+        }
+
+        var outputDirectory = Path.GetDirectoryName(output);
+        if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
+        File.Copy(cachedWorkbook, output, overwrite: true);
+        ValidateXlsxPackage(output);
+        return new ConversionResult("wps-spreadsheet");
+    }
+
+    private static bool ValidInspectionCache(string workbookPath, string manifestPath, string inputSha256)
+    {
+        try
+        {
+            if (!File.Exists(workbookPath) || !File.Exists(manifestPath)) return false;
+            var manifest = JsonSerializer.Deserialize<InspectionCacheManifest>(File.ReadAllText(manifestPath));
+            if (manifest is null
+                || !string.Equals(manifest.Schema, InspectionCacheSchema, StringComparison.Ordinal)
+                || !string.Equals(manifest.InputSha256, inputSha256, StringComparison.Ordinal)
+                || !string.Equals(manifest.Backend, "wps-spreadsheet", StringComparison.Ordinal)
+                || !string.Equals(manifest.OutputSha256, FileSha256(workbookPath), StringComparison.Ordinal))
+                return false;
+            ValidateXlsxPackage(workbookPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string InspectionCacheRoot()
+    {
+        var configured = Environment.GetEnvironmentVariable("TIWATER_OFFICE_CACHE_ROOT")?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
+        var xdg = Environment.GetEnvironmentVariable("XDG_CACHE_HOME")?.Trim();
+        if (!string.IsNullOrWhiteSpace(xdg)) return Path.Combine(Path.GetFullPath(xdg), "tiwater", "office-conversions");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "tiwater", "office-conversions");
+    }
+
+    private static string FileSha256(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return System.Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+    }
+
+    private static void ValidateXlsxPackage(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var workbook = new XSSFWorkbook(stream);
+        if (workbook.NumberOfSheets < 1) throw new InvalidOperationException($"WPS RPC produced an XLSX without worksheets: {path}");
+    }
+
+    private static void AtomicWrite(string path, string content)
+    {
+        var temporary = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporary, content);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
+    }
 
     private static ConversionResult ConvertXlsToXlsx(string input, string output, bool requireWpsForAuthority)
     {

@@ -15,10 +15,17 @@ internal static class WpsRpcSession
             ?? throw new InvalidOperationException($"{command} is required for {purpose}.");
 
     internal static IDisposable AcquireSpreadsheetLease(TimeSpan? timeout = null, string? lockPath = null)
+        => AcquireFileLease(
+            Path.GetFullPath(lockPath ?? SpreadsheetLeasePath),
+            timeout ?? TimeSpan.FromMinutes(5),
+            "WPS spreadsheet runtime");
+
+    internal static IDisposable AcquireContentLease(string lockPath, TimeSpan timeout)
+        => AcquireFileLease(Path.GetFullPath(lockPath), timeout, "WPS spreadsheet content conversion");
+
+    private static IDisposable AcquireFileLease(string absolute, TimeSpan wait, string label)
     {
-        var absolute = Path.GetFullPath(lockPath ?? SpreadsheetLeasePath);
         Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
-        var wait = timeout ?? TimeSpan.FromMinutes(30);
         var started = Stopwatch.StartNew();
         while (true)
         {
@@ -32,7 +39,7 @@ internal static class WpsRpcSession
             }
             catch (IOException error)
             {
-                throw new TimeoutException($"WPS spreadsheet runtime remained busy for {wait}.", error);
+                throw new TimeoutException($"{label} remained busy for {wait}.", error);
             }
         }
     }
