@@ -389,6 +389,33 @@ public static class Editor
             return new DocxEditAppliedOperation(operation.Type, false, "body range cannot delete document-level section properties");
         }
 
+        var removedPrecedingPageBreak = false;
+        if (operation.RemovePrecedingPageBreak == true)
+        {
+            if (!deleteToBodyEnd)
+            {
+                return new DocxEditAppliedOperation(operation.Type, false, "removePrecedingPageBreak requires deleteToBodyEnd=true");
+            }
+            if (startIndex == 0 || children[startIndex - 1] is not Paragraph boundaryParagraph)
+            {
+                return new DocxEditAppliedOperation(operation.Type, false, "preceding body element is not a paragraph");
+            }
+
+            var pageBreaks = boundaryParagraph.Descendants<Break>()
+                .Where(element => element.Type?.Value == BreakValues.Page)
+                .ToList();
+            if (pageBreaks.Count != 1)
+            {
+                return new DocxEditAppliedOperation(
+                    operation.Type,
+                    false,
+                    $"Expected exactly one explicit page break in the preceding paragraph, found {pageBreaks.Count}");
+            }
+
+            pageBreaks[0].Remove();
+            removedPrecedingPageBreak = true;
+        }
+
         foreach (var child in selected)
         {
             child.Remove();
@@ -397,7 +424,8 @@ public static class Editor
         return new DocxEditAppliedOperation(
             operation.Type,
             true,
-            $"Deleted {selected.Count} direct body element(s) beginning at paragraph: {operation.FindText}");
+            $"Deleted {selected.Count} direct body element(s) beginning at paragraph: {operation.FindText}"
+                + (removedPrecedingPageBreak ? " and removed the preceding explicit page break" : string.Empty));
     }
 
     private static bool TryResolveParagraphMatchMode(string? requested, out string mode, out string error)

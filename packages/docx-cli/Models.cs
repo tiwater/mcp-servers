@@ -376,6 +376,7 @@ public sealed record DocxEditOperation(
     string? ParagraphStyle = null,
     string? EndParagraphStyle = null,
     bool? DeleteToBodyEnd = null,
+    bool? RemovePrecedingPageBreak = null,
     bool? NoWrap = null,
     bool? CantSplit = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null,
