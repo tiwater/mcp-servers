@@ -10,7 +10,7 @@ public static class FontPolicy
 {
     public const string Schema = "tiwater.docx-font-policy/v1";
     private const string ReportSchema = "tiwater.docx-font-validation/v1";
-    private const string ToolVersion = "0.10.11";
+    private static string ToolVersion => RuntimeIdentity.Version;
 
     public static int RunValidate(string[] args)
     {
