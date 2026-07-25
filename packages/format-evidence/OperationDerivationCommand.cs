@@ -11,6 +11,9 @@ public static class OperationDerivationCommand
         string Format,
         string EffectTypeId,
         string EffectTypeVersion,
+        string DerivationAdapterId,
+        string DerivationAdapterVersion,
+        string ExecutionAdapterId,
         string OperationSchemaFile,
         string OperationSchemaId,
         string TargetScope,
@@ -156,7 +159,11 @@ public static class OperationDerivationCommand
         if (
             provider["identity"]!["id"]!.GetValue<string>() != contract.ProviderId ||
             provider["identity"]!["version"]!.GetValue<string>() != contract.ProviderVersion ||
-            (isV2 && Canonical(provider["adapter"]) != Canonical(descriptor["executionAdapter"])))
+            (isV2 && (
+                provider["adapter"]!["id"]!.GetValue<string>() != contract.DerivationAdapterId ||
+                provider["adapter"]!["version"]!.GetValue<string>() != contract.DerivationAdapterVersion ||
+                descriptor["executionAdapter"]!["id"]!.GetValue<string>() != contract.ExecutionAdapterId ||
+                descriptor["executionAdapter"]!["version"]!.GetValue<string>() != contract.ProviderVersion)))
             throw new InvalidOperationException("operation derivation provider mismatch");
         var output = request["output"]!.AsObject();
         var outputArtifact = output["artifact"]!.AsObject();
