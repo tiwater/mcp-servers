@@ -29,6 +29,7 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="contracts/*.schema.json" Pack="true" PackagePath="contracts/" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../format-evidence/contracts/*.schema.json" Link="contracts/%(Filename)%(Extension)" Pack="true" PackagePath="contracts/" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

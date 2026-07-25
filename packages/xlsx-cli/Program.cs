@@ -27,6 +27,8 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -137,6 +139,8 @@ internal static class Cli
         Console.WriteLine("  inspect <input.xlsx> [--json]");
         Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
         Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
+        Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
+        Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  evidence <input.xlsx>");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");

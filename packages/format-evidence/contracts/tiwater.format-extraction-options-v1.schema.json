@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.format-extraction-options/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["facets"],
+  "properties": {
+    "facets": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["format-summary"]
+      }
+    }
+  }
+}

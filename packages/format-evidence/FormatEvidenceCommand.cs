@@ -15,6 +15,12 @@ public static class FormatEvidenceCommand
     public static int RunValidator(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null)
         => Run(args, true, tool, version, format, inspect, additionalObservations, acceptedSourceFormats, classifyError);
 
+    public static int RunProducerV2(string[] args, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null)
+        => RunV2(args, false, tool, version, format, inspect, acceptedSourceFormats, classifyError);
+
+    public static int RunValidatorV2(string[] args, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null)
+        => RunV2(args, true, tool, version, format, inspect, acceptedSourceFormats, classifyError);
+
     private static int Run(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations, IReadOnlySet<string>? acceptedSourceFormats, Func<Exception, ErrorClassification?>? classifyError)
     {
         var values = ParseArgs(args, validator);
@@ -82,6 +88,168 @@ public static class FormatEvidenceCommand
         }
         foreach (var name in validator ? new[] { "request", "evidence", "output" } : new[] { "request", "output" }) if (!values.ContainsKey(name)) throw new InvalidOperationException($"missing --{name}");
         return values;
+    }
+
+    private static int RunV2(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats, Func<Exception, ErrorClassification?>? classifyError)
+    {
+        var values = ParseArgs(args, validator);
+        var request = JsonNode.Parse(File.ReadAllText(values["request"]))!.AsObject();
+        var output = Path.GetFullPath(values["output"]);
+        try
+        {
+            var sourceFormat = ValidateRequestV2(request, tool, version, format, acceptedSourceFormats);
+            var expected = BuildEvidenceV2(request, sourceFormat, inspect);
+            JsonObject result;
+            if (!validator) result = expected;
+            else
+            {
+                var evidence = JsonNode.Parse(File.ReadAllText(values["evidence"]))!.AsObject();
+                var pass = Canonical(evidence) == Canonical(expected);
+                result = new JsonObject
+                {
+                    ["schema"] = "tiwater.format-evidence-verdict/v2",
+                    ["requestId"] = request["requestId"]!.GetValue<string>(),
+                    ["subject"] = request["subject"]!.DeepClone(),
+                    ["artifactVersionId"] = request["artifact"]!["artifactVersionId"]!.GetValue<string>(),
+                    ["evidence"] = new JsonObject
+                    {
+                        ["evidenceId"] = evidence["evidenceId"]?.GetValue<string>() ?? "missing",
+                        ["sha256"] = Sha(Canonical(evidence))
+                    },
+                    ["validator"] = request["validator"]!.DeepClone(),
+                    ["recomputedSourceBytesSha256"] = request["artifact"]!["bytesSha256"]!.GetValue<string>(),
+                    ["recomputedObservationSha256"] = expected["observation"]!["sha256"]!.GetValue<string>(),
+                    ["recomputedProvenanceSha256"] = Sha(Canonical(expected["provenance"])),
+                    ["decision"] = pass ? "pass" : "failed",
+                    ["findings"] = pass
+                        ? new JsonArray()
+                        : new JsonArray(new JsonObject
+                        {
+                            ["code"] = "format-evidence-recomputation-mismatch",
+                            ["severity"] = "error"
+                        })
+                };
+            }
+            AtomicWrite(output, result);
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(error.Message);
+            var artifact = request["artifact"] as JsonObject;
+            var classification = classifyError?.Invoke(error)
+                ?? new ErrorClassification("format-evidence-v2-invalid", "evidence", false);
+            var result = new JsonObject
+            {
+                ["schema"] = "tiwater.format-evidence-error/v1",
+                ["requestId"] = request["requestId"]?.GetValue<string>() ?? "unknown",
+                ["subject"] = request["subject"]?.DeepClone() ?? new JsonObject { ["kind"] = "input", ["inputId"] = "unknown" },
+                ["artifactVersionId"] = artifact?["artifactVersionId"]?.GetValue<string>() ?? "unknown",
+                ["code"] = classification.Code,
+                ["category"] = classification.Category,
+                ["retryable"] = classification.Retryable,
+                ["provider"] = new JsonObject { ["tool"] = tool, ["toolVersion"] = version, ["capabilityId"] = validator ? "validate-inspect-evidence-v2" : "inspect-evidence-v2" },
+                ["refs"] = new JsonArray()
+            };
+            AtomicWrite(output, result);
+            return 0;
+        }
+    }
+
+    private static string ValidateRequestV2(JsonObject request, string tool, string version, string format, IReadOnlySet<string>? acceptedSourceFormats)
+    {
+        var required = new[] { "schema", "requestId", "runId", "subject", "artifact", "provider", "validator", "runtime", "extraction", "expectedEvidenceContract" };
+        if (request.Count != required.Length || required.Any(name => !request.ContainsKey(name)) || request["schema"]!.GetValue<string>() != "tiwater.format-evidence-request/v2")
+            throw new InvalidOperationException("v2 request contract invalid");
+        var expectedProvider = new JsonObject { ["id"] = tool, ["version"] = version };
+        var expectedValidator = new JsonObject { ["id"] = $"{tool}-validator", ["version"] = version };
+        if (Canonical(request["provider"]) != Canonical(expectedProvider) || Canonical(request["validator"]) != Canonical(expectedValidator) || Canonical(request["runtime"]) != Canonical(expectedProvider))
+            throw new InvalidOperationException("v2 provider identity mismatch");
+        var expectedEvidence = ContractRef("tiwater.format-evidence-v2.schema.json", "tiwater.format-evidence/v2");
+        if (Canonical(request["expectedEvidenceContract"]) != Canonical(expectedEvidence))
+            throw new InvalidOperationException("v2 evidence contract mismatch");
+        var extraction = request["extraction"]!.AsObject();
+        var expectedExtraction = ContractRef("tiwater.format-extraction-options-v1.schema.json", "tiwater.format-extraction-options/v1");
+        if (Canonical(extraction["schema"]) != Canonical(expectedExtraction) || extraction["sha256"]!.GetValue<string>() != Sha(Canonical(extraction["value"])))
+            throw new InvalidOperationException("v2 extraction authority mismatch");
+        var extractionValue = extraction["value"]!.AsObject();
+        if (extractionValue.Count != 1 || extractionValue["facets"] is not JsonArray facets || facets.Count != 1 || facets[0]!.GetValue<string>() != "format-summary")
+            throw new InvalidOperationException("v2 extraction options invalid");
+        var artifact = request["artifact"]!.AsObject();
+        var file = artifact["path"]!.GetValue<string>();
+        if (!Path.IsPathFullyQualified(file) || FileSha(file) != artifact["bytesSha256"]!.GetValue<string>())
+            throw new InvalidOperationException("v2 artifact authority mismatch");
+        var sourceFormat = Path.GetExtension(file).Equals(".xls", StringComparison.OrdinalIgnoreCase) ? "xls" : format;
+        var allowedFormats = acceptedSourceFormats ?? new HashSet<string>(StringComparer.Ordinal) { format };
+        if (!allowedFormats.Contains(sourceFormat)) throw new InvalidOperationException("v2 source format invalid");
+        return sourceFormat;
+    }
+
+    private static JsonObject BuildEvidenceV2(JsonObject request, string sourceFormat, Func<string, object> inspect)
+    {
+        var artifact = request["artifact"]!.AsObject();
+        var inspection = JsonSerializer.SerializeToNode(inspect(artifact["path"]!.GetValue<string>()))!;
+        var inspectionSha256 = Sha(Canonical(inspection));
+        var facets = new JsonArray();
+        if (inspection is JsonObject objectInspection)
+        {
+            foreach (var item in objectInspection.OrderBy(item => item.Key, StringComparer.Ordinal))
+                facets.Add(new JsonObject { ["facetId"] = item.Key, ["sha256"] = Sha(Canonical(item.Value)) });
+        }
+        else facets.Add(new JsonObject { ["facetId"] = "inspection", ["sha256"] = inspectionSha256 });
+        var observationValue = new JsonObject
+        {
+            ["format"] = sourceFormat,
+            ["inspectionSha256"] = inspectionSha256,
+            ["facets"] = facets
+        };
+        var observation = TypedValue("tiwater.format-observation-summary-v1.schema.json", "tiwater.format-observation-summary/v1", observationValue);
+        var provenanceValue = new JsonObject
+        {
+            ["kind"] = "provider-inspection",
+            ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(),
+            ["sourceBytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(),
+            ["inspectionSha256"] = inspectionSha256,
+            ["provider"] = request["provider"]!.DeepClone(),
+            ["runtime"] = request["runtime"]!.DeepClone(),
+            ["extractionSha256"] = request["extraction"]!["sha256"]!.GetValue<string>()
+        };
+        var provenance = new JsonArray(TypedValue("tiwater.format-provenance-v1.schema.json", "tiwater.format-provenance/v1", provenanceValue));
+        var evidence = new JsonObject
+        {
+            ["schema"] = "tiwater.format-evidence/v2",
+            ["requestId"] = request["requestId"]!.GetValue<string>(),
+            ["subject"] = request["subject"]!.DeepClone(),
+            ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(),
+            ["source"] = new JsonObject
+            {
+                ["bytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(),
+                ["mediaType"] = artifact["mediaType"]!.GetValue<string>()
+            },
+            ["format"] = sourceFormat,
+            ["provider"] = request["provider"]!.DeepClone(),
+            ["runtime"] = request["runtime"]!.DeepClone(),
+            ["extractionSha256"] = request["extraction"]!["sha256"]!.GetValue<string>(),
+            ["observation"] = observation,
+            ["provenance"] = provenance
+        };
+        evidence["evidenceId"] = $"evidence-{Sha(Canonical(evidence))}";
+        return evidence;
+    }
+
+    private static JsonObject TypedValue(string file, string id, JsonNode value)
+        => new()
+        {
+            ["schema"] = ContractRef(file, id),
+            ["value"] = value,
+            ["sha256"] = Sha(Canonical(value))
+        };
+
+    private static JsonObject ContractRef(string file, string id)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "contracts", file);
+        if (!File.Exists(path)) throw new InvalidOperationException($"provider contract missing: {file}");
+        return new JsonObject { ["id"] = id, ["sha256"] = FileSha(path) };
     }
 
     private static string ValidateRequest(JsonObject request, string output, string format, bool validator, IReadOnlySet<string>? acceptedSourceFormats)

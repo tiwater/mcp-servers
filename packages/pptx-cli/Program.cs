@@ -11,6 +11,8 @@ internal static class Program
 
 internal static class Cli
 {
+    private const string ToolVersion = "0.2.7";
+
     public static Task<int> RunAsync(string[] args)
     {
         if (args.Length == 0)
@@ -24,8 +26,10 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", "0.2.6", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", "0.2.6", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
@@ -126,6 +130,8 @@ internal static class Cli
         Console.WriteLine("  inspect <input.pptx> [--json]");
         Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
         Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
+        Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
+        Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect <input.pptx> --json --detail");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
