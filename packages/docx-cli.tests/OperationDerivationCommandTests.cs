@@ -199,7 +199,7 @@ public sealed class OperationDerivationCommandTests
                 ["format"] = "docx"
             },
             ["targetArtifact"] = artifact,
-            ["observation"] = Typed("tiwater.provider-document-observation/v1", observationValue),
+            ["observation"] = Typed("tiwater.provider-document-observation/v2", observationValue),
             ["target"] = target,
             ["sourceFact"] = new JsonObject
             {

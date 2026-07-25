@@ -198,7 +198,7 @@ public static class FormatEvidenceCommand
                 facets.Add(new JsonObject { ["facetId"] = item.Key, ["sha256"] = Sha(Canonical(item.Value)) });
         }
         else facets.Add(new JsonObject { ["facetId"] = "inspection", ["sha256"] = inspectionSha256 });
-        var observationSchema = ContractRef("tiwater.provider-document-observation-v1.schema.json", "tiwater.provider-document-observation/v1");
+        var observationSchema = ContractRef("tiwater.provider-document-observation-v2.schema.json", "tiwater.provider-document-observation/v2");
         var epochMaterial = new JsonObject
         {
             ["sourceBytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(),
