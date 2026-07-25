@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.provider-json-pointer-locator/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "pointer", "candidateValueSha256"],
+  "properties": {
+    "format": {
+      "enum": ["docx", "xlsx", "xls", "pptx", "pdf", "txt"]
+    },
+    "pointer": { "type": "string" },
+    "candidateValueSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

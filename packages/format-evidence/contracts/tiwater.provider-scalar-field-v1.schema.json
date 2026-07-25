@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.provider-scalar-field/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "kind", "value", "sha256"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["string", "number", "boolean", "null"] },
+    "value": { "type": ["string", "number", "boolean", "null"] },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

@@ -27,6 +27,14 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, CandidateCapabilities)),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, CandidateCapabilities)),
+                "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
+                "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
+                "execute-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], ExecutionContract())),
+                "validate-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], ExecutionContract())),
+                "provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunProducer(args[1..], ManifestContract())),
+                "validate-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunValidator(args[1..], ManifestContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -41,6 +49,77 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static OperationDerivationCommand.Contract OperationContract() => new(
+        "tiwater-xlsx",
+        XlsxToolVersion.Current,
+        "xlsx",
+        "xlsx.edit",
+        "1",
+        "tiwater.xlsx-edit-v1.schema.json",
+        "tiwater.xlsx-edit/v1",
+        "current-artifact",
+        "single-edit",
+        true,
+        value =>
+        {
+            var plan = JsonSerializer.Deserialize<XlsxEditDocument>(value.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("XLSX derived operation could not be parsed");
+            if (plan.Operations.Count != 1 || string.IsNullOrWhiteSpace(plan.Operations[0].Type))
+                throw new InvalidOperationException("XLSX derived operation invalid");
+        });
+
+    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
+    {
+        var kinds = new List<string>();
+        if (fields.Contains("sheet") && fields.Contains("cell")) kinds.AddRange(["setCellValue", "setRichTextCellValue"]);
+        if (fields.Contains("sheet") && fields.Contains("range")) kinds.Add("setPrintArea");
+        if (fields.Contains("sheet") && fields.Contains("startCell")) kinds.Add("setRangeValues");
+        if (fields.Contains("sheet") && fields.Contains("startRow")) kinds.Add("insertRows");
+        if (fields.Contains("sheet") && fields.Contains("sourceRow") && fields.Contains("targetRow")) kinds.Add("copyRow");
+        if (fields.Contains("sheet") && fields.Contains("anchorText")) kinds.Add("expandSectionRows");
+        return kinds.Count == 0 ? [] : [new("xlsx.edit", "1", kinds)];
+    }
+
+    private static EffectExecutionCommand.Contract ExecutionContract() => new(
+        "tiwater-xlsx",
+        XlsxToolVersion.Current,
+        "xlsx.edit",
+        "1",
+        "tiwater-xlsx-edit",
+        XlsxToolVersion.Current,
+        "tiwater.xlsx-edit-v1.schema.json",
+        "tiwater.xlsx-edit/v1",
+        "tiwater.xlsx-edit-result-v1.schema.json",
+        "tiwater.xlsx-edit-result/v1",
+        (operation, request) =>
+        {
+            var plan = JsonSerializer.Deserialize<XlsxEditDocument>(operation["value"]!.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("XLSX execution operation invalid");
+            var input = request["inputArtifact"]!["path"]!.GetValue<string>();
+            var output = request["output"]!["path"]!.GetValue<string>();
+            Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+            var receipt = Editor.Apply(input, output, plan.Operations);
+            return new(
+                JsonSerializer.SerializeToNode(receipt, Json.Options)!,
+                receipt.AppliedOperations.All(item => item.Applied));
+        },
+        receipt =>
+        {
+            _ = JsonSerializer.Deserialize<XlsxEditResult>(receipt.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("XLSX execution receipt invalid");
+        },
+        receipt => JsonSerializer.Deserialize<XlsxEditResult>(
+            receipt.ToJsonString(),
+            Json.Options)!.AppliedOperations.All(item => item.Applied));
+
+    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
+        "tiwater-xlsx", XlsxToolVersion.Current, "xlsx.edit", "1",
+        "tiwater.xlsx-edit-v1.schema.json", "tiwater.xlsx-edit/v1",
+        "tiwater.xlsx-edit-result-v1.schema.json", "tiwater.xlsx-edit-result/v1",
+        "derive-operation", "validate-derived-operation",
+        "execute-effect", "validate-execution-evidence",
+        "tiwater-xlsx-edit", XlsxToolVersion.Current);
 
     private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };
 
@@ -137,6 +216,8 @@ internal static class Cli
         Console.WriteLine("  inspect <input.xlsx> [--json]");
         Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
         Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
+        Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
+        Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  evidence <input.xlsx>");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");

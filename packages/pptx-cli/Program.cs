@@ -11,6 +11,8 @@ internal static class Program
 
 internal static class Cli
 {
+    private const string ToolVersion = "0.2.8";
+
     public static Task<int> RunAsync(string[] args)
     {
         if (args.Length == 0)
@@ -24,8 +26,22 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", "0.2.6", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", "0.2.6", "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
+                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
+                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, candidateCapabilities: CandidateCapabilities)),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, candidateCapabilities: CandidateCapabilities)),
+                "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
+                "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
+                "derive-template-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], TemplateOperationContract())),
+                "validate-derived-template-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], TemplateOperationContract())),
+                "execute-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], ExecutionContract())),
+                "validate-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], ExecutionContract())),
+                "execute-template-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], TemplateExecutionContract())),
+                "validate-template-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], TemplateExecutionContract())),
+                "provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunProducer(args[1..], ManifestContract())),
+                "validate-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunValidator(args[1..], ManifestContract())),
+                "template-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunProducer(args[1..], TemplateManifestContract())),
+                "validate-template-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunValidator(args[1..], TemplateManifestContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
@@ -39,6 +55,140 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static OperationDerivationCommand.Contract OperationContract() => new(
+        "tiwater-pptx",
+        ToolVersion,
+        "pptx",
+        "pptx.edit",
+        "1",
+        "tiwater.pptx-edit-v1.schema.json",
+        "tiwater.pptx-edit/v1",
+        "current-artifact",
+        "single-edit",
+        false,
+        value =>
+        {
+            var plan = JsonSerializer.Deserialize<FormatEditPlan>(value.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("PPTX derived operation could not be parsed");
+            if (plan.Operations.Count != 1)
+                throw new InvalidOperationException("PPTX derived operation invalid");
+        });
+
+    private static OperationDerivationCommand.Contract TemplateOperationContract() => new(
+        "tiwater-pptx",
+        ToolVersion,
+        "pptx",
+        "pptx.template-apply",
+        "1",
+        "tiwater.pptx-template-apply-v1.schema.json",
+        "tiwater.pptx-template-apply/v1",
+        "external-artifact",
+        "root-object",
+        false,
+        value =>
+        {
+            var plan = JsonSerializer.Deserialize<TemplateApplicationPlan>(value.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("PPTX template operation could not be parsed");
+            if (string.IsNullOrWhiteSpace(plan.TargetMasterPath) || plan.Slides.Count == 0)
+                throw new InvalidOperationException("PPTX template operation invalid");
+        });
+
+    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
+    {
+        var capabilities = new List<FormatEvidenceCommand.CandidateCapability>();
+        if (fields.Contains("slideNumber") && fields.Contains("shapeId") && fields.Contains("runIndex"))
+            capabilities.Add(new("pptx.edit", "1", ["setRunFormat"]));
+        if (pointer.Contains("/Masters/", StringComparison.Ordinal) &&
+            !pointer.Contains("/Layouts/", StringComparison.Ordinal) &&
+            fields.Contains("path"))
+            capabilities.Add(new("pptx.template-apply", "1", ["applyTemplate"]));
+        return capabilities;
+    }
+
+    private static EffectExecutionCommand.Contract ExecutionContract() => new(
+        "tiwater-pptx",
+        ToolVersion,
+        "pptx.edit",
+        "1",
+        "tiwater-pptx-edit",
+        ToolVersion,
+        "tiwater.pptx-edit-v1.schema.json",
+        "tiwater.pptx-edit/v1",
+        "tiwater.pptx-edit-result-v1.schema.json",
+        "tiwater.pptx-edit-result/v1",
+        (operation, request) =>
+        {
+            var plan = JsonSerializer.Deserialize<FormatEditPlan>(operation["value"]!.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("PPTX execution operation invalid");
+            var input = request["inputArtifact"]!["path"]!.GetValue<string>();
+            var output = request["output"]!["path"]!.GetValue<string>();
+            var receipt = FormatEditor.Apply(input, plan, output);
+            return new(
+                JsonSerializer.SerializeToNode(receipt, Json.Options)!,
+                receipt.Issues.Count == 0 && receipt.ChangedCount == receipt.OperationCount);
+        },
+        receipt =>
+        {
+            _ = JsonSerializer.Deserialize<FormatEditResult>(receipt.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("PPTX execution receipt invalid");
+        },
+        receipt =>
+        {
+            var value = JsonSerializer.Deserialize<FormatEditResult>(receipt.ToJsonString(), Json.Options)!;
+            return value.Issues.Count == 0 && value.ChangedCount == value.OperationCount;
+        });
+
+    private static EffectExecutionCommand.Contract TemplateExecutionContract() => new(
+        "tiwater-pptx",
+        ToolVersion,
+        "pptx.template-apply",
+        "1",
+        "tiwater-pptx-template-apply",
+        ToolVersion,
+        "tiwater.pptx-template-apply-v1.schema.json",
+        "tiwater.pptx-template-apply/v1",
+        "tiwater.pptx-template-apply-result-v1.schema.json",
+        "tiwater.pptx-template-apply-result/v1",
+        (operation, request) =>
+        {
+            var plan = JsonSerializer.Deserialize<TemplateApplicationPlan>(operation["value"]!.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("PPTX template execution operation invalid");
+            var auxiliary = request["auxiliaryArtifacts"]!.AsArray();
+            if (auxiliary.Count != 1)
+                throw new InvalidOperationException("PPTX template execution requires one template artifact");
+            var input = request["inputArtifact"]!["path"]!.GetValue<string>();
+            var template = auxiliary[0]!["path"]!.GetValue<string>();
+            var output = request["output"]!["path"]!.GetValue<string>();
+            var receipt = TemplateApplicator.Apply(input, template, plan, output);
+            return new(
+                JsonSerializer.SerializeToNode(receipt, Json.Options)!,
+                receipt.Issues.Count == 0 && receipt.ChangedSlideCount == plan.Slides.Count);
+        },
+        receipt =>
+        {
+            _ = JsonSerializer.Deserialize<TemplateApplicationResult>(receipt.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("PPTX template execution receipt invalid");
+        },
+        receipt => JsonSerializer.Deserialize<TemplateApplicationResult>(
+            receipt.ToJsonString(),
+            Json.Options)!.Issues.Count == 0);
+
+    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
+        "tiwater-pptx", ToolVersion, "pptx.edit", "1",
+        "tiwater.pptx-edit-v1.schema.json", "tiwater.pptx-edit/v1",
+        "tiwater.pptx-edit-result-v1.schema.json", "tiwater.pptx-edit-result/v1",
+        "derive-operation", "validate-derived-operation",
+        "execute-effect", "validate-execution-evidence",
+        "tiwater-pptx-edit", ToolVersion);
+
+    private static ProviderContractManifestCommand.Contract TemplateManifestContract() => new(
+        "tiwater-pptx", ToolVersion, "pptx.template-apply", "1",
+        "tiwater.pptx-template-apply-v1.schema.json", "tiwater.pptx-template-apply/v1",
+        "tiwater.pptx-template-apply-result-v1.schema.json", "tiwater.pptx-template-apply-result/v1",
+        "derive-template-operation", "validate-derived-template-operation",
+        "execute-template-effect", "validate-template-execution-evidence",
+        "tiwater-pptx-template-apply", ToolVersion);
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> PresentationTargetObservations() =>
     [
@@ -126,6 +276,8 @@ internal static class Cli
         Console.WriteLine("  inspect <input.pptx> [--json]");
         Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
         Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
+        Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
+        Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect <input.pptx> --json --detail");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");

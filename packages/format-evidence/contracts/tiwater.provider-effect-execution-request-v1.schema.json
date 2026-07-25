@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.provider-effect-execution-request/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "requestId",
+    "runId",
+    "outputId",
+    "mode",
+    "operationDerivationResult",
+    "operationDerivationVerdict",
+    "inputArtifact",
+    "inputEpochId",
+    "auxiliaryArtifacts",
+    "output",
+    "expectedReceiptContract",
+    "expectedExecutionEvidenceContract",
+    "lineageContract"
+  ],
+  "properties": {
+    "requestId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "outputId": { "type": "string", "minLength": 1 },
+    "mode": { "enum": ["materialization", "mutation"] },
+    "operationDerivationResult": { "$ref": "#/$defs/ArtifactRef" },
+    "operationDerivationVerdict": { "$ref": "#/$defs/ArtifactRef" },
+    "inputArtifact": {
+      "oneOf": [
+        { "$ref": "#/$defs/BlobRef" },
+        { "type": "null" }
+      ]
+    },
+    "inputEpochId": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "null" }
+      ]
+    },
+    "auxiliaryArtifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/BlobRef" }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "mediaType"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "mediaType": { "type": "string", "minLength": 1 }
+      }
+    },
+    "expectedReceiptContract": { "$ref": "#/$defs/SchemaRef" },
+    "expectedExecutionEvidenceContract": { "$ref": "#/$defs/SchemaRef" },
+    "lineageContract": { "$ref": "#/$defs/SchemaRef" }
+  },
+  "$defs": {
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "SchemaRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "path", "sha256"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/SchemaRef" },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "BlobRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactVersionId", "path", "bytesSha256", "mediaType"],
+      "properties": {
+        "artifactVersionId": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "bytesSha256": { "$ref": "#/$defs/Sha256" },
+        "mediaType": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
