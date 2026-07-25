@@ -46,6 +46,11 @@ public sealed class ProviderOperationContractTests
     [InlineData("tiwater.provider-resource-set/v1")]
     [InlineData("tiwater.provider-write-set/v1")]
     [InlineData("tiwater.operation-derivation-provenance/v1")]
+    [InlineData("lucid.effect-execution-request/v1")]
+    [InlineData("lucid.execution-evidence/v2")]
+    [InlineData("tiwater.provider-effect-execution-request/v1")]
+    [InlineData("tiwater.provider-artifact-lineage/v1")]
+    [InlineData("tiwater.execution-evidence-verdict/v1")]
     public void Supporting_value_contracts_are_package_owned(string id)
     {
         Assert.Equal(id, Load(id)["$id"]!.GetValue<string>());

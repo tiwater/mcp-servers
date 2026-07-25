@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.provider-artifact-lineage/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "effectId",
+    "outputId",
+    "inputArtifactVersionId",
+    "outputArtifactVersionId",
+    "inputEpochId",
+    "outputEpochId",
+    "inputBytesSha256",
+    "outputBytesSha256",
+    "operationSha256",
+    "receiptSha256",
+    "provider"
+  ],
+  "properties": {
+    "effectId": { "type": "string", "minLength": 1 },
+    "outputId": { "type": "string", "minLength": 1 },
+    "inputArtifactVersionId": { "type": ["string", "null"] },
+    "outputArtifactVersionId": { "type": "string", "minLength": 1 },
+    "inputEpochId": { "type": ["string", "null"] },
+    "outputEpochId": { "type": "string", "minLength": 1 },
+    "inputBytesSha256": {
+      "oneOf": [
+        { "$ref": "#/$defs/Sha256" },
+        { "type": "null" }
+      ]
+    },
+    "outputBytesSha256": { "$ref": "#/$defs/Sha256" },
+    "operationSha256": { "$ref": "#/$defs/Sha256" },
+    "receiptSha256": { "$ref": "#/$defs/Sha256" },
+    "provider": { "$ref": "#/$defs/Identity" }
+  },
+  "$defs": {
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
