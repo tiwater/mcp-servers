@@ -119,9 +119,14 @@ public sealed class TemplateOperationDerivationTests
             new JsonObject { ["slideNumber"] = 2, ["targetLayoutPath"] = "/ppt/slideLayouts/slideLayout1.xml" });
         return new JsonObject
         {
-            ["schema"] = "tiwater.operation-derivation-request/v1",
+            ["schema"] = "tiwater.operation-derivation-request/v2",
             ["requestId"] = "template-request",
             ["runId"] = "run-1",
+            ["effectIntentId"] = "template-effect",
+            ["bindingId"] = "binding-1",
+            ["closureAuthority"] = NodeRef("closure", "lucid.effect-closure/v2"),
+            ["bindingAuthority"] = NodeRef("binding-plan", "lucid.binding-plan/v2"),
+            ["normalizedFactsAuthority"] = NodeRef("facts", "lucid.normalized-facts/v4"),
             ["effectDescriptor"] = new JsonObject
             {
                 ["identity"] = new JsonObject { ["id"] = "pptx.template-apply", ["version"] = "1" },
@@ -129,7 +134,12 @@ public sealed class TemplateOperationDerivationTests
                 ["operationSchema"] = Ref("tiwater.pptx-template-apply-v1.schema.json", "tiwater.pptx-template-apply/v1"),
                 ["resourceSetSchema"] = Ref("tiwater.provider-resource-set-v1.schema.json", "tiwater.provider-resource-set/v1"),
                 ["writeSetSchema"] = Ref("tiwater.provider-write-set-v1.schema.json", "tiwater.provider-write-set/v1"),
-                ["targetScope"] = "external-artifact"
+                ["targetScope"] = "external-artifact",
+                ["executionAdapter"] = new JsonObject
+                {
+                    ["id"] = "tiwater-pptx-template-derivation",
+                    ["version"] = "1"
+                }
             },
             ["output"] = new JsonObject
             {
@@ -140,18 +150,25 @@ public sealed class TemplateOperationDerivationTests
             },
             ["targetArtifact"] = templateArtifact,
             ["observation"] = Typed("tiwater.provider-document-observation/v2", observationValue),
-            ["target"] = target,
-            ["sourceFact"] = new JsonObject
+            ["target"] = new JsonObject
             {
-                ["ref"] = new JsonObject
-                {
-                    ["nodeId"] = "facts",
-                    ["contract"] = new JsonObject { ["id"] = "lucid.normalized-facts/v4", ["sha256"] = Hash },
-                    ["sha256"] = Hash
-                },
+                ["targetAuthority"] = NodeRef("semantic-targets", "lucid.semantic-targets/v3"),
+                ["targetId"] = "template-target",
+                ["candidate"] = target,
+                ["resourceSet"] = new JsonArray(TypedRef(
+                    "tiwater.provider-resource-set-v1.schema.json",
+                    "tiwater.provider-resource-set/v1",
+                    target["resourceDeclarations"]!.DeepClone())),
+                ["writeSet"] = new JsonArray(TypedRef(
+                    "tiwater.provider-write-set-v1.schema.json",
+                    "tiwater.provider-write-set/v1",
+                    target["writeDeclarations"]!.DeepClone()))
+            },
+            ["sourceFacts"] = new JsonArray(new JsonObject
+            {
                 ["factId"] = "slides",
                 ["value"] = Typed("lucid.slide-assignments/v1", slides)
-            },
+            }),
             ["effectIntent"] = Typed("tiwater.provider-effect-intent/v1", new JsonObject
             {
                 ["effectId"] = "template-effect",
@@ -170,7 +187,6 @@ public sealed class TemplateOperationDerivationTests
                         ["source"] = "source-fact"
                     })
             }),
-            ["bindingAuthority"] = Typed("lucid.binding-authority/v1", new JsonObject { ["bindingId"] = "binding-1" }),
             ["provider"] = new JsonObject
             {
                 ["identity"] = new JsonObject { ["id"] = "tiwater-pptx", ["version"] = "0.2.7" },
@@ -204,6 +220,20 @@ public sealed class TemplateOperationDerivationTests
         ["schema"] = new JsonObject { ["id"] = id, ["sha256"] = Hash },
         ["value"] = value.DeepClone(),
         ["sha256"] = Sha(Canonical(value))
+    };
+
+    private static JsonObject TypedRef(string file, string id, JsonNode value) => new()
+    {
+        ["schema"] = Ref(file, id),
+        ["value"] = value.DeepClone(),
+        ["sha256"] = Sha(Canonical(value))
+    };
+
+    private static JsonObject NodeRef(string nodeId, string contractId) => new()
+    {
+        ["nodeId"] = nodeId,
+        ["contract"] = new JsonObject { ["id"] = contractId, ["sha256"] = Hash },
+        ["sha256"] = Hash
     };
 
     private static JsonObject Ref(string file, string id) => new()

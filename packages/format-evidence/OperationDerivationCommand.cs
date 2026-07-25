@@ -109,12 +109,22 @@ public static class OperationDerivationCommand
 
     private static Admitted AdmitRequest(JsonObject request, Contract contract)
     {
-        ExactKeys(request, [
-            "schema", "requestId", "runId", "effectDescriptor", "output",
-            "targetArtifact", "observation", "target", "sourceFact", "effectIntent",
-            "bindingAuthority", "provider", "expectedResultContract"
-        ], "request");
-        if (request["schema"]!.GetValue<string>() != "tiwater.operation-derivation-request/v1")
+        var requestSchema = request["schema"]!.GetValue<string>();
+        var isV2 = requestSchema == "tiwater.operation-derivation-request/v2";
+        if (isV2)
+            ExactKeys(request, [
+                "schema", "requestId", "runId", "effectIntentId", "bindingId",
+                "closureAuthority", "bindingAuthority", "normalizedFactsAuthority",
+                "effectDescriptor", "output", "targetArtifact", "observation",
+                "target", "sourceFacts", "effectIntent", "provider", "expectedResultContract"
+            ], "request");
+        else
+            ExactKeys(request, [
+                "schema", "requestId", "runId", "effectDescriptor", "output",
+                "targetArtifact", "observation", "target", "sourceFact", "effectIntent",
+                "bindingAuthority", "provider", "expectedResultContract"
+            ], "request");
+        if (!isV2 && requestSchema != "tiwater.operation-derivation-request/v1")
             throw new InvalidOperationException("operation derivation request schema invalid");
         var expectedResult = ContractRef(
             "tiwater.operation-derivation-result-v1.schema.json",
@@ -129,6 +139,11 @@ public static class OperationDerivationCommand
         var writeSchema = ContractRef(
             "tiwater.provider-write-set-v1.schema.json",
             "tiwater.provider-write-set/v1");
+        if (isV2)
+            ExactKeys(descriptor, [
+                "identity", "descriptorSha256", "operationSchema", "resourceSetSchema",
+                "writeSetSchema", "targetScope", "executionAdapter"
+            ], "effect descriptor");
         if (
             descriptor["identity"]!["id"]!.GetValue<string>() != contract.EffectTypeId ||
             descriptor["identity"]!["version"]!.GetValue<string>() != contract.EffectTypeVersion ||
@@ -140,12 +155,40 @@ public static class OperationDerivationCommand
         var provider = request["provider"]!.AsObject();
         if (
             provider["identity"]!["id"]!.GetValue<string>() != contract.ProviderId ||
-            provider["identity"]!["version"]!.GetValue<string>() != contract.ProviderVersion)
+            provider["identity"]!["version"]!.GetValue<string>() != contract.ProviderVersion ||
+            (isV2 && Canonical(provider["adapter"]) != Canonical(descriptor["executionAdapter"])))
             throw new InvalidOperationException("operation derivation provider mismatch");
         var output = request["output"]!.AsObject();
         var outputArtifact = output["artifact"]!.AsObject();
         var targetArtifact = request["targetArtifact"]!.AsObject();
-        var target = request["target"]!.AsObject();
+        JsonObject target;
+        JsonObject sourceFact;
+        if (isV2)
+        {
+            RequireText(request, "effectIntentId");
+            RequireText(request, "bindingId");
+            RequireNodeRef(request["closureAuthority"]!.AsObject());
+            RequireNodeRef(request["bindingAuthority"]!.AsObject());
+            RequireNodeRef(request["normalizedFactsAuthority"]!.AsObject());
+            var targetEnvelope = request["target"]!.AsObject();
+            ExactKeys(targetEnvelope, [
+                "targetAuthority", "targetId", "candidate", "resourceSet", "writeSet"
+            ], "target");
+            RequireNodeRef(targetEnvelope["targetAuthority"]!.AsObject());
+            RequireText(targetEnvelope, "targetId");
+            target = targetEnvelope["candidate"]!.AsObject();
+            var sourceFacts = request["sourceFacts"]!.AsArray();
+            if (sourceFacts.Count != 1)
+                throw new InvalidOperationException("operation derivation source facts cardinality invalid");
+            sourceFact = sourceFacts[0]!.AsObject();
+            ExactKeys(sourceFact, ["factId", "value"], "source fact");
+            RequireText(sourceFact, "factId");
+        }
+        else
+        {
+            target = request["target"]!.AsObject();
+            sourceFact = request["sourceFact"]!.AsObject();
+        }
         if (
             output["format"]!.GetValue<string>() != contract.Format ||
             target["artifactVersionId"]!.GetValue<string>() != targetArtifact["artifactVersionId"]!.GetValue<string>() ||
@@ -174,18 +217,18 @@ public static class OperationDerivationCommand
         if (capabilityCount != 1)
             throw new InvalidOperationException("operation derivation target capability mismatch");
         RequireTyped(target["locator"]!.AsObject(), "tiwater.provider-json-pointer-locator/v1");
-        var sourceFact = request["sourceFact"]!.AsObject();
         RequireTyped(sourceFact["value"]!.AsObject());
         var intentTyped = request["effectIntent"]!.AsObject();
         RequireTyped(intentTyped, "tiwater.provider-effect-intent/v1");
         var intent = intentTyped["value"]!.AsObject();
         if (
+            (isV2 && request["effectIntentId"]!.GetValue<string>() != intent["effectId"]!.GetValue<string>()) ||
             intent["effectType"]!["id"]!.GetValue<string>() != contract.EffectTypeId ||
             intent["effectType"]!["version"]!.GetValue<string>() != contract.EffectTypeVersion ||
             !target["supportedOperationKinds"]!.AsArray().Any(kind =>
                 kind!.GetValue<string>() == intent["operationKind"]!.GetValue<string>()))
             throw new InvalidOperationException("operation derivation intent effect mismatch");
-        RequireTyped(request["bindingAuthority"]!.AsObject());
+        if (!isV2) RequireTyped(request["bindingAuthority"]!.AsObject());
         foreach (var field in target["semanticIdentity"]!.AsArray())
             if (field!["sha256"]!.GetValue<string>() != Sha(Canonical(field["value"])))
                 throw new InvalidOperationException("operation derivation semantic identity hash mismatch");
@@ -196,6 +239,20 @@ public static class OperationDerivationCommand
         var writes = target["writeDeclarations"]!.AsArray();
         if (writes.Count == 0 || writes.Any(value => !resourceKeys.Contains(value!["resourceKey"]!.GetValue<string>())))
             throw new InvalidOperationException("operation derivation write declarations invalid");
+        if (isV2)
+        {
+            var targetEnvelope = request["target"]!.AsObject();
+            RequireClaim(
+                targetEnvelope["resourceSet"]!.AsArray(),
+                resourceSchema,
+                resources,
+                "resource set");
+            RequireClaim(
+                targetEnvelope["writeSet"]!.AsArray(),
+                writeSchema,
+                writes,
+                "write set");
+        }
         return new Admitted(
             target,
             sourceFact,
@@ -423,6 +480,47 @@ public static class OperationDerivationCommand
             typed["sha256"]!.GetValue<string>() != Sha(Canonical(typed["value"])) ||
             (expectedSchema is not null && typed["schema"]!["id"]!.GetValue<string>() != expectedSchema))
             throw new InvalidOperationException("operation derivation typed value invalid");
+    }
+
+    private static void RequireClaim(
+        JsonArray claims,
+        JsonObject expectedSchema,
+        JsonArray expectedValue,
+        string label)
+    {
+        if (claims.Count != 1)
+            throw new InvalidOperationException($"operation derivation {label} cardinality invalid");
+        var claim = claims[0]!.AsObject();
+        RequireTyped(claim);
+        if (
+            Canonical(claim["schema"]) != Canonical(expectedSchema) ||
+            Canonical(claim["value"]) != Canonical(expectedValue))
+            throw new InvalidOperationException($"operation derivation {label} authority mismatch");
+    }
+
+    private static void RequireNodeRef(JsonObject reference)
+    {
+        ExactKeys(reference, ["nodeId", "contract", "sha256"], "node ref");
+        RequireText(reference, "nodeId");
+        var contract = reference["contract"]!.AsObject();
+        ExactKeys(contract, ["id", "sha256"], "schema ref");
+        RequireText(contract, "id");
+        RequireSha(contract["sha256"], "schema ref");
+        RequireSha(reference["sha256"], "node ref");
+    }
+
+    private static void RequireText(JsonObject value, string field)
+    {
+        if (string.IsNullOrWhiteSpace(value[field]!.GetValue<string>()))
+            throw new InvalidOperationException($"operation derivation {field} invalid");
+    }
+
+    private static void RequireSha(JsonNode? value, string label)
+    {
+        var sha256 = value!.GetValue<string>();
+        if (sha256.Length != 64 || sha256.Any(character =>
+                character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+            throw new InvalidOperationException($"operation derivation {label} hash invalid");
     }
 
     private static void RequireArtifact(JsonObject artifact, string label)

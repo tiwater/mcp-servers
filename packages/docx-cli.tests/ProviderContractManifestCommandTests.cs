@@ -9,7 +9,7 @@ public sealed class ProviderContractManifestCommandTests
         var fixture = Fixture();
         Assert.Equal(0, ProviderContractManifestCommand.RunProducer(["--output", fixture.Manifest], fixture.Contract));
         var manifest = Load(fixture.Manifest);
-        Assert.Equal(23, manifest["contracts"]!.AsArray().Count);
+        Assert.Equal(24, manifest["contracts"]!.AsArray().Count);
         Assert.Equal(
             ["format-observation", "operation-derivation", "effect-execution"],
             manifest["ports"]!.AsArray().Select(item => item!["role"]!.GetValue<string>()));
@@ -68,12 +68,12 @@ public sealed class ProviderContractManifestCommandTests
             Path.Combine(root, "manifest.json"),
             Path.Combine(root, "verdict.json"),
             new(
-                "tiwater-docx", "0.10.16", "docx.edit", "1",
+                "tiwater-docx", "0.10.17", "docx.edit", "1",
                 "tiwater.docx-edit-v1.schema.json", "tiwater.docx-edit/v1",
                 "tiwater.docx-edit-result-v1.schema.json", "tiwater.docx-edit-result/v1",
                 "derive-operation", "validate-derived-operation",
                 "execute-effect", "validate-execution-evidence",
-                "tiwater-docx-edit", "0.10.16"));
+                "tiwater-docx-edit", "0.10.17"));
     }
 
     private static JsonObject Load(string path) =>
