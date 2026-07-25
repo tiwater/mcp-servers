@@ -9,7 +9,7 @@ public sealed class ProviderContractManifestCommandTests
         var fixture = Fixture();
         Assert.Equal(0, ProviderContractManifestCommand.RunProducer(["--output", fixture.Manifest], fixture.Contract));
         var manifest = Load(fixture.Manifest);
-        Assert.Equal(23, manifest["contracts"]!.AsArray().Count);
+        Assert.Equal(24, manifest["contracts"]!.AsArray().Count);
         Assert.Equal(
             ["format-observation", "operation-derivation", "effect-execution"],
             manifest["ports"]!.AsArray().Select(item => item!["role"]!.GetValue<string>()));
