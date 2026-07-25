@@ -55,6 +55,9 @@ public sealed class TemplateOperationDerivationTests
         "pptx",
         "pptx.template-apply",
         "1",
+        "tiwater-pptx-template-derivation",
+        "1",
+        "tiwater-pptx-template-apply",
         "tiwater.pptx-template-apply-v1.schema.json",
         "tiwater.pptx-template-apply/v1",
         "external-artifact",
@@ -137,8 +140,8 @@ public sealed class TemplateOperationDerivationTests
                 ["targetScope"] = "external-artifact",
                 ["executionAdapter"] = new JsonObject
                 {
-                    ["id"] = "tiwater-pptx-template-derivation",
-                    ["version"] = "1"
+                    ["id"] = "tiwater-pptx-template-apply",
+                    ["version"] = "0.2.7"
                 }
             },
             ["output"] = new JsonObject

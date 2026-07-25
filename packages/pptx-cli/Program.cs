@@ -11,7 +11,7 @@ internal static class Program
 
 internal static class Cli
 {
-    private const string ToolVersion = "0.2.10";
+    private const string ToolVersion = "0.2.11";
 
     public static Task<int> RunAsync(string[] args)
     {
@@ -62,6 +62,9 @@ internal static class Cli
         "pptx",
         "pptx.edit",
         "1",
+        "tiwater-pptx-operation-derivation",
+        "1",
+        "tiwater-pptx-edit",
         "tiwater.pptx-edit-v1.schema.json",
         "tiwater.pptx-edit/v1",
         "current-artifact",
@@ -81,6 +84,9 @@ internal static class Cli
         "pptx",
         "pptx.template-apply",
         "1",
+        "tiwater-pptx-template-derivation",
+        "1",
+        "tiwater-pptx-template-apply",
         "tiwater.pptx-template-apply-v1.schema.json",
         "tiwater.pptx-template-apply/v1",
         "external-artifact",

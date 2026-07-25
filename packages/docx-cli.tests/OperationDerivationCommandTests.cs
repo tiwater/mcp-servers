@@ -66,6 +66,7 @@ public sealed class OperationDerivationCommandTests
             request => request["effectIntentId"] = "wrong-effect",
             request => request["bindingAuthority"]!["sha256"] = "not-a-hash",
             request => request["effectDescriptor"]!["executionAdapter"]!["id"] = "wrong-adapter",
+            request => request["provider"]!["adapter"]!["id"] = "wrong-adapter",
             request =>
             {
                 request["target"]!["resourceSet"]![0]!["value"] = new JsonArray();
@@ -110,6 +111,9 @@ public sealed class OperationDerivationCommandTests
         "docx",
         "docx.edit",
         "1",
+        "tiwater-docx-operation-derivation",
+        "1",
+        "tiwater-docx-edit",
         "tiwater.docx-edit-v1.schema.json",
         "tiwater.docx-edit/v1",
         "current-artifact",
@@ -207,8 +211,8 @@ public sealed class OperationDerivationCommandTests
                 ["targetScope"] = "current-artifact",
                 ["executionAdapter"] = new JsonObject
                 {
-                    ["id"] = "tiwater-docx-operation-derivation",
-                    ["version"] = "1"
+                    ["id"] = "tiwater-docx-edit",
+                    ["version"] = "0.10.14"
                 }
             },
             ["output"] = new JsonObject
