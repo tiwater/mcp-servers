@@ -54,6 +54,7 @@ internal static class Cli
         "1",
         "tiwater.pptx-edit-v1.schema.json",
         "tiwater.pptx-edit/v1",
+        "current-artifact",
         false,
         value =>
         {

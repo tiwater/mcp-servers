@@ -59,7 +59,8 @@ public sealed class OperationDerivationCommandTests
             request => request["sourceFact"]!["value"]!["sha256"] = Hash,
             request => request["effectDescriptor"]!["operationSchema"]!["sha256"] = Hash,
             request => request["target"]!["resourceDeclarations"] = new JsonArray(),
-            request => request["observation"]!["value"]!["targetUniverse"]!["candidates"] = new JsonArray()
+            request => request["observation"]!["value"]!["targetUniverse"]!["candidates"] = new JsonArray(),
+            request => File.WriteAllText(request["targetArtifact"]!["path"]!.GetValue<string>(), "drifted bytes")
         };
         foreach (var mutate in mutations)
         {
@@ -101,6 +102,7 @@ public sealed class OperationDerivationCommandTests
         "1",
         "tiwater.docx-edit-v1.schema.json",
         "tiwater.docx-edit/v1",
+        "current-artifact",
         true,
         value =>
         {
@@ -116,6 +118,15 @@ public sealed class OperationDerivationCommandTests
         JsonArray? semanticFields = null)
     {
         sourceValue ??= JsonValue.Create("approved");
+        var artifactPath = Path.GetTempFileName();
+        File.WriteAllText(artifactPath, "current artifact bytes");
+        var artifact = new JsonObject
+        {
+            ["artifactVersionId"] = "artifact-1",
+            ["path"] = artifactPath,
+            ["bytesSha256"] = FileSha(artifactPath),
+            ["mediaType"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        };
         semanticFields ??=
         [
             Scalar("tableIndex", JsonValue.Create(0)),
@@ -176,15 +187,17 @@ public sealed class OperationDerivationCommandTests
                 ["descriptorSha256"] = Hash,
                 ["operationSchema"] = Ref("tiwater.docx-edit-v1.schema.json", "tiwater.docx-edit/v1"),
                 ["resourceSetSchema"] = Ref("tiwater.provider-resource-set-v1.schema.json", "tiwater.provider-resource-set/v1"),
-                ["writeSetSchema"] = Ref("tiwater.provider-write-set-v1.schema.json", "tiwater.provider-write-set/v1")
+                ["writeSetSchema"] = Ref("tiwater.provider-write-set-v1.schema.json", "tiwater.provider-write-set/v1"),
+                ["targetScope"] = "current-artifact"
             },
             ["output"] = new JsonObject
             {
                 ["outputId"] = "primary",
-                ["artifactVersionId"] = "artifact-1",
+                ["artifact"] = artifact.DeepClone(),
                 ["epochId"] = "epoch-1",
                 ["format"] = "docx"
             },
+            ["targetArtifact"] = artifact,
             ["observation"] = Typed("tiwater.provider-document-observation/v1", observationValue),
             ["target"] = target,
             ["sourceFact"] = new JsonObject
@@ -264,6 +277,9 @@ public sealed class OperationDerivationCommandTests
 
     private static string Sha(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private static string FileSha(string path) =>
+        Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
 
     private static string Canonical(JsonNode? node) => node switch
     {

@@ -13,6 +13,7 @@ public static class OperationDerivationCommand
         string EffectTypeVersion,
         string OperationSchemaFile,
         string OperationSchemaId,
+        string TargetScope,
         bool IncludeOperationKindField,
         Action<JsonNode> ValidateOperation);
 
@@ -109,7 +110,7 @@ public static class OperationDerivationCommand
     {
         ExactKeys(request, [
             "schema", "requestId", "runId", "effectDescriptor", "output",
-            "observation", "target", "sourceFact", "effectIntent",
+            "targetArtifact", "observation", "target", "sourceFact", "effectIntent",
             "bindingAuthority", "provider", "expectedResultContract"
         ], "request");
         if (request["schema"]!.GetValue<string>() != "tiwater.operation-derivation-request/v1")
@@ -132,7 +133,8 @@ public static class OperationDerivationCommand
             descriptor["identity"]!["version"]!.GetValue<string>() != contract.EffectTypeVersion ||
             Canonical(descriptor["operationSchema"]) != Canonical(expectedOperation) ||
             Canonical(descriptor["resourceSetSchema"]) != Canonical(resourceSchema) ||
-            Canonical(descriptor["writeSetSchema"]) != Canonical(writeSchema))
+            Canonical(descriptor["writeSetSchema"]) != Canonical(writeSchema) ||
+            descriptor["targetScope"]!.GetValue<string>() != contract.TargetScope)
             throw new InvalidOperationException("operation derivation effect descriptor mismatch");
         var provider = request["provider"]!.AsObject();
         if (
@@ -140,18 +142,24 @@ public static class OperationDerivationCommand
             provider["identity"]!["version"]!.GetValue<string>() != contract.ProviderVersion)
             throw new InvalidOperationException("operation derivation provider mismatch");
         var output = request["output"]!.AsObject();
+        var outputArtifact = output["artifact"]!.AsObject();
+        var targetArtifact = request["targetArtifact"]!.AsObject();
         var target = request["target"]!.AsObject();
         if (
             output["format"]!.GetValue<string>() != contract.Format ||
-            target["artifactVersionId"]!.GetValue<string>() != output["artifactVersionId"]!.GetValue<string>() ||
-            target["epochId"]!.GetValue<string>() != output["epochId"]!.GetValue<string>())
+            target["artifactVersionId"]!.GetValue<string>() != targetArtifact["artifactVersionId"]!.GetValue<string>() ||
+            (contract.TargetScope == "current-artifact" &&
+                (Canonical(targetArtifact) != Canonical(outputArtifact) ||
+                 target["epochId"]!.GetValue<string>() != output["epochId"]!.GetValue<string>())))
             throw new InvalidOperationException("operation derivation output target mismatch");
+        RequireArtifact(outputArtifact, "output");
+        RequireArtifact(targetArtifact, "target");
         RequireTyped(request["observation"]!.AsObject(), "tiwater.provider-document-observation/v1");
         var observation = request["observation"]!["value"]!.AsObject();
         if (
             observation["format"]!.GetValue<string>() != contract.Format ||
-            observation["artifactVersionId"]!.GetValue<string>() != output["artifactVersionId"]!.GetValue<string>() ||
-            observation["epochId"]!.GetValue<string>() != output["epochId"]!.GetValue<string>() ||
+            observation["artifactVersionId"]!.GetValue<string>() != targetArtifact["artifactVersionId"]!.GetValue<string>() ||
+            observation["epochId"]!.GetValue<string>() != target["epochId"]!.GetValue<string>() ||
             observation["inspectionSha256"]!.GetValue<string>() != target["inspectionSha256"]!.GetValue<string>())
             throw new InvalidOperationException("operation derivation observation identity mismatch");
         var candidates = observation["targetUniverse"]!["candidates"]!.AsArray()
@@ -309,7 +317,7 @@ public static class OperationDerivationCommand
             ["output"] = new JsonObject
             {
                 ["outputId"] = request["output"]!["outputId"]!.DeepClone(),
-                ["artifactVersionId"] = request["output"]!["artifactVersionId"]!.DeepClone(),
+                ["artifactVersionId"] = request["output"]!["artifact"]!["artifactVersionId"]!.DeepClone(),
                 ["epochId"] = request["output"]!["epochId"]!.DeepClone()
             },
             ["targetCandidateId"] = authority.Target["candidateId"]!.DeepClone(),
@@ -387,6 +395,17 @@ public static class OperationDerivationCommand
             throw new InvalidOperationException("operation derivation typed value invalid");
     }
 
+    private static void RequireArtifact(JsonObject artifact, string label)
+    {
+        ExactKeys(artifact, ["artifactVersionId", "path", "bytesSha256", "mediaType"], $"{label} artifact");
+        var path = artifact["path"]!.GetValue<string>();
+        if (
+            !Path.IsPathFullyQualified(path) ||
+            !File.Exists(path) ||
+            FileSha(path) != artifact["bytesSha256"]!.GetValue<string>())
+            throw new InvalidOperationException($"operation derivation {label} artifact invalid");
+    }
+
     private static JsonObject Typed(JsonObject schema, JsonNode value) =>
         new()
         {
@@ -422,6 +441,9 @@ public static class OperationDerivationCommand
 
     private static string Sha(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private static string FileSha(string path) =>
+        Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
 
     private static string Canonical(JsonNode? node) => node switch
     {

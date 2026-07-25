@@ -54,6 +54,7 @@ internal static class Cli
         "1",
         "tiwater.xlsx-edit-v1.schema.json",
         "tiwater.xlsx-edit/v1",
+        "current-artifact",
         true,
         value =>
         {

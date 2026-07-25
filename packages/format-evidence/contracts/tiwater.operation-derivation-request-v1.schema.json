@@ -9,6 +9,7 @@
     "runId",
     "effectDescriptor",
     "output",
+    "targetArtifact",
     "observation",
     "target",
     "sourceFact",
@@ -29,7 +30,8 @@
         "descriptorSha256",
         "operationSchema",
         "resourceSetSchema",
-        "writeSetSchema"
+        "writeSetSchema",
+        "targetScope"
       ],
       "properties": {
         "identity": { "$ref": "#/$defs/Identity" },
@@ -37,19 +39,22 @@
         "operationSchema": { "$ref": "#/$defs/SchemaRef" },
         "resourceSetSchema": { "$ref": "#/$defs/SchemaRef" },
         "writeSetSchema": { "$ref": "#/$defs/SchemaRef" }
+        ,
+        "targetScope": { "enum": ["current-artifact", "external-artifact"] }
       }
     },
     "output": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["outputId", "artifactVersionId", "epochId", "format"],
+      "required": ["outputId", "artifact", "epochId", "format"],
       "properties": {
         "outputId": { "type": "string", "minLength": 1 },
-        "artifactVersionId": { "type": "string", "minLength": 1 },
+        "artifact": { "$ref": "#/$defs/ArtifactAuthority" },
         "epochId": { "type": "string", "minLength": 1 },
         "format": { "enum": ["docx", "xlsx", "pptx"] }
       }
     },
+    "targetArtifact": { "$ref": "#/$defs/ArtifactAuthority" },
     "observation": { "$ref": "#/$defs/TypedValue" },
     "target": {
       "type": "object",
@@ -169,6 +174,17 @@
         "nodeId": { "type": "string", "minLength": 1 },
         "contract": { "$ref": "#/$defs/SchemaRef" },
         "sha256": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "ArtifactAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactVersionId", "path", "bytesSha256", "mediaType"],
+      "properties": {
+        "artifactVersionId": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "bytesSha256": { "$ref": "#/$defs/Sha256" },
+        "mediaType": { "type": "string", "minLength": 1 }
       }
     },
     "ResourceDeclaration": {
