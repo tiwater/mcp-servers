@@ -89,6 +89,11 @@ during normalization. This prevents a vision model from changing downstream
 cell indexes by splitting one visual merged cell into multiple empty columns;
 leading and trailing blank columns, and any column containing evidence in at
 least one row, remain intact.
+When a provider returns each physical row as a separate one-line Markdown
+table, consecutive same-width fragments are normalized together only when a
+later row structurally fills an interior blank column from an earlier merged
+header row. This preserves the original column geometry without joining
+unrelated single-row tables on text similarity.
 Top-level `table_logical_rows` additionally joins an unambiguous suffix-only
 row at the start of the next page to its owning row at the previous page end.
 It retains every contributing physical `source_row_ids` value, so downstream

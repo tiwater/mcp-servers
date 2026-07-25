@@ -746,13 +746,62 @@ def _drop_merged_cell_suffix_fragments(rows: list[list[str]]) -> list[list[str]]
     return normalized
 
 
-def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
-    """Expose model-returned markdown table rows as stable runtime evidence."""
-    rows: list[dict] = []
-    for table_index, table in enumerate(tables):
+def _coalesce_structural_markdown_fragments(tables: list) -> list[tuple[int, list[list[str]]]]:
+    """Join row fragments only when their shared column geometry proves continuity.
+
+    Some vision providers return each physical row of one table as a separate
+    one-line Markdown table. Normalizing each fragment independently destroys
+    merged-header geometry because the header's intentionally blank interior
+    columns appear globally empty. Consecutive one-row fragments are joined
+    only when they have the same width and a later row fills an interior blank
+    column from an earlier row. Otherwise their original table boundaries are
+    preserved.
+    """
+    parsed_tables: list[tuple[int, list[list[str]]]] = []
+    for source_index, table in enumerate(tables):
         if not isinstance(table, str):
             continue
         parsed = [_split_markdown_table_row(line) for line in table.splitlines() if "|" in line]
+        if parsed:
+            parsed_tables.append((source_index, parsed))
+
+    result: list[tuple[int, list[list[str]]]] = []
+    index = 0
+    while index < len(parsed_tables):
+        source_index, parsed = parsed_tables[index]
+        if len(parsed) != 1 or _is_markdown_separator_row(parsed[0]):
+            result.append((source_index, parsed))
+            index += 1
+            continue
+        width = len(parsed[0])
+        end = index + 1
+        while (
+            end < len(parsed_tables)
+            and len(parsed_tables[end][1]) == 1
+            and not _is_markdown_separator_row(parsed_tables[end][1][0])
+            and len(parsed_tables[end][1][0]) == width
+        ):
+            end += 1
+        run = [entry[1][0] for entry in parsed_tables[index:end]]
+        structurally_continuous = any(
+            not _normalize_markdown_cell(row[column])
+            and any(_normalize_markdown_cell(later[column]) for later in run[row_index + 1:])
+            for row_index, row in enumerate(run[:-1])
+            for column in range(1, max(1, width - 1))
+        )
+        if len(run) > 1 and structurally_continuous:
+            result.append((source_index, run))
+            index = end
+            continue
+        result.append((source_index, parsed))
+        index += 1
+    return result
+
+
+def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
+    """Expose model-returned markdown table rows as stable runtime evidence."""
+    rows: list[dict] = []
+    for table_index, parsed in _coalesce_structural_markdown_fragments(tables):
         parsed = _drop_globally_empty_markdown_columns(parsed)
         parsed = _drop_merged_cell_suffix_fragments(parsed)
         separator_index = next((index for index, cells in enumerate(parsed) if _is_markdown_separator_row(cells)), None)
