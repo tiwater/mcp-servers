@@ -30,6 +30,8 @@ internal static class Cli
                 "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, candidateCapabilities: CandidateCapabilities)),
                 "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
+                "execute-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], ExecutionContract())),
+                "validate-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], ExecutionContract())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -90,6 +92,38 @@ internal static class Cli
         if (fields.Contains("commentId")) kinds.AddRange(["replaceAnchoredText", "deleteComment"]);
         return kinds.Count == 0 ? [] : [new("docx.edit", "1", kinds)];
     }
+
+    private static EffectExecutionCommand.Contract ExecutionContract() => new(
+        "tiwater-docx",
+        RuntimeIdentity.Version,
+        "docx.edit",
+        "1",
+        "tiwater-docx-edit",
+        RuntimeIdentity.Version,
+        "tiwater.docx-edit-v1.schema.json",
+        "tiwater.docx-edit/v1",
+        "tiwater.docx-edit-result-v1.schema.json",
+        "tiwater.docx-edit-result/v1",
+        (operation, request) =>
+        {
+            var plan = JsonSerializer.Deserialize<DocxEditDocument>(operation["value"]!.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("DOCX execution operation invalid");
+            var input = request["inputArtifact"]!["path"]!.GetValue<string>();
+            var output = request["output"]!["path"]!.GetValue<string>();
+            Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+            var receipt = Editor.Apply(input, output, plan.Operations);
+            return new(
+                JsonSerializer.SerializeToNode(receipt, Json.Options)!,
+                receipt.AppliedOperations.All(item => item.Applied));
+        },
+        receipt =>
+        {
+            _ = JsonSerializer.Deserialize<DocxEditResult>(receipt.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("DOCX execution receipt invalid");
+        },
+        receipt => JsonSerializer.Deserialize<DocxEditResult>(
+            receipt.ToJsonString(),
+            Json.Options)!.AppliedOperations.All(item => item.Applied));
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>
     [

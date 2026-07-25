@@ -31,6 +31,8 @@ internal static class Cli
                 "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, CandidateCapabilities)),
                 "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
+                "execute-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], ExecutionContract())),
+                "validate-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], ExecutionContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -76,6 +78,38 @@ internal static class Cli
         if (fields.Contains("sheet") && fields.Contains("anchorText")) kinds.Add("expandSectionRows");
         return kinds.Count == 0 ? [] : [new("xlsx.edit", "1", kinds)];
     }
+
+    private static EffectExecutionCommand.Contract ExecutionContract() => new(
+        "tiwater-xlsx",
+        XlsxToolVersion.Current,
+        "xlsx.edit",
+        "1",
+        "tiwater-xlsx-edit",
+        XlsxToolVersion.Current,
+        "tiwater.xlsx-edit-v1.schema.json",
+        "tiwater.xlsx-edit/v1",
+        "tiwater.xlsx-edit-result-v1.schema.json",
+        "tiwater.xlsx-edit-result/v1",
+        (operation, request) =>
+        {
+            var plan = JsonSerializer.Deserialize<XlsxEditDocument>(operation["value"]!.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("XLSX execution operation invalid");
+            var input = request["inputArtifact"]!["path"]!.GetValue<string>();
+            var output = request["output"]!["path"]!.GetValue<string>();
+            Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+            var receipt = Editor.Apply(input, output, plan.Operations);
+            return new(
+                JsonSerializer.SerializeToNode(receipt, Json.Options)!,
+                receipt.AppliedOperations.All(item => item.Applied));
+        },
+        receipt =>
+        {
+            _ = JsonSerializer.Deserialize<XlsxEditResult>(receipt.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("XLSX execution receipt invalid");
+        },
+        receipt => JsonSerializer.Deserialize<XlsxEditResult>(
+            receipt.ToJsonString(),
+            Json.Options)!.AppliedOperations.All(item => item.Applied));
 
     private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };
 
