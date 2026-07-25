@@ -13,6 +13,13 @@ public sealed class ProviderOperationContractTests
                 "targetArtifact", "observation", "target", "sourceFact", "effectIntent", "bindingAuthority",
                 "provider", "expectedResultContract"
             ],
+            ["tiwater.operation-derivation-request/v2"] =
+            [
+                "schema", "requestId", "runId", "effectIntentId", "bindingId",
+                "closureAuthority", "bindingAuthority", "normalizedFactsAuthority",
+                "effectDescriptor", "output", "targetArtifact", "observation",
+                "target", "sourceFacts", "effectIntent", "provider", "expectedResultContract"
+            ],
             ["tiwater.operation-derivation-result/v1"] =
             [
                 "schema", "derivationId", "requestId", "effectDescriptor",
@@ -73,6 +80,17 @@ public sealed class ProviderOperationContractTests
             "tiwater.provider-document-observation-v1.schema.json");
         var sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
         Assert.Equal("f61eeab31c67fba295192b817986ed30833010df85ab81a17ee34c95fd35a005", sha256);
+    }
+
+    [Fact]
+    public void Published_derivation_request_v1_bytes_remain_compatible()
+    {
+        var path = Path.Combine(
+            AppContext.BaseDirectory,
+            "contracts",
+            "tiwater.operation-derivation-request-v1.schema.json");
+        var sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+        Assert.Equal("18deaab46eacb64b53385f95afb11917820adc9f7be427435cd9dd23f629fee2", sha256);
     }
 
     private static JsonObject Load(string id)
