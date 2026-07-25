@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Xunit;
 
 public sealed class ProviderOperationContractTests
 {

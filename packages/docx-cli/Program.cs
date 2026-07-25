@@ -28,6 +28,8 @@ internal static class Cli
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
                 "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) })),
                 "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) })),
+                "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
+                "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -56,6 +58,22 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static OperationDerivationCommand.Contract OperationContract() => new(
+        "tiwater-docx",
+        RuntimeIdentity.Version,
+        "docx",
+        "docx.edit",
+        "1",
+        "tiwater.docx-edit-v1.schema.json",
+        "tiwater.docx-edit/v1",
+        value =>
+        {
+            var plan = JsonSerializer.Deserialize<DocxEditDocument>(value.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("DOCX derived operation could not be parsed");
+            if (plan.Operations.Count != 1 || string.IsNullOrWhiteSpace(plan.Operations[0].Type))
+                throw new InvalidOperationException("DOCX derived operation invalid");
+        });
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>
     [

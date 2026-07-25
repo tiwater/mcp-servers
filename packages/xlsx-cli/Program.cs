@@ -29,6 +29,8 @@ internal static class Cli
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
                 "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
                 "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
+                "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
+                "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -43,6 +45,22 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static OperationDerivationCommand.Contract OperationContract() => new(
+        "tiwater-xlsx",
+        XlsxToolVersion.Current,
+        "xlsx",
+        "xlsx.edit",
+        "1",
+        "tiwater.xlsx-edit-v1.schema.json",
+        "tiwater.xlsx-edit/v1",
+        value =>
+        {
+            var plan = JsonSerializer.Deserialize<XlsxEditDocument>(value.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("XLSX derived operation could not be parsed");
+            if (plan.Operations.Count != 1 || string.IsNullOrWhiteSpace(plan.Operations[0].Type))
+                throw new InvalidOperationException("XLSX derived operation invalid");
+        });
 
     private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };
 

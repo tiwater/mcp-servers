@@ -30,6 +30,8 @@ internal static class Cli
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
                 "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
                 "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
+                "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
+                "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
@@ -43,6 +45,22 @@ internal static class Cli
             return Task.FromResult(1);
         }
     }
+
+    private static OperationDerivationCommand.Contract OperationContract() => new(
+        "tiwater-pptx",
+        ToolVersion,
+        "pptx",
+        "pptx.edit",
+        "1",
+        "tiwater.pptx-edit-v1.schema.json",
+        "tiwater.pptx-edit/v1",
+        value =>
+        {
+            var plan = JsonSerializer.Deserialize<FormatEditPlan>(value.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("PPTX derived operation could not be parsed");
+            if (plan.Operations.Count != 1)
+                throw new InvalidOperationException("PPTX derived operation invalid");
+        });
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> PresentationTargetObservations() =>
     [
