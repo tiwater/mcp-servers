@@ -8,7 +8,7 @@ public sealed class ProviderOperationContractTests
             ["tiwater.operation-derivation-request/v1"] =
             [
                 "schema", "requestId", "runId", "effectDescriptor", "output",
-                "target", "sourceFact", "effectIntent", "bindingAuthority",
+                "observation", "target", "sourceFact", "effectIntent", "bindingAuthority",
                 "provider", "expectedResultContract"
             ],
             ["tiwater.operation-derivation-result/v1"] =

@@ -13,11 +13,28 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "value"],
+        "required": ["name", "source"],
         "properties": {
           "name": { "type": "string", "minLength": 1 },
+          "source": { "enum": ["source-fact", "literal"] },
           "value": { "$ref": "#/$defs/TypedValue" }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "source": { "const": "source-fact" } },
+              "required": ["source"]
+            },
+            "then": { "not": { "required": ["value"] } }
+          },
+          {
+            "if": {
+              "properties": { "source": { "const": "literal" } },
+              "required": ["source"]
+            },
+            "then": { "required": ["value"] }
+          }
+        ]
       }
     }
   },
