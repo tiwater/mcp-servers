@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.xlsx-edit/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operations"],
+  "properties": {
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "enum": [
+              "setCellValue",
+              "setPrintArea",
+              "setRichTextCellValue",
+              "setRangeValues",
+              "insertRows",
+              "copyRow",
+              "expandSectionRows"
+            ]
+          },
+          "sheet": { "type": ["string", "null"] },
+          "cell": { "type": ["string", "null"] },
+          "value": { "type": ["string", "number", "boolean", "null"] },
+          "valueType": { "type": ["string", "null"] },
+          "startCell": { "type": ["string", "null"] },
+          "values": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            ]
+          },
+          "bold": { "type": ["boolean", "null"] },
+          "shrinkToFit": { "type": ["boolean", "null"] },
+          "wrapText": { "type": ["boolean", "null"] },
+          "startRow": { "type": ["integer", "null"], "minimum": 1 },
+          "count": { "type": ["integer", "null"], "minimum": 1 },
+          "sourceRow": { "type": ["integer", "null"], "minimum": 1 },
+          "targetRow": { "type": ["integer", "null"], "minimum": 1 },
+          "translateFormulas": { "type": ["boolean", "null"] },
+          "anchorText": { "type": ["string", "null"] },
+          "exampleRows": { "type": ["integer", "null"], "minimum": 1 },
+          "targetRows": { "type": ["integer", "null"], "minimum": 1 },
+          "preserveStyle": { "type": ["boolean", "null"] },
+          "preserveFormulas": { "type": ["boolean", "null"] },
+          "preserveMergedRanges": { "type": ["boolean", "null"] },
+          "range": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

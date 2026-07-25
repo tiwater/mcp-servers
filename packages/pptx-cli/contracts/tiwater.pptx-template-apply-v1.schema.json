@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.pptx-template-apply/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["targetMasterPath", "slides"],
+  "properties": {
+    "targetMasterPath": { "type": "string", "minLength": 1 },
+    "slides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slideNumber", "targetLayoutPath"],
+        "properties": {
+          "slideNumber": { "type": "integer", "minimum": 1 },
+          "targetLayoutPath": { "type": "string", "minLength": 1 },
+          "contentBounds": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["x", "y", "cx", "cy"],
+                "properties": {
+                  "x": { "type": "integer" },
+                  "y": { "type": "integer" },
+                  "cx": { "type": "integer", "minimum": 0 },
+                  "cy": { "type": "integer", "minimum": 0 }
+                }
+              }
+            ]
+          },
+          "contentShapeIds": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "array",
+                "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

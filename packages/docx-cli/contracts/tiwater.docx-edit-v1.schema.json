@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.docx-edit/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operations"],
+  "properties": {
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operation" }
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "replaceAnchoredText",
+            "replaceParagraphText",
+            "replaceParagraphRunText",
+            "replaceBodyText",
+            "deleteBodyParagraph",
+            "deleteBodyRange",
+            "startSectionBeforeParagraph",
+            "replaceAllHeaderParagraphText",
+            "replaceHeaderParagraphText",
+            "replaceHeaderParagraphRunText",
+            "replaceFooterParagraphText",
+            "replaceFooterParagraphRunText",
+            "replaceHeaderText",
+            "replaceTableCellText",
+            "replaceTableCellRunText",
+            "replaceHeaderTableCellText",
+            "replaceHeaderTableCellRunText",
+            "replaceFooterTableCellText",
+            "replaceFooterTableCellRunText",
+            "replaceTableCellRichText",
+            "replaceTable",
+            "insertTableRows",
+            "deleteTableRows",
+            "replaceTableRows",
+            "insertTableColumns",
+            "setTableWidth",
+            "setTableCellAlignment",
+            "setTableCellNoWrap",
+            "setTableCellFontSize",
+            "applyDocumentFontPolicy",
+            "setTableRowHeight",
+            "setTableRowCantSplit",
+            "mergeTableCells",
+            "unmergeTableRowHorizontalCells",
+            "unmergeTableColumnVerticalCells",
+            "fillTableSemantically",
+            "deleteComment",
+            "deleteComments",
+            "markFieldsDirty",
+            "sanitizeFields",
+            "freezeFields"
+          ]
+        },
+        "commentId": { "type": ["string", "null"] },
+        "text": { "type": ["string", "null"] },
+        "findText": { "type": ["string", "null"] },
+        "headerIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "footerIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "paragraphIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "runIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "tableIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "rowIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "cellIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "gridColumn": { "type": ["integer", "null"], "minimum": 0 },
+        "rows": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/tableCell" }
+              }
+            }
+          ]
+        },
+        "commentIds": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "startCellIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "endCellIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "startRowIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "endRowIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "templateRowIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "columnIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "columnCount": { "type": ["integer", "null"], "minimum": 0 },
+        "templateColumnIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "cells": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "$ref": "#/$defs/semanticFillRule" } }
+          ]
+        },
+        "alignment": { "type": ["string", "null"] },
+        "width": { "type": ["string", "null"] },
+        "widthType": { "type": ["string", "null"] },
+        "orientation": { "type": ["string", "null"] },
+        "fontSize": { "type": ["string", "null"] },
+        "height": { "type": ["string", "null"] },
+        "heightRule": { "type": ["string", "null"] },
+        "endFindText": { "type": ["string", "null"] },
+        "matchMode": { "type": ["string", "null"] },
+        "endMatchMode": { "type": ["string", "null"] },
+        "paragraphStyle": { "type": ["string", "null"] },
+        "endParagraphStyle": { "type": ["string", "null"] },
+        "deleteToBodyEnd": { "type": ["boolean", "null"] },
+        "removePrecedingPageBreak": { "type": ["boolean", "null"] },
+        "noWrap": { "type": ["boolean", "null"] },
+        "cantSplit": { "type": ["boolean", "null"] },
+        "richText": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "$ref": "#/$defs/richText" } }
+          ]
+        },
+        "fontPolicy": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/fontPolicy" }
+          ]
+        }
+      }
+    },
+    "tableCell": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": ["string", "null"] },
+        "gridSpan": { "type": ["integer", "null"], "minimum": 1 },
+        "vMerge": { "type": ["string", "null"] },
+        "bold": { "type": ["boolean", "null"] },
+        "header": { "type": ["boolean", "null"] },
+        "shading": { "type": ["string", "null"] },
+        "alignment": { "type": ["string", "null"] },
+        "richText": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "$ref": "#/$defs/richText" } }
+          ]
+        }
+      }
+    },
+    "richText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" },
+        "color": { "type": ["string", "null"] },
+        "underline": { "type": ["boolean", "null"] },
+        "bold": { "type": ["boolean", "null"] },
+        "fontName": { "type": ["string", "null"] }
+      }
+    },
+    "semanticFillRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rowPatterns", "colPatterns", "text"],
+      "properties": {
+        "rowPatterns": { "type": "array", "items": { "type": "string" } },
+        "colPatterns": { "type": "array", "items": { "type": "string" } },
+        "text": { "type": "string" }
+      }
+    },
+    "fontPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "body", "table"],
+      "properties": {
+        "schema": { "type": "string", "minLength": 1 },
+        "body": { "$ref": "#/$defs/fontRule" },
+        "table": { "$ref": "#/$defs/fontRule" }
+      }
+    },
+    "fontRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eastAsia", "latin", "size"],
+      "properties": {
+        "eastAsia": { "type": "string", "minLength": 1 },
+        "latin": { "type": "string", "minLength": 1 },
+        "size": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
