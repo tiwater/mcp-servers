@@ -101,6 +101,7 @@ public sealed class OperationDerivationCommandTests
         "1",
         "tiwater.docx-edit-v1.schema.json",
         "tiwater.docx-edit/v1",
+        true,
         value =>
         {
             var document = JsonSerializer.Deserialize<DocxEditDocument>(value.ToJsonString(), Json.Options);
@@ -134,6 +135,9 @@ public sealed class OperationDerivationCommandTests
                 ["candidateValueSha256"] = Hash
             }),
             ["capabilities"] = new JsonArray(new JsonObject { ["id"] = "docx.edit", ["version"] = "1" }),
+            ["supportedOperationKinds"] = new JsonArray(
+                JsonValue.Create("replaceTableCellText"),
+                JsonValue.Create("replaceTable")),
             ["resourceDeclarations"] = new JsonArray(new JsonObject
             {
                 ["resourceKey"] = "docx:artifact-1:document",

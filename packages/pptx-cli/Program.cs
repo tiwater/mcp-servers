@@ -28,8 +28,8 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
-                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
-                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) })),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, supportedOperationKinds: SupportedOperationKinds)),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, supportedOperationKinds: SupportedOperationKinds)),
                 "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
@@ -54,6 +54,7 @@ internal static class Cli
         "1",
         "tiwater.pptx-edit-v1.schema.json",
         "tiwater.pptx-edit/v1",
+        false,
         value =>
         {
             var plan = JsonSerializer.Deserialize<FormatEditPlan>(value.ToJsonString(), Json.Options)
@@ -61,6 +62,11 @@ internal static class Cli
             if (plan.Operations.Count != 1)
                 throw new InvalidOperationException("PPTX derived operation invalid");
         });
+
+    private static IReadOnlyList<string> SupportedOperationKinds(IReadOnlySet<string> fields) =>
+        fields.Contains("slideNumber") && fields.Contains("shapeId") && fields.Contains("runIndex")
+            ? ["setRunFormat"]
+            : [];
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> PresentationTargetObservations() =>
     [

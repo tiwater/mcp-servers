@@ -19,6 +19,7 @@ public sealed class FormatEvidenceV2ContractTests
         var evidencePath = Path.Combine(root, "evidence.json");
         var secondEvidencePath = Path.Combine(root, "evidence-second.json");
         var verdictPath = Path.Combine(root, "verdict.json");
+        var tamperedVerdictPath = Path.Combine(root, "verdict-tampered.json");
         File.WriteAllText(input, "current provider bytes");
 
         var extractionValue = new { facets = new[] { "format-summary" } };
@@ -54,13 +55,15 @@ public sealed class FormatEvidenceV2ContractTests
             "tiwater-docx",
             "1.0.0",
             "docx",
-            _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } }));
+            _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } },
+            supportedOperationKinds: SupportedKinds));
         Assert.Equal(0, FormatEvidenceCommand.RunValidatorV2(
             ["--request", requestPath, "--evidence", evidencePath, "--output", verdictPath],
             "tiwater-docx",
             "1.0.0",
             "docx",
-            _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } }));
+            _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } },
+            supportedOperationKinds: SupportedKinds));
         Assert.Equal("pass", JsonNode.Parse(File.ReadAllText(verdictPath))!["decision"]!.GetValue<string>());
 
         Assert.Equal(0, FormatEvidenceCommand.RunProducerV2(
@@ -68,7 +71,8 @@ public sealed class FormatEvidenceV2ContractTests
             "tiwater-docx",
             "1.0.0",
             "docx",
-            _ => new { document = new { paragraphs = 2 }, tables = new { count = 1 } }));
+            _ => new { document = new { paragraphs = 2 }, tables = new { count = 1 } },
+            supportedOperationKinds: SupportedKinds));
         var firstObservation = JsonNode.Parse(File.ReadAllText(evidencePath))!["observation"]!["sha256"]!.GetValue<string>();
         var secondObservation = JsonNode.Parse(File.ReadAllText(secondEvidencePath))!["observation"]!["sha256"]!.GetValue<string>();
         Assert.NotEqual(firstObservation, secondObservation);
@@ -77,20 +81,29 @@ public sealed class FormatEvidenceV2ContractTests
         Assert.NotEqual(
             firstUniverse["universeSha256"]!.GetValue<string>(),
             secondUniverse["universeSha256"]!.GetValue<string>());
-        Assert.True(
-            secondUniverse["candidates"]!.AsArray().Count
-            > firstUniverse["candidates"]!.AsArray().Count);
+        Assert.Equal(
+            firstUniverse["candidates"]!.AsArray().Count,
+            secondUniverse["candidates"]!.AsArray().Count);
+        Assert.NotEqual(
+            firstUniverse["candidates"]!.ToJsonString(),
+            secondUniverse["candidates"]!.ToJsonString());
+        var targets = JsonNode.Parse(File.ReadAllText(evidencePath))!["observation"]!["value"]!["targetUniverse"]!["candidates"]!.AsArray();
+        Assert.Single(targets);
+        Assert.Equal(
+            "replaceParagraphText",
+            targets[0]!["supportedOperationKinds"]![0]!.GetValue<string>());
 
         var tampered = JsonNode.Parse(File.ReadAllText(evidencePath))!.AsObject();
         tampered["observation"]!["value"]!["inventoryUniverse"]!["candidates"]!.AsArray().RemoveAt(0);
         File.WriteAllText(evidencePath, tampered.ToJsonString());
         Assert.Equal(0, FormatEvidenceCommand.RunValidatorV2(
-            ["--request", requestPath, "--evidence", evidencePath, "--output", verdictPath],
+            ["--request", requestPath, "--evidence", evidencePath, "--output", tamperedVerdictPath],
             "tiwater-docx",
             "1.0.0",
             "docx",
-            _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } }));
-        Assert.Equal("failed", JsonNode.Parse(File.ReadAllText(verdictPath))!["decision"]!.GetValue<string>());
+            _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } },
+            supportedOperationKinds: SupportedKinds));
+        Assert.Equal("failed", JsonNode.Parse(File.ReadAllText(tamperedVerdictPath))!["decision"]!.GetValue<string>());
     }
 
     private static object ContractRef(string file, string id)
@@ -101,4 +114,7 @@ public sealed class FormatEvidenceV2ContractTests
 
     private static string Sha(string canonicalJson)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalJson))).ToLowerInvariant();
+
+    private static IReadOnlyList<string> SupportedKinds(IReadOnlySet<string> fields) =>
+        fields.Contains("paragraphs") ? ["replaceParagraphText"] : [];
 }

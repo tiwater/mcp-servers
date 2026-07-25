@@ -13,6 +13,7 @@ public static class OperationDerivationCommand
         string EffectTypeVersion,
         string OperationSchemaFile,
         string OperationSchemaId,
+        bool IncludeOperationKindField,
         Action<JsonNode> ValidateOperation);
 
     private sealed record DerivedValues(
@@ -171,7 +172,9 @@ public static class OperationDerivationCommand
         var intent = intentTyped["value"]!.AsObject();
         if (
             intent["effectType"]!["id"]!.GetValue<string>() != contract.EffectTypeId ||
-            intent["effectType"]!["version"]!.GetValue<string>() != contract.EffectTypeVersion)
+            intent["effectType"]!["version"]!.GetValue<string>() != contract.EffectTypeVersion ||
+            !target["supportedOperationKinds"]!.AsArray().Any(kind =>
+                kind!.GetValue<string>() == intent["operationKind"]!.GetValue<string>()))
             throw new InvalidOperationException("operation derivation intent effect mismatch");
         RequireTyped(request["bindingAuthority"]!.AsObject());
         foreach (var field in target["semanticIdentity"]!.AsArray())
@@ -200,7 +203,9 @@ public static class OperationDerivationCommand
         JsonObject intent,
         Contract contract)
     {
-        var operation = new JsonObject { ["type"] = intent["operationKind"]!.DeepClone() };
+        var operation = new JsonObject();
+        if (contract.IncludeOperationKindField)
+            operation["type"] = intent["operationKind"]!.DeepClone();
         foreach (var field in target["semanticIdentity"]!.AsArray())
             AddExact(operation, field!["name"]!.GetValue<string>(), field["value"]);
         foreach (var argument in intent["arguments"]!.AsArray())
@@ -223,10 +228,9 @@ public static class OperationDerivationCommand
         JsonObject intent,
         Contract contract)
     {
-        var members = new SortedDictionary<string, JsonNode?>(StringComparer.Ordinal)
-        {
-            ["type"] = intent["operationKind"]!.DeepClone()
-        };
+        var members = new SortedDictionary<string, JsonNode?>(StringComparer.Ordinal);
+        if (contract.IncludeOperationKindField)
+            members["type"] = intent["operationKind"]!.DeepClone();
         foreach (var identity in target["semanticIdentity"]!.AsArray())
         {
             var name = identity!["name"]!.GetValue<string>();
@@ -352,11 +356,13 @@ public static class OperationDerivationCommand
             item.Any(entry => !itemProperties.ContainsKey(entry.Key)) ||
             itemRequired.Any(name => !item.ContainsKey(name)))
             throw new InvalidOperationException("operation derivation operation fields invalid");
-        var allowedKinds = itemProperties["type"]!["enum"]!.AsArray()
-            .Select(entry => entry!.GetValue<string>())
-            .ToHashSet(StringComparer.Ordinal);
-        if (!allowedKinds.Contains(item["type"]!.GetValue<string>()))
-            throw new InvalidOperationException("operation derivation operation kind invalid");
+        if (itemProperties["type"]?["enum"] is JsonArray kindValues)
+        {
+            var allowedKinds = kindValues.Select(entry => entry!.GetValue<string>())
+                .ToHashSet(StringComparer.Ordinal);
+            if (!allowedKinds.Contains(item["type"]!.GetValue<string>()))
+                throw new InvalidOperationException("operation derivation operation kind invalid");
+        }
     }
 
     private static void AddExact(JsonObject target, string name, JsonNode? value)

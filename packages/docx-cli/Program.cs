@@ -26,8 +26,8 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
-                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) })),
-                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) })),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, supportedOperationKinds: SupportedOperationKinds)),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, supportedOperationKinds: SupportedOperationKinds)),
                 "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
@@ -67,6 +67,7 @@ internal static class Cli
         "1",
         "tiwater.docx-edit-v1.schema.json",
         "tiwater.docx-edit/v1",
+        true,
         value =>
         {
             var plan = JsonSerializer.Deserialize<DocxEditDocument>(value.ToJsonString(), Json.Options)
@@ -74,6 +75,19 @@ internal static class Cli
             if (plan.Operations.Count != 1 || string.IsNullOrWhiteSpace(plan.Operations[0].Type))
                 throw new InvalidOperationException("DOCX derived operation invalid");
         });
+
+    private static IReadOnlyList<string> SupportedOperationKinds(IReadOnlySet<string> fields)
+    {
+        var kinds = new List<string>();
+        if (fields.Contains("paragraphIndex")) kinds.Add("replaceParagraphText");
+        if (fields.Contains("paragraphIndex") && fields.Contains("runIndex")) kinds.Add("replaceParagraphRunText");
+        if (fields.Contains("tableIndex")) kinds.AddRange(["setTableWidth", "replaceTable", "insertTableRows", "replaceTableRows", "deleteTableRows", "insertTableColumns"]);
+        if (fields.Contains("tableIndex") && fields.Contains("rowIndex")) kinds.AddRange(["setTableRowHeight", "setTableRowCantSplit"]);
+        if (fields.Contains("tableIndex") && fields.Contains("rowIndex") && fields.Contains("cellIndex"))
+            kinds.AddRange(["replaceTableCellText", "replaceTableCellRichText", "setTableCellAlignment", "setTableCellNoWrap", "setTableCellFontSize"]);
+        if (fields.Contains("commentId")) kinds.AddRange(["replaceAnchoredText", "deleteComment"]);
+        return kinds;
+    }
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>
     [
