@@ -139,7 +139,7 @@ public sealed class TemplateOperationDerivationTests
                 ["format"] = "pptx"
             },
             ["targetArtifact"] = templateArtifact,
-            ["observation"] = Typed("tiwater.provider-document-observation/v1", observationValue),
+            ["observation"] = Typed("tiwater.provider-document-observation/v2", observationValue),
             ["target"] = target,
             ["sourceFact"] = new JsonObject
             {

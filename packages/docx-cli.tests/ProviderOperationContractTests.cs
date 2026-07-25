@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Xunit;
 
@@ -57,9 +58,21 @@ public sealed class ProviderOperationContractTests
     [InlineData("lucid.composed-effect/v2")]
     [InlineData("tiwater.provider-contract-manifest/v1")]
     [InlineData("tiwater.provider-contract-manifest-verdict/v1")]
+    [InlineData("tiwater.provider-document-observation/v2")]
     public void Supporting_value_contracts_are_package_owned(string id)
     {
         Assert.Equal(id, Load(id)["$id"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void Published_observation_v1_bytes_remain_compatible()
+    {
+        var path = Path.Combine(
+            AppContext.BaseDirectory,
+            "contracts",
+            "tiwater.provider-document-observation-v1.schema.json");
+        var sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+        Assert.Equal("f61eeab31c67fba295192b817986ed30833010df85ab81a17ee34c95fd35a005", sha256);
     }
 
     private static JsonObject Load(string id)

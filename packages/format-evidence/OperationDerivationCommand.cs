@@ -155,7 +155,7 @@ public static class OperationDerivationCommand
             throw new InvalidOperationException("operation derivation output target mismatch");
         RequireArtifact(outputArtifact, "output");
         RequireArtifact(targetArtifact, "target");
-        RequireTyped(request["observation"]!.AsObject(), "tiwater.provider-document-observation/v1");
+        RequireTyped(request["observation"]!.AsObject(), "tiwater.provider-document-observation/v2");
         var observation = request["observation"]!["value"]!.AsObject();
         if (
             observation["format"]!.GetValue<string>() != contract.Format ||
