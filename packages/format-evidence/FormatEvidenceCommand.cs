@@ -197,13 +197,71 @@ public static class FormatEvidenceCommand
                 facets.Add(new JsonObject { ["facetId"] = item.Key, ["sha256"] = Sha(Canonical(item.Value)) });
         }
         else facets.Add(new JsonObject { ["facetId"] = "inspection", ["sha256"] = inspectionSha256 });
+        var observationSchema = ContractRef("tiwater.provider-document-observation-v1.schema.json", "tiwater.provider-document-observation/v1");
+        var epochMaterial = new JsonObject
+        {
+            ["sourceBytesSha256"] = artifact["bytesSha256"]!.GetValue<string>(),
+            ["provider"] = request["provider"]!.DeepClone(),
+            ["runtime"] = request["runtime"]!.DeepClone(),
+            ["extractionSha256"] = request["extraction"]!["sha256"]!.GetValue<string>(),
+            ["observationSchema"] = observationSchema.DeepClone()
+        };
+        var epochId = $"epoch-{Sha(Canonical(epochMaterial))}";
+        var candidates = EnumerateCandidates(
+            inspection,
+            sourceFormat,
+            artifact["artifactVersionId"]!.GetValue<string>(),
+            epochId,
+            inspectionSha256,
+            request["provider"]!.AsObject());
+        var inventoryBase = new JsonObject
+        {
+            ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(),
+            ["inspectionSha256"] = inspectionSha256,
+            ["candidates"] = new JsonArray(candidates.Select(candidate => candidate.Inventory.DeepClone()).ToArray())
+        };
+        var inventorySha256 = Sha(Canonical(inventoryBase));
+        var inventoryUniverse = new JsonObject
+        {
+            ["universeId"] = $"inventory-{inventorySha256}",
+            ["artifactVersionId"] = inventoryBase["artifactVersionId"]!.DeepClone(),
+            ["inspectionSha256"] = inspectionSha256,
+            ["candidates"] = inventoryBase["candidates"]!.DeepClone(),
+            ["universeSha256"] = inventorySha256
+        };
+        var targetBase = new JsonObject
+        {
+            ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(),
+            ["epochId"] = epochId,
+            ["inspectionSha256"] = inspectionSha256,
+            ["candidates"] = new JsonArray(candidates.Select(candidate => candidate.Target.DeepClone()).ToArray())
+        };
+        var targetSha256 = Sha(Canonical(targetBase));
+        var targetUniverse = new JsonObject
+        {
+            ["universeId"] = $"targets-{targetSha256}",
+            ["artifactVersionId"] = targetBase["artifactVersionId"]!.DeepClone(),
+            ["epochId"] = epochId,
+            ["inspectionSha256"] = inspectionSha256,
+            ["candidates"] = targetBase["candidates"]!.DeepClone(),
+            ["universeSha256"] = targetSha256
+        };
         var observationValue = new JsonObject
         {
             ["format"] = sourceFormat,
+            ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(),
+            ["epochId"] = epochId,
             ["inspectionSha256"] = inspectionSha256,
-            ["facets"] = facets
+            ["facets"] = facets,
+            ["inventoryUniverse"] = inventoryUniverse,
+            ["targetUniverse"] = targetUniverse
         };
-        var observation = TypedValue("tiwater.format-observation-summary-v1.schema.json", "tiwater.format-observation-summary/v1", observationValue);
+        var observation = new JsonObject
+        {
+            ["schema"] = observationSchema,
+            ["value"] = observationValue,
+            ["sha256"] = Sha(Canonical(observationValue))
+        };
         var provenanceValue = new JsonObject
         {
             ["kind"] = "provider-inspection",
@@ -236,6 +294,111 @@ public static class FormatEvidenceCommand
         evidence["evidenceId"] = $"evidence-{Sha(Canonical(evidence))}";
         return evidence;
     }
+
+    private sealed record ProviderCandidate(JsonObject Inventory, JsonObject Target);
+
+    private static IReadOnlyList<ProviderCandidate> EnumerateCandidates(JsonNode inspection, string format, string artifactVersionId, string epochId, string inspectionSha256, JsonObject provider)
+    {
+        var candidates = new List<ProviderCandidate>();
+        Walk(inspection, "");
+        return candidates.OrderBy(candidate => candidate.Inventory["pointer"]!.GetValue<string>(), StringComparer.Ordinal).ToList();
+
+        void Walk(JsonNode? value, string pointer)
+        {
+            var kind = value switch { JsonObject => "object", JsonArray => "array", _ => "scalar" };
+            var candidateValueSha256 = Sha(Canonical(value));
+            var candidateMaterial = new JsonObject
+            {
+                ["artifactVersionId"] = artifactVersionId,
+                ["provider"] = provider.DeepClone(),
+                ["inspectionSha256"] = inspectionSha256,
+                ["pointer"] = pointer
+            };
+            var candidateId = $"candidate-{Sha(Canonical(candidateMaterial))}";
+            var fields = ScalarFields(value);
+            var inventory = new JsonObject
+            {
+                ["candidateId"] = candidateId,
+                ["candidateKind"] = kind,
+                ["pointer"] = pointer,
+                ["fields"] = fields.DeepClone(),
+                ["candidateValueSha256"] = candidateValueSha256,
+                ["dispositionInput"] = "available"
+            };
+            var rootResource = $"{format}:{artifactVersionId}:document";
+            var locatorValue = new JsonObject
+            {
+                ["format"] = format,
+                ["pointer"] = pointer,
+                ["candidateValueSha256"] = candidateValueSha256
+            };
+            var target = new JsonObject
+            {
+                ["candidateId"] = candidateId,
+                ["artifactVersionId"] = artifactVersionId,
+                ["epochId"] = epochId,
+                ["semanticIdentity"] = fields.DeepClone(),
+                ["locator"] = TypedValue("tiwater.provider-json-pointer-locator-v1.schema.json", "tiwater.provider-json-pointer-locator/v1", locatorValue),
+                ["capabilities"] = new JsonArray(new JsonObject { ["id"] = $"{format}.edit", ["version"] = "1" }),
+                ["resourceDeclarations"] = new JsonArray(new JsonObject
+                {
+                    ["resourceKey"] = rootResource,
+                    ["access"] = pointer.Length == 0 ? "exclusive-write" : "shared-write"
+                }),
+                ["writeDeclarations"] = new JsonArray(new JsonObject
+                {
+                    ["resourceKey"] = rootResource,
+                    ["writeKey"] = pointer
+                }),
+                ["candidateValueSha256"] = candidateValueSha256,
+                ["inspectionSha256"] = inspectionSha256
+            };
+            candidates.Add(new ProviderCandidate(inventory, target));
+            if (value is JsonObject objectValue)
+            {
+                foreach (var item in objectValue.OrderBy(item => item.Key, StringComparer.Ordinal))
+                    Walk(item.Value, $"{pointer}/{EscapePointer(item.Key)}");
+            }
+            else if (value is JsonArray arrayValue)
+            {
+                for (var index = 0; index < arrayValue.Count; index += 1)
+                    Walk(arrayValue[index], $"{pointer}/{index}");
+            }
+        }
+    }
+
+    private static JsonArray ScalarFields(JsonNode? value)
+    {
+        var fields = new JsonArray();
+        if (value is JsonObject objectValue)
+        {
+            foreach (var item in objectValue.Where(item => item.Value is null or JsonValue).OrderBy(item => item.Key, StringComparer.Ordinal))
+                fields.Add(ScalarField(item.Key, item.Value));
+        }
+        else if (value is JsonArray arrayValue) fields.Add(ScalarField("length", JsonValue.Create(arrayValue.Count)));
+        else fields.Add(ScalarField("value", value));
+        return fields;
+    }
+
+    private static JsonObject ScalarField(string name, JsonNode? value)
+    {
+        var kind = value switch
+        {
+            null => "null",
+            JsonValue scalar when scalar.TryGetValue<string>(out _) => "string",
+            JsonValue scalar when scalar.TryGetValue<bool>(out _) => "boolean",
+            _ => "number"
+        };
+        return new JsonObject
+        {
+            ["name"] = name,
+            ["kind"] = kind,
+            ["value"] = value?.DeepClone(),
+            ["sha256"] = Sha(Canonical(value))
+        };
+    }
+
+    private static string EscapePointer(string value) => value.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
 
     private static JsonObject TypedValue(string file, string id, JsonNode value)
         => new()

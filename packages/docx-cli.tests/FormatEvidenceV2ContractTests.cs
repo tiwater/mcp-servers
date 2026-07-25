@@ -72,9 +72,17 @@ public sealed class FormatEvidenceV2ContractTests
         var firstObservation = JsonNode.Parse(File.ReadAllText(evidencePath))!["observation"]!["sha256"]!.GetValue<string>();
         var secondObservation = JsonNode.Parse(File.ReadAllText(secondEvidencePath))!["observation"]!["sha256"]!.GetValue<string>();
         Assert.NotEqual(firstObservation, secondObservation);
+        var firstUniverse = JsonNode.Parse(File.ReadAllText(evidencePath))!["observation"]!["value"]!["inventoryUniverse"]!;
+        var secondUniverse = JsonNode.Parse(File.ReadAllText(secondEvidencePath))!["observation"]!["value"]!["inventoryUniverse"]!;
+        Assert.NotEqual(
+            firstUniverse["universeSha256"]!.GetValue<string>(),
+            secondUniverse["universeSha256"]!.GetValue<string>());
+        Assert.True(
+            secondUniverse["candidates"]!.AsArray().Count
+            > firstUniverse["candidates"]!.AsArray().Count);
 
         var tampered = JsonNode.Parse(File.ReadAllText(evidencePath))!.AsObject();
-        tampered["observation"]!["value"]!["inspectionSha256"] = new string('0', 64);
+        tampered["observation"]!["value"]!["inventoryUniverse"]!["candidates"]!.AsArray().RemoveAt(0);
         File.WriteAllText(evidencePath, tampered.ToJsonString());
         Assert.Equal(0, FormatEvidenceCommand.RunValidatorV2(
             ["--request", requestPath, "--evidence", evidencePath, "--output", verdictPath],
