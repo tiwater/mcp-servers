@@ -14,6 +14,7 @@ public static class OperationDerivationCommand
         string OperationSchemaFile,
         string OperationSchemaId,
         string TargetScope,
+        string OperationShape,
         bool IncludeOperationKindField,
         Action<JsonNode> ValidateOperation);
 
@@ -214,18 +215,19 @@ public static class OperationDerivationCommand
         var operation = new JsonObject();
         if (contract.IncludeOperationKindField)
             operation["type"] = intent["operationKind"]!.DeepClone();
-        foreach (var field in target["semanticIdentity"]!.AsArray())
-            AddExact(operation, field!["name"]!.GetValue<string>(), field["value"]);
+        if (contract.OperationShape == "single-edit")
+            foreach (var field in target["semanticIdentity"]!.AsArray())
+                AddExact(operation, field!["name"]!.GetValue<string>(), field["value"]);
         foreach (var argument in intent["arguments"]!.AsArray())
         {
             var item = argument!.AsObject();
-            var value = item["source"]!.GetValue<string>() == "source-fact"
-                ? sourceFact["value"]!["value"]
-                : item["value"]!["value"];
+            var value = ResolveProducerArgument(item, target, sourceFact);
             AddExact(operation, item["name"]!.GetValue<string>(), value);
         }
         return new DerivedValues(
-            new JsonObject { ["operations"] = new JsonArray(operation) },
+            contract.OperationShape == "single-edit"
+                ? new JsonObject { ["operations"] = new JsonArray(operation) }
+                : operation,
             target["resourceDeclarations"]!.AsArray().DeepClone().AsArray(),
             target["writeDeclarations"]!.AsArray().DeepClone().AsArray());
     }
@@ -239,19 +241,18 @@ public static class OperationDerivationCommand
         var members = new SortedDictionary<string, JsonNode?>(StringComparer.Ordinal);
         if (contract.IncludeOperationKindField)
             members["type"] = intent["operationKind"]!.DeepClone();
-        foreach (var identity in target["semanticIdentity"]!.AsArray())
-        {
-            var name = identity!["name"]!.GetValue<string>();
-            if (!members.TryAdd(name, identity["value"]!.DeepClone()))
-                throw new InvalidOperationException("operation derivation duplicate semantic field");
-        }
+        if (contract.OperationShape == "single-edit")
+            foreach (var identity in target["semanticIdentity"]!.AsArray())
+            {
+                var name = identity!["name"]!.GetValue<string>();
+                if (!members.TryAdd(name, identity["value"]!.DeepClone()))
+                    throw new InvalidOperationException("operation derivation duplicate semantic field");
+            }
         foreach (var entry in intent["arguments"]!.AsArray())
         {
             var argument = entry!.AsObject();
             var name = argument["name"]!.GetValue<string>();
-            var value = argument["source"]!.GetValue<string>() == "source-fact"
-                ? sourceFact["value"]!["value"]!.DeepClone()
-                : argument["value"]!["value"]!.DeepClone();
+            var value = ResolveValidatorArgument(argument, target, sourceFact);
             if (members.TryGetValue(name, out var prior) && Canonical(prior) != Canonical(value))
                 throw new InvalidOperationException("operation derivation conflicting field");
             members[name] = value;
@@ -263,7 +264,9 @@ public static class OperationDerivationCommand
         var writes = new JsonArray(target["writeDeclarations"]!.AsArray()
             .Select(value => value!.DeepClone()).ToArray());
         return new DerivedValues(
-            new JsonObject { ["operations"] = new JsonArray(operation) },
+            contract.OperationShape == "single-edit"
+                ? new JsonObject { ["operations"] = new JsonArray(operation) }
+                : operation,
             resources,
             writes);
     }
@@ -350,6 +353,7 @@ public static class OperationDerivationCommand
             root.Any(item => !rootProperties.ContainsKey(item.Key)) ||
             rootRequired.Any(name => !root.ContainsKey(name)))
             throw new InvalidOperationException("operation derivation operation root invalid");
+        if (contract.OperationShape == "root-object") return;
         var operations = root["operations"]!.AsArray();
         if (operations.Count != 1)
             throw new InvalidOperationException("operation derivation operation cardinality invalid");
@@ -378,6 +382,32 @@ public static class OperationDerivationCommand
         if (target.TryGetPropertyValue(name, out var prior) && Canonical(prior) != Canonical(value))
             throw new InvalidOperationException($"operation derivation conflicting field: {name}");
         target[name] = value?.DeepClone();
+    }
+
+    private static JsonNode? ResolveProducerArgument(JsonObject argument, JsonObject target, JsonObject sourceFact) =>
+        argument["source"]!.GetValue<string>() switch
+        {
+            "source-fact" => sourceFact["value"]!["value"],
+            "literal" => argument["value"]!["value"],
+            "target-field" => target["semanticIdentity"]!.AsArray().Single(field =>
+                field!["name"]!.GetValue<string>() == argument["fieldName"]!.GetValue<string>())!["value"],
+            _ => throw new InvalidOperationException("operation derivation argument source invalid")
+        };
+
+    private static JsonNode? ResolveValidatorArgument(JsonObject argument, JsonObject target, JsonObject sourceFact)
+    {
+        var source = argument["source"]!.GetValue<string>();
+        if (source == "source-fact") return sourceFact["value"]!["value"]!.DeepClone();
+        if (source == "literal") return argument["value"]!["value"]!.DeepClone();
+        if (source != "target-field")
+            throw new InvalidOperationException("operation derivation validator argument source invalid");
+        var name = argument["fieldName"]!.GetValue<string>();
+        var matches = target["semanticIdentity"]!.AsArray()
+            .Where(field => field!["name"]!.GetValue<string>() == name)
+            .ToList();
+        if (matches.Count != 1)
+            throw new InvalidOperationException("operation derivation validator target field invalid");
+        return matches[0]!["value"]!.DeepClone();
     }
 
     private static void ExactKeys(JsonObject value, IReadOnlyCollection<string> expected, string label)

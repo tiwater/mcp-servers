@@ -26,8 +26,8 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
-                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, supportedOperationKinds: SupportedOperationKinds)),
-                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, supportedOperationKinds: SupportedOperationKinds)),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, candidateCapabilities: CandidateCapabilities)),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, candidateCapabilities: CandidateCapabilities)),
                 "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
@@ -68,6 +68,7 @@ internal static class Cli
         "tiwater.docx-edit-v1.schema.json",
         "tiwater.docx-edit/v1",
         "current-artifact",
+        "single-edit",
         true,
         value =>
         {
@@ -77,7 +78,7 @@ internal static class Cli
                 throw new InvalidOperationException("DOCX derived operation invalid");
         });
 
-    private static IReadOnlyList<string> SupportedOperationKinds(IReadOnlySet<string> fields)
+    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
     {
         var kinds = new List<string>();
         if (fields.Contains("paragraphIndex")) kinds.Add("replaceParagraphText");
@@ -87,7 +88,7 @@ internal static class Cli
         if (fields.Contains("tableIndex") && fields.Contains("rowIndex") && fields.Contains("cellIndex"))
             kinds.AddRange(["replaceTableCellText", "replaceTableCellRichText", "setTableCellAlignment", "setTableCellNoWrap", "setTableCellFontSize"]);
         if (fields.Contains("commentId")) kinds.AddRange(["replaceAnchoredText", "deleteComment"]);
-        return kinds;
+        return kinds.Count == 0 ? [] : [new("docx.edit", "1", kinds)];
     }
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>

@@ -28,10 +28,12 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, _ => PresentationTargetObservations())),
-                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, supportedOperationKinds: SupportedOperationKinds)),
-                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, supportedOperationKinds: SupportedOperationKinds)),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, candidateCapabilities: CandidateCapabilities)),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, candidateCapabilities: CandidateCapabilities)),
                 "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
+                "derive-template-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], TemplateOperationContract())),
+                "validate-derived-template-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], TemplateOperationContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
@@ -55,6 +57,7 @@ internal static class Cli
         "tiwater.pptx-edit-v1.schema.json",
         "tiwater.pptx-edit/v1",
         "current-artifact",
+        "single-edit",
         false,
         value =>
         {
@@ -64,10 +67,36 @@ internal static class Cli
                 throw new InvalidOperationException("PPTX derived operation invalid");
         });
 
-    private static IReadOnlyList<string> SupportedOperationKinds(IReadOnlySet<string> fields) =>
-        fields.Contains("slideNumber") && fields.Contains("shapeId") && fields.Contains("runIndex")
-            ? ["setRunFormat"]
-            : [];
+    private static OperationDerivationCommand.Contract TemplateOperationContract() => new(
+        "tiwater-pptx",
+        ToolVersion,
+        "pptx",
+        "pptx.template-apply",
+        "1",
+        "tiwater.pptx-template-apply-v1.schema.json",
+        "tiwater.pptx-template-apply/v1",
+        "external-artifact",
+        "root-object",
+        false,
+        value =>
+        {
+            var plan = JsonSerializer.Deserialize<TemplateApplicationPlan>(value.ToJsonString(), Json.Options)
+                ?? throw new InvalidOperationException("PPTX template operation could not be parsed");
+            if (string.IsNullOrWhiteSpace(plan.TargetMasterPath) || plan.Slides.Count == 0)
+                throw new InvalidOperationException("PPTX template operation invalid");
+        });
+
+    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
+    {
+        var capabilities = new List<FormatEvidenceCommand.CandidateCapability>();
+        if (fields.Contains("slideNumber") && fields.Contains("shapeId") && fields.Contains("runIndex"))
+            capabilities.Add(new("pptx.edit", "1", ["setRunFormat"]));
+        if (pointer.Contains("/Masters/", StringComparison.Ordinal) &&
+            !pointer.Contains("/Layouts/", StringComparison.Ordinal) &&
+            fields.Contains("path"))
+            capabilities.Add(new("pptx.template-apply", "1", ["applyTemplate"]));
+        return capabilities;
+    }
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> PresentationTargetObservations() =>
     [

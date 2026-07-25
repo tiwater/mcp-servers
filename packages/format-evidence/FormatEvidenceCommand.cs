@@ -9,17 +9,18 @@ public static class FormatEvidenceCommand
 {
     public sealed record AdditionalObservation(string ObservationId, string SemanticField, string Use, object Value, string Pointer);
     public sealed record ErrorClassification(string Code, string Category, bool Retryable);
+    public sealed record CandidateCapability(string Id, string Version, IReadOnlyList<string> OperationKinds);
     public static int RunProducer(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null)
         => Run(args, false, tool, version, format, inspect, additionalObservations, acceptedSourceFormats, classifyError);
 
     public static int RunValidator(string[] args, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations = null, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null)
         => Run(args, true, tool, version, format, inspect, additionalObservations, acceptedSourceFormats, classifyError);
 
-    public static int RunProducerV2(string[] args, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null, Func<IReadOnlySet<string>, IReadOnlyList<string>>? supportedOperationKinds = null)
-        => RunV2(args, false, tool, version, format, inspect, acceptedSourceFormats, classifyError, supportedOperationKinds);
+    public static int RunProducerV2(string[] args, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null, Func<string, IReadOnlySet<string>, IReadOnlyList<CandidateCapability>>? candidateCapabilities = null)
+        => RunV2(args, false, tool, version, format, inspect, acceptedSourceFormats, classifyError, candidateCapabilities);
 
-    public static int RunValidatorV2(string[] args, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null, Func<IReadOnlySet<string>, IReadOnlyList<string>>? supportedOperationKinds = null)
-        => RunV2(args, true, tool, version, format, inspect, acceptedSourceFormats, classifyError, supportedOperationKinds);
+    public static int RunValidatorV2(string[] args, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats = null, Func<Exception, ErrorClassification?>? classifyError = null, Func<string, IReadOnlySet<string>, IReadOnlyList<CandidateCapability>>? candidateCapabilities = null)
+        => RunV2(args, true, tool, version, format, inspect, acceptedSourceFormats, classifyError, candidateCapabilities);
 
     private static int Run(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, Func<string, IReadOnlyList<AdditionalObservation>>? additionalObservations, IReadOnlySet<string>? acceptedSourceFormats, Func<Exception, ErrorClassification?>? classifyError)
     {
@@ -90,7 +91,7 @@ public static class FormatEvidenceCommand
         return values;
     }
 
-    private static int RunV2(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats, Func<Exception, ErrorClassification?>? classifyError, Func<IReadOnlySet<string>, IReadOnlyList<string>>? supportedOperationKinds)
+    private static int RunV2(string[] args, bool validator, string tool, string version, string format, Func<string, object> inspect, IReadOnlySet<string>? acceptedSourceFormats, Func<Exception, ErrorClassification?>? classifyError, Func<string, IReadOnlySet<string>, IReadOnlyList<CandidateCapability>>? candidateCapabilities)
     {
         var values = ParseArgs(args, validator);
         var request = JsonNode.Parse(File.ReadAllText(values["request"]))!.AsObject();
@@ -98,7 +99,7 @@ public static class FormatEvidenceCommand
         try
         {
             var sourceFormat = ValidateRequestV2(request, tool, version, format, acceptedSourceFormats);
-            var expected = BuildEvidenceV2(request, sourceFormat, inspect, supportedOperationKinds);
+            var expected = BuildEvidenceV2(request, sourceFormat, inspect, candidateCapabilities);
             JsonObject result;
             if (!validator) result = expected;
             else
@@ -185,7 +186,7 @@ public static class FormatEvidenceCommand
         return sourceFormat;
     }
 
-    private static JsonObject BuildEvidenceV2(JsonObject request, string sourceFormat, Func<string, object> inspect, Func<IReadOnlySet<string>, IReadOnlyList<string>>? supportedOperationKinds)
+    private static JsonObject BuildEvidenceV2(JsonObject request, string sourceFormat, Func<string, object> inspect, Func<string, IReadOnlySet<string>, IReadOnlyList<CandidateCapability>>? candidateCapabilities)
     {
         var artifact = request["artifact"]!.AsObject();
         var inspection = JsonSerializer.SerializeToNode(inspect(artifact["path"]!.GetValue<string>()))!;
@@ -214,7 +215,7 @@ public static class FormatEvidenceCommand
             epochId,
             inspectionSha256,
             request["provider"]!.AsObject(),
-            supportedOperationKinds);
+            candidateCapabilities);
         var inventoryBase = new JsonObject
         {
             ["artifactVersionId"] = artifact["artifactVersionId"]!.GetValue<string>(),
@@ -298,7 +299,7 @@ public static class FormatEvidenceCommand
 
     private sealed record ProviderCandidate(JsonObject Inventory, JsonObject? Target);
 
-    private static IReadOnlyList<ProviderCandidate> EnumerateCandidates(JsonNode inspection, string format, string artifactVersionId, string epochId, string inspectionSha256, JsonObject provider, Func<IReadOnlySet<string>, IReadOnlyList<string>>? supportedOperationKinds)
+    private static IReadOnlyList<ProviderCandidate> EnumerateCandidates(JsonNode inspection, string format, string artifactVersionId, string epochId, string inspectionSha256, JsonObject provider, Func<string, IReadOnlySet<string>, IReadOnlyList<CandidateCapability>>? candidateCapabilities)
     {
         var candidates = new List<ProviderCandidate>();
         Walk(inspection, "");
@@ -328,7 +329,12 @@ public static class FormatEvidenceCommand
             };
             var rootResource = $"{format}:{artifactVersionId}:document";
             var fieldNames = fields.Select(field => field!["name"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
-            var operationKinds = (supportedOperationKinds?.Invoke(fieldNames) ?? [])
+            var capabilities = (candidateCapabilities?.Invoke(pointer, fieldNames) ?? [])
+                .Where(capability => capability.OperationKinds.Count > 0)
+                .OrderBy(capability => $"{capability.Id}@{capability.Version}", StringComparer.Ordinal)
+                .ToArray();
+            var operationKinds = capabilities
+                .SelectMany(capability => capability.OperationKinds)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(item => item, StringComparer.Ordinal)
                 .ToArray();
@@ -345,7 +351,11 @@ public static class FormatEvidenceCommand
                 ["epochId"] = epochId,
                 ["semanticIdentity"] = fields.DeepClone(),
                 ["locator"] = TypedValue("tiwater.provider-json-pointer-locator-v1.schema.json", "tiwater.provider-json-pointer-locator/v1", locatorValue),
-                ["capabilities"] = new JsonArray(new JsonObject { ["id"] = $"{format}.edit", ["version"] = "1" }),
+                ["capabilities"] = new JsonArray(capabilities.Select(capability => (JsonNode?)new JsonObject
+                {
+                    ["id"] = capability.Id,
+                    ["version"] = capability.Version
+                }).ToArray()),
                 ["supportedOperationKinds"] = new JsonArray(operationKinds.Select(
                     item => (JsonNode?)JsonValue.Create(item)).ToArray()),
                 ["resourceDeclarations"] = new JsonArray(new JsonObject
@@ -381,7 +391,7 @@ public static class FormatEvidenceCommand
         if (value is JsonObject objectValue)
         {
             foreach (var item in objectValue.Where(item => item.Value is null or JsonValue).OrderBy(item => item.Key, StringComparer.Ordinal))
-                fields.Add(ScalarField(item.Key, item.Value));
+                fields.Add(ScalarField(JsonNamingPolicy.CamelCase.ConvertName(item.Key), item.Value));
         }
         else if (value is JsonArray arrayValue) fields.Add(ScalarField("length", JsonValue.Create(arrayValue.Count)));
         else fields.Add(ScalarField("value", value));

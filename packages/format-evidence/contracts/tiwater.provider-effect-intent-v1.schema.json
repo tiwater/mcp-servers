@@ -16,10 +16,21 @@
         "required": ["name", "source"],
         "properties": {
           "name": { "type": "string", "minLength": 1 },
-          "source": { "enum": ["source-fact", "literal"] },
+          "source": { "enum": ["source-fact", "target-field", "literal"] },
+          "fieldName": { "type": "string", "minLength": 1 },
           "value": { "$ref": "#/$defs/TypedValue" }
         },
         "allOf": [
+          {
+            "if": {
+              "properties": { "source": { "const": "target-field" } },
+              "required": ["source"]
+            },
+            "then": {
+              "required": ["fieldName"],
+              "not": { "required": ["value"] }
+            }
+          },
           {
             "if": {
               "properties": { "source": { "const": "source-fact" } },

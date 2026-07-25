@@ -56,14 +56,14 @@ public sealed class FormatEvidenceV2ContractTests
             "1.0.0",
             "docx",
             _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } },
-            supportedOperationKinds: SupportedKinds));
+            candidateCapabilities: CandidateCapabilities));
         Assert.Equal(0, FormatEvidenceCommand.RunValidatorV2(
             ["--request", requestPath, "--evidence", evidencePath, "--output", verdictPath],
             "tiwater-docx",
             "1.0.0",
             "docx",
             _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } },
-            supportedOperationKinds: SupportedKinds));
+            candidateCapabilities: CandidateCapabilities));
         Assert.Equal("pass", JsonNode.Parse(File.ReadAllText(verdictPath))!["decision"]!.GetValue<string>());
 
         Assert.Equal(0, FormatEvidenceCommand.RunProducerV2(
@@ -72,7 +72,7 @@ public sealed class FormatEvidenceV2ContractTests
             "1.0.0",
             "docx",
             _ => new { document = new { paragraphs = 2 }, tables = new { count = 1 } },
-            supportedOperationKinds: SupportedKinds));
+            candidateCapabilities: CandidateCapabilities));
         var firstObservation = JsonNode.Parse(File.ReadAllText(evidencePath))!["observation"]!["sha256"]!.GetValue<string>();
         var secondObservation = JsonNode.Parse(File.ReadAllText(secondEvidencePath))!["observation"]!["sha256"]!.GetValue<string>();
         Assert.NotEqual(firstObservation, secondObservation);
@@ -102,7 +102,7 @@ public sealed class FormatEvidenceV2ContractTests
             "1.0.0",
             "docx",
             _ => new { document = new { paragraphs = 1 }, tables = new { count = 0 } },
-            supportedOperationKinds: SupportedKinds));
+            candidateCapabilities: CandidateCapabilities));
         Assert.Equal("failed", JsonNode.Parse(File.ReadAllText(tamperedVerdictPath))!["decision"]!.GetValue<string>());
     }
 
@@ -115,6 +115,10 @@ public sealed class FormatEvidenceV2ContractTests
     private static string Sha(string canonicalJson)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalJson))).ToLowerInvariant();
 
-    private static IReadOnlyList<string> SupportedKinds(IReadOnlySet<string> fields) =>
-        fields.Contains("paragraphs") ? ["replaceParagraphText"] : [];
+    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(
+        string pointer,
+        IReadOnlySet<string> fields) =>
+        fields.Contains("paragraphs")
+            ? [new("docx.edit", "1", ["replaceParagraphText"])]
+            : [];
 }

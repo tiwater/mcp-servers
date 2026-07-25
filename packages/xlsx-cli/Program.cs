@@ -27,8 +27,8 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
                 "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookTargetObservations, WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure)),
-                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, SupportedOperationKinds)),
-                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, SupportedOperationKinds)),
+                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, CandidateCapabilities)),
+                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, CandidateCapabilities)),
                 "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
@@ -55,6 +55,7 @@ internal static class Cli
         "tiwater.xlsx-edit-v1.schema.json",
         "tiwater.xlsx-edit/v1",
         "current-artifact",
+        "single-edit",
         true,
         value =>
         {
@@ -64,7 +65,7 @@ internal static class Cli
                 throw new InvalidOperationException("XLSX derived operation invalid");
         });
 
-    private static IReadOnlyList<string> SupportedOperationKinds(IReadOnlySet<string> fields)
+    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
     {
         var kinds = new List<string>();
         if (fields.Contains("sheet") && fields.Contains("cell")) kinds.AddRange(["setCellValue", "setRichTextCellValue"]);
@@ -73,7 +74,7 @@ internal static class Cli
         if (fields.Contains("sheet") && fields.Contains("startRow")) kinds.Add("insertRows");
         if (fields.Contains("sheet") && fields.Contains("sourceRow") && fields.Contains("targetRow")) kinds.Add("copyRow");
         if (fields.Contains("sheet") && fields.Contains("anchorText")) kinds.Add("expandSectionRows");
-        return kinds;
+        return kinds.Count == 0 ? [] : [new("xlsx.edit", "1", kinds)];
     }
 
     private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };

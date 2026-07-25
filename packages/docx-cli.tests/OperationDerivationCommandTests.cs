@@ -103,6 +103,7 @@ public sealed class OperationDerivationCommandTests
         "tiwater.docx-edit-v1.schema.json",
         "tiwater.docx-edit/v1",
         "current-artifact",
+        "single-edit",
         true,
         value =>
         {
