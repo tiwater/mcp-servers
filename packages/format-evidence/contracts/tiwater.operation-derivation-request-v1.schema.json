@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.operation-derivation-request/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "requestId",
+    "runId",
+    "effectDescriptor",
+    "output",
+    "target",
+    "sourceFact",
+    "effectIntent",
+    "bindingAuthority",
+    "provider",
+    "expectedResultContract"
+  ],
+  "properties": {
+    "schema": { "const": "tiwater.operation-derivation-request/v1" },
+    "requestId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "effectDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "descriptorSha256",
+        "operationSchema",
+        "resourceSetSchema",
+        "writeSetSchema"
+      ],
+      "properties": {
+        "identity": { "$ref": "#/$defs/Identity" },
+        "descriptorSha256": { "$ref": "#/$defs/Sha256" },
+        "operationSchema": { "$ref": "#/$defs/SchemaRef" },
+        "resourceSetSchema": { "$ref": "#/$defs/SchemaRef" },
+        "writeSetSchema": { "$ref": "#/$defs/SchemaRef" }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outputId", "artifactVersionId", "epochId", "format"],
+      "properties": {
+        "outputId": { "type": "string", "minLength": 1 },
+        "artifactVersionId": { "type": "string", "minLength": 1 },
+        "epochId": { "type": "string", "minLength": 1 },
+        "format": { "enum": ["docx", "xlsx", "pptx"] }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateId",
+        "artifactVersionId",
+        "epochId",
+        "locator",
+        "resourceDeclarations",
+        "writeDeclarations",
+        "candidateValueSha256",
+        "inspectionSha256"
+      ],
+      "properties": {
+        "candidateId": { "type": "string", "minLength": 1 },
+        "artifactVersionId": { "type": "string", "minLength": 1 },
+        "epochId": { "type": "string", "minLength": 1 },
+        "locator": { "$ref": "#/$defs/TypedValue" },
+        "resourceDeclarations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/ResourceDeclaration" }
+        },
+        "writeDeclarations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/WriteDeclaration" }
+        },
+        "candidateValueSha256": { "$ref": "#/$defs/Sha256" },
+        "inspectionSha256": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "sourceFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "factId", "value"],
+      "properties": {
+        "ref": { "$ref": "#/$defs/NodeRef" },
+        "factId": { "type": "string", "minLength": 1 },
+        "value": { "$ref": "#/$defs/TypedValue" }
+      }
+    },
+    "effectIntent": { "$ref": "#/$defs/TypedValue" },
+    "bindingAuthority": { "$ref": "#/$defs/TypedValue" },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "adapter", "runtime"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/Identity" },
+        "adapter": { "$ref": "#/$defs/Identity" },
+        "runtime": { "$ref": "#/$defs/Identity" }
+      }
+    },
+    "expectedResultContract": { "$ref": "#/$defs/SchemaRef" }
+  },
+  "$defs": {
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "SchemaRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "TypedValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "value", "sha256"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/SchemaRef" },
+        "value": {
+          "$comment": "Validated against the registered schema at sibling:schema.",
+          "x-lucid-dynamic-schema-ref": "sibling:schema"
+        },
+        "sha256": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "NodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "contract", "sha256"],
+      "properties": {
+        "nodeId": { "type": "string", "minLength": 1 },
+        "contract": { "$ref": "#/$defs/SchemaRef" },
+        "sha256": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "ResourceDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceKey", "access"],
+      "properties": {
+        "resourceKey": { "type": "string", "minLength": 1 },
+        "access": { "enum": ["shared-write", "exclusive-write"] }
+      }
+    },
+    "WriteDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceKey", "writeKey"],
+      "properties": {
+        "resourceKey": { "type": "string", "minLength": 1 },
+        "writeKey": { "type": "string" }
+      }
+    }
+  }
+}
