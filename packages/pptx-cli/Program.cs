@@ -11,7 +11,7 @@ internal static class Program
 
 internal static class Cli
 {
-    private const string ToolVersion = "0.2.9";
+    private const string ToolVersion = "0.2.10";
 
     public static Task<int> RunAsync(string[] args)
     {

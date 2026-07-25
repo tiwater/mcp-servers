@@ -68,12 +68,12 @@ public sealed class ProviderContractManifestCommandTests
             Path.Combine(root, "manifest.json"),
             Path.Combine(root, "verdict.json"),
             new(
-                "tiwater-docx", "0.10.16", "docx.edit", "1",
+                "tiwater-docx", "0.10.17", "docx.edit", "1",
                 "tiwater.docx-edit-v1.schema.json", "tiwater.docx-edit/v1",
                 "tiwater.docx-edit-result-v1.schema.json", "tiwater.docx-edit-result/v1",
                 "derive-operation", "validate-derived-operation",
                 "execute-effect", "validate-execution-evidence",
-                "tiwater-docx-edit", "0.10.16"));
+                "tiwater-docx-edit", "0.10.17"));
     }
 
     private static JsonObject Load(string path) =>
