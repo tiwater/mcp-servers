@@ -130,7 +130,7 @@ public sealed class EffectExecutionCommandTests
                 ["effectType"] = "docx.edit",
                 ["descriptorSha256"] = Hash,
                 ["operationSchema"] = Ref("tiwater.docx-edit-v1.schema.json", "tiwater.docx-edit/v1"),
-                ["executionAdapter"] = new JsonObject { ["id"] = "tiwater-docx-edit", ["version"] = "0.10.17" }
+                ["executionAdapter"] = new JsonObject { ["id"] = "tiwater-docx-edit", ["version"] = "0.10.18" }
             },
             ["operation"] = operation,
             ["resourceSet"] = new JsonArray(),
@@ -251,11 +251,11 @@ public sealed class EffectExecutionCommandTests
         var requestPath = Write(root, "request.json", request);
         var contract = new EffectExecutionCommand.Contract(
             "tiwater-docx",
-            "0.10.17",
+            "0.10.18",
             "docx.edit",
             "1",
             "tiwater-docx-edit",
-            "0.10.17",
+            "0.10.18",
             "tiwater.docx-edit-v1.schema.json",
             "tiwater.docx-edit/v1",
             "tiwater.docx-edit-result-v1.schema.json",
