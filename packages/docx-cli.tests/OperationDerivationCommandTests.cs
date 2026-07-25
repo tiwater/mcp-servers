@@ -16,7 +16,9 @@ public sealed class OperationDerivationCommandTests
         var result = OperationDerivationCommand.Produce(request, Contract());
         Assert.Equal("replaceTableCellText", result["operation"]!["value"]!["operations"]![0]!["type"]!.GetValue<string>());
         Assert.Equal("approved", result["operation"]!["value"]!["operations"]![0]!["text"]!.GetValue<string>());
-        Assert.Equal(request["target"]!["resourceDeclarations"]!.ToJsonString(), result["resourceSet"]!["value"]!.ToJsonString());
+        Assert.Equal(
+            request["target"]!["candidate"]!["resourceDeclarations"]!.ToJsonString(),
+            result["resourceSet"]!["value"]!.ToJsonString());
         var path = Path.GetTempFileName();
         try
         {
@@ -55,12 +57,20 @@ public sealed class OperationDerivationCommandTests
     {
         var mutations = new Action<JsonObject>[]
         {
-            request => request["target"]!["epochId"] = "stale-epoch",
-            request => request["sourceFact"]!["value"]!["sha256"] = Hash,
+            request => request["target"]!["candidate"]!["epochId"] = "stale-epoch",
+            request => request["sourceFacts"]![0]!["value"]!["sha256"] = Hash,
             request => request["effectDescriptor"]!["operationSchema"]!["sha256"] = Hash,
-            request => request["target"]!["resourceDeclarations"] = new JsonArray(),
+            request => request["target"]!["candidate"]!["resourceDeclarations"] = new JsonArray(),
             request => request["observation"]!["value"]!["targetUniverse"]!["candidates"] = new JsonArray(),
-            request => File.WriteAllText(request["targetArtifact"]!["path"]!.GetValue<string>(), "drifted bytes")
+            request => File.WriteAllText(request["targetArtifact"]!["path"]!.GetValue<string>(), "drifted bytes"),
+            request => request["effectIntentId"] = "wrong-effect",
+            request => request["bindingAuthority"]!["sha256"] = "not-a-hash",
+            request => request["effectDescriptor"]!["executionAdapter"]!["id"] = "wrong-adapter",
+            request =>
+            {
+                request["target"]!["resourceSet"]![0]!["value"] = new JsonArray();
+                RetagTyped(request["target"]!["resourceSet"]![0]!.AsObject());
+            }
         };
         foreach (var mutate in mutations)
         {
@@ -179,9 +189,14 @@ public sealed class OperationDerivationCommandTests
         var sourceTyped = Typed("lucid.typed-value/v1", sourceValue);
         var request = new JsonObject
         {
-            ["schema"] = "tiwater.operation-derivation-request/v1",
+            ["schema"] = "tiwater.operation-derivation-request/v2",
             ["requestId"] = "request-1",
             ["runId"] = "run-1",
+            ["effectIntentId"] = "effect-1",
+            ["bindingId"] = "binding-1",
+            ["closureAuthority"] = NodeRef("closure", "lucid.effect-closure/v2"),
+            ["bindingAuthority"] = NodeRef("binding-plan", "lucid.binding-plan/v2"),
+            ["normalizedFactsAuthority"] = NodeRef("facts", "lucid.normalized-facts/v4"),
             ["effectDescriptor"] = new JsonObject
             {
                 ["identity"] = new JsonObject { ["id"] = "docx.edit", ["version"] = "1" },
@@ -189,7 +204,12 @@ public sealed class OperationDerivationCommandTests
                 ["operationSchema"] = Ref("tiwater.docx-edit-v1.schema.json", "tiwater.docx-edit/v1"),
                 ["resourceSetSchema"] = Ref("tiwater.provider-resource-set-v1.schema.json", "tiwater.provider-resource-set/v1"),
                 ["writeSetSchema"] = Ref("tiwater.provider-write-set-v1.schema.json", "tiwater.provider-write-set/v1"),
-                ["targetScope"] = "current-artifact"
+                ["targetScope"] = "current-artifact",
+                ["executionAdapter"] = new JsonObject
+                {
+                    ["id"] = "tiwater-docx-operation-derivation",
+                    ["version"] = "1"
+                }
             },
             ["output"] = new JsonObject
             {
@@ -200,18 +220,25 @@ public sealed class OperationDerivationCommandTests
             },
             ["targetArtifact"] = artifact,
             ["observation"] = Typed("tiwater.provider-document-observation/v2", observationValue),
-            ["target"] = target,
-            ["sourceFact"] = new JsonObject
+            ["target"] = new JsonObject
             {
-                ["ref"] = new JsonObject
-                {
-                    ["nodeId"] = "facts",
-                    ["contract"] = new JsonObject { ["id"] = "lucid.normalized-facts/v4", ["sha256"] = Hash },
-                    ["sha256"] = Hash
-                },
+                ["targetAuthority"] = NodeRef("semantic-targets", "lucid.semantic-targets/v3"),
+                ["targetId"] = "target-1",
+                ["candidate"] = target,
+                ["resourceSet"] = new JsonArray(TypedRef(
+                    "tiwater.provider-resource-set-v1.schema.json",
+                    "tiwater.provider-resource-set/v1",
+                    target["resourceDeclarations"]!.DeepClone())),
+                ["writeSet"] = new JsonArray(TypedRef(
+                    "tiwater.provider-write-set-v1.schema.json",
+                    "tiwater.provider-write-set/v1",
+                    target["writeDeclarations"]!.DeepClone()))
+            },
+            ["sourceFacts"] = new JsonArray(new JsonObject
+            {
                 ["factId"] = "fact-1",
                 ["value"] = sourceTyped
-            },
+            }),
             ["effectIntent"] = Typed("tiwater.provider-effect-intent/v1", new JsonObject
             {
                 ["effectId"] = "effect-1",
@@ -222,10 +249,6 @@ public sealed class OperationDerivationCommandTests
                     ["name"] = sourceArgument,
                     ["source"] = "source-fact"
                 })
-            }),
-            ["bindingAuthority"] = Typed("lucid.binding-authority/v1", new JsonObject
-            {
-                ["bindingId"] = "binding-1"
             }),
             ["provider"] = new JsonObject
             {
@@ -263,6 +286,22 @@ public sealed class OperationDerivationCommandTests
             ["sha256"] = Sha(Canonical(value))
         };
 
+    private static JsonObject TypedRef(string file, string id, JsonNode value) =>
+        new()
+        {
+            ["schema"] = Ref(file, id),
+            ["value"] = value.DeepClone(),
+            ["sha256"] = Sha(Canonical(value))
+        };
+
+    private static JsonObject NodeRef(string nodeId, string contractId) =>
+        new()
+        {
+            ["nodeId"] = nodeId,
+            ["contract"] = new JsonObject { ["id"] = contractId, ["sha256"] = Hash },
+            ["sha256"] = Hash
+        };
+
     private static JsonObject Ref(string file, string id) =>
         new()
         {
@@ -275,6 +314,9 @@ public sealed class OperationDerivationCommandTests
         var observation = request["observation"]!.AsObject();
         observation["sha256"] = Sha(Canonical(observation["value"]));
     }
+
+    private static void RetagTyped(JsonObject typed) =>
+        typed["sha256"] = Sha(Canonical(typed["value"]));
 
     private static string Sha(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
