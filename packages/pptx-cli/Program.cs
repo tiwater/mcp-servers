@@ -38,6 +38,10 @@ internal static class Cli
                 "validate-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], ExecutionContract())),
                 "execute-template-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], TemplateExecutionContract())),
                 "validate-template-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], TemplateExecutionContract())),
+                "provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunProducer(args[1..], ManifestContract())),
+                "validate-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunValidator(args[1..], ManifestContract())),
+                "template-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunProducer(args[1..], TemplateManifestContract())),
+                "validate-template-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunValidator(args[1..], TemplateManifestContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
@@ -169,6 +173,22 @@ internal static class Cli
         receipt => JsonSerializer.Deserialize<TemplateApplicationResult>(
             receipt.ToJsonString(),
             Json.Options)!.Issues.Count == 0);
+
+    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
+        "tiwater-pptx", ToolVersion, "pptx.edit", "1",
+        "tiwater.pptx-edit-v1.schema.json", "tiwater.pptx-edit/v1",
+        "tiwater.pptx-edit-result-v1.schema.json", "tiwater.pptx-edit-result/v1",
+        "derive-operation", "validate-derived-operation",
+        "execute-effect", "validate-execution-evidence",
+        "tiwater-pptx-edit", ToolVersion);
+
+    private static ProviderContractManifestCommand.Contract TemplateManifestContract() => new(
+        "tiwater-pptx", ToolVersion, "pptx.template-apply", "1",
+        "tiwater.pptx-template-apply-v1.schema.json", "tiwater.pptx-template-apply/v1",
+        "tiwater.pptx-template-apply-result-v1.schema.json", "tiwater.pptx-template-apply-result/v1",
+        "derive-template-operation", "validate-derived-template-operation",
+        "execute-template-effect", "validate-template-execution-evidence",
+        "tiwater-pptx-template-apply", ToolVersion);
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> PresentationTargetObservations() =>
     [

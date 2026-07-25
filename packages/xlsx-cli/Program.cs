@@ -33,6 +33,8 @@ internal static class Cli
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "execute-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], ExecutionContract())),
                 "validate-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], ExecutionContract())),
+                "provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunProducer(args[1..], ManifestContract())),
+                "validate-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunValidator(args[1..], ManifestContract())),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
@@ -110,6 +112,14 @@ internal static class Cli
         receipt => JsonSerializer.Deserialize<XlsxEditResult>(
             receipt.ToJsonString(),
             Json.Options)!.AppliedOperations.All(item => item.Applied));
+
+    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
+        "tiwater-xlsx", XlsxToolVersion.Current, "xlsx.edit", "1",
+        "tiwater.xlsx-edit-v1.schema.json", "tiwater.xlsx-edit/v1",
+        "tiwater.xlsx-edit-result-v1.schema.json", "tiwater.xlsx-edit-result/v1",
+        "derive-operation", "validate-derived-operation",
+        "execute-effect", "validate-execution-evidence",
+        "tiwater-xlsx-edit", XlsxToolVersion.Current);
 
     private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };
 

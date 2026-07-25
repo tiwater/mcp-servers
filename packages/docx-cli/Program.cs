@@ -32,6 +32,8 @@ internal static class Cli
                 "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
                 "execute-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], ExecutionContract())),
                 "validate-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], ExecutionContract())),
+                "provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunProducer(args[1..], ManifestContract())),
+                "validate-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunValidator(args[1..], ManifestContract())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -124,6 +126,14 @@ internal static class Cli
         receipt => JsonSerializer.Deserialize<DocxEditResult>(
             receipt.ToJsonString(),
             Json.Options)!.AppliedOperations.All(item => item.Applied));
+
+    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
+        "tiwater-docx", RuntimeIdentity.Version, "docx.edit", "1",
+        "tiwater.docx-edit-v1.schema.json", "tiwater.docx-edit/v1",
+        "tiwater.docx-edit-result-v1.schema.json", "tiwater.docx-edit-result/v1",
+        "derive-operation", "validate-derived-operation",
+        "execute-effect", "validate-execution-evidence",
+        "tiwater-docx-edit", RuntimeIdentity.Version);
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>
     [

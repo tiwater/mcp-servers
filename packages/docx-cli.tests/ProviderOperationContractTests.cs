@@ -55,6 +55,8 @@ public sealed class ProviderOperationContractTests
     [InlineData("lucid.operator-verdict/v1")]
     [InlineData("lucid.effect-bundle/v3")]
     [InlineData("lucid.composed-effect/v2")]
+    [InlineData("tiwater.provider-contract-manifest/v1")]
+    [InlineData("tiwater.provider-contract-manifest-verdict/v1")]
     public void Supporting_value_contracts_are_package_owned(string id)
     {
         Assert.Equal(id, Load(id)["$id"]!.GetValue<string>());

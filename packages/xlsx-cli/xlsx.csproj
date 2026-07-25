@@ -29,6 +29,7 @@
     <Compile Include="../format-evidence/FormatEvidenceCommand.cs" Link="FormatEvidenceCommand.cs" />
     <Compile Include="../format-evidence/OperationDerivationCommand.cs" Link="OperationDerivationCommand.cs" />
     <Compile Include="../format-evidence/EffectExecutionCommand.cs" Link="EffectExecutionCommand.cs" />
+    <Compile Include="../format-evidence/ProviderContractManifestCommand.cs" Link="ProviderContractManifestCommand.cs" />
   </ItemGroup>
 
   <ItemGroup>
