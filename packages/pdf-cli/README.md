@@ -56,6 +56,8 @@ Published evidence uses the same PDF metadata and detailed-table inspectors. The
 ```bash
 tiwater-pdf inspect-evidence --request request.json --output evidence.json
 tiwater-pdf validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
+tiwater-pdf inspect-evidence-v2 --request request-v2.json --output evidence-v2.json
+tiwater-pdf validate-inspect-evidence-v2 --request request-v2.json --evidence evidence-v2.json --output verdict-v2.json
 ```
 
 ### 5. OCR Scanned PDFs With a Vision LLM
