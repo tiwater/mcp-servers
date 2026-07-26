@@ -135,6 +135,55 @@ public class PptxCliTests
     }
 
     [Fact]
+    public void InspectDetail_resolves_the_current_paragraph_level_without_fabricating_direct_formatting()
+    {
+        var path = CreateInheritedFormattingFixture();
+
+        var run = Assert.Single(Inspector.InspectDetail(path).Slides[0].Shapes[0].Runs);
+
+        Assert.Equal("Inherited Sans", run.FontFamily);
+        Assert.Equal(24d, run.FontSize);
+        Assert.Equal("FFFFFF", run.Color);
+        Assert.True(run.Bold);
+        Assert.Null(run.DirectFontFamily);
+        Assert.Null(run.DirectFontSize);
+        Assert.Null(run.DirectColor);
+        Assert.Null(run.DirectBold);
+        Assert.Equal("shape-list-level-1", run.FontFamilySource);
+        Assert.Equal("shape-list-level-1", run.FontSizeSource);
+        Assert.Equal("shape-list-default", run.ColorSource);
+        Assert.Equal("shape-list-level-1", run.BoldSource);
+    }
+
+    [Fact]
+    public void InspectDetail_keeps_an_explicit_wrong_color_distinct_from_inherited_color()
+    {
+        var path = CreateInheritedFormattingFixture("287341");
+
+        var run = Assert.Single(Inspector.InspectDetail(path).Slides[0].Shapes[0].Runs);
+
+        Assert.Equal("287341", run.Color);
+        Assert.Equal("287341", run.DirectColor);
+        Assert.Equal("direct-run", run.ColorSource);
+        Assert.Equal(24d, run.FontSize);
+    }
+
+    [Fact]
+    public void InspectDetail_uses_master_other_text_style_when_the_shape_has_no_local_default()
+    {
+        var path = CreateInheritedFormattingFixture(useLocalStyle: false);
+
+        var run = Assert.Single(Inspector.InspectDetail(path).Slides[0].Shapes[0].Runs);
+
+        Assert.Equal("Master Sans", run.FontFamily);
+        Assert.Equal(18d, run.FontSize);
+        Assert.Equal("000000", run.Color);
+        Assert.Equal("master-text-style-level-1", run.FontFamilySource);
+        Assert.Equal("master-text-style-level-1", run.FontSizeSource);
+        Assert.Equal("master-text-style-level-1", run.ColorSource);
+    }
+
+    [Fact]
     public void ApplyTemplate_preserves_slide_content_and_switches_every_slide_to_target_master()
     {
         var source = CreateFixture();
@@ -321,6 +370,66 @@ public class PptxCliTests
             new P.NotesSize { Cx = 6858000, Cy = 9144000 });
         presentationPart.Presentation.Save();
 
+        return path;
+    }
+
+    private static string CreateInheritedFormattingFixture(string? directColor = null, bool useLocalStyle = true)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"pptx-inherited-format-{Guid.NewGuid():N}.pptx");
+        using var presentation = PresentationDocument.Create(path, PresentationDocumentType.Presentation);
+        var presentationPart = presentation.AddPresentationPart();
+        var master = presentationPart.AddNewPart<SlideMasterPart>("rIdMaster1");
+        var layout = master.AddNewPart<SlideLayoutPart>("rIdLayout1");
+        layout.SlideLayout = new P.SlideLayout(new P.CommonSlideData(CreateShapeTree()), new P.ColorMapOverride(new A.MasterColorMapping()));
+        layout.SlideLayout.Save();
+        var masterRunProperties = new A.DefaultRunProperties(
+            new A.SolidFill(new A.RgbColorModelHex { Val = "000000" }),
+            new A.LatinFont { Typeface = "Master Sans" },
+            new A.EastAsianFont { Typeface = "Master Sans" })
+        {
+            FontSize = 1800
+        };
+        master.SlideMaster = new P.SlideMaster(
+            new P.CommonSlideData(CreateShapeTree()),
+            new P.SlideLayoutIdList(new P.SlideLayoutId { Id = 1U, RelationshipId = "rIdLayout1" }),
+            new P.TextStyles(new P.TitleStyle(), new P.BodyStyle(), new P.OtherStyle(new A.Level1ParagraphProperties(masterRunProperties))));
+        master.SlideMaster.Save();
+        layout.AddPart(master, "rIdMaster");
+
+        var runProperties = new A.RunProperties();
+        if (directColor is not null) runProperties.Append(new A.SolidFill(new A.RgbColorModelHex { Val = directColor }));
+        var levelProperties = new A.Level1ParagraphProperties(
+            new A.DefaultRunProperties(
+                new A.LatinFont { Typeface = "Inherited Sans" },
+                new A.EastAsianFont { Typeface = "Inherited Sans" })
+            {
+                FontSize = 2400,
+                Bold = true
+            });
+        var defaultProperties = new A.DefaultParagraphProperties(
+            new A.DefaultRunProperties(new A.SolidFill(new A.RgbColorModelHex { Val = "FFFFFF" })));
+        var shape = new P.Shape(
+            new P.NonVisualShapeProperties(
+                new P.NonVisualDrawingProperties { Id = 2U, Name = "Inherited title" },
+                new P.NonVisualShapeDrawingProperties(),
+                new P.ApplicationNonVisualDrawingProperties()),
+            new P.ShapeProperties(),
+            new P.TextBody(
+                new A.BodyProperties(),
+                useLocalStyle ? new A.ListStyle(defaultProperties, levelProperties) : new A.ListStyle(),
+                new A.Paragraph(
+                    new A.ParagraphProperties { Level = 0 },
+                    new A.Run(runProperties, new A.Text("01")))));
+        var slide = presentationPart.AddNewPart<SlidePart>("rIdSlide1");
+        slide.Slide = new P.Slide(new P.CommonSlideData(CreateShapeTree(shape)), new P.ColorMapOverride(new A.MasterColorMapping()));
+        slide.AddPart(layout);
+        slide.Slide.Save();
+        presentationPart.Presentation = new P.Presentation(
+            new P.SlideMasterIdList(new P.SlideMasterId { Id = 2147483648U, RelationshipId = "rIdMaster1" }),
+            new P.SlideIdList(new P.SlideId { Id = 256U, RelationshipId = "rIdSlide1" }),
+            new P.SlideSize { Cx = 9144000, Cy = 6858000 },
+            new P.NotesSize { Cx = 6858000, Cy = 9144000 });
+        presentationPart.Presentation.Save();
         return path;
     }
 
