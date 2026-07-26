@@ -62,6 +62,10 @@ def test_pdf_v2_evidence_is_read_only_and_tampering_is_rejected(tmp_path):
     assert value["schema"] == "tiwater.format-evidence/v2"
     assert observation["inventoryUniverse"]["candidates"]
     assert observation["targetUniverse"]["candidates"] == []
+    for candidate in observation["inventoryUniverse"]["candidates"]:
+        for field in candidate["fields"]:
+            expected = hashlib.sha256(canonical(field["value"]).encode("utf-8")).hexdigest()
+            assert field["sha256"] == expected
     assert run_v2(request_path, verdict, inspect, __version__, evidence) == 0
     assert json.loads(verdict.read_text())["decision"] == "pass"
 

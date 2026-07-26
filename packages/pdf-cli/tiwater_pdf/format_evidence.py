@@ -112,7 +112,7 @@ def _contract_ref(file: str, contract_id: str) -> dict:
 
 
 def _typed_value(file: str, contract_id: str, value: object) -> dict:
-    return {"schema": _contract_ref(file, contract_id), "value": value, "sha256": sha(value)}
+    return {"schema": _contract_ref(file, contract_id), "value": value, "sha256": sha(canonical(value))}
 
 
 def _scalar_kind(value: object) -> str:
@@ -128,13 +128,13 @@ def _scalar_kind(value: object) -> str:
 def _scalar_fields(value: object) -> list[dict]:
     if isinstance(value, dict):
         return [
-            {"name": name, "kind": _scalar_kind(item), "value": item, "sha256": sha(item)}
+            {"name": name, "kind": _scalar_kind(item), "value": item, "sha256": sha(canonical(item))}
             for name, item in sorted(value.items())
             if not isinstance(item, (dict, list))
         ]
     if isinstance(value, list):
-        return [{"name": "length", "kind": "number", "value": len(value), "sha256": sha(len(value))}]
-    return [{"name": "value", "kind": _scalar_kind(value), "value": value, "sha256": sha(value)}]
+        return [{"name": "length", "kind": "number", "value": len(value), "sha256": sha(canonical(len(value)))}]
+    return [{"name": "value", "kind": _scalar_kind(value), "value": value, "sha256": sha(canonical(value))}]
 
 
 def _escape_pointer(value: str) -> str:
@@ -150,7 +150,7 @@ def _inventory_candidates(
     candidates: list[dict] = []
 
     def walk(value: object, pointer: str) -> None:
-        candidate_value_sha256 = sha(value)
+        candidate_value_sha256 = sha(canonical(value))
         material = {
             "artifactVersionId": artifact_version_id,
             "provider": provider,
@@ -205,9 +205,9 @@ def _validate_request_v2(request: dict, version: str) -> None:
 def _build_evidence_v2(request: dict, inspect: Callable[[Path], object]) -> dict:
     artifact = request["artifact"]
     inspection = inspect(Path(artifact["path"]))
-    inspection_sha256 = sha(inspection)
+    inspection_sha256 = sha(canonical(inspection))
     if isinstance(inspection, dict):
-        facets = [{"facetId": name, "sha256": sha(value)} for name, value in sorted(inspection.items())]
+        facets = [{"facetId": name, "sha256": sha(canonical(value))} for name, value in sorted(inspection.items())]
     else:
         facets = [{"facetId": "inspection", "sha256": inspection_sha256}]
     observation_schema = _contract_ref(
