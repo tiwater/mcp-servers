@@ -292,6 +292,18 @@ internal static class Cli
         Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
         Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
+        Console.WriteLine("  derive-operation --request <request.json> --output <result.json>");
+        Console.WriteLine("  validate-derived-operation --request <request.json> --result <result.json> --output <verdict.json>");
+        Console.WriteLine("  derive-template-operation --request <request.json> --output <result.json>");
+        Console.WriteLine("  validate-derived-template-operation --request <request.json> --result <result.json> --output <verdict.json>");
+        Console.WriteLine("  execute-effect --request <request.json> --effect-bundle <bundle.json> --effect-verdict <verdict.json> --output <evidence.json>");
+        Console.WriteLine("  validate-execution-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
+        Console.WriteLine("  execute-template-effect --request <request.json> --effect-bundle <bundle.json> --effect-verdict <verdict.json> --output <evidence.json>");
+        Console.WriteLine("  validate-template-execution-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
+        Console.WriteLine("  provider-contract-manifest --output <manifest.json>");
+        Console.WriteLine("  validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json>");
+        Console.WriteLine("  template-provider-contract-manifest --output <manifest.json>");
+        Console.WriteLine("  validate-template-provider-contract-manifest --manifest <manifest.json> --output <verdict.json>");
         Console.WriteLine("  inspect <input.pptx> --json --detail");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
