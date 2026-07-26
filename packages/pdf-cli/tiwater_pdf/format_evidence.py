@@ -97,6 +97,254 @@ def build_evidence(request: dict, inspect: Callable[[Path], object], version: st
     return evidence
 
 
+def _contract_path(file: str) -> Path:
+    packaged = Path(__file__).with_name("contracts") / file
+    if packaged.is_file():
+        return packaged
+    development = Path(__file__).resolve().parents[2] / "format-evidence" / "contracts" / file
+    if development.is_file():
+        return development
+    raise ValueError(f"provider contract missing: {file}")
+
+
+def _contract_ref(file: str, contract_id: str) -> dict:
+    return {"id": contract_id, "sha256": file_sha(_contract_path(file))}
+
+
+def _typed_value(file: str, contract_id: str, value: object) -> dict:
+    return {"schema": _contract_ref(file, contract_id), "value": value, "sha256": sha(value)}
+
+
+def _scalar_kind(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, bool):
+        return "boolean"
+    return "number"
+
+
+def _scalar_fields(value: object) -> list[dict]:
+    if isinstance(value, dict):
+        return [
+            {"name": name, "kind": _scalar_kind(item), "value": item, "sha256": sha(item)}
+            for name, item in sorted(value.items())
+            if not isinstance(item, (dict, list))
+        ]
+    if isinstance(value, list):
+        return [{"name": "length", "kind": "number", "value": len(value), "sha256": sha(len(value))}]
+    return [{"name": "value", "kind": _scalar_kind(value), "value": value, "sha256": sha(value)}]
+
+
+def _escape_pointer(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _inventory_candidates(
+    inspection: object,
+    artifact_version_id: str,
+    provider: dict,
+    inspection_sha256: str,
+) -> list[dict]:
+    candidates: list[dict] = []
+
+    def walk(value: object, pointer: str) -> None:
+        candidate_value_sha256 = sha(value)
+        material = {
+            "artifactVersionId": artifact_version_id,
+            "provider": provider,
+            "inspectionSha256": inspection_sha256,
+            "pointer": pointer,
+        }
+        candidates.append({
+            "candidateId": f"candidate-{sha(material)}",
+            "candidateKind": "object" if isinstance(value, dict) else "array" if isinstance(value, list) else "scalar",
+            "pointer": pointer,
+            "fields": _scalar_fields(value),
+            "candidateValueSha256": candidate_value_sha256,
+            "dispositionInput": "available",
+        })
+        if isinstance(value, dict):
+            for name, child in sorted(value.items()):
+                walk(child, f"{pointer}/{_escape_pointer(name)}")
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, f"{pointer}/{index}")
+
+    walk(inspection, "")
+    return sorted(candidates, key=lambda item: item["pointer"])
+
+
+def _validate_request_v2(request: dict, version: str) -> None:
+    required = {
+        "schema", "requestId", "runId", "subject", "artifact", "provider",
+        "validator", "runtime", "extraction", "expectedEvidenceContract",
+    }
+    if set(request) != required or request.get("schema") != "tiwater.format-evidence-request/v2":
+        raise ValueError("v2 request contract invalid")
+    provider = {"id": "tiwater-pdf", "version": version}
+    validator = {"id": "tiwater-pdf-validator", "version": version}
+    if request["provider"] != provider or request["validator"] != validator or request["runtime"] != provider:
+        raise ValueError("v2 provider identity mismatch")
+    expected_evidence = _contract_ref("tiwater.format-evidence-v2.schema.json", "tiwater.format-evidence/v2")
+    if request["expectedEvidenceContract"] != expected_evidence:
+        raise ValueError("v2 evidence contract mismatch")
+    extraction = request["extraction"]
+    expected_extraction = _contract_ref("tiwater.format-extraction-options-v1.schema.json", "tiwater.format-extraction-options/v1")
+    if extraction.get("schema") != expected_extraction or extraction.get("sha256") != sha(extraction.get("value")):
+        raise ValueError("v2 extraction authority mismatch")
+    if extraction.get("value") != {"facets": ["format-summary"]}:
+        raise ValueError("v2 extraction options invalid")
+    artifact = request["artifact"]
+    source = Path(artifact["path"])
+    if not source.is_absolute() or source.suffix.lower() != ".pdf" or file_sha(source) != artifact["bytesSha256"]:
+        raise ValueError("v2 artifact authority mismatch")
+
+
+def _build_evidence_v2(request: dict, inspect: Callable[[Path], object]) -> dict:
+    artifact = request["artifact"]
+    inspection = inspect(Path(artifact["path"]))
+    inspection_sha256 = sha(inspection)
+    if isinstance(inspection, dict):
+        facets = [{"facetId": name, "sha256": sha(value)} for name, value in sorted(inspection.items())]
+    else:
+        facets = [{"facetId": "inspection", "sha256": inspection_sha256}]
+    observation_schema = _contract_ref(
+        "tiwater.provider-document-observation-v2.schema.json",
+        "tiwater.provider-document-observation/v2",
+    )
+    epoch_material = {
+        "sourceBytesSha256": artifact["bytesSha256"],
+        "provider": request["provider"],
+        "runtime": request["runtime"],
+        "extractionSha256": request["extraction"]["sha256"],
+        "observationSchema": observation_schema,
+    }
+    epoch_id = f"epoch-{sha(epoch_material)}"
+    inventory_base = {
+        "artifactVersionId": artifact["artifactVersionId"],
+        "inspectionSha256": inspection_sha256,
+        "candidates": _inventory_candidates(
+            inspection,
+            artifact["artifactVersionId"],
+            request["provider"],
+            inspection_sha256,
+        ),
+    }
+    inventory_sha256 = sha(inventory_base)
+    target_base = {
+        "artifactVersionId": artifact["artifactVersionId"],
+        "epochId": epoch_id,
+        "inspectionSha256": inspection_sha256,
+        "candidates": [],
+    }
+    target_sha256 = sha(target_base)
+    observation_value = {
+        "format": "pdf",
+        "artifactVersionId": artifact["artifactVersionId"],
+        "epochId": epoch_id,
+        "inspectionSha256": inspection_sha256,
+        "facets": facets,
+        "inventoryUniverse": {
+            "universeId": f"inventory-{inventory_sha256}",
+            **inventory_base,
+            "universeSha256": inventory_sha256,
+        },
+        "targetUniverse": {
+            "universeId": f"targets-{target_sha256}",
+            **target_base,
+            "universeSha256": target_sha256,
+        },
+    }
+    provenance_value = {
+        "kind": "provider-inspection",
+        "artifactVersionId": artifact["artifactVersionId"],
+        "sourceBytesSha256": artifact["bytesSha256"],
+        "inspectionSha256": inspection_sha256,
+        "provider": request["provider"],
+        "runtime": request["runtime"],
+        "extractionSha256": request["extraction"]["sha256"],
+    }
+    evidence = {
+        "schema": "tiwater.format-evidence/v2",
+        "requestId": request["requestId"],
+        "subject": request["subject"],
+        "artifactVersionId": artifact["artifactVersionId"],
+        "source": {"bytesSha256": artifact["bytesSha256"], "mediaType": artifact["mediaType"]},
+        "format": "pdf",
+        "provider": request["provider"],
+        "runtime": request["runtime"],
+        "extractionSha256": request["extraction"]["sha256"],
+        "observation": {
+            "schema": observation_schema,
+            "value": observation_value,
+            "sha256": sha(observation_value),
+        },
+        "provenance": [
+            _typed_value(
+                "tiwater.format-provenance-v1.schema.json",
+                "tiwater.format-provenance/v1",
+                provenance_value,
+            )
+        ],
+    }
+    evidence["evidenceId"] = f"evidence-{sha(evidence)}"
+    return evidence
+
+
+def run_v2(
+    request_path: Path,
+    output: Path,
+    inspect: Callable[[Path], object],
+    version: str,
+    evidence_path: Path | None = None,
+) -> int:
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    validator = evidence_path is not None
+    try:
+        _validate_request_v2(request, version)
+        expected = _build_evidence_v2(request, inspect)
+        if not validator:
+            result = expected
+        else:
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            passed = canonical(evidence) == canonical(expected)
+            result = {
+                "schema": "tiwater.format-evidence-verdict/v2",
+                "requestId": request["requestId"],
+                "subject": request["subject"],
+                "artifactVersionId": request["artifact"]["artifactVersionId"],
+                "evidence": {"evidenceId": evidence.get("evidenceId", "missing"), "sha256": sha(evidence)},
+                "validator": request["validator"],
+                "recomputedSourceBytesSha256": request["artifact"]["bytesSha256"],
+                "recomputedObservationSha256": expected["observation"]["sha256"],
+                "recomputedProvenanceSha256": sha(expected["provenance"]),
+                "decision": "pass" if passed else "failed",
+                "findings": [] if passed else [{"code": "format-evidence-recomputation-mismatch", "severity": "error"}],
+            }
+    except Exception as error:
+        print(str(error), file=os.sys.stderr)
+        artifact = request.get("artifact", {})
+        result = {
+            "schema": "tiwater.format-evidence-error/v1",
+            "requestId": request.get("requestId", "unknown"),
+            "subject": request.get("subject", {"kind": "input", "inputId": "unknown"}),
+            "artifactVersionId": artifact.get("artifactVersionId", "unknown"),
+            "code": "format-evidence-v2-invalid",
+            "category": "evidence",
+            "retryable": False,
+            "provider": {
+                "tool": "tiwater-pdf",
+                "toolVersion": version,
+                "capabilityId": "validate-inspect-evidence-v2" if validator else "inspect-evidence-v2",
+            },
+            "refs": [],
+        }
+    atomic_write(output, result)
+    return 0
+
+
 def run(request_path: Path, output: Path, inspect: Callable[[Path], object], version: str, evidence_path: Path | None = None) -> int:
     request = json.loads(request_path.read_text(encoding="utf-8"))
     validator = evidence_path is not None
