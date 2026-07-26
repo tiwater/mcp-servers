@@ -144,9 +144,9 @@ public static class Inspector
     }
 
     private static List<ShapeDetail> ExtractShapes(SlidePart slidePart)
-        => ExtractShapes(slidePart, slidePart.Slide?.CommonSlideData?.ShapeTree);
+        => ExtractShapes(slidePart, slidePart.Slide?.CommonSlideData?.ShapeTree, slidePart);
 
-    private static List<ShapeDetail> ExtractShapes(OpenXmlPart ownerPart, ShapeTree? shapeTree)
+    private static List<ShapeDetail> ExtractShapes(OpenXmlPart ownerPart, ShapeTree? shapeTree, SlidePart? slideContext = null)
     {
         var shapes = new List<ShapeDetail>();
         var zOrder = 0;
@@ -161,7 +161,9 @@ public static class Inspector
                 shapes.Add(new ShapeDetail(shapeId,
                     shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "shape", zOrder++,
                     GetAttributeValue(app?.PlaceholderShape, "type"), null, null,
-                    string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody), ExtractRuns(shape.TextBody)));
+                    string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody),
+                    ExtractRuns(shape.TextBody, MasterTextStyle(slideContext, app?.PlaceholderShape), slideContext?.SlideLayoutPart?.SlideMasterPart?.ThemePart,
+                        slideContext?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.ColorMap)));
             }
             else if (child is Picture picture)
             {
@@ -271,7 +273,7 @@ public static class Inspector
             .ToList();
     }
 
-    private static List<TextRunDetail> ExtractRuns(OpenXmlElement? textBody)
+    private static List<TextRunDetail> ExtractRuns(OpenXmlElement? textBody, OpenXmlElement? masterTextStyle = null, ThemePart? themePart = null, OpenXmlElement? colorMap = null)
     {
         if (textBody is null)
         {
@@ -281,25 +283,56 @@ public static class Inspector
         var runs = new List<TextRunDetail>();
         var runIndex = 0;
         var paragraphIndex = 0;
-        var textBodyDefaultRunProperties = textBody.GetFirstChild<A.ListStyle>()?
-            .Descendants<A.DefaultRunProperties>()
-            .FirstOrDefault();
         foreach (var paragraph in textBody.Elements<A.Paragraph>())
         {
             var paragraphDefaultRunProperties = paragraph.ParagraphProperties?
-                .GetFirstChild<A.DefaultRunProperties>()
-                ?? textBodyDefaultRunProperties;
+                .GetFirstChild<A.DefaultRunProperties>();
+            var paragraphLevel = int.TryParse(GetAttributeValue(paragraph.ParagraphProperties, "lvl"), out var level) ? level : 0;
+            var listStyle = textBody.GetFirstChild<A.ListStyle>();
+            var levelDefaultRunProperties = listStyle?.ChildElements
+                .FirstOrDefault(value => string.Equals(value.LocalName, $"lvl{paragraphLevel + 1}pPr", StringComparison.Ordinal))
+                ?.GetFirstChild<A.DefaultRunProperties>();
+            var bodyDefaultRunProperties = listStyle?.ChildElements
+                .FirstOrDefault(value => string.Equals(value.LocalName, "defPPr", StringComparison.Ordinal))
+                ?.GetFirstChild<A.DefaultRunProperties>();
+            var masterLevelDefaultRunProperties = masterTextStyle?.ChildElements
+                .FirstOrDefault(value => string.Equals(value.LocalName, $"lvl{paragraphLevel + 1}pPr", StringComparison.Ordinal))
+                ?.GetFirstChild<A.DefaultRunProperties>();
+            var masterDefaultRunProperties = masterTextStyle?.ChildElements
+                .FirstOrDefault(value => string.Equals(value.LocalName, "defPPr", StringComparison.Ordinal))
+                ?.GetFirstChild<A.DefaultRunProperties>();
             foreach (var run in paragraph.Elements<A.Run>())
             {
                 var properties = run.RunProperties;
+                var candidates = new[]
+                {
+                    new FormatCandidate(properties, "direct-run"),
+                    new FormatCandidate(paragraphDefaultRunProperties, "paragraph-default"),
+                    new FormatCandidate(levelDefaultRunProperties, $"shape-list-level-{paragraphLevel + 1}"),
+                    new FormatCandidate(bodyDefaultRunProperties, "shape-list-default"),
+                    new FormatCandidate(masterLevelDefaultRunProperties, $"master-text-style-level-{paragraphLevel + 1}"),
+                    new FormatCandidate(masterDefaultRunProperties, "master-text-style-default")
+                };
+                var fontFamily = Resolve(candidates, properties => ExtractFontFamily(properties, themePart));
+                var fontSize = Resolve(candidates, ExtractFontSize);
+                var color = Resolve(candidates, properties => ExtractColor(properties, themePart, colorMap));
+                var bold = Resolve(candidates, ExtractBold);
                 runs.Add(new TextRunDetail(
                     RunIndex: runIndex,
                     ParagraphIndex: paragraphIndex,
                     Text: run.Text?.Text ?? string.Empty,
-                    FontFamily: ExtractFontFamily(properties, paragraphDefaultRunProperties),
-                    FontSize: ExtractFontSize(properties, paragraphDefaultRunProperties),
-                    Color: ExtractColor(properties, paragraphDefaultRunProperties),
-                    Bold: ExtractBold(properties, paragraphDefaultRunProperties)));
+                    FontFamily: fontFamily.Value,
+                    FontSize: fontSize.Value,
+                    Color: color.Value,
+                    Bold: bold.Value,
+                    DirectFontFamily: ExtractFontFamily(properties, themePart),
+                    DirectFontSize: ExtractFontSize(properties),
+                    DirectColor: ExtractDirectColor(properties),
+                    DirectBold: ExtractBold(properties),
+                    FontFamilySource: fontFamily.Source,
+                    FontSizeSource: fontSize.Source,
+                    ColorSource: color.Source,
+                    BoldSource: bold.Source));
                 runIndex++;
             }
 
@@ -307,6 +340,29 @@ public static class Inspector
         }
 
         return runs;
+    }
+
+    private static OpenXmlElement? MasterTextStyle(SlidePart? slidePart, PlaceholderShape? placeholder)
+    {
+        var styles = slidePart?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.TextStyles;
+        if (styles is null) return null;
+        var type = GetAttributeValue(placeholder, "type");
+        if (type is "title" or "ctrTitle") return styles.TitleStyle;
+        if (type is "body" or "subTitle") return styles.BodyStyle;
+        return styles.OtherStyle;
+    }
+
+    private sealed record FormatCandidate(OpenXmlElement? Properties, string Source);
+    private sealed record ResolvedFormat<T>(T? Value, string? Source);
+
+    private static ResolvedFormat<T> Resolve<T>(IEnumerable<FormatCandidate> candidates, Func<OpenXmlElement?, T?> extract)
+    {
+        foreach (var candidate in candidates)
+        {
+            var value = extract(candidate.Properties);
+            if (value is not null) return new ResolvedFormat<T>(value, candidate.Source);
+        }
+        return new ResolvedFormat<T>(default, null);
     }
 
     private static List<ParagraphDetail> ExtractDescendantParagraphs(OpenXmlElement owner)
@@ -358,66 +414,75 @@ public static class Inspector
     private static long? ParseLongAttribute(OpenXmlElement? element, string localName)
         => long.TryParse(GetAttributeValue(element, localName), out var value) ? value : null;
 
-    private static string? ExtractFontFamily(params OpenXmlElement?[] propertyCandidates)
+    private static string? ExtractFontFamily(OpenXmlElement? properties, ThemePart? themePart = null)
     {
-        foreach (var properties in propertyCandidates)
-        {
-            var value = properties?.GetFirstChild<A.EastAsianFont>()?.Typeface?.Value
-                ?? properties?.GetFirstChild<A.LatinFont>()?.Typeface?.Value
-                ?? properties?.GetFirstChild<A.ComplexScriptFont>()?.Typeface?.Value;
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-
-        return null;
+        var value = properties?.GetFirstChild<A.EastAsianFont>()?.Typeface?.Value
+            ?? properties?.GetFirstChild<A.LatinFont>()?.Typeface?.Value
+            ?? properties?.GetFirstChild<A.ComplexScriptFont>()?.Typeface?.Value;
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (!value.StartsWith("+m", StringComparison.Ordinal)) return value;
+        var family = value.StartsWith("+mj-", StringComparison.Ordinal) ? "majorFont" : "minorFont";
+        var script = value.EndsWith("-ea", StringComparison.Ordinal) ? "ea"
+            : value.EndsWith("-cs", StringComparison.Ordinal) ? "cs" : "latin";
+        var fontScheme = themePart?.Theme?.ThemeElements?.FontScheme;
+        var familyElement = fontScheme?.ChildElements.FirstOrDefault(element => element.LocalName == family);
+        var resolved = familyElement?.ChildElements.FirstOrDefault(element => element.LocalName == script)
+            ?.GetAttribute("typeface", string.Empty).Value;
+        if (string.IsNullOrWhiteSpace(resolved) && script != "latin")
+            resolved = familyElement?.ChildElements.FirstOrDefault(element => element.LocalName == "latin")
+                ?.GetAttribute("typeface", string.Empty).Value;
+        return string.IsNullOrWhiteSpace(resolved) ? null : resolved;
     }
 
-    private static double? ExtractFontSize(params OpenXmlElement?[] propertyCandidates)
+    private static double? ExtractFontSize(OpenXmlElement? properties)
     {
-        foreach (var properties in propertyCandidates)
-        {
-            var value = GetAttributeValue(properties, "sz");
-            if (int.TryParse(value, out var fontSize))
-            {
-                return fontSize / 100d;
-            }
-        }
-
-        return null;
+        var value = GetAttributeValue(properties, "sz");
+        return int.TryParse(value, out var fontSize) ? fontSize / 100d : null;
     }
 
-    private static string? ExtractColor(params OpenXmlElement?[] propertyCandidates)
+    private static string? ExtractColor(OpenXmlElement? properties, ThemePart? themePart = null, OpenXmlElement? colorMap = null)
     {
-        foreach (var properties in propertyCandidates)
-        {
-            var value = properties?.GetFirstChild<A.SolidFill>()?.GetFirstChild<A.RgbColorModelHex>()?.Val?.Value;
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value.ToUpperInvariant();
-            }
-        }
-
-        return null;
+        var fill = properties?.GetFirstChild<A.SolidFill>();
+        var rgb = fill?.GetFirstChild<A.RgbColorModelHex>()?.Val?.Value;
+        if (!string.IsNullOrWhiteSpace(rgb)) return rgb.ToUpperInvariant();
+        var system = fill?.GetFirstChild<A.SystemColor>();
+        if (!string.IsNullOrWhiteSpace(system?.LastColor?.Value)) return system.LastColor.Value.ToUpperInvariant();
+        var scheme = fill?.GetFirstChild<A.SchemeColor>();
+        var schemeName = GetAttributeValue(scheme, "val");
+        if (string.IsNullOrWhiteSpace(schemeName)) return null;
+        if (scheme!.ChildElements.Count > 0) return null;
+        var mappedName = GetAttributeValue(colorMap, schemeName) ?? schemeName;
+        var themeColor = themePart?.Theme?.ThemeElements?.ColorScheme?.ChildElements
+            .FirstOrDefault(element => string.Equals(element.LocalName, mappedName, StringComparison.Ordinal));
+        var themeRgb = themeColor?.Descendants<A.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+        if (!string.IsNullOrWhiteSpace(themeRgb)) return themeRgb.ToUpperInvariant();
+        var themeSystem = themeColor?.Descendants<A.SystemColor>().FirstOrDefault()?.LastColor?.Value;
+        return string.IsNullOrWhiteSpace(themeSystem) ? null : themeSystem.ToUpperInvariant();
     }
 
-    private static bool? ExtractBold(params OpenXmlElement?[] propertyCandidates)
+    private static string? ExtractDirectColor(OpenXmlElement? properties)
     {
-        foreach (var properties in propertyCandidates)
+        var fill = properties?.GetFirstChild<A.SolidFill>();
+        var rgb = fill?.GetFirstChild<A.RgbColorModelHex>()?.Val?.Value;
+        if (!string.IsNullOrWhiteSpace(rgb)) return rgb.ToUpperInvariant();
+        var system = fill?.GetFirstChild<A.SystemColor>();
+        if (!string.IsNullOrWhiteSpace(system?.LastColor?.Value)) return $"system:{GetAttributeValue(system, "val")}";
+        var scheme = fill?.GetFirstChild<A.SchemeColor>();
+        var schemeName = GetAttributeValue(scheme, "val");
+        return string.IsNullOrWhiteSpace(schemeName) ? null : $"scheme:{schemeName}";
+    }
+
+    private static bool? ExtractBold(OpenXmlElement? properties)
+    {
+        var value = GetAttributeValue(properties, "b");
+        if (string.Equals(value, "1", StringComparison.Ordinal) || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase))
         {
-            var value = GetAttributeValue(properties, "b");
-            if (string.Equals(value, "1", StringComparison.Ordinal) || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (string.Equals(value, "0", StringComparison.Ordinal) || string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
+            return true;
         }
-
+        if (string.Equals(value, "0", StringComparison.Ordinal) || string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
         return null;
     }
 

@@ -126,7 +126,15 @@ public sealed record TextRunDetail(
     string? FontFamily,
     double? FontSize,
     string? Color,
-    bool? Bold
+    bool? Bold,
+    string? DirectFontFamily = null,
+    double? DirectFontSize = null,
+    string? DirectColor = null,
+    bool? DirectBold = null,
+    string? FontFamilySource = null,
+    string? FontSizeSource = null,
+    string? ColorSource = null,
+    string? BoldSource = null
 );
 
 public sealed record FormatEditPlan(IReadOnlyList<FormatEditOperation> Operations);
