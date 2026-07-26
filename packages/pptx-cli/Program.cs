@@ -1,6 +1,10 @@
 using System.Text.Json;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using Dockit.Pptx;
 using Tiwater.FormatEvidence;
+
+[assembly: InternalsVisibleTo("pptx-cli.tests")]
 
 namespace Dockit.Pptx.Cli;
 
@@ -11,7 +15,11 @@ internal static class Program
 
 internal static class Cli
 {
-    private const string ToolVersion = "0.2.11";
+    private static readonly string ToolVersion =
+        typeof(Cli).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion.Split('+', 2)[0]
+        ?? throw new InvalidOperationException("pptx-tool-version-missing");
 
     public static Task<int> RunAsync(string[] args)
     {

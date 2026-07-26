@@ -1,3 +1,5 @@
 """tiwater-pdf - PDF inspection and table extraction CLI."""
 
-__version__ = "0.7.0"
+from importlib.metadata import version
+
+__version__ = version("tiwater-pdf")

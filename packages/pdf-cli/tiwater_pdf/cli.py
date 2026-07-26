@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import fitz
+from . import __version__
 from .format_evidence import run as run_format_evidence
 
 DEFAULT_OCR_MODEL = "qwen3.7-plus"
@@ -1880,10 +1881,10 @@ def main() -> int:
 
     try:
         if args.command == "inspect-evidence":
-            return run_format_evidence(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, "0.21.1")
+            return run_format_evidence(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, __version__)
 
         elif args.command == "validate-inspect-evidence":
-            return run_format_evidence(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, "0.21.1", args.evidence)
+            return run_format_evidence(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, __version__, args.evidence)
 
         elif args.command == "inspect":
             result = inspect(args.input)
