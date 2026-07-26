@@ -72,16 +72,22 @@ internal static class Cli
                 throw new InvalidOperationException("XLSX derived operation invalid");
         });
 
-    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
+    internal static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
     {
-        var kinds = new List<string>();
-        if (fields.Contains("sheet") && fields.Contains("cell")) kinds.AddRange(["setCellValue", "setRichTextCellValue"]);
-        if (fields.Contains("sheet") && fields.Contains("range")) kinds.Add("setPrintArea");
-        if (fields.Contains("sheet") && fields.Contains("startCell")) kinds.Add("setRangeValues");
-        if (fields.Contains("sheet") && fields.Contains("startRow")) kinds.Add("insertRows");
-        if (fields.Contains("sheet") && fields.Contains("sourceRow") && fields.Contains("targetRow")) kinds.Add("copyRow");
-        if (fields.Contains("sheet") && fields.Contains("anchorText")) kinds.Add("expandSectionRows");
-        return kinds.Count == 0 ? [] : [new("xlsx.edit", "1", kinds)];
+        if (!fields.Contains("sheet")) return [];
+        return
+        [
+            new("xlsx.edit", "1",
+            [
+                "setCellValue",
+                "setRichTextCellValue",
+                "setPrintArea",
+                "setRangeValues",
+                "insertRows",
+                "copyRow",
+                "expandSectionRows"
+            ])
+        ];
     }
 
     private static EffectExecutionCommand.Contract ExecutionContract() => new(
