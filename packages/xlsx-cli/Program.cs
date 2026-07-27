@@ -122,13 +122,13 @@ internal static class Cli
             receipt.ToJsonString(),
             Json.Options)!.AppliedOperations.All(item => item.Applied));
 
-    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
+    internal static ProviderContractManifestCommand.Contract ManifestContract() => new(
         "tiwater-xlsx", XlsxToolVersion.Current, "xlsx.edit", "1",
         "tiwater.xlsx-edit-v1.schema.json", "tiwater.xlsx-edit/v1",
         "tiwater.xlsx-edit-result-v1.schema.json", "tiwater.xlsx-edit-result/v1",
         "derive-operation", "validate-derived-operation",
         "execute-effect", "validate-execution-evidence",
-        "tiwater-xlsx-edit", XlsxToolVersion.Current);
+        "tiwater-xlsx-edit", XlsxToolVersion.Current, "xlsx");
 
     private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };
 
@@ -231,8 +231,8 @@ internal static class Cli
         Console.WriteLine("  validate-derived-operation --request <request.json> --result <result.json> --output <verdict.json>");
         Console.WriteLine("  execute-effect --request <request.json> --effect-bundle <bundle.json> --effect-verdict <verdict.json> --output <evidence.json>");
         Console.WriteLine("  validate-execution-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
-        Console.WriteLine("  provider-contract-manifest --output <manifest.json>");
-        Console.WriteLine("  validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json>");
+        Console.WriteLine("  provider-contract-manifest --output <manifest.json> [--format lucid.provider-contract-manifest --schema-set-version <n>]");
+        Console.WriteLine("  validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json> [--schema-set-version <n>]");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  evidence <input.xlsx>");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");

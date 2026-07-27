@@ -130,13 +130,13 @@ internal static class Cli
             receipt.ToJsonString(),
             Json.Options)!.AppliedOperations.All(item => item.Applied));
 
-    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
+    internal static ProviderContractManifestCommand.Contract ManifestContract() => new(
         "tiwater-docx", RuntimeIdentity.Version, "docx.edit", "1",
         "tiwater.docx-edit-v1.schema.json", "tiwater.docx-edit/v1",
         "tiwater.docx-edit-result-v1.schema.json", "tiwater.docx-edit-result/v1",
         "derive-operation", "validate-derived-operation",
         "execute-effect", "validate-execution-evidence",
-        "tiwater-docx-edit", RuntimeIdentity.Version);
+        "tiwater-docx-edit", RuntimeIdentity.Version, "docx");
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>
     [
@@ -233,8 +233,8 @@ internal static class Cli
         Console.WriteLine("  validate-derived-operation --request <request.json> --result <result.json> --output <verdict.json>");
         Console.WriteLine("  execute-effect --request <request.json> --effect-bundle <bundle.json> --effect-verdict <verdict.json> --output <evidence.json>");
         Console.WriteLine("  validate-execution-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
-        Console.WriteLine("  provider-contract-manifest --output <manifest.json>");
-        Console.WriteLine("  validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json>");
+        Console.WriteLine("  provider-contract-manifest --output <manifest.json> [--format lucid.provider-contract-manifest --schema-set-version <n>]");
+        Console.WriteLine("  validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json> [--schema-set-version <n>]");
         Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
