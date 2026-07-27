@@ -1,4 +1,5 @@
 using Dockit.Xlsx;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System.Diagnostics;
@@ -68,6 +69,19 @@ public class ValidationTests
     }
 
     [Fact]
+    public void Validate_accepts_known_excel_form_control_extension_attributes_as_warnings()
+    {
+        var path = CreateWorkbookWithExcelFormControlExtensions();
+
+        var result = Validator.Validate(path);
+
+        Assert.True(result.Valid, string.Join(Environment.NewLine, result.Errors));
+        Assert.Empty(result.Errors);
+        Assert.Contains(result.Warnings, warning => warning.Contains("autoLine", StringComparison.Ordinal));
+        Assert.Contains(result.Warnings, warning => warning.Contains("print", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Cli_validate_exits_one_and_emits_json_for_invalid_non_xlsx_file()
     {
         var path = Path.Combine(Path.GetTempPath(), $"xlsx-cli-invalid-text-{Guid.NewGuid():N}.xlsx");
@@ -117,6 +131,36 @@ public class ValidationTests
 
         var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
         sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "RP" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateWorkbookWithExcelFormControlExtensions()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-form-control-extensions-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        worksheetPart.Worksheet = new Worksheet(new SheetData());
+        var controlPropertiesPart = worksheetPart.AddNewPart<ControlPropertiesPart>();
+        using (var writer = new StreamWriter(controlPropertiesPart.GetStream(FileMode.Create, FileAccess.Write)))
+        {
+            writer.Write(
+                """
+                <formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+                  objectType="CheckBox" autoLine="false" print="true" lockText="1" noThreeD="1"/>
+                """);
+        }
+
+        var sheets = workbookPart.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet
+        {
+            Id = workbookPart.GetIdOfPart(worksheetPart),
+            SheetId = 1,
+            Name = "Sheet1",
+        });
         workbookPart.Workbook.Save();
         worksheetPart.Worksheet.Save();
         return path;

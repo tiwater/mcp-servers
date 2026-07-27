@@ -259,6 +259,42 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_resolves_an_explicit_source_exclusion_without_a_fake_target()
+    {
+        var source = CreateTextMigrationFixture("obsolete source section");
+        var baseline = CreateTextMigrationFixture("current target section");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "obsolete source section"),
+                    null,
+                    "out-of-scope")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var mapping = Assert.Single(resolved.Plan.Mappings);
+        Assert.Equal("out-of-scope", mapping.Disposition);
+        Assert.Null(mapping.BaselineObjectId);
+        Assert.Equal("semantic-candidate-out-of-scope", mapping.Reason);
+
+        var missingTarget = candidate with
+        {
+            Mappings =
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "obsolete source section"),
+                    null,
+                    "copy-text")
+            ]
+        };
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, missingTarget));
+        Assert.Equal("template-migration-semantic-candidate-baseline-missing", error.Message);
+    }
+
+    [Fact]
     public void TemplateMigration_pairs_only_equal_paragraph_gaps_between_unique_text_anchors()
     {
         var source = CreateTextMigrationFixture("anchor start", "legacy heading", "anchor end");
