@@ -21,9 +21,9 @@ public static class Inspector
             try
             {
                 var conversion = convertLegacyWorkbook(path, converted);
-                if (!string.Equals(conversion.Backend, "wps-spreadsheet", StringComparison.Ordinal)
+                if (!string.Equals(conversion.Backend, "et", StringComparison.Ordinal)
                     || !string.IsNullOrWhiteSpace(conversion.FallbackReason))
-                    throw new InvalidOperationException("Published XLS inspection requires authoritative WPS Spreadsheet conversion without fallback.");
+                    throw new InvalidOperationException("Published XLS inspection requires authoritative ET conversion without fallback.");
                 var convertedWorkbook = Inspect(converted) with { File = Path.GetFullPath(path) };
                 var convertedExport = Extractor.Export(converted);
                 var convertedEvidence = System.Text.Json.JsonSerializer.SerializeToNode(EvidenceInspector.Inspect(converted), Json.Options)!.AsObject();

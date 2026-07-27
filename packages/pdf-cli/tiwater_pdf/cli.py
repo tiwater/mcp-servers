@@ -1871,7 +1871,15 @@ def main() -> int:
 
     try:
         if args.command == "inspect":
-            result = inspect(args.input)
+            summary = inspect(args.input)
+            result = (
+                {
+                    "document": summary,
+                    "tables": extract_table_details(args.input),
+                }
+                if args.json
+                else summary
+            )
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))
             else:

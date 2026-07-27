@@ -21,18 +21,13 @@ Outputs a unified structural report of a Word document, including paragraph styl
 tiwater-docx inspect <input.docx> [--json]
 ```
 
+`--json` includes the document report, table details, document flow, and font inspection in one result.
+
 ### 1a. Inspect Table Details
 Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. Tables are traversed depth-first from the body through arbitrarily nested table cells; every table carries a containment path, declared `Width`/`WidthType`, and nested tables carry their parent-cell runtime address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, and cells expose mutation address, grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
 
 ```bash
 tiwater-docx inspect-tables <input.docx> [--json]
-```
-
-Published runtimes also expose the closed Lucid evidence ports. Both commands re-use the DOCX inspectors above; the validator re-reads the source bytes and recomputes the evidence independently.
-
-```bash
-tiwater-docx inspect-evidence --request request.json --output evidence.json
-tiwater-docx validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
 ```
 
 ### 2. Compare Two Documents
@@ -284,4 +279,4 @@ Example operations file:
 }
 ```
 
-Scenario-specific planning and resolution workflows now live in Lucid skills and scripts. This CLI remains the generic document runtime for inspection, export, fill, comparison, and explicit edit application.
+The CLI is a generic document runtime for inspection, export, fill, comparison, and explicit edit application.

@@ -6,9 +6,9 @@ using System.Text.Json;
 
 namespace Dockit.Convert;
 
-public sealed class AuthoritativeSpreadsheetRuntimeException : Exception
+public sealed class RequiredEtRuntimeException : Exception
 {
-    public AuthoritativeSpreadsheetRuntimeException(string message, Exception? innerException = null)
+    public RequiredEtRuntimeException(string message, Exception? innerException = null)
         : base(message, innerException) { }
 }
 
@@ -20,7 +20,7 @@ public static class WorkbookConverter
     private sealed record InspectionCacheManifest(string Schema, string InputSha256, string OutputSha256, string Backend);
 
     public static ConversionResult ConvertXlsToXlsx(string input, string output)
-        => ConvertXlsToXlsx(input, output, requireWpsForAuthority: false);
+        => ConvertXlsToXlsx(input, output, requireEtBackend: false);
 
     public static ConversionResult ConvertXlsToXlsxForInspection(string input, string output)
     {
@@ -29,7 +29,7 @@ public static class WorkbookConverter
         if (!File.Exists(input)) throw new InvalidOperationException($"Input file not found: {input}");
 
         var inputSha256 = FileSha256(input);
-        var cacheDirectory = Path.Combine(InspectionCacheRoot(), "xls-to-xlsx", "wps-spreadsheet", "v1", inputSha256);
+        var cacheDirectory = Path.Combine(InspectionCacheRoot(), "xls-to-xlsx", "et", "v1", inputSha256);
         var cachedWorkbook = Path.Combine(cacheDirectory, "normalized.xlsx");
         var manifestPath = Path.Combine(cacheDirectory, "manifest.json");
         Directory.CreateDirectory(cacheDirectory);
@@ -43,10 +43,10 @@ public static class WorkbookConverter
                 var candidate = Path.Combine(cacheDirectory, $"normalized-{Guid.NewGuid():N}.xlsx");
                 try
                 {
-                    var conversion = ConvertXlsToXlsx(input, candidate, requireWpsForAuthority: true);
-                    if (!string.Equals(conversion.Backend, "wps-spreadsheet", StringComparison.Ordinal)
+                    var conversion = ConvertXlsToXlsx(input, candidate, requireEtBackend: true);
+                    if (!string.Equals(conversion.Backend, "et", StringComparison.Ordinal)
                         || !string.IsNullOrWhiteSpace(conversion.FallbackReason))
-                        throw new InvalidOperationException("Authoritative XLS inspection cache requires WPS Spreadsheet conversion without fallback.");
+                        throw new InvalidOperationException("Authoritative XLS inspection cache requires ET conversion without fallback.");
                     ValidateXlsxPackage(candidate);
                     var outputSha256 = FileSha256(candidate);
                     File.Move(candidate, cachedWorkbook, overwrite: true);
@@ -69,7 +69,7 @@ public static class WorkbookConverter
         if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
         File.Copy(cachedWorkbook, output, overwrite: true);
         ValidateXlsxPackage(output);
-        return new ConversionResult("wps-spreadsheet");
+        return new ConversionResult("et");
     }
 
     private static bool ValidInspectionCache(string workbookPath, string manifestPath, string inputSha256)
@@ -81,7 +81,7 @@ public static class WorkbookConverter
             if (manifest is null
                 || !string.Equals(manifest.Schema, InspectionCacheSchema, StringComparison.Ordinal)
                 || !string.Equals(manifest.InputSha256, inputSha256, StringComparison.Ordinal)
-                || !string.Equals(manifest.Backend, "wps-spreadsheet", StringComparison.Ordinal)
+                || !string.Equals(manifest.Backend, "et", StringComparison.Ordinal)
                 || !string.Equals(manifest.OutputSha256, FileSha256(workbookPath), StringComparison.Ordinal))
                 return false;
             ValidateXlsxPackage(workbookPath);
@@ -129,7 +129,7 @@ public static class WorkbookConverter
         }
     }
 
-    private static ConversionResult ConvertXlsToXlsx(string input, string output, bool requireWpsForAuthority)
+    private static ConversionResult ConvertXlsToXlsx(string input, string output, bool requireEtBackend)
     {
         if (!File.Exists(input))
         {
@@ -137,24 +137,24 @@ public static class WorkbookConverter
         }
 
         var requiredBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_XLSX_BACKEND")?.Trim();
-        var requireWps = requireWpsForAuthority || string.Equals(requiredBackend, "wps-spreadsheet", StringComparison.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(requiredBackend) && !requireWps)
+        var requireEt = requireEtBackend || string.Equals(requiredBackend, "et", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(requiredBackend) && !requireEt)
         {
             throw new InvalidOperationException($"Unsupported required XLSX backend: {requiredBackend}");
         }
 
-        if (WpsSpreadsheetConverter.IsAvailable())
+        if (EtWorkbookConverter.IsAvailable())
         {
             try
             {
-                WpsSpreadsheetConverter.ConvertXlsToXlsx(input, output);
-                return new ConversionResult("wps-spreadsheet");
+                EtWorkbookConverter.ConvertXlsToXlsx(input, output);
+                return new ConversionResult("et");
             }
             catch (Exception ex)
             {
-                if (requireWps)
+                if (requireEt)
                 {
-                    throw new AuthoritativeSpreadsheetRuntimeException($"Required WPS Spreadsheet XLS conversion failed: {ex.Message}", ex);
+                    throw new RequiredEtRuntimeException($"Required ET XLS conversion failed: {ex.Message}", ex);
                 }
                 var fallbackReason = $"WPS RPC conversion failed: {ex.Message}";
                 var fallback = ConvertXlsToXlsxWithoutWps(input, output);
@@ -167,18 +167,18 @@ public static class WorkbookConverter
             }
         }
 
-        if (LimaWpsWriterPdfConverter.IsAvailable())
+        if (LimaWpsPdfConverter.IsAvailable())
         {
             try
             {
-                LimaWpsWriterPdfConverter.ConvertSpreadsheetToXlsx(input, output);
-                return new ConversionResult("wps-spreadsheet");
+                LimaWpsPdfConverter.ConvertSpreadsheetToXlsx(input, output);
+                return new ConversionResult("et");
             }
             catch (Exception ex)
             {
-                if (requireWps)
+                if (requireEt)
                 {
-                    throw new AuthoritativeSpreadsheetRuntimeException($"Required Lima WPS Spreadsheet XLS conversion failed: {ex.Message}", ex);
+                    throw new RequiredEtRuntimeException($"Required Lima ET XLS conversion failed: {ex.Message}", ex);
                 }
                 var fallbackReason = $"Lima WPS RPC conversion failed: {ex.Message}";
                 var fallback = ConvertXlsToXlsxWithoutWps(input, output);
@@ -191,10 +191,10 @@ public static class WorkbookConverter
             }
         }
 
-        if (requireWps)
+        if (requireEt)
         {
-            throw new AuthoritativeSpreadsheetRuntimeException(
-                "WPS Spreadsheet XLS conversion was required but neither local WPS RPC nor a configured Lima WPS runtime is available.");
+            throw new RequiredEtRuntimeException(
+                "ET XLS conversion was required but neither local WPS RPC nor a configured Lima WPS runtime is available.");
         }
 
         return ConvertXlsToXlsxWithoutWps(input, output);

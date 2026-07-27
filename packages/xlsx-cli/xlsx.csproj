@@ -26,13 +26,11 @@
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.2.0" />
     <PackageReference Include="NPOI" Version="2.7.2" />
     <ProjectReference Include="../convert-cli/convert.csproj" />
-    <Compile Include="../format-evidence/FormatEvidenceCommand.cs" Link="FormatEvidenceCommand.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="contracts/*.schema.json" Pack="true" PackagePath="contracts/" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="../format-evidence/contracts/*.schema.json" Link="contracts/%(Filename)%(Extension)" Pack="true" PackagePath="contracts/" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

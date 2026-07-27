@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace Dockit.Convert;
 
-public static class WpsWriterPdfConverter
+public static class WpsPdfConverter
 {
     public static bool IsAvailable()
         => !string.IsNullOrWhiteSpace(FindWpsRpcPython())
@@ -18,23 +18,23 @@ public static class WpsWriterPdfConverter
         }
 
         var python = FindWpsRpcPython()
-            ?? throw new InvalidOperationException("WPS RPC python is required for WPS Writer PDF conversion. Set TIWATER_WPSRPC_PYTHON.");
+            ?? throw new InvalidOperationException("WPS RPC python is required for WPS PDF conversion. Set TIWATER_WPSRPC_PYTHON.");
         var xvfb = FindOnPath("xvfb-run")
-            ?? throw new InvalidOperationException("xvfb-run is required for WPS Writer PDF conversion.");
+            ?? throw new InvalidOperationException("xvfb-run is required for WPS PDF conversion.");
         var dbusRunSession = FindOnPath("dbus-run-session")
-            ?? throw new InvalidOperationException("dbus-run-session is required for WPS Writer PDF conversion.");
+            ?? throw new InvalidOperationException("dbus-run-session is required for WPS PDF conversion.");
         if (string.IsNullOrWhiteSpace(FindOnPath("wps")))
         {
-            throw new InvalidOperationException("WPS Writer command not found: wps");
+            throw new InvalidOperationException("WPS command not found: wps");
         }
 
         var outputDir = Path.GetDirectoryName(Path.GetFullPath(output));
         if (!string.IsNullOrWhiteSpace(outputDir)) Directory.CreateDirectory(outputDir);
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"tiwater-convert-wps-writer-{Guid.NewGuid():N}");
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"tiwater-convert-wps-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
         var helperPath = Path.Combine(tempRoot, "writer_to_pdf_wps.py");
-        File.WriteAllText(helperPath, WpsHelperScript);
+        File.WriteAllText(helperPath, EtHelperScript);
 
         try
         {
@@ -66,20 +66,20 @@ public static class WpsWriterPdfConverter
     {
         var startInfo = CreateProcessStartInfo(xvfb, tempRoot);
         foreach (var arg in CreateHelperArguments(dbusRunSession, python, helperPath, input, output)) startInfo.ArgumentList.Add(arg);
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start WPS Writer RPC conversion.");
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start WPS RPC conversion.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
         {
             try { process.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException("WPS Writer RPC PDF conversion timed out after 180 seconds.");
+            throw new TimeoutException("WPS RPC PDF conversion timed out after 180 seconds.");
         }
         var stdout = stdoutTask.GetAwaiter().GetResult();
         var stderr = stderrTask.GetAwaiter().GetResult();
         if (process.ExitCode != 0 || !IsPdf(output))
         {
             var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static s => !string.IsNullOrWhiteSpace(s)));
-            throw new InvalidOperationException($"WPS Writer RPC failed to convert {input} to PDF." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+            throw new InvalidOperationException($"WPS RPC failed to convert {input} to PDF." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
         }
     }
 
@@ -140,7 +140,7 @@ public static class WpsWriterPdfConverter
             if (!string.IsNullOrWhiteSpace(value) && File.Exists(value)) return Path.GetFullPath(value);
         }
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var candidate = Path.Combine(home, ".local", "share", "lucid-docs", "wpsrpc-venv", "bin", "python");
+        var candidate = Path.Combine(home, ".local", "share", "tiwater", "wpsrpc-venv", "bin", "python");
         return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;
     }
 
@@ -155,7 +155,7 @@ public static class WpsWriterPdfConverter
         return null;
     }
 
-    private const string WpsHelperScript = """
+    private const string EtHelperScript = """
 import os
 import sys
 

@@ -3,7 +3,7 @@ using NPOI.XSSF.UserModel;
 
 namespace Dockit.Convert;
 
-public static class WpsSpreadsheetRecalculator
+public static class EtRecalculator
 {
     public static bool IsAvailable()
         => FindPython() is not null && WpsRpcSession.IsAvailable() && FindOnPath("et") is not null;
@@ -17,13 +17,13 @@ public static class WpsSpreadsheetRecalculator
         var python = FindPython() ?? throw new InvalidOperationException("WPS RPC python is required for XLSX recalculation.");
         var xvfb = WpsRpcSession.RequireCommand("xvfb-run", "WPS XLSX recalculation");
         var dbus = WpsRpcSession.RequireCommand("dbus-run-session", "WPS XLSX recalculation");
-        if (FindOnPath("et") is null) throw new InvalidOperationException("WPS Spreadsheets command not found: et");
+        if (FindOnPath("et") is null) throw new InvalidOperationException("ET command not found: et");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         var root = Path.Combine(Path.GetTempPath(), $"tiwater-convert-wps-recalculate-{Guid.NewGuid():N}"); Directory.CreateDirectory(root);
-        var helper = Path.Combine(root, "recalculate_xlsx_wps.py"); File.WriteAllText(helper, WpsHelperScript);
+        var helper = Path.Combine(root, "recalculate_xlsx_wps.py"); File.WriteAllText(helper, EtHelperScript);
         try
         {
-            using var lease = WpsRpcSession.AcquireSpreadsheetLease();
+            using var lease = WpsRpcSession.AcquireEtLease();
             using var process = Process.Start(WpsRpcSession.CreateProcessStartInfo(dbus, xvfb, python, helper, input, output, root)) ?? throw new InvalidOperationException("Failed to start WPS XLSX recalculation.");
             var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(TimeSpan.FromMinutes(10))) { try { process.Kill(entireProcessTree: true); } catch { } throw new TimeoutException("WPS XLSX recalculation timed out after 600 seconds."); }
@@ -37,12 +37,12 @@ public static class WpsSpreadsheetRecalculator
     private static string? FindPython()
     {
         foreach (var name in new[] { "TIWATER_WPSRPC_PYTHON" }) { var value = Environment.GetEnvironmentVariable(name); if (!string.IsNullOrWhiteSpace(value) && File.Exists(value)) return Path.GetFullPath(value); }
-        var candidate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "lucid-docs", "wpsrpc-venv", "bin", "python"); return File.Exists(candidate) ? candidate : null;
+        var candidate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "tiwater", "wpsrpc-venv", "bin", "python"); return File.Exists(candidate) ? candidate : null;
     }
 
     private static string? FindOnPath(string command) => (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Select(directory => Path.Combine(directory, OperatingSystem.IsWindows() ? $"{command}.exe" : command)).FirstOrDefault(File.Exists);
 
-    internal const string WpsHelperScript = """
+    internal const string EtHelperScript = """
 import os
 import sys
 from pywpsrpc.rpcetapi import createEtRpcInstance, etapi

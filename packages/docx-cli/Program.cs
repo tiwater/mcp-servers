@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Dockit.Docx;
-using Tiwater.FormatEvidence;
 
 namespace Dockit.Docx.Cli;
 
@@ -24,8 +23,6 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, candidateCapabilities: CandidateCapabilities)),
-                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, candidateCapabilities: CandidateCapabilities)),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -55,19 +52,6 @@ internal static class Cli
         }
     }
 
-    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
-    {
-        var kinds = new List<string>();
-        if (fields.Contains("paragraphIndex")) kinds.Add("replaceParagraphText");
-        if (fields.Contains("paragraphIndex") && fields.Contains("runIndex")) kinds.Add("replaceParagraphRunText");
-        if (fields.Contains("tableIndex")) kinds.AddRange(["setTableWidth", "replaceTable", "insertTableRows", "replaceTableRows", "deleteTableRows", "insertTableColumns"]);
-        if (fields.Contains("tableIndex") && fields.Contains("rowIndex")) kinds.AddRange(["setTableRowHeight", "setTableRowCantSplit"]);
-        if (fields.Contains("tableIndex") && fields.Contains("rowIndex") && fields.Contains("cellIndex"))
-            kinds.AddRange(["replaceTableCellText", "replaceTableCellRichText", "setTableCellAlignment", "setTableCellNoWrap", "setTableCellFontSize"]);
-        if (fields.Contains("commentId")) kinds.AddRange(["replaceAnchoredText", "deleteComment"]);
-        return kinds.Count == 0 ? [] : [new("docx.edit", "1", kinds)];
-    }
-
     private static Task<int> RunInspectAsync(string[] args)
     {
         if (args.Length < 1)
@@ -77,16 +61,20 @@ internal static class Cli
 
         var input = args[0];
         var json = args.Skip(1).Contains("--json", StringComparer.Ordinal);
-        var report = Inspector.Inspect(input);
-
         if (json)
         {
-            WriteJson(report);
+            WriteJson(new
+            {
+                document = Inspector.Inspect(input),
+                tables = Inspector.InspectTables(input),
+                flow = Inspector.InspectDocumentFlow(input),
+                fonts = FontPolicy.Inspect(input),
+            });
+            return Task.FromResult(0);
         }
-        else
-        {
-            RenderInspect(report);
-        }
+        var report = Inspector.Inspect(input);
+
+        RenderInspect(report);
 
         return Task.FromResult(0);
     }
@@ -142,8 +130,6 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
-        Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
-        Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");

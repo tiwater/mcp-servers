@@ -1,8 +1,6 @@
 using System.Text.Json;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using Dockit.Pptx;
-using Tiwater.FormatEvidence;
 
 [assembly: InternalsVisibleTo("pptx-cli.tests")]
 
@@ -15,12 +13,6 @@ internal static class Program
 
 internal static class Cli
 {
-    private static readonly string ToolVersion =
-        typeof(Cli).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion.Split('+', 2)[0]
-        ?? throw new InvalidOperationException("pptx-tool-version-missing");
-
     public static Task<int> RunAsync(string[] args)
     {
         if (args.Length == 0)
@@ -34,8 +26,6 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, candidateCapabilities: CandidateCapabilities)),
-                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-pptx", ToolVersion, "pptx", input => new { presentation = Inspector.Inspect(input), detail = Inspector.InspectDetail(input) }, candidateCapabilities: CandidateCapabilities)),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
@@ -50,18 +40,6 @@ internal static class Cli
         }
     }
 
-    private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
-    {
-        var capabilities = new List<FormatEvidenceCommand.CandidateCapability>();
-        if (fields.Contains("slideNumber") && fields.Contains("shapeId") && fields.Contains("runIndex"))
-            capabilities.Add(new("pptx.edit", "1", ["setRunFormat"]));
-        if (pointer.Contains("/Masters/", StringComparison.Ordinal) &&
-            !pointer.Contains("/Layouts/", StringComparison.Ordinal) &&
-            fields.Contains("path"))
-            capabilities.Add(new("pptx.template-apply", "1", ["applyTemplate"]));
-        return capabilities;
-    }
-
     private static Task<int> RunInspectAsync(string[] args)
     {
         if (args.Length < 1)
@@ -71,17 +49,10 @@ internal static class Cli
 
         var input = args[0];
         var json = args.Skip(1).Contains("--json", StringComparer.Ordinal);
-        var detail = args.Skip(1).Contains("--detail", StringComparer.Ordinal);
-        if (detail)
-        {
-            WriteJson(Inspector.InspectDetail(input));
-            return Task.FromResult(0);
-        }
-
         var report = Inspector.Inspect(input);
         if (json)
         {
-            WriteJson(report);
+            WriteJson(Inspector.InspectDetail(input));
         }
         else
         {
@@ -133,9 +104,6 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.pptx> [--json]");
-        Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
-        Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
-        Console.WriteLine("  inspect <input.pptx> --json --detail");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
         Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");

@@ -41,7 +41,7 @@ internal static class NativeRenderProvenanceCollector
 {
     internal static NativeRenderProvenance Capture(string input, string output, string backend)
     {
-        if (backend is not ("wps-writer" or "wps-spreadsheet" or "wps-presentation"))
+        if (backend is not ("wps" or "et" or "wpp"))
             throw new InvalidOperationException($"Native WPS provenance does not support backend: {backend}");
 
         var buildVersion = Run("dpkg-query", ["-W", "-f=${Version}", "wps-office"], "native-render-wps-build-unavailable");
@@ -104,7 +104,7 @@ internal static class NativeRenderProvenanceCollector
 
     private static string ResolveWpsExecutable(string backend)
     {
-        var command = backend switch { "wps-writer" => "wps", "wps-spreadsheet" => "et", _ => "wpp" };
+        var command = backend switch { "wps" => "wps", "et" => "et", _ => "wpp" };
         var installed = Path.Combine("/opt/kingsoft/wps-office/office6", command);
         if (File.Exists(installed)) return installed;
         foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))

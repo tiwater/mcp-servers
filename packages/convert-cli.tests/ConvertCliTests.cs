@@ -98,15 +98,15 @@ public class ConvertCliTests
         Directory.CreateDirectory(root);
         try
         {
-            using (WpsSpreadsheetPdfConverter.AcquireRuntimeLease(TimeSpan.FromSeconds(1), lockPath))
+            using (EtPdfConverter.AcquireRuntimeLease(TimeSpan.FromSeconds(1), lockPath))
             {
                 Assert.Throws<TimeoutException>(() =>
-                    LimaWpsWriterPdfConverter.AcquireSpreadsheetHostLease(TimeSpan.FromMilliseconds(150), lockPath));
+                    LimaWpsPdfConverter.AcquireEtHostLease(TimeSpan.FromMilliseconds(150), lockPath));
             }
 
-            using var limaLease = LimaWpsWriterPdfConverter.AcquireSpreadsheetHostLease(TimeSpan.FromSeconds(1), lockPath);
+            using var limaLease = LimaWpsPdfConverter.AcquireEtHostLease(TimeSpan.FromSeconds(1), lockPath);
             Assert.Throws<TimeoutException>(() =>
-                WpsSpreadsheetPdfConverter.AcquireRuntimeLease(TimeSpan.FromMilliseconds(150), lockPath));
+                EtPdfConverter.AcquireRuntimeLease(TimeSpan.FromMilliseconds(150), lockPath));
         }
         finally
         {
@@ -117,20 +117,20 @@ public class ConvertCliTests
     [Fact]
     public void Wps_xlsx_recalculation_is_writable_full_calculation_and_fresh_save()
     {
-        var script = WpsSpreadsheetRecalculator.WpsHelperScript;
+        var script = EtRecalculator.EtHelperScript;
         Assert.Contains("ReadOnly=False", script);
         Assert.Contains("hr = app.CalculateFull()", script);
         Assert.Contains("Application.CalculateFull failed", script);
         Assert.Contains("book.SaveAs(output_path", script);
-        Assert.Throws<InvalidOperationException>(() => WpsSpreadsheetRecalculator.Recalculate("/missing/input.xlsx", "/tmp/output.xlsx"));
+        Assert.Throws<InvalidOperationException>(() => EtRecalculator.Recalculate("/missing/input.xlsx", "/tmp/output.xlsx"));
         var input = CreateXlsxFixture();
-        Assert.Throws<InvalidOperationException>(() => WpsSpreadsheetRecalculator.Recalculate(input, input));
+        Assert.Throws<InvalidOperationException>(() => EtRecalculator.Recalculate(input, input));
     }
 
     [Fact]
     public void Lima_recalculation_transport_invokes_the_versioned_remote_command()
     {
-        var start = LimaWpsWriterPdfConverter.CreateSpreadsheetConversionStartInfo("/usr/bin/limactl", "wps", "/shared/input.xlsx", "/shared/output.xlsx", "recalculate-xlsx");
+        var start = LimaWpsPdfConverter.CreateSpreadsheetConversionStartInfo("/usr/bin/limactl", "wps", "/shared/input.xlsx", "/shared/output.xlsx", "recalculate-xlsx");
         Assert.Equal("/usr/bin/limactl", start.FileName);
         Assert.Contains("recalculate-xlsx '/shared/input.xlsx' '/shared/output.xlsx'", start.ArgumentList.Last());
     }
@@ -144,12 +144,12 @@ public class ConvertCliTests
         File.WriteAllText(output, "output bytes");
         var inputHash = System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(input))).ToLowerInvariant();
         var outputHash = System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(output))).ToLowerInvariant();
-        var valid = $$"""{"status":"ok","backend":"wps-spreadsheet","fallback_reason":null,"source_format":"xlsx","target_format":"xlsx","input_sha256":"{{inputHash}}","output_sha256":"{{outputHash}}"}""";
+        var valid = $$"""{"status":"ok","backend":"et","fallback_reason":null,"source_format":"xlsx","target_format":"xlsx","input_sha256":"{{inputHash}}","output_sha256":"{{outputHash}}"}""";
 
-        LimaWpsWriterPdfConverter.ValidateSpreadsheetEvidence(valid, "recalculate-xlsx", input, output);
+        LimaWpsPdfConverter.ValidateSpreadsheetEvidence(valid, "recalculate-xlsx", input, output);
 
         var unattested = valid.Replace(outputHash, new string('0', 64), StringComparison.Ordinal);
-        Assert.Throws<InvalidOperationException>(() => LimaWpsWriterPdfConverter.ValidateSpreadsheetEvidence(unattested, "recalculate-xlsx", input, output));
+        Assert.Throws<InvalidOperationException>(() => LimaWpsPdfConverter.ValidateSpreadsheetEvidence(unattested, "recalculate-xlsx", input, output));
     }
 
     [Fact]
@@ -161,7 +161,7 @@ public class ConvertCliTests
         var result = WorkbookConverter.ConvertXlsToXlsx(input, output);
 
         Assert.True(File.Exists(output));
-        Assert.Contains(result.Backend, new[] { "wps-spreadsheet", "libreoffice", "npoi" });
+        Assert.Contains(result.Backend, new[] { "et", "libreoffice", "npoi" });
         using var stream = File.OpenRead(output);
         var workbook = new XSSFWorkbook(stream);
         var sheet = workbook.GetSheetAt(0);
@@ -236,37 +236,37 @@ public class ConvertCliTests
     [Fact]
     public void Required_wps_writer_backend_fails_closed_when_runtime_is_unavailable()
     {
-        if (WpsWriterPdfConverter.IsAvailable()) return;
+        if (WpsPdfConverter.IsAvailable()) return;
         var input = CreateDocxFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
         var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
-        var originalLimaInstance = Environment.GetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE");
-        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps-writer");
-        Environment.SetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE", null);
+        var originalLimaInstance = Environment.GetEnvironmentVariable("TIWATER_WPS_OFFICE_LIMA_INSTANCE");
+        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps");
+        Environment.SetEnvironmentVariable("TIWATER_WPS_OFFICE_LIMA_INSTANCE", null);
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() => OfficePdfConverter.ConvertToPdf(input, output, "docx"));
-            Assert.Contains("WPS Writer PDF backend was required", ex.Message);
+            Assert.Contains("WPS PDF backend was required", ex.Message);
         }
         finally
         {
             Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", originalBackend);
-            Environment.SetEnvironmentVariable("TIWATER_WPS_WRITER_LIMA_INSTANCE", originalLimaInstance);
+            Environment.SetEnvironmentVariable("TIWATER_WPS_OFFICE_LIMA_INSTANCE", originalLimaInstance);
         }
     }
 
     [Fact]
     public void Required_wps_spreadsheet_backend_fails_closed_when_runtime_is_unavailable()
     {
-        if (WpsSpreadsheetPdfConverter.IsAvailable() || LimaWpsWriterPdfConverter.IsAvailable()) return;
+        if (EtPdfConverter.IsAvailable() || LimaWpsPdfConverter.IsAvailable()) return;
         var input = CreateLegacyXlsFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
         var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
-        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps-spreadsheet");
+        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "et");
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() => OfficePdfConverter.ConvertToPdf(input, output, "xls"));
-            Assert.Contains("WPS Spreadsheets PDF backend was required", ex.Message);
+            Assert.Contains("ET PDF backend was required", ex.Message);
         }
         finally
         {
@@ -277,8 +277,8 @@ public class ConvertCliTests
     [Fact]
     public void Wps_spreadsheet_uses_the_supported_ExportAsFixedFormat_pdf_api()
     {
-        var helperScript = typeof(WpsSpreadsheetPdfConverter)
-            .GetField("WpsHelperScript", BindingFlags.NonPublic | BindingFlags.Static)
+        var helperScript = typeof(EtPdfConverter)
+            .GetField("EtHelperScript", BindingFlags.NonPublic | BindingFlags.Static)
             ?.GetRawConstantValue() as string;
 
         Assert.NotNull(helperScript);
@@ -291,15 +291,15 @@ public class ConvertCliTests
     [Fact]
     public void Wps_spreadsheet_pdf_conversion_creates_a_real_pdf_when_runtime_is_available()
     {
-        if (!WpsSpreadsheetPdfConverter.IsAvailable()) return;
+        if (!EtPdfConverter.IsAvailable()) return;
         var input = CreateXlsxFixture();
         var output = Path.Combine(Path.GetTempPath(), $"converted-{Guid.NewGuid():N}.pdf");
         var originalBackend = Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND");
-        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "wps-spreadsheet");
+        Environment.SetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND", "et");
         try
         {
             var result = OfficePdfConverter.ConvertToPdf(input, output, "xlsx");
-            Assert.Equal("wps-spreadsheet", result.Backend);
+            Assert.Equal("et", result.Backend);
             Assert.True(File.Exists(output));
             Assert.True(new FileInfo(output).Length > 1_000);
             Assert.Equal("%PDF", File.ReadAllText(output)[..4]);
@@ -315,7 +315,7 @@ public class ConvertCliTests
     [InlineData("Fatal IO error on X server :101")]
     public void Wps_writer_recognizes_transient_rpc_startup_failures(string message)
     {
-        Assert.True(WpsWriterPdfConverter.IsTransientStartupFailure(message));
+        Assert.True(WpsPdfConverter.IsTransientStartupFailure(message));
     }
 
     [Fact]
@@ -324,7 +324,7 @@ public class ConvertCliTests
         var isolated = Path.Combine(Path.GetTempPath(), $"wps-working-{Guid.NewGuid():N}");
         Directory.CreateDirectory(isolated);
 
-        var startInfo = WpsWriterPdfConverter.CreateProcessStartInfo("xvfb-run", isolated);
+        var startInfo = WpsPdfConverter.CreateProcessStartInfo("xvfb-run", isolated);
 
         Assert.Equal(Path.GetFullPath(isolated), startInfo.WorkingDirectory);
         Assert.NotEqual(Directory.GetCurrentDirectory(), startInfo.WorkingDirectory);
@@ -335,7 +335,7 @@ public class ConvertCliTests
     [Fact]
     public void Wps_writer_starts_an_isolated_dbus_session()
     {
-        var arguments = WpsWriterPdfConverter.CreateHelperArguments(
+        var arguments = WpsPdfConverter.CreateHelperArguments(
             "dbus-run-session",
             "/tmp/wpsrpc-python",
             "/tmp/writer_to_pdf_wps.py",
@@ -357,8 +357,8 @@ public class ConvertCliTests
     [Fact]
     public void Wps_writer_uses_the_supported_SaveAs2_pdf_api()
     {
-        var helperScript = typeof(WpsWriterPdfConverter)
-            .GetField("WpsHelperScript", BindingFlags.NonPublic | BindingFlags.Static)
+        var helperScript = typeof(WpsPdfConverter)
+            .GetField("EtHelperScript", BindingFlags.NonPublic | BindingFlags.Static)
             ?.GetRawConstantValue() as string;
 
         Assert.NotNull(helperScript);

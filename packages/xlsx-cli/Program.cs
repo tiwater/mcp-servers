@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Dockit.Convert;
 using Dockit.Xlsx;
-using Tiwater.FormatEvidence;
 
 namespace Dockit.Xlsx.Cli;
 
@@ -25,10 +24,7 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, CandidateCapabilities)),
-                "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-xlsx", XlsxToolVersion.Current, "xlsx", input => Inspector.InspectPublishedEvidence(input), WorkbookSourceFormats, ClassifyWorkbookEvidenceFailure, CandidateCapabilities)),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
-                "evidence" => RunEvidenceAsync(args[1..]),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 "validate" => RunValidateAsync(args[1..]),
@@ -42,38 +38,6 @@ internal static class Cli
         }
     }
 
-    internal static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
-    {
-        if (!fields.Contains("sheet")) return [];
-        return
-        [
-            new("xlsx.edit", "1",
-            [
-                "setCellValue",
-                "setRichTextCellValue",
-                "setPrintArea",
-                "setRangeValues",
-                "insertRows",
-                "copyRow",
-                "expandSectionRows"
-            ])
-        ];
-    }
-
-    private static readonly IReadOnlySet<string> WorkbookSourceFormats = new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" };
-
-    internal static FormatEvidenceCommand.ErrorClassification? ClassifyWorkbookEvidenceFailure(Exception error)
-        => error is AuthoritativeSpreadsheetRuntimeException
-            ? new("inspect-evidence-runtime-unavailable", "runtime", true)
-            : null;
-
-    private static Task<int> RunEvidenceAsync(string[] args)
-    {
-        if (args.Length < 1) throw new InvalidOperationException("evidence requires <input.xlsx>");
-        WriteJson(EvidenceInspector.Inspect(args[0]));
-        return Task.FromResult(0);
-    }
-
     private static Task<int> RunInspectAsync(string[] args)
     {
         if (args.Length < 1)
@@ -83,16 +47,14 @@ internal static class Cli
 
         var input = args[0];
         var json = args.Skip(1).Contains("--json", StringComparer.Ordinal);
-        var report = Inspector.Inspect(input);
-
         if (json)
         {
-            WriteJson(report);
+            WriteJson(Inspector.InspectPublishedEvidence(input));
+            return Task.FromResult(0);
         }
-        else
-        {
-            RenderInspect(report);
-        }
+        var report = Inspector.Inspect(input);
+
+        RenderInspect(report);
 
         return Task.FromResult(0);
     }
@@ -139,10 +101,7 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.xlsx> [--json]");
-        Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
-        Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
-        Console.WriteLine("  evidence <input.xlsx>");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");
         Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");
         Console.WriteLine("  validate <input.xlsx>");
