@@ -149,6 +149,7 @@ public static class Transforms
     {
         public Dictionary<string, string>? CellValues { get; set; } = new();
         public Dictionary<string, string>? TableSlots { get; set; } = new();
+        public Dictionary<string, List<Dictionary<string, string>>>? RowGroups { get; set; } = new();
     }
 
     public static int RunFillTemplate(string[] args)
@@ -169,6 +170,11 @@ public static class Transforms
 
         using var doc = WordprocessingDocument.Open(output, true);
         var body = doc.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+
+        if (data.RowGroups != null)
+        {
+            ExpandRowGroups(doc, data.RowGroups);
+        }
 
         if (data.CellValues != null)
         {
@@ -215,6 +221,64 @@ public static class Transforms
         doc.MainDocumentPart!.Document.Save();
         Console.WriteLine($"Filled template saved to {output}");
         return 0;
+    }
+
+    private static void ExpandRowGroups(
+        WordprocessingDocument doc,
+        IReadOnlyDictionary<string, List<Dictionary<string, string>>> groups)
+    {
+        foreach (var group in groups)
+        {
+            var marker = "{{" + group.Key + "}}";
+            var matches = Inspector.GetRoots(doc)
+                .SelectMany(root => root.Descendants<Table>())
+                .SelectMany(table => table.Elements<TableRow>())
+                .Where(row => row.InnerText.Contains(marker, StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count == 0)
+            {
+                throw new InvalidOperationException($"fill-template-row-group-marker-missing:{group.Key}");
+            }
+            foreach (var markerRow in matches)
+            {
+                var table = markerRow.Parent as Table
+                    ?? throw new InvalidOperationException($"fill-template-row-group-table-missing:{group.Key}");
+                var rows = table.Elements<TableRow>().ToList();
+                var markerIndex = rows.IndexOf(markerRow);
+                if (markerIndex < 0 || markerIndex + 1 >= rows.Count)
+                {
+                    throw new InvalidOperationException($"fill-template-row-group-prototype-missing:{group.Key}");
+                }
+                var prototype = rows[markerIndex + 1];
+                ReplaceText(markerRow, marker, string.Empty);
+                foreach (var values in group.Value)
+                {
+                    var clone = (TableRow)prototype.CloneNode(true);
+                    foreach (var value in values)
+                    {
+                        ReplaceText(clone, "{{" + value.Key + "}}", value.Value ?? string.Empty);
+                        ReplaceText(clone, "[" + value.Key + "]", value.Value ?? string.Empty);
+                    }
+                    table.InsertBefore(clone, prototype);
+                }
+                prototype.Remove();
+            }
+        }
+    }
+
+    private static void ReplaceText(OpenXmlElement root, string token, string value)
+    {
+        foreach (var paragraph in root.Descendants<Paragraph>())
+        {
+            var texts = paragraph.Descendants<Text>().ToList();
+            if (texts.Count == 0) continue;
+            var combined = string.Concat(texts.Select(text => text.Text));
+            var updated = combined.Replace(token, value, StringComparison.Ordinal);
+            if (string.Equals(combined, updated, StringComparison.Ordinal)) continue;
+            texts[0].Text = updated;
+            texts[0].Space = SpaceProcessingModeValues.Preserve;
+            foreach (var extra in texts.Skip(1)) extra.Text = string.Empty;
+        }
     }
 
     private static int ReplaceCellValuePlaceholders(WordprocessingDocument doc, IReadOnlyDictionary<string, string> values)

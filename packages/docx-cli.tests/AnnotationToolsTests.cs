@@ -1639,6 +1639,42 @@ public class AnnotationToolsTests
         Assert.Contains("2024-09-18", headerText);
     }
 
+    [Fact]
+    public void FillTemplate_expands_observable_table_row_groups()
+    {
+        var input = Path.Combine(Path.GetTempPath(), $"row-group-{Guid.NewGuid():N}.docx");
+        var dataPath = Path.Combine(Path.GetTempPath(), $"row-group-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"row-group-filled-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+        {
+            var main = doc.AddMainDocumentPart();
+            main.Document = new Document(new Body(
+                new Table(
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("{{people}}")))), new TableCell(new Paragraph(new Run(new Text("Name"))))),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("[role]")))), new TableCell(new Paragraph(new Run(new Text("[name]"))))))));
+            main.Document.Save();
+        }
+        File.WriteAllText(dataPath, """
+        {
+          "rowGroups": {
+            "people": [
+              {"role":"Prepared by","name":"Alice"},
+              {"role":"Approved by","name":"Bob"}
+            ]
+          }
+        }
+        """);
+
+        Transforms.RunFillTemplate([input, dataPath, output]);
+
+        using var filled = WordprocessingDocument.Open(output, false);
+        var rows = filled.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ToList();
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("Name", rows[0].InnerText);
+        Assert.Equal("Prepared byAlice", rows[1].InnerText);
+        Assert.Equal("Approved byBob", rows[2].InnerText);
+    }
+
     private static string CreateAnnotatedFixture()
     {
         var path = Path.Combine(Path.GetTempPath(), $"annotated-{Guid.NewGuid():N}.docx");
