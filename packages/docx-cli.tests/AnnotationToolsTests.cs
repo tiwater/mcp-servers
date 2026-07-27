@@ -1682,6 +1682,7 @@ public class AnnotationToolsTests
             var main = doc.AddMainDocumentPart();
             main.Document = new Document(new Body(
                 new Paragraph(new Run(new Drawing()), new Run(new Text("Quality Assurance"))),
+                new Paragraph(new Run(new Text("Version 1.0"))),
                 new Table(
                     new TableRow(new TableCell(new Paragraph(new Run(new Text("{{people}}")))), new TableCell(new Paragraph(new Run(new Text("Name"))))),
                     new TableRow(new TableCell(new Paragraph(new Run(new Text("[role]")))), new TableCell(new Paragraph(new Run(new Text("[name]"))))),
@@ -1697,7 +1698,8 @@ public class AnnotationToolsTests
             ]
           },
           "selectedOptions": ["Quality Assurance"],
-          "removeRowsContaining": ["default revision"]
+          "removeRowsContaining": ["default revision"],
+          "uniqueTextValues": {"Version 1.0":"Version 02"}
         }
         """);
 
@@ -1712,6 +1714,7 @@ public class AnnotationToolsTests
         var selection = filled.MainDocumentPart.Document.Body.Elements<Paragraph>().Single();
         Assert.Equal("☒ Quality Assurance", selection.InnerText);
         Assert.Empty(selection.Descendants<Drawing>());
+        Assert.Contains("Version 02", filled.MainDocumentPart.Document.Body.InnerText);
     }
 
     private static string CreateRepeatedRowMigrationFixture()
@@ -1986,6 +1989,7 @@ public class AnnotationToolsTests
                 new Run(new Text("effectiveDate")),
                 new Run(new Text("}}"))));
         body.Append(new Paragraph(new Run(new Text("[nodeName]"))));
+        body.Append(new Paragraph(new Run(new Text("Version 1.0"))));
         body.Append(new Paragraph(new Run(new Text("after"))));
         body.Append(sectionProps);
 

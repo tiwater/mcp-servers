@@ -152,6 +152,7 @@ public static class Transforms
         public Dictionary<string, List<Dictionary<string, string>>>? RowGroups { get; set; } = new();
         public List<string>? SelectedOptions { get; set; } = [];
         public List<string>? RemoveRowsContaining { get; set; } = [];
+        public Dictionary<string, string>? UniqueTextValues { get; set; } = new();
     }
 
     public static int RunFillTemplate(string[] args)
@@ -184,6 +185,10 @@ public static class Transforms
         if (data.RemoveRowsContaining != null)
         {
             RemoveRowsContaining(doc, data.RemoveRowsContaining);
+        }
+        if (data.UniqueTextValues != null)
+        {
+            ReplaceUniqueTextValues(doc, data.UniqueTextValues);
         }
 
         if (data.CellValues != null)
@@ -273,6 +278,25 @@ public static class Transforms
                 }
                 prototype.Remove();
             }
+        }
+    }
+
+    private static void ReplaceUniqueTextValues(
+        WordprocessingDocument doc,
+        IReadOnlyDictionary<string, string> values)
+    {
+        foreach (var value in values)
+        {
+            var matches = Inspector.GetRoots(doc)
+                .SelectMany(root => root.Descendants<Paragraph>())
+                .Where(paragraph => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text))
+                    .Contains(value.Key, StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count != 1)
+            {
+                throw new InvalidOperationException($"fill-template-unique-text-match-count:{value.Key}:{matches.Count}");
+            }
+            ReplaceText(matches[0], value.Key, value.Value ?? string.Empty);
         }
     }
 
