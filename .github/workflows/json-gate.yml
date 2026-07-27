@@ -1,0 +1,58 @@
+name: JSON Publish Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  json-gate:
+    name: Parse tracked and packed JSON
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Prove trailing commas fail the gate
+        run: python scripts/test_validate_json.py
+
+      - name: Parse every version-controlled JSON file
+        run: python scripts/validate_json.py --tracked
+
+      - name: Pack .NET tools
+        run: |
+          set -euo pipefail
+          for dir in packages/xlsx-cli packages/docx-cli packages/pptx-cli packages/convert-cli; do
+            rm -rf "$dir/nupkg"
+            (cd "$dir" && dotnet pack -c Release -o ./nupkg)
+          done
+
+      - name: Build Python package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          rm -rf packages/pdf-cli/dist
+          python -m build --outdir packages/pdf-cli/dist packages/pdf-cli
+
+      - name: Parse every JSON file inside packed artifacts
+        run: |
+          set -euo pipefail
+          python scripts/validate_json.py \
+            --archives-from packages/xlsx-cli/nupkg \
+            --archives-from packages/docx-cli/nupkg \
+            --archives-from packages/pptx-cli/nupkg \
+            --archives-from packages/convert-cli/nupkg \
+            --archives-from packages/pdf-cli/dist
