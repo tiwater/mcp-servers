@@ -48,7 +48,7 @@
       "properties": {
         "schema": { "$ref": "#/$defs/SchemaRef" },
         "value": {
-          "$comment": "Validated against the registered schema at sibling:schema.",
+          "$comment": "Validated against the registered schema at sibling:schema."
         },
         "sha256": { "$ref": "#/$defs/Sha256" }
       }
