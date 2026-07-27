@@ -257,6 +257,7 @@ public static class Transforms
         foreach (var kvp in values)
         {
             updated = updated.Replace("{{" + kvp.Key + "}}", kvp.Value ?? string.Empty, StringComparison.Ordinal);
+            updated = updated.Replace("[" + kvp.Key + "]", kvp.Value ?? string.Empty, StringComparison.Ordinal);
         }
         return updated;
     }

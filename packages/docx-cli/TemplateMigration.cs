@@ -416,13 +416,13 @@ public static class TemplateMigration
         {
             RequireOnlyFields(mapping, new HashSet<string>(["source", "baseline", "disposition"], StringComparer.Ordinal), "template-migration-semantic-candidate-mapping");
             if (!mapping.TryGetProperty("source", out var source)) throw new InvalidOperationException("template-migration-semantic-candidate-source-missing");
-            RequireOnlyFields(source, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-source");
+            RequireOnlyFields(source, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "empty"], StringComparer.Ordinal), "template-migration-semantic-candidate-source");
             var outOfScope = mapping.TryGetProperty("disposition", out var disposition)
                 && string.Equals(disposition.GetString(), "out-of-scope", StringComparison.Ordinal);
             if (mapping.TryGetProperty("baseline", out var baseline))
             {
                 if (outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");
-                RequireOnlyFields(baseline, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline");
+                RequireOnlyFields(baseline, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "empty"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline");
             }
             else if (!outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-missing");
         }
@@ -435,7 +435,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceStart", "sourceEnd" })
                 {
                     if (!append.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "empty"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -478,7 +478,8 @@ public static class TemplateMigration
         var text = !string.IsNullOrWhiteSpace(selector.Text);
         var sha = !string.IsNullOrWhiteSpace(selector.Sha256);
         var descendant = !string.IsNullOrWhiteSpace(selector.DescendantText);
-        if ((text ? 1 : 0) + (sha ? 1 : 0) + (descendant ? 1 : 0) != 1) throw new InvalidOperationException($"template-migration-semantic-{side}-selector-required");
+        var empty = selector.Empty is true;
+        if ((text ? 1 : 0) + (sha ? 1 : 0) + (descendant ? 1 : 0) + (empty ? 1 : 0) != 1) throw new InvalidOperationException($"template-migration-semantic-{side}-selector-required");
         if (sha && !Regex.IsMatch(selector.Sha256!, "^[A-Fa-f0-9]{64}$", RegexOptions.CultureInvariant)) throw new InvalidOperationException($"template-migration-semantic-{side}-sha256-invalid");
     }
 
@@ -496,6 +497,7 @@ public static class TemplateMigration
         return siblings.Where(item =>
                 (normalizedText is null || string.Equals(NormalizeMappingText(item.Text), normalizedText, StringComparison.Ordinal))
                 && (selector.Sha256 is null || (item.Provenance.TryGetValue("sha256", out var hash) && string.Equals(hash, selector.Sha256, StringComparison.OrdinalIgnoreCase)))
+                && (selector.Empty is not true || string.IsNullOrWhiteSpace(item.Text))
                 && (normalizedDescendantText is null || HasDescendantText(objects, item, normalizedDescendantText))
                 && (normalizedParentText is null || (item.ParentId is not null && byId.TryGetValue(item.ParentId, out var parent) && string.Equals(NormalizeMappingText(parent.Text), normalizedParentText, StringComparison.Ordinal)))
                 && ContextTextMatches(siblings, item, -1, normalizedPreviousText)

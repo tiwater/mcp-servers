@@ -250,6 +250,20 @@ public class AnnotationToolsTests
         var contextResolved = TemplateMigration.ResolveSemanticCandidate(contextualSource, contextualBaseline, contextualCandidate);
         Assert.Contains(contextResolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1" && item.Disposition == "copy-text");
 
+        var blankBaseline = CreateTextMigrationFixture("before target", "", "after target");
+        var blankSource = CreateTextMigrationFixture("before source", "current fact", "after source");
+        var blankCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "current fact"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", PreviousText: "before target", NextText: "after target", Empty: true),
+                    "copy-text")
+            ]);
+        var blankResolved = TemplateMigration.ResolveSemanticCandidate(blankSource, blankBaseline, blankCandidate);
+        Assert.True(blankResolved.Pass, string.Join("; ", blankResolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(blankResolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1");
+
         var invalidCandidate = Path.Combine(Path.GetTempPath(), $"migration-semantic-invalid-{Guid.NewGuid():N}.json");
         File.WriteAllText(invalidCandidate, """
         {"schema":"tiwater.docx.template-migration-semantic-candidate/v1","mappings":[{"source":{"kind":"paragraph","text":"legacy factual content","sourceObjectId":"body:paragraph:0"},"baseline":{"kind":"paragraph","text":"target format placeholder"},"disposition":"copy-text"}]}
@@ -1602,7 +1616,8 @@ public class AnnotationToolsTests
             """
             {
               "cellValues": {
-                "effectiveDate": "2024-09-18"
+                "effectiveDate": "2024-09-18",
+                "nodeName": "Prepared by"
               }
             }
             """,
@@ -1616,6 +1631,8 @@ public class AnnotationToolsTests
         using var doc = WordprocessingDocument.Open(output, false);
         var bodyText = string.Concat(doc.MainDocumentPart!.Document!.Descendants<Text>().Select(text => text.Text));
         Assert.Contains("2024-09-18", bodyText);
+        Assert.Contains("Prepared by", bodyText);
+        Assert.DoesNotContain("[nodeName]", bodyText);
 
         var headerText = string.Concat(
             doc.MainDocumentPart.HeaderParts.SelectMany(part => part.Header!.Descendants<Text>()).Select(text => text.Text));
@@ -1878,6 +1895,7 @@ public class AnnotationToolsTests
                 new Run(new Text("{{")),
                 new Run(new Text("effectiveDate")),
                 new Run(new Text("}}"))));
+        body.Append(new Paragraph(new Run(new Text("[nodeName]"))));
         body.Append(new Paragraph(new Run(new Text("after"))));
         body.Append(sectionProps);
 
