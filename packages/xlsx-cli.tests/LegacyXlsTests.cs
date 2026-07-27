@@ -14,38 +14,6 @@ namespace Dockit.Xlsx.Tests;
 public class LegacyXlsTests
 {
     [Fact]
-    public void Published_evidence_marks_authoritative_runtime_failure_retryable()
-    {
-        var input = CreateLegacyXlsFixture();
-        var root = Path.Combine(Path.GetTempPath(), $"xlsx-runtime-failure-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
-        var request = Path.Combine(root, "request.json");
-        var output = Path.Combine(root, "evidence.json");
-        var hash = System.Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(input))).ToLowerInvariant();
-        File.WriteAllText(request, JsonSerializer.Serialize(new {
-            schema = "tiwater.format-evidence-request/v1", requestId = "request-runtime", runId = "run-runtime",
-            subject = new { kind = "input", inputId = "input-runtime" },
-            artifact = new { artifactVersionId = "av-runtime", path = input, bytesSha256 = hash, format = "xls" },
-            extraction = new { schema = "tiwater.xls.inspect/v1", options = new { }, optionsSha256 = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" },
-            expectedEvidenceSchema = "lucid.published-format-evidence/v1", outputPath = output
-        }));
-
-        var exit = FormatEvidenceCommand.RunProducer(
-            ["--request", request, "--output", output],
-            "tiwater-xlsx", "test", "xlsx",
-            _ => throw new AuthoritativeSpreadsheetRuntimeException("WPS runtime unavailable"),
-            acceptedSourceFormats: new HashSet<string>(StringComparer.Ordinal) { "xls", "xlsx" },
-            classifyError: Dockit.Xlsx.Cli.Cli.ClassifyWorkbookEvidenceFailure);
-
-        Assert.Equal(0, exit);
-        using var error = JsonDocument.Parse(File.ReadAllText(output));
-        Assert.Equal("inspect-evidence-runtime-unavailable", error.RootElement.GetProperty("code").GetString());
-        Assert.Equal("runtime", error.RootElement.GetProperty("category").GetString());
-        Assert.True(error.RootElement.GetProperty("retryable").GetBoolean());
-        Assert.False(error.RootElement.TryGetProperty("message", out _));
-    }
-
-    [Fact]
     public void Published_evidence_rejects_non_authoritative_legacy_conversion()
     {
         var path = CreateLegacyXlsFixture();

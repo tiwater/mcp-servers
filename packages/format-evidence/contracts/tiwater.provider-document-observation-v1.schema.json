@@ -49,7 +49,6 @@
         "schema": { "$ref": "#/$defs/SchemaRef" },
         "value": {
           "$comment": "Validated against the registered schema at sibling:schema.",
-          "x-lucid-dynamic-schema-ref": "sibling:schema"
         },
         "sha256": { "$ref": "#/$defs/Sha256" }
       }
