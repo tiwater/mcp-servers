@@ -1681,9 +1681,11 @@ public class AnnotationToolsTests
         {
             var main = doc.AddMainDocumentPart();
             main.Document = new Document(new Body(
+                new Paragraph(new Run(new Drawing()), new Run(new Text("Quality Assurance"))),
                 new Table(
                     new TableRow(new TableCell(new Paragraph(new Run(new Text("{{people}}")))), new TableCell(new Paragraph(new Run(new Text("Name"))))),
-                    new TableRow(new TableCell(new Paragraph(new Run(new Text("[role]")))), new TableCell(new Paragraph(new Run(new Text("[name]"))))))));
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("[role]")))), new TableCell(new Paragraph(new Run(new Text("[name]"))))),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("default revision"))))))));
             main.Document.Save();
         }
         File.WriteAllText(dataPath, """
@@ -1693,7 +1695,9 @@ public class AnnotationToolsTests
               {"role":"Prepared by","name":"Alice"},
               {"role":"Approved by","name":"Bob"}
             ]
-          }
+          },
+          "selectedOptions": ["Quality Assurance"],
+          "removeRowsContaining": ["default revision"]
         }
         """);
 
@@ -1705,6 +1709,9 @@ public class AnnotationToolsTests
         Assert.Equal("Name", rows[0].InnerText);
         Assert.Equal("Prepared byAlice", rows[1].InnerText);
         Assert.Equal("Approved byBob", rows[2].InnerText);
+        var selection = filled.MainDocumentPart.Document.Body.Elements<Paragraph>().Single();
+        Assert.Equal("☒ Quality Assurance", selection.InnerText);
+        Assert.Empty(selection.Descendants<Drawing>());
     }
 
     private static string CreateRepeatedRowMigrationFixture()

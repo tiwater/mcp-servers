@@ -150,6 +150,8 @@ public static class Transforms
         public Dictionary<string, string>? CellValues { get; set; } = new();
         public Dictionary<string, string>? TableSlots { get; set; } = new();
         public Dictionary<string, List<Dictionary<string, string>>>? RowGroups { get; set; } = new();
+        public List<string>? SelectedOptions { get; set; } = [];
+        public List<string>? RemoveRowsContaining { get; set; } = [];
     }
 
     public static int RunFillTemplate(string[] args)
@@ -174,6 +176,14 @@ public static class Transforms
         if (data.RowGroups != null)
         {
             ExpandRowGroups(doc, data.RowGroups);
+        }
+        if (data.SelectedOptions != null)
+        {
+            MarkSelectedOptions(doc, data.SelectedOptions);
+        }
+        if (data.RemoveRowsContaining != null)
+        {
+            RemoveRowsContaining(doc, data.RemoveRowsContaining);
         }
 
         if (data.CellValues != null)
@@ -265,6 +275,56 @@ public static class Transforms
             }
         }
     }
+
+    private static void MarkSelectedOptions(WordprocessingDocument doc, IReadOnlyList<string> options)
+    {
+        foreach (var option in options)
+        {
+            var expected = NormalizeVisibleText(option);
+            var matches = Inspector.GetRoots(doc)
+                .SelectMany(root => root.Descendants<Paragraph>())
+                .Where(paragraph => string.Equals(
+                    NormalizeVisibleText(string.Concat(paragraph.Descendants<Text>().Select(text => text.Text))),
+                    expected,
+                    StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count != 1)
+            {
+                throw new InvalidOperationException($"fill-template-selected-option-match-count:{option}:{matches.Count}");
+            }
+            var paragraph = matches[0];
+            var drawings = paragraph.Descendants<Drawing>().ToList();
+            if (drawings.Count == 0)
+            {
+                throw new InvalidOperationException($"fill-template-selected-option-marker-missing:{option}");
+            }
+            foreach (var drawing in drawings) drawing.Remove();
+            var firstRun = paragraph.Elements<Run>().FirstOrDefault();
+            var marker = new Run(new Text("☒ ") { Space = SpaceProcessingModeValues.Preserve });
+            if (firstRun is null) paragraph.Append(marker);
+            else paragraph.InsertBefore(marker, firstRun);
+        }
+    }
+
+    private static void RemoveRowsContaining(WordprocessingDocument doc, IReadOnlyList<string> markers)
+    {
+        foreach (var marker in markers)
+        {
+            var expected = NormalizeVisibleText(marker);
+            var matches = Inspector.GetRoots(doc)
+                .SelectMany(root => root.Descendants<TableRow>())
+                .Where(row => NormalizeVisibleText(row.InnerText).Contains(expected, StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count != 1)
+            {
+                throw new InvalidOperationException($"fill-template-remove-row-match-count:{marker}:{matches.Count}");
+            }
+            matches[0].Remove();
+        }
+    }
+
+    private static string NormalizeVisibleText(string value)
+        => string.Concat((value ?? string.Empty).Where(character => !char.IsWhiteSpace(character)));
 
     private static void ReplaceText(OpenXmlElement root, string token, string value)
     {
