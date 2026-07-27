@@ -264,6 +264,20 @@ public class AnnotationToolsTests
         Assert.True(blankResolved.Pass, string.Join("; ", blankResolved.Unresolved.Select(item => item.Reason)));
         Assert.Contains(blankResolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1");
 
+        var overrideSource = CreateTextMigrationFixture("shared fact");
+        var overrideBaseline = CreateTextMigrationFixture("shared fact", "preferred target slot");
+        var overrideCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "shared fact"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "preferred target slot"),
+                    "copy-text")
+            ]);
+        var overridden = TemplateMigration.ResolveSemanticCandidate(overrideSource, overrideBaseline, overrideCandidate);
+        Assert.True(overridden.Pass, string.Join("; ", overridden.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(overridden.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:0" && item.BaselineObjectId == "body:paragraph:1");
+
         var invalidCandidate = Path.Combine(Path.GetTempPath(), $"migration-semantic-invalid-{Guid.NewGuid():N}.json");
         File.WriteAllText(invalidCandidate, """
         {"schema":"tiwater.docx.template-migration-semantic-candidate/v1","mappings":[{"source":{"kind":"paragraph","text":"legacy factual content","sourceObjectId":"body:paragraph:0"},"baseline":{"kind":"paragraph","text":"target format placeholder"},"disposition":"copy-text"}]}

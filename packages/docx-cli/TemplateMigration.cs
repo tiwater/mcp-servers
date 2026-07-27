@@ -317,14 +317,6 @@ public static class TemplateMigration
                 continue;
             }
             var sourceObject = sourceMatches[0];
-            var pending = mappings.TryGetValue(sourceObject.Id, out var existing)
-                && string.Equals(existing.Disposition, "review-required", StringComparison.Ordinal);
-            var newRunMapping = sourceObject.Kind == "run" && !mappings.ContainsKey(sourceObject.Id);
-            if (!pending && !newRunMapping)
-            {
-                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id));
-                continue;
-            }
             if (string.Equals(proposal.Disposition, "out-of-scope", StringComparison.Ordinal))
             {
                 mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, null, proposal.Disposition, "semantic-candidate-out-of-scope");
