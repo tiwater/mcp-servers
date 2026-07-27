@@ -188,13 +188,13 @@ internal static class Cli
             receipt.ToJsonString(),
             Json.Options)!.Issues.Count == 0);
 
-    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
+    internal static ProviderContractManifestCommand.Contract ManifestContract() => new(
         "tiwater-pptx", ToolVersion, "pptx.edit", "1",
         "tiwater.pptx-edit-v1.schema.json", "tiwater.pptx-edit/v1",
         "tiwater.pptx-edit-result-v1.schema.json", "tiwater.pptx-edit-result/v1",
         "derive-operation", "validate-derived-operation",
         "execute-effect", "validate-execution-evidence",
-        "tiwater-pptx-edit", ToolVersion);
+        "tiwater-pptx-edit", ToolVersion, "pptx");
 
     private static ProviderContractManifestCommand.Contract TemplateManifestContract() => new(
         "tiwater-pptx", ToolVersion, "pptx.template-apply", "1",
@@ -202,7 +202,7 @@ internal static class Cli
         "tiwater.pptx-template-apply-result-v1.schema.json", "tiwater.pptx-template-apply-result/v1",
         "derive-template-operation", "validate-derived-template-operation",
         "execute-template-effect", "validate-template-execution-evidence",
-        "tiwater-pptx-template-apply", ToolVersion);
+        "tiwater-pptx-template-apply", ToolVersion, "pptx");
 
     private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> PresentationTargetObservations() =>
     [
@@ -300,8 +300,8 @@ internal static class Cli
         Console.WriteLine("  validate-execution-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  execute-template-effect --request <request.json> --effect-bundle <bundle.json> --effect-verdict <verdict.json> --output <evidence.json>");
         Console.WriteLine("  validate-template-execution-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
-        Console.WriteLine("  provider-contract-manifest --output <manifest.json>");
-        Console.WriteLine("  validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json>");
+        Console.WriteLine("  provider-contract-manifest --output <manifest.json> [--format lucid.provider-contract-manifest --schema-set-version <n>]");
+        Console.WriteLine("  validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json> [--schema-set-version <n>]");
         Console.WriteLine("  template-provider-contract-manifest --output <manifest.json>");
         Console.WriteLine("  validate-template-provider-contract-manifest --manifest <manifest.json> --output <verdict.json>");
         Console.WriteLine("  inspect <input.pptx> --json --detail");

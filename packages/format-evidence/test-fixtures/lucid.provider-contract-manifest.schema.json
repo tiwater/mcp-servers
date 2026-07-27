@@ -1,0 +1,453 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lucid.provider-contract-manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaSetVersion",
+    "manifestId",
+    "provider",
+    "runtime",
+    "ports"
+  ],
+  "properties": {
+    "schema": {
+      "const": "lucid.provider-contract-manifest"
+    },
+    "schemaSetVersion": {
+      "const": 15
+    },
+    "manifestId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ports": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "producer",
+              "validator",
+              "requestSchema",
+              "validatorRequestSchema",
+              "resultSchema",
+              "verdictSchema",
+              "options",
+              "cacheKeyComposition",
+              "resourceDeclarations",
+              "sideEffect",
+              "attemptBudget"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "observe",
+                  "derive",
+                  "reobserve",
+                  "render"
+                ]
+              },
+              "producer": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "version",
+                  "adapterIdentity"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "adapterIdentity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "version"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              },
+              "validator": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "version",
+                  "adapterIdentity"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "adapterIdentity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "version"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              },
+              "requestSchema": {
+                "type": "string",
+                "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+              },
+              "validatorRequestSchema": {
+                "type": "string",
+                "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+              },
+              "resultSchema": {
+                "type": "string",
+                "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+              },
+              "verdictSchema": {
+                "type": "string",
+                "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "valueSchema"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "valueSchema": {
+                      "type": "string",
+                      "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+                    }
+                  }
+                }
+              },
+              "cacheKeyComposition": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "resourceDeclarations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resourceKey",
+                    "access"
+                  ],
+                  "properties": {
+                    "resourceKey": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "access": {
+                      "enum": [
+                        "read",
+                        "shared-write",
+                        "exclusive-write"
+                      ]
+                    }
+                  }
+                },
+                "minItems": 1
+              },
+              "sideEffect": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "idempotent"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "read-only"
+                  },
+                  "idempotent": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "attemptBudget": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "description": "unique-by:kind within one manifest; enforced by manifest validator"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "producer",
+              "validator",
+              "requestSchema",
+              "validatorRequestSchema",
+              "resultSchema",
+              "verdictSchema",
+              "options",
+              "cacheKeyComposition",
+              "resourceDeclarations",
+              "sideEffect",
+              "attemptBudget"
+            ],
+            "properties": {
+              "kind": {
+                "const": "execute"
+              },
+              "producer": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "version",
+                  "adapterIdentity"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "adapterIdentity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "version"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              },
+              "validator": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "version",
+                  "adapterIdentity"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "adapterIdentity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "version"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              },
+              "requestSchema": {
+                "type": "string",
+                "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+              },
+              "validatorRequestSchema": {
+                "type": "string",
+                "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+              },
+              "resultSchema": {
+                "type": "string",
+                "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+              },
+              "verdictSchema": {
+                "type": "string",
+                "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "valueSchema"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "valueSchema": {
+                      "type": "string",
+                      "pattern": "^(lucid\\.[a-z0-9-]+(/v[0-9]+)?|tiwater\\.[a-z0-9-]+/v[0-9]+)$"
+                    }
+                  }
+                }
+              },
+              "cacheKeyComposition": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "resourceDeclarations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resourceKey",
+                    "access"
+                  ],
+                  "properties": {
+                    "resourceKey": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "access": {
+                      "enum": [
+                        "read",
+                        "shared-write",
+                        "exclusive-write"
+                      ]
+                    }
+                  }
+                },
+                "minItems": 1
+              },
+              "sideEffect": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "idempotent"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "mutating"
+                  },
+                  "idempotent": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "attemptBudget": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "description": "unique-by:kind within one manifest; enforced by manifest validator"
+          }
+        ]
+      },
+      "minItems": 1
+    }
+  }
+}
