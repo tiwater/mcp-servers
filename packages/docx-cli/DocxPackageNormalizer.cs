@@ -109,6 +109,14 @@ public static class DocxPackageNormalizer
         [W + "tblDescription"] = 16,
     };
 
+    private static readonly IReadOnlyDictionary<XName, int> SettingsTailOrder = new Dictionary<XName, int>
+    {
+        [W + "themeFontLang"] = 0,
+        [W + "clrSchemeMapping"] = 1,
+        [W + "doNotIncludeSubdocsInStats"] = 2,
+        [W + "doNotAutoCompressPictures"] = 3,
+    };
+
     public static int RunNormalize(string[] args)
     {
         if (args.Length < 2)
@@ -166,6 +174,7 @@ public static class DocxPackageNormalizer
 
         NormalizeNamespaces(document.Root);
         NormalizeChildOrder(document.Root);
+        NormalizeWpsNoNumbering(document.Root);
         normalized = document.Declaration is null
             ? document.ToString(SaveOptions.DisableFormatting)
             : document.Declaration + document.ToString(SaveOptions.DisableFormatting);
@@ -238,6 +247,47 @@ public static class DocxPackageNormalizer
             {
                 SortChildren(element, TablePropertyOrder);
             }
+            else if (element.Name == W + "settings")
+            {
+                SortSelectedChildren(element, SettingsTailOrder);
+            }
+        }
+    }
+
+    private static void NormalizeWpsNoNumbering(XElement root)
+    {
+        foreach (var numbering in root.Descendants(W + "numPr").ToList())
+        {
+            var level = numbering.Element(W + "ilvl")?.Attribute(W + "val")?.Value;
+            var numberId = numbering.Element(W + "numId")?.Attribute(W + "val")?.Value;
+            if (level == "-1" && numberId == "0")
+            {
+                numbering.Remove();
+            }
+        }
+    }
+
+    private static void SortSelectedChildren(
+        XElement element,
+        IReadOnlyDictionary<XName, int> order)
+    {
+        var slots = element.Elements()
+            .Where(child => order.ContainsKey(child.Name))
+            .ToList();
+        if (slots.Count < 2)
+        {
+            return;
+        }
+
+        var sorted = slots
+            .Select((child, index) => new { Child = child, Index = index })
+            .OrderBy(item => order[item.Child.Name])
+            .ThenBy(item => item.Index)
+            .Select(item => new XElement(item.Child))
+            .ToList();
+        for (var index = 0; index < slots.Count; index++)
+        {
+            slots[index].ReplaceWith(sorted[index]);
         }
     }
 

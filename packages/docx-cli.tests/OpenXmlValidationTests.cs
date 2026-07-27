@@ -34,7 +34,11 @@ public class OpenXmlValidationTests
 
         var result = OpenXmlValidation.Validate(input);
 
-        Assert.True(result.Pass);
+        Assert.True(
+            result.Pass,
+            string.Join(
+                Environment.NewLine,
+                result.Errors.Select(error => $"{error.Id}: {error.Description} ({error.Path})")));
         Assert.Empty(result.Errors);
         Assert.Equal(2, result.WarningCount);
         Assert.All(result.Warnings, warning =>
@@ -68,6 +72,37 @@ public class OpenXmlValidationTests
         Assert.Single(result.Errors);
         Assert.Equal("Sch_UnexpectedElementContentExpectingComplex", result.Errors[0].Id);
         Assert.Null(result.Errors[0].CompatibilityCode);
+    }
+
+    [Fact]
+    public void Wps_table_layout_in_a_style_is_a_compatibility_warning()
+    {
+        var input = CreateFixture(
+            """
+            <w:style w:type="table" w:styleId="WpsTableStyle">
+              <w:name w:val="WPS table style"/>
+              <w:qFormat/>
+              <w:uiPriority w:val="1"/>
+              <w:tblPr>
+                <w:tblBorders/>
+                <w:tblLayout w:type="fixed"/>
+              </w:tblPr>
+            </w:style>
+            """);
+
+        var result = OpenXmlValidation.Validate(input);
+
+        Assert.True(
+            result.Pass,
+            string.Join(
+                Environment.NewLine,
+                result.Errors.Select(error => $"{error.Id}: {error.Description} ({error.Path})")));
+        Assert.Empty(result.Errors);
+        Assert.Equal(2, result.WarningCount);
+        Assert.Contains(result.Warnings, warning =>
+            warning.CompatibilityCode == "wordprocessing-style-trailing-ui-priority");
+        Assert.Contains(result.Warnings, warning =>
+            warning.CompatibilityCode == "wordprocessing-style-table-layout");
     }
 
     private static string CreateFixture(params string[] styles)
