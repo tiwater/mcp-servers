@@ -169,7 +169,7 @@
           "$ref": "#/$defs/SchemaRef"
         },
         "value": {
-          "$comment": "Validated against the registered schema at sibling:schema.",
+          "$comment": "Validated against the registered schema at sibling:schema."
         },
         "sha256": {
           "type": "string",
