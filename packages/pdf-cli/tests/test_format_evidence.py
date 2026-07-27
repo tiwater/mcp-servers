@@ -7,7 +7,8 @@ import fitz
 
 from tiwater_pdf import __version__
 from tiwater_pdf.cli import main
-from tiwater_pdf.format_evidence import canonical, run, run_v2, sha
+from tiwater_pdf.format_evidence import canonical, run, run_v2, runtime_identity, sha
+from tiwater_pdf.provider_contract_manifest import build_manifest
 
 
 def contract_ref(name, contract_id):
@@ -30,7 +31,7 @@ def v2_request(source):
         },
         "provider": {"id": "tiwater-pdf", "version": __version__},
         "validator": {"id": "tiwater-pdf-validator", "version": __version__},
-        "runtime": {"id": "tiwater-pdf", "version": __version__},
+        "runtime": runtime_identity(__version__),
         "extraction": {
             "schema": contract_ref("tiwater.format-extraction-options-v1.schema.json", "tiwater.format-extraction-options/v1"),
             "value": extraction_value,
@@ -96,6 +97,29 @@ def test_pdf_v2_rejects_provider_drift_and_changed_source_bytes(tmp_path):
     output.unlink()
     assert run_v2(request_path, output, inspect, __version__) == 0
     assert json.loads(output.read_text())["code"] == "format-evidence-v2-invalid"
+
+
+def test_pdf_v2_requires_the_published_manifest_runtime(tmp_path):
+    source = tmp_path / "source.pdf"
+    make_pdf(source)
+    inspect = lambda path: {"pages": len(fitz.open(path))}
+    request_path = tmp_path / "request.json"
+    accepted = tmp_path / "accepted.json"
+    request = v2_request(source)
+    assert request["runtime"] == build_manifest(15, __version__)["runtime"]
+    request_path.write_text(canonical(request), encoding="utf-8")
+    assert run_v2(request_path, accepted, inspect, __version__) == 0
+    assert json.loads(accepted.read_text())["schema"] == "tiwater.format-evidence/v2"
+
+    forged = v2_request(source)
+    forged["runtime"] = {"id": "dotnet", "version": "9.0"}
+    forged_path = tmp_path / "forged-request.json"
+    forged_output = tmp_path / "forged-output.json"
+    forged_path.write_text(canonical(forged), encoding="utf-8")
+    assert run_v2(forged_path, forged_output, inspect, __version__) == 0
+    refused = json.loads(forged_output.read_text())
+    assert refused["schema"] == "tiwater.format-evidence-error/v1"
+    assert refused["code"] == "format-evidence-v2-invalid"
 
 
 def test_pdf_cli_exposes_v2_producer_and_validator(tmp_path, monkeypatch):
