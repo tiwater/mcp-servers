@@ -60,13 +60,6 @@ tiwater-pdf inspect-evidence-v2 --request request-v2.json --output evidence-v2.j
 tiwater-pdf validate-inspect-evidence-v2 --request request-v2.json --evidence evidence-v2.json --output verdict-v2.json
 ```
 
-The provider contract manifest closes over the observation-only port declarations and the deployed contract schema bytes. The validator independently recomputes every identity, hash, and port declaration from the installed package.
-
-```bash
-tiwater-pdf provider-contract-manifest --schema-set-version 15 --output manifest.json
-tiwater-pdf validate-provider-contract-manifest --manifest manifest.json --output manifest-verdict.json
-```
-
 ### 5. OCR Scanned PDFs With a Vision LLM
 Extracts text from scanned or image-only PDFs using an OpenAI-compatible vision model.
 

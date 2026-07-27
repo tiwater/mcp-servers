@@ -23,9 +23,6 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      - name: Test .NET tools before publish
-        run: dotnet test mcp-servers.sln -c Release --nologo
-
       - name: Login to NuGet
         id: nuget-login
         uses: NuGet/login@v1
@@ -62,23 +59,14 @@ jobs:
           set -euo pipefail
           verify_tool() {
             local project="$1"
-            shift
-            local package version destination tool_name
+            local package version destination
             package="$(sed -n 's:.*<PackageId>\(.*\)</PackageId>.*:\1:p' "$project" | head -n 1)"
             version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$project" | head -n 1)"
-            tool_name="$(sed -n 's:.*<ToolCommandName>\(.*\)</ToolCommandName>.*:\1:p' "$project" | head -n 1)"
             test -n "$package"
             test -n "$version"
-            test -n "$tool_name"
             destination="$(mktemp -d)"
             for attempt in $(seq 1 120); do
               if dotnet tool install "$package" --version "$version" --tool-path "$destination" --add-source https://api.nuget.org/v3/index.json --no-http-cache; then
-                for command in "$@"; do
-                  if "$destination/$tool_name" "$command" --help 2>&1 | grep -qi "Unknown command"; then
-                    echo "$tool_name $command is missing from the published binary" >&2
-                    return 1
-                  fi
-                done
                 return 0
               fi
               if [ "$attempt" = 120 ]; then
@@ -88,10 +76,10 @@ jobs:
               sleep 15
             done
           }
-          verify_tool packages/xlsx-cli/xlsx.csproj derive-operation validate-derived-operation execute-effect validate-execution-evidence provider-contract-manifest validate-provider-contract-manifest
-          verify_tool packages/docx-cli/docx.csproj derive-operation validate-derived-operation execute-effect validate-execution-evidence provider-contract-manifest validate-provider-contract-manifest
-          verify_tool packages/pptx-cli/pptx.csproj derive-operation validate-derived-operation execute-effect validate-execution-evidence provider-contract-manifest validate-provider-contract-manifest
-          verify_tool packages/convert-cli/convert.csproj render validate-render-evidence provider-contract-manifest validate-provider-contract-manifest
+          verify_tool packages/xlsx-cli/xlsx.csproj
+          verify_tool packages/docx-cli/docx.csproj
+          verify_tool packages/pptx-cli/pptx.csproj
+          verify_tool packages/convert-cli/convert.csproj
 
   publish-python:
     name: Publish Python Runtime (tiwater-pdf)

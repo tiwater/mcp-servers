@@ -111,11 +111,6 @@ def _contract_ref(file: str, contract_id: str) -> dict:
     return {"id": contract_id, "sha256": file_sha(_contract_path(file))}
 
 
-def runtime_identity(version: str) -> dict:
-    """The runtime identity this package publishes for every declared port."""
-    return {"id": "tiwater-pdf", "version": version}
-
-
 def _typed_value(file: str, contract_id: str, value: object) -> dict:
     return {"schema": _contract_ref(file, contract_id), "value": value, "sha256": sha(canonical(value))}
 
@@ -190,12 +185,8 @@ def _validate_request_v2(request: dict, version: str) -> None:
         raise ValueError("v2 request contract invalid")
     provider = {"id": "tiwater-pdf", "version": version}
     validator = {"id": "tiwater-pdf-validator", "version": version}
-    if request["provider"] != provider or request["validator"] != validator:
+    if request["provider"] != provider or request["validator"] != validator or request["runtime"] != provider:
         raise ValueError("v2 provider identity mismatch")
-    # The runtime a request carries is the runtime identity this package
-    # publishes in its provider contract manifest, never the provider identity.
-    if request["runtime"] != runtime_identity(version):
-        raise ValueError("v2 runtime identity mismatch")
     expected_evidence = _contract_ref("tiwater.format-evidence-v2.schema.json", "tiwater.format-evidence/v2")
     if request["expectedEvidenceContract"] != expected_evidence:
         raise ValueError("v2 evidence contract mismatch")

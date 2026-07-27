@@ -37,7 +37,7 @@ public sealed class FormatEvidenceV2ContractTests
             },
             provider = new { id = "tiwater-xlsx", version = "1.0.0" },
             validator = new { id = "tiwater-xlsx-validator", version = "1.0.0" },
-            runtime = ManifestRuntime(),
+            runtime = new { id = "tiwater-xlsx", version = "1.0.0" },
             extraction = new
             {
                 schema = ContractRef("tiwater.format-extraction-options-v1.schema.json", "tiwater.format-extraction-options/v1"),
@@ -90,12 +90,6 @@ public sealed class FormatEvidenceV2ContractTests
             Assert.Equal("xlsx.edit", target["capabilities"]![0]!["id"]!.GetValue<string>());
             Assert.Equal("1", target["capabilities"]![0]!["version"]!.GetValue<string>());
         }
-    }
-
-    private static dynamic ManifestRuntime()
-    {
-        var runtime = ProviderContractManifestCommand.RuntimeIdentity();
-        return new { id = runtime["id"]!.GetValue<string>(), version = runtime["version"]!.GetValue<string>() };
     }
 
     private static object ContractRef(string file, string id)

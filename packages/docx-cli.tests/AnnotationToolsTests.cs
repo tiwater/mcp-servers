@@ -27,7 +27,7 @@ public class AnnotationToolsTests
         var output = Path.Combine(root, "output.docx");
         File.WriteAllText(operations, JsonSerializer.Serialize(new DocxEditDocument([
             new DocxEditOperation("replaceTableCellText", TableIndex: 99, RowIndex: 0, CellIndex: 0, Text: "unreachable")
-        ]), Dockit.Docx.Json.Options));
+        ]), Json.Options));
 
         Assert.Equal(1, Editor.RunEdit([source, operations, output]));
         Assert.True(File.Exists(output));
@@ -503,7 +503,7 @@ public class AnnotationToolsTests
         var plan = new TemplateMigrationPlan("tiwater.docx.template-migration-plan/v1", analysis.Source.Sha256, analysis.Baseline.Sha256,
             [new TemplateMigrationMapping("body:paragraph:0", "body:paragraph:0", "copy-text")]);
         var planPath = Path.Combine(Path.GetTempPath(), $"migration-plan-{Guid.NewGuid():N}.json");
-        File.WriteAllText(planPath, System.Text.Json.JsonSerializer.Serialize(plan, Dockit.Docx.Json.Options));
+        File.WriteAllText(planPath, System.Text.Json.JsonSerializer.Serialize(plan, Json.Options));
         var output = Path.Combine(Path.GetTempPath(), $"migration-validated-{Guid.NewGuid():N}.docx");
         Assert.True(TemplateMigration.Apply(source, baseline, plan, output).Pass);
 
