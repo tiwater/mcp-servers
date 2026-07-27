@@ -103,7 +103,7 @@ internal static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  tiwater-convert render --request <request.json> --output <result.json>");
         Console.WriteLine("  tiwater-convert validate-render-evidence --request <request.json> --result <result.json> --output <verdict.json>");
-        Console.WriteLine("  tiwater-convert provider-contract-manifest --output <manifest.json>");
+        Console.WriteLine("  tiwater-convert provider-contract-manifest --schema-set-version <15> --output <manifest.json>");
         Console.WriteLine("  tiwater-convert validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json>");
         Console.WriteLine("  tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>");
         Console.WriteLine("  tiwater-convert recalculate-xlsx <input.xlsx> <output.xlsx>");
