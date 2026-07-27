@@ -1,57 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "tiwater.convert-provider-contract-manifest/v1",
-  "description": "Closed provider contract manifest binding every render contract schema byte hash, the render producer/validator command identities, and the runtime version of this package.",
+  "description": "Closed Set-15 provider contract manifest of the tiwater-convert render provider. The output mirrors lucid.provider-contract-manifest (schema set 15) restricted to exactly one read-only render port, the convert render contract family, and this package's identities; manifestId is recomputed over the port declarations and the deployed bytes of every declared contract schema. Convert never declares observation, derivation, reobservation, or execution ports.",
   "type": "object",
-  "required": ["schema", "provider", "contracts", "ports", "runtime", "manifest_sha256"],
+  "required": ["schema", "schemaSetVersion", "manifestId", "provider", "runtime", "ports"],
   "properties": {
-    "schema": { "const": "tiwater.convert-provider-contract-manifest/v1" },
-    "provider": { "$ref": "#/$defs/identity" },
-    "contracts": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["role", "schema_ref"],
-        "properties": {
-          "role": {
-            "enum": ["render-request", "render-result", "render-verdict", "native-render-provenance", "provider-contract-manifest", "provider-contract-manifest-verdict"]
-          },
-          "schema_ref": {
-            "type": "object",
-            "required": ["id", "sha256"],
-            "properties": {
-              "id": { "type": "string", "minLength": 1 },
-              "sha256": { "$ref": "#/$defs/sha256", "description": "SHA-256 of the deployed schema file bytes for this contract role." }
-            },
-            "additionalProperties": false
-          }
-        },
-        "additionalProperties": false
-      }
+    "schema": { "const": "lucid.provider-contract-manifest" },
+    "schemaSetVersion": { "type": "integer", "minimum": 1 },
+    "manifestId": {
+      "type": "string",
+      "pattern": "^manifest-[a-f0-9]{64}$",
+      "description": "manifest- plus SHA-256 over the canonical serialization of {contractSchemas, manifest}, where contractSchemas binds the deployed byte hash of every declared contract schema."
     },
+    "provider": { "$ref": "#/$defs/providerIdentity" },
+    "runtime": { "$ref": "#/$defs/providerIdentity" },
     "ports": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["role", "producer", "validator"],
-        "properties": {
-          "role": { "enum": ["render", "provider-contract-manifest"] },
-          "producer": { "$ref": "#/$defs/command" },
-          "validator": { "$ref": "#/$defs/command" }
-        },
-        "additionalProperties": false
-      }
-    },
-    "runtime": { "$ref": "#/$defs/identity" },
-    "manifest_sha256": {
-      "$ref": "#/$defs/sha256",
-      "description": "SHA-256 over the canonical serialization (ordinal key order) of the manifest without the manifest_sha256 field."
+      "minItems": 1,
+      "maxItems": 1,
+      "items": { "$ref": "#/$defs/renderPort" }
     }
   },
   "additionalProperties": false,
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "identity": {
+    "providerIdentity": {
       "type": "object",
       "required": ["id", "version"],
       "properties": {
@@ -60,13 +33,104 @@
       },
       "additionalProperties": false
     },
-    "command": {
+    "adapterIdentity": {
       "type": "object",
-      "required": ["id", "version", "command"],
+      "required": ["id", "version"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
-        "version": { "type": "string", "minLength": 1 },
-        "command": { "type": "string", "minLength": 1 }
+        "version": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "renderPort": {
+      "type": "object",
+      "required": [
+        "kind", "producer", "validator", "requestSchema", "validatorRequestSchema",
+        "resultSchema", "verdictSchema", "options", "cacheKeyComposition",
+        "resourceDeclarations", "sideEffect", "attemptBudget"
+      ],
+      "properties": {
+        "kind": { "const": "render" },
+        "producer": {
+          "type": "object",
+          "required": ["id", "version", "adapterIdentity"],
+          "properties": {
+            "id": { "const": "tiwater-convert-render-producer" },
+            "version": { "type": "string", "minLength": 1 },
+            "adapterIdentity": {
+              "allOf": [
+                { "$ref": "#/$defs/adapterIdentity" },
+                { "properties": { "id": { "const": "tiwater-convert-render-producer" } } }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "validator": {
+          "type": "object",
+          "required": ["id", "version", "adapterIdentity"],
+          "properties": {
+            "id": { "const": "tiwater-convert-render-validator" },
+            "version": { "type": "string", "minLength": 1 },
+            "adapterIdentity": {
+              "allOf": [
+                { "$ref": "#/$defs/adapterIdentity" },
+                { "properties": { "id": { "const": "tiwater-convert-render-validator" } } }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "requestSchema": { "const": "tiwater.convert-render-request/v1" },
+        "validatorRequestSchema": { "const": "tiwater.convert-render-request/v1" },
+        "resultSchema": { "const": "tiwater.convert-render-result/v1" },
+        "verdictSchema": { "const": "tiwater.convert-render-verdict/v1" },
+        "options": {
+          "type": "array",
+          "maxItems": 0,
+          "description": "tiwater.convert-render-request/v1 declares an explicitly empty option set."
+        },
+        "cacheKeyComposition": {
+          "type": "array",
+          "items": {
+            "enum": ["schemaSetVersion", "bytesSha256", "provider", "optionsSha256", "rendererBackend"]
+          },
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "allOf": [
+            { "contains": { "const": "schemaSetVersion" } },
+            { "contains": { "const": "bytesSha256" } },
+            { "contains": { "const": "provider" } },
+            { "contains": { "const": "optionsSha256" } },
+            { "contains": { "const": "rendererBackend" } }
+          ],
+          "description": "Exactly schemaSetVersion, bytesSha256, provider, optionsSha256, rendererBackend."
+        },
+        "resourceDeclarations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["resourceKey", "access"],
+            "properties": {
+              "resourceKey": { "const": "convert:document" },
+              "access": { "const": "read" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sideEffect": {
+          "type": "object",
+          "required": ["kind", "idempotent"],
+          "properties": {
+            "kind": { "const": "read-only" },
+            "idempotent": { "const": true }
+          },
+          "additionalProperties": false
+        },
+        "attemptBudget": { "const": 1 }
       },
       "additionalProperties": false
     }
