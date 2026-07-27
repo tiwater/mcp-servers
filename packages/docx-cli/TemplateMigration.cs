@@ -311,27 +311,32 @@ public static class TemplateMigration
         foreach (var proposal in candidate.Mappings ?? [])
         {
             var sourceMatches = ResolveSelector(analysis.Source.Objects, proposal.Source);
-            var baselineMatches = ResolveSelector(analysis.Baseline.Objects, proposal.Baseline);
             if (sourceMatches.Count != 1)
             {
                 failures.Add(new TemplateMigrationPlanFailure(sourceMatches.Count == 0 ? "template-migration-semantic-source-missing" : "template-migration-semantic-source-ambiguous", Detail: proposal.Source.Kind));
                 continue;
             }
-            if (baselineMatches.Count != 1)
-            {
-                failures.Add(new TemplateMigrationPlanFailure(baselineMatches.Count == 0 ? "template-migration-semantic-baseline-missing" : "template-migration-semantic-baseline-ambiguous", Detail: proposal.Baseline.Kind));
-                continue;
-            }
             var sourceObject = sourceMatches[0];
-            var baselineObject = baselineMatches[0];
             var pending = mappings.TryGetValue(sourceObject.Id, out var existing)
                 && string.Equals(existing.Disposition, "review-required", StringComparison.Ordinal);
             var newRunMapping = sourceObject.Kind == "run" && !mappings.ContainsKey(sourceObject.Id);
             if (!pending && !newRunMapping)
             {
-                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id, baselineObject.Id));
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id));
                 continue;
             }
+            if (string.Equals(proposal.Disposition, "out-of-scope", StringComparison.Ordinal))
+            {
+                mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, null, proposal.Disposition, "semantic-candidate-out-of-scope");
+                continue;
+            }
+            var baselineMatches = ResolveSelector(analysis.Baseline.Objects, proposal.Baseline!);
+            if (baselineMatches.Count != 1)
+            {
+                failures.Add(new TemplateMigrationPlanFailure(baselineMatches.Count == 0 ? "template-migration-semantic-baseline-missing" : "template-migration-semantic-baseline-ambiguous", Detail: proposal.Baseline!.Kind));
+                continue;
+            }
+            var baselineObject = baselineMatches[0];
             var reason = proposal.Disposition switch
             {
                 "retain-target" => "semantic-candidate-retain-target",
@@ -410,11 +415,16 @@ public static class TemplateMigration
         foreach (var mapping in mappings.EnumerateArray())
         {
             RequireOnlyFields(mapping, new HashSet<string>(["source", "baseline", "disposition"], StringComparer.Ordinal), "template-migration-semantic-candidate-mapping");
-            foreach (var side in new[] { "source", "baseline" })
+            if (!mapping.TryGetProperty("source", out var source)) throw new InvalidOperationException("template-migration-semantic-candidate-source-missing");
+            RequireOnlyFields(source, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-source");
+            var outOfScope = mapping.TryGetProperty("disposition", out var disposition)
+                && string.Equals(disposition.GetString(), "out-of-scope", StringComparison.Ordinal);
+            if (mapping.TryGetProperty("baseline", out var baseline))
             {
-                if (!mapping.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                if (outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");
+                RequireOnlyFields(baseline, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline");
             }
+            else if (!outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-missing");
         }
         if (root.TryGetProperty("bodyAppends", out var appends))
         {
@@ -444,8 +454,16 @@ public static class TemplateMigration
         foreach (var mapping in candidate.Mappings ?? [])
         {
             ValidateSemanticSelector(mapping.Source, "source");
-            ValidateSemanticSelector(mapping.Baseline, "baseline");
-            if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
+            if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label" or "out-of-scope")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
+            if (string.Equals(mapping.Disposition, "out-of-scope", StringComparison.Ordinal))
+            {
+                if (mapping.Baseline is not null) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");
+            }
+            else
+            {
+                if (mapping.Baseline is null) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-missing");
+                ValidateSemanticSelector(mapping.Baseline, "baseline");
+            }
         }
         foreach (var append in candidate.BodyAppends ?? [])
         {
