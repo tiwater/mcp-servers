@@ -352,7 +352,10 @@ public static class Transforms
 
     private static void ReplaceText(OpenXmlElement root, string token, string value)
     {
-        foreach (var paragraph in root.Descendants<Paragraph>())
+        var paragraphs = root is Paragraph paragraphRoot
+            ? [paragraphRoot]
+            : root.Descendants<Paragraph>().ToList();
+        foreach (var paragraph in paragraphs)
         {
             var texts = paragraph.Descendants<Text>().ToList();
             if (texts.Count == 0) continue;
