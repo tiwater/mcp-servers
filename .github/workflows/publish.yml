@@ -23,6 +23,14 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Parse every version-controlled JSON file
+        run: python scripts/validate_json.py --tracked
+
       - name: Login to NuGet
         id: nuget-login
         uses: NuGet/login@v1
@@ -33,24 +41,28 @@ jobs:
         run: |
           cd packages/xlsx-cli
           dotnet pack -c Release -o ./nupkg
+          python ../../scripts/validate_json.py --archives-from ./nupkg
           dotnet nuget push ./nupkg/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://www.nuget.org/api/v2/package --skip-duplicate
 
       - name: Pack and Publish tiwater-docx
         run: |
           cd packages/docx-cli
           dotnet pack -c Release -o ./nupkg
+          python ../../scripts/validate_json.py --archives-from ./nupkg
           dotnet nuget push ./nupkg/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://www.nuget.org/api/v2/package --skip-duplicate
 
       - name: Pack and Publish tiwater-pptx
         run: |
           cd packages/pptx-cli
           dotnet pack -c Release -o ./nupkg
+          python ../../scripts/validate_json.py --archives-from ./nupkg
           dotnet nuget push ./nupkg/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://www.nuget.org/api/v2/package --skip-duplicate
 
       - name: Pack and Publish tiwater-convert
         run: |
           cd packages/convert-cli
           dotnet pack -c Release -o ./nupkg
+          python ../../scripts/validate_json.py --archives-from ./nupkg
           dotnet nuget push ./nupkg/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://www.nuget.org/api/v2/package --skip-duplicate
 
       - name: Verify tools are installable from NuGet V3
@@ -97,6 +109,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install build twine
 
+      - name: Parse every version-controlled JSON file
+        run: python scripts/validate_json.py --tracked
+
       - name: Build and Publish tiwater-pdf
         env:
           TWINE_USERNAME: __token__
@@ -104,4 +119,5 @@ jobs:
         run: |
           cd packages/pdf-cli
           python -m build
+          python ../../scripts/validate_json.py --archives-from ./dist
           twine upload dist/* --skip-existing
