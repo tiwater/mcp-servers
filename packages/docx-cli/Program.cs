@@ -24,16 +24,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunProducer(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
-                "validate-inspect-evidence" => Task.FromResult(FormatEvidenceCommand.RunValidator(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, _ => DocumentTargetObservations())),
                 "inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunProducerV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, candidateCapabilities: CandidateCapabilities)),
                 "validate-inspect-evidence-v2" => Task.FromResult(FormatEvidenceCommand.RunValidatorV2(args[1..], "tiwater-docx", RuntimeIdentity.Version, "docx", input => new { document = Inspector.Inspect(input), tables = Inspector.InspectTables(input), flow = Inspector.InspectDocumentFlow(input), fonts = FontPolicy.Inspect(input) }, candidateCapabilities: CandidateCapabilities)),
-                "derive-operation" => Task.FromResult(OperationDerivationCommand.RunProducer(args[1..], OperationContract())),
-                "validate-derived-operation" => Task.FromResult(OperationDerivationCommand.RunValidator(args[1..], OperationContract())),
-                "execute-effect" => Task.FromResult(EffectExecutionCommand.RunProducer(args[1..], ExecutionContract())),
-                "validate-execution-evidence" => Task.FromResult(EffectExecutionCommand.RunValidator(args[1..], ExecutionContract())),
-                "provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunProducer(args[1..], ManifestContract())),
-                "validate-provider-contract-manifest" => Task.FromResult(ProviderContractManifestCommand.RunValidator(args[1..], ManifestContract())),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-template-transform" => RunValidateTemplateTransformAsync(args[1..]),
@@ -63,28 +55,6 @@ internal static class Cli
         }
     }
 
-    private static OperationDerivationCommand.Contract OperationContract() => new(
-        "tiwater-docx",
-        RuntimeIdentity.Version,
-        "docx",
-        "docx.edit",
-        "1",
-        "tiwater-docx-operation-derivation",
-        "1",
-        "tiwater-docx-edit",
-        "tiwater.docx-edit-v1.schema.json",
-        "tiwater.docx-edit/v1",
-        "current-artifact",
-        "single-edit",
-        true,
-        value =>
-        {
-            var plan = JsonSerializer.Deserialize<DocxEditDocument>(value.ToJsonString(), Json.Options)
-                ?? throw new InvalidOperationException("DOCX derived operation could not be parsed");
-            if (plan.Operations.Count != 1 || string.IsNullOrWhiteSpace(plan.Operations[0].Type))
-                throw new InvalidOperationException("DOCX derived operation invalid");
-        });
-
     private static IReadOnlyList<FormatEvidenceCommand.CandidateCapability> CandidateCapabilities(string pointer, IReadOnlySet<string> fields)
     {
         var kinds = new List<string>();
@@ -97,59 +67,6 @@ internal static class Cli
         if (fields.Contains("commentId")) kinds.AddRange(["replaceAnchoredText", "deleteComment"]);
         return kinds.Count == 0 ? [] : [new("docx.edit", "1", kinds)];
     }
-
-    private static EffectExecutionCommand.Contract ExecutionContract() => new(
-        "tiwater-docx",
-        RuntimeIdentity.Version,
-        "docx.edit",
-        "1",
-        "tiwater-docx-edit",
-        RuntimeIdentity.Version,
-        "tiwater.docx-edit-v1.schema.json",
-        "tiwater.docx-edit/v1",
-        "tiwater.docx-edit-result-v1.schema.json",
-        "tiwater.docx-edit-result/v1",
-        (operation, request) =>
-        {
-            var plan = JsonSerializer.Deserialize<DocxEditDocument>(operation["value"]!.ToJsonString(), Json.Options)
-                ?? throw new InvalidOperationException("DOCX execution operation invalid");
-            var input = request["inputArtifact"]!["path"]!.GetValue<string>();
-            var output = request["output"]!["path"]!.GetValue<string>();
-            Directory.CreateDirectory(Path.GetDirectoryName(output)!);
-            var receipt = Editor.Apply(input, output, plan.Operations);
-            return new(
-                JsonSerializer.SerializeToNode(receipt, Json.Options)!,
-                receipt.AppliedOperations.All(item => item.Applied));
-        },
-        receipt =>
-        {
-            _ = JsonSerializer.Deserialize<DocxEditResult>(receipt.ToJsonString(), Json.Options)
-                ?? throw new InvalidOperationException("DOCX execution receipt invalid");
-        },
-        receipt => JsonSerializer.Deserialize<DocxEditResult>(
-            receipt.ToJsonString(),
-            Json.Options)!.AppliedOperations.All(item => item.Applied));
-
-    private static ProviderContractManifestCommand.Contract ManifestContract() => new(
-        "tiwater-docx", RuntimeIdentity.Version, "docx.edit", "1",
-        "tiwater.docx-edit-v1.schema.json", "tiwater.docx-edit/v1",
-        "tiwater.docx-edit-result-v1.schema.json", "tiwater.docx-edit-result/v1",
-        "derive-operation", "validate-derived-operation",
-        "execute-effect", "validate-execution-evidence",
-        "tiwater-docx-edit", RuntimeIdentity.Version);
-
-    private static IReadOnlyList<FormatEvidenceCommand.AdditionalObservation> DocumentTargetObservations() =>
-    [
-        new("document-target-1", "document.semantic-target", "structure", new
-        {
-            candidateId = "docx-document-root",
-            semanticIdentity = new { format = "docx", scope = "document" },
-            runtimeLocator = new { kind = "docx-document" },
-            capabilities = new[] { "docx.edit" },
-            resourceSet = new[] { new { resourceKey = "docx-main-document", access = "write" } },
-            writeSet = new[] { new { resourceKey = "docx-main-document", writeKey = "document-content" } }
-        }, "/inspection/document")
-    ];
 
     private static Task<int> RunInspectAsync(string[] args)
     {
@@ -225,8 +142,6 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
-        Console.WriteLine("  inspect-evidence --request <request.json> --output <evidence.json>");
-        Console.WriteLine("  validate-inspect-evidence --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect-evidence-v2 --request <request.json> --output <evidence.json>");
         Console.WriteLine("  validate-inspect-evidence-v2 --request <request.json> --evidence <evidence.json> --output <verdict.json>");
         Console.WriteLine("  inspect-tables <input.docx> [--json]");

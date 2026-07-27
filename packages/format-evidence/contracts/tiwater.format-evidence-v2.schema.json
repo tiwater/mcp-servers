@@ -170,7 +170,6 @@
         },
         "value": {
           "$comment": "Validated against the registered schema at sibling:schema.",
-          "x-lucid-dynamic-schema-ref": "sibling:schema"
         },
         "sha256": {
           "type": "string",

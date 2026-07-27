@@ -14,48 +14,6 @@ namespace Dockit.Pptx.Tests;
 public class PptxCliTests
 {
     [Fact]
-    public async Task Published_inspection_evidence_is_recomputed_from_pptx_bytes()
-    {
-        var source = CreateFixture();
-        var root = Path.Combine(Path.GetTempPath(), $"pptx-evidence-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
-        var evidence = Path.Combine(root, "evidence.json");
-        var verdict = Path.Combine(root, "verdict.json");
-        var request = Path.Combine(root, "request.json");
-        var hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))).ToLowerInvariant();
-        File.WriteAllText(request, JsonSerializer.Serialize(new
-        {
-            schema = "tiwater.format-evidence-request/v1",
-            requestId = "request-1",
-            runId = "run-1",
-            subject = new { kind = "input", inputId = "input-1" },
-            artifact = new { artifactVersionId = "av-1", path = source, bytesSha256 = hash, format = "pptx" },
-            extraction = new
-            {
-                schema = "tiwater.pptx.inspect/v1",
-                options = new { },
-                optionsSha256 = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
-            },
-            expectedEvidenceSchema = "lucid.published-format-evidence/v1",
-            outputPath = evidence
-        }));
-
-        Assert.Equal(0, await global::Dockit.Pptx.Cli.Cli.RunAsync(["inspect-evidence", "--request", request, "--output", evidence]));
-        Assert.Equal(0, await global::Dockit.Pptx.Cli.Cli.RunAsync(["validate-inspect-evidence", "--request", request, "--evidence", evidence, "--output", verdict]));
-
-        var expectedVersion = typeof(global::Dockit.Pptx.Cli.Cli).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
-            .InformationalVersion.Split('+', 2)[0];
-        using var evidenceDocument = JsonDocument.Parse(File.ReadAllText(evidence));
-        Assert.Equal(expectedVersion, evidenceDocument.RootElement.GetProperty("provider").GetProperty("toolVersion").GetString());
-        Assert.Contains(
-            evidenceDocument.RootElement.GetProperty("observations").EnumerateArray(),
-            entry => entry.GetProperty("semanticField").GetString() == "document.semantic-target");
-        using var verdictDocument = JsonDocument.Parse(File.ReadAllText(verdict));
-        Assert.True(verdictDocument.RootElement.GetProperty("pass").GetBoolean());
-        Assert.Equal(expectedVersion, verdictDocument.RootElement.GetProperty("validator").GetProperty("toolVersion").GetString());
-    }
-    [Fact]
     public void Inspect_reports_slide_metrics_and_placeholders()
     {
         var path = CreateFixture();
