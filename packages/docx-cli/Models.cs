@@ -248,7 +248,9 @@ public sealed record TemplateMigrationSemanticSelector(
     string? PreviousText = null,
     string? NextText = null,
     string? DescendantText = null,
-    bool? Empty = null);
+    bool? Empty = null,
+    string? PreviousParentText = null,
+    string? NextParentText = null);
 
 public sealed record TemplateMigrationSemanticCandidateMapping(
     TemplateMigrationSemanticSelector Source,

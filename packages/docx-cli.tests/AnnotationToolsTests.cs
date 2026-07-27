@@ -278,6 +278,24 @@ public class AnnotationToolsTests
         Assert.True(overridden.Pass, string.Join("; ", overridden.Unresolved.Select(item => item.Reason)));
         Assert.Contains(overridden.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:0" && item.BaselineObjectId == "body:paragraph:1");
 
+        var repeatedRows = CreateRepeatedRowMigrationFixture();
+        var repeatedCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector(
+                        "table-cell",
+                        Scope: "body",
+                        Text: "Reviewed by",
+                        ParentText: "Reviewed by",
+                        PreviousParentText: "Prepared by",
+                        NextParentText: "Reviewed by"),
+                    null,
+                    "out-of-scope")
+            ]);
+        var repeatedResolved = TemplateMigration.ResolveSemanticCandidate(repeatedRows, repeatedRows, repeatedCandidate);
+        Assert.Contains(repeatedResolved.Plan.Mappings, item => item.SourceObjectId == "body:table:0:row:1:cell:0" && item.Disposition == "out-of-scope");
+
         var invalidCandidate = Path.Combine(Path.GetTempPath(), $"migration-semantic-invalid-{Guid.NewGuid():N}.json");
         File.WriteAllText(invalidCandidate, """
         {"schema":"tiwater.docx.template-migration-semantic-candidate/v1","mappings":[{"source":{"kind":"paragraph","text":"legacy factual content","sourceObjectId":"body:paragraph:0"},"baseline":{"kind":"paragraph","text":"target format placeholder"},"disposition":"copy-text"}]}
@@ -1687,6 +1705,21 @@ public class AnnotationToolsTests
         Assert.Equal("Name", rows[0].InnerText);
         Assert.Equal("Prepared byAlice", rows[1].InnerText);
         Assert.Equal("Approved byBob", rows[2].InnerText);
+    }
+
+    private static string CreateRepeatedRowMigrationFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"repeated-rows-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = doc.AddMainDocumentPart();
+        main.Document = new Document(new Body(
+            new Table(
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("Prepared by"))))),
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("Reviewed by"))))),
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("Reviewed by"))))),
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("Approved by"))))))));
+        main.Document.Save();
+        return path;
     }
 
     private static string CreateAnnotatedFixture()
