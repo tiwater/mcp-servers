@@ -21,7 +21,7 @@ public static class WpsSpreadsheetConverter
         if (string.IsNullOrWhiteSpace(python))
         {
             throw new InvalidOperationException(
-                "WPS RPC python is required for WPS XLS conversion. Set TIWATER_WPSRPC_PYTHON or LUCID_WPSRPC_PYTHON.");
+                "WPS RPC python is required for WPS XLS conversion. Set TIWATER_WPSRPC_PYTHON.");
         }
         var xvfb = WpsRpcSession.RequireCommand("xvfb-run", "WPS XLS conversion");
         var dbusRunSession = WpsRpcSession.RequireCommand("dbus-run-session", "WPS XLS conversion");
@@ -97,7 +97,7 @@ public static class WpsSpreadsheetConverter
 
     private static string? FindWpsRpcPython()
     {
-        foreach (var envName in new[] { "TIWATER_WPSRPC_PYTHON", "LUCID_WPSRPC_PYTHON" })
+        foreach (var envName in new[] { "TIWATER_WPSRPC_PYTHON" })
         {
             var value = Environment.GetEnvironmentVariable(envName);
             if (!string.IsNullOrWhiteSpace(value) && File.Exists(value))

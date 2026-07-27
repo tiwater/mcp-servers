@@ -18,7 +18,7 @@ public static class WpsWriterPdfConverter
         }
 
         var python = FindWpsRpcPython()
-            ?? throw new InvalidOperationException("WPS RPC python is required for WPS Writer PDF conversion. Set TIWATER_WPSRPC_PYTHON or LUCID_WPSRPC_PYTHON.");
+            ?? throw new InvalidOperationException("WPS RPC python is required for WPS Writer PDF conversion. Set TIWATER_WPSRPC_PYTHON.");
         var xvfb = FindOnPath("xvfb-run")
             ?? throw new InvalidOperationException("xvfb-run is required for WPS Writer PDF conversion.");
         var dbusRunSession = FindOnPath("dbus-run-session")
@@ -134,7 +134,7 @@ public static class WpsWriterPdfConverter
 
     private static string? FindWpsRpcPython()
     {
-        foreach (var envName in new[] { "TIWATER_WPSRPC_PYTHON", "LUCID_WPSRPC_PYTHON" })
+        foreach (var envName in new[] { "TIWATER_WPSRPC_PYTHON" })
         {
             var value = Environment.GetEnvironmentVariable(envName);
             if (!string.IsNullOrWhiteSpace(value) && File.Exists(value)) return Path.GetFullPath(value);

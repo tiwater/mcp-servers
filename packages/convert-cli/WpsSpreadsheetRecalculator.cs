@@ -36,7 +36,7 @@ public static class WpsSpreadsheetRecalculator
 
     private static string? FindPython()
     {
-        foreach (var name in new[] { "TIWATER_WPSRPC_PYTHON", "LUCID_WPSRPC_PYTHON" }) { var value = Environment.GetEnvironmentVariable(name); if (!string.IsNullOrWhiteSpace(value) && File.Exists(value)) return Path.GetFullPath(value); }
+        foreach (var name in new[] { "TIWATER_WPSRPC_PYTHON" }) { var value = Environment.GetEnvironmentVariable(name); if (!string.IsNullOrWhiteSpace(value) && File.Exists(value)) return Path.GetFullPath(value); }
         var candidate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "lucid-docs", "wpsrpc-venv", "bin", "python"); return File.Exists(candidate) ? candidate : null;
     }
 

@@ -14,12 +14,12 @@ public class LimaWpsWriterPdfConverterTests
 
         var startInfo = LimaWpsWriterPdfConverter.CreateProcessStartInfo(
             "/usr/local/bin/limactl",
-            "lucid-wps",
+            "tiwater-office",
             input,
             output);
 
         Assert.Equal("/usr/local/bin/limactl", startInfo.FileName);
-        Assert.Equal(new[] { "shell", "lucid-wps", "--", "bash", "-lc" }, startInfo.ArgumentList.Take(5));
+        Assert.Equal(new[] { "shell", "tiwater-office", "--", "bash", "-lc" }, startInfo.ArgumentList.Take(5));
         Assert.Contains(input, startInfo.ArgumentList[5]);
         Assert.Contains(output, startInfo.ArgumentList[5]);
         Assert.Contains("TIWATER_OFFICE_PDF_BACKEND=wps-writer", startInfo.ArgumentList[5]);
@@ -31,9 +31,9 @@ public class LimaWpsWriterPdfConverterTests
     {
         var startInfo = LimaWpsWriterPdfConverter.CreateProcessStartInfo(
             "/usr/local/bin/limactl",
-            "lucid-wps",
-            "/tmp/lucid-wps-render/input.rtf",
-            "/tmp/lucid-wps-render/output.pdf");
+            "tiwater-office",
+            "/tmp/tiwater-wps-render/input.rtf",
+            "/tmp/tiwater-wps-render/output.pdf");
 
         Assert.Contains("rtf-to-pdf", startInfo.ArgumentList[5]);
     }
@@ -43,12 +43,12 @@ public class LimaWpsWriterPdfConverterTests
     {
         var startInfo = LimaWpsWriterPdfConverter.CreateSpreadsheetConversionStartInfo(
             "/usr/local/bin/limactl",
-            "lucid-wps",
-            "/tmp/lucid-wps-render/input.xls",
-            "/tmp/lucid-wps-render/output.xlsx");
+            "tiwater-office",
+            "/tmp/tiwater-wps-render/input.xls",
+            "/tmp/tiwater-wps-render/output.xlsx");
 
         Assert.Equal("/usr/local/bin/limactl", startInfo.FileName);
-        Assert.Equal(new[] { "shell", "lucid-wps", "--", "bash", "-lc" }, startInfo.ArgumentList.Take(5));
+        Assert.Equal(new[] { "shell", "tiwater-office", "--", "bash", "-lc" }, startInfo.ArgumentList.Take(5));
         Assert.Contains("TIWATER_OFFICE_XLSX_BACKEND=wps-spreadsheet", startInfo.ArgumentList[5]);
         Assert.Contains("xls-to-xlsx", startInfo.ArgumentList[5]);
         Assert.DoesNotContain("soffice", startInfo.ArgumentList[5], StringComparison.OrdinalIgnoreCase);
