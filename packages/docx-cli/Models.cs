@@ -251,7 +251,7 @@ public sealed record TemplateMigrationSemanticSelector(
 
 public sealed record TemplateMigrationSemanticCandidateMapping(
     TemplateMigrationSemanticSelector Source,
-    TemplateMigrationSemanticSelector Baseline,
+    TemplateMigrationSemanticSelector? Baseline,
     string Disposition);
 
 public sealed record TemplateMigrationSemanticCandidateBodyAppend(
