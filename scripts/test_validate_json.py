@@ -13,11 +13,14 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().with_name("validate_json.py")
 
 
-def run_gate(*args: str) -> subprocess.CompletedProcess[str]:
+def run_gate(
+    *args: str, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
 
 
@@ -48,6 +51,17 @@ class ValidateJsonGateTests(unittest.TestCase):
             result = run_gate("--archives-from", str(root))
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("invalid JSON", result.stderr)
+
+    def test_relative_archive_directory_uses_invocation_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive_directory = root / "dist"
+            archive_directory.mkdir()
+            archive = archive_directory / "sample.whl"
+            with zipfile.ZipFile(archive, "w") as packed:
+                packed.writestr("contracts/valid.json", '{"ok": true}\n')
+            result = run_gate("--archives-from", "./dist", cwd=root)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

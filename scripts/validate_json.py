@@ -150,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root = (args.root or repo_root()).resolve()
+    invocation_directory = Path.cwd()
     failures: list[str] = []
     checked = 0
     selected = bool(args.tracked or args.paths or args.archives_from)
@@ -166,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     explicit_files: list[Path] = []
     archives: list[Path] = []
     for path in args.paths:
-        resolved = path if path.is_absolute() else root / path
+        resolved = path if path.is_absolute() else invocation_directory / path
         if resolved.is_dir():
             for candidate in sorted(resolved.rglob("*.json")):
                 if candidate.is_file():
@@ -184,7 +185,11 @@ def main(argv: list[str] | None = None) -> int:
             failures.append(f"{resolved}: path does not exist")
 
     for directory in args.archives_from:
-        resolved = directory if directory.is_absolute() else root / directory
+        resolved = (
+            directory
+            if directory.is_absolute()
+            else invocation_directory / directory
+        )
         if not resolved.is_dir():
             failures.append(f"{resolved}: archive directory does not exist")
             continue
