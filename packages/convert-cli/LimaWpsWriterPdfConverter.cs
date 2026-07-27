@@ -7,7 +7,7 @@ namespace Dockit.Convert;
 internal static class LimaWpsWriterPdfConverter
 {
     private const string InstanceEnvironment = "TIWATER_WPS_WRITER_LIMA_INSTANCE";
-    private const string SharedRoot = "/tmp/lucid-wps-render";
+    private const string SharedRoot = "/tmp/tiwater-wps-render";
 
     internal static bool IsAvailable()
         => OperatingSystem.IsMacOS()
@@ -162,10 +162,10 @@ internal static class LimaWpsWriterPdfConverter
     }
 
     private static string RemoteCommand(string input, string output, string backend)
-        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/tiwater/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
 
     private static string SpreadsheetConversionCommand(string input, string output, string command)
-        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/lucid-docs/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_XLSX_BACKEND=wps-spreadsheet; tiwater-convert {command} '{input}' '{output}'";
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/tiwater/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_XLSX_BACKEND=wps-spreadsheet; tiwater-convert {command} '{input}' '{output}'";
 
     private static void RunSpreadsheetConversion(string limactl, string instance, string input, string output, string command)
     {

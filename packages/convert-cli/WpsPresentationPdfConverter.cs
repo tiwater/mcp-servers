@@ -15,7 +15,7 @@ public static class WpsPresentationPdfConverter
         if (!File.Exists(input)) throw new InvalidOperationException($"Input file not found: {input}");
 
         var python = FindWpsRpcPython()
-            ?? throw new InvalidOperationException("WPS RPC python is required for WPS Presentation PDF conversion. Set TIWATER_WPSRPC_PYTHON or LUCID_WPSRPC_PYTHON.");
+            ?? throw new InvalidOperationException("WPS RPC python is required for WPS Presentation PDF conversion. Set TIWATER_WPSRPC_PYTHON.");
         var xvfb = FindOnPath("xvfb-run")
             ?? throw new InvalidOperationException("xvfb-run is required for WPS Presentation PDF conversion.");
         var dbusRunSession = FindOnPath("dbus-run-session")
@@ -122,7 +122,7 @@ public static class WpsPresentationPdfConverter
 
     private static string? FindWpsRpcPython()
     {
-        foreach (var environmentName in new[] { "TIWATER_WPSRPC_PYTHON", "LUCID_WPSRPC_PYTHON" })
+        foreach (var environmentName in new[] { "TIWATER_WPSRPC_PYTHON" })
         {
             var value = Environment.GetEnvironmentVariable(environmentName);
             if (!string.IsNullOrWhiteSpace(value) && File.Exists(value)) return Path.GetFullPath(value);

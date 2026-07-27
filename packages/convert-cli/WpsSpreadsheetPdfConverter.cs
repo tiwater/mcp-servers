@@ -17,7 +17,7 @@ public static class WpsSpreadsheetPdfConverter
         if (!File.Exists(input)) throw new InvalidOperationException($"Input file not found: {input}");
 
         var python = FindWpsRpcPython()
-            ?? throw new InvalidOperationException("WPS RPC python is required for WPS Spreadsheets PDF conversion. Set TIWATER_WPSRPC_PYTHON or LUCID_WPSRPC_PYTHON.");
+            ?? throw new InvalidOperationException("WPS RPC python is required for WPS Spreadsheets PDF conversion. Set TIWATER_WPSRPC_PYTHON.");
         var xvfb = WpsRpcSession.RequireCommand("xvfb-run", "WPS Spreadsheets PDF conversion");
         var dbusRunSession = WpsRpcSession.RequireCommand("dbus-run-session", "WPS Spreadsheets PDF conversion");
         if (string.IsNullOrWhiteSpace(FindOnPath("et"))) throw new InvalidOperationException("WPS Spreadsheets command not found: et");
@@ -69,7 +69,7 @@ public static class WpsSpreadsheetPdfConverter
 
     private static string? FindWpsRpcPython()
     {
-        foreach (var environmentName in new[] { "TIWATER_WPSRPC_PYTHON", "LUCID_WPSRPC_PYTHON" })
+        foreach (var environmentName in new[] { "TIWATER_WPSRPC_PYTHON" })
         {
             var value = Environment.GetEnvironmentVariable(environmentName);
             if (!string.IsNullOrWhiteSpace(value) && File.Exists(value)) return Path.GetFullPath(value);

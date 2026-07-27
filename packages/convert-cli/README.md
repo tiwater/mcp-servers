@@ -31,8 +31,8 @@ provider-owned object unchanged rather than probing the host independently.
 
 XLS conversion prefers WPS Spreadsheets through `pywpsrpc` when available,
 because WPS generally preserves legacy workbook formatting better on Linux. Set
-`TIWATER_WPSRPC_PYTHON` or `LUCID_WPSRPC_PYTHON` to the pywpsrpc venv Python if
-it is not installed at `~/.local/share/lucid-docs/wpsrpc-venv/bin/python`.
+`TIWATER_WPSRPC_PYTHON` to the pywpsrpc venv Python if
+it is not installed at `~/.local/share/tiwater/wpsrpc-venv/bin/python`.
 `xvfb-run` and the WPS `et` command must be available. If WPS conversion is not
 available or fails, the converter falls back to LibreOffice/soffice and then to
 the built-in NPOI converter.
@@ -60,7 +60,7 @@ native backend and fail closed; it never treats LibreOffice output as WPS
 Presentation proof.
 
 On macOS, set `TIWATER_WPS_WRITER_LIMA_INSTANCE` to the name of a configured
-Lima Linux instance that exposes the documented `/tmp/lucid-wps-render` shared
+Lima Linux instance that exposes the documented `/tmp/tiwater-wps-render` shared
 directory and has the published WPS Writer, Spreadsheets, and Presentation runtimes installed. The converter
 then stages each input and output in a unique shared directory and invokes
 `limactl shell <instance>` itself; it reports the requested `wps-writer` or
