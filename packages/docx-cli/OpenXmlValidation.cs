@@ -29,6 +29,8 @@ public static class OpenXmlValidation
         "The element has unexpected child element 'http://schemas.openxmlformats.org/wordprocessingml/2006/main:uiPriority'.";
     private const string TrailingUiPriorityCompatibilityCode =
         "wordprocessing-style-trailing-ui-priority";
+    private const string StyleTableLayoutCompatibilityCode =
+        "wordprocessing-style-table-layout";
 
     private static readonly HashSet<string> AllowedLeadingStyleMetadata =
     [
@@ -79,6 +81,10 @@ public static class OpenXmlValidation
             {
                 warnings.Add(issue with { CompatibilityCode = TrailingUiPriorityCompatibilityCode });
             }
+            else if (IsStyleTableLayoutCompatibilityWarning(error))
+            {
+                warnings.Add(issue with { CompatibilityCode = StyleTableLayoutCompatibilityCode });
+            }
             else
             {
                 errors.Add(issue);
@@ -123,17 +129,64 @@ public static class OpenXmlValidation
             return false;
         }
 
-        var normalizedStyle = (Style)style.CloneNode(true);
-        var normalizedUiPriority = normalizedStyle.GetFirstChild<UIPriority>();
-        var canonicalInsertionPoint = normalizedStyle.ChildElements.FirstOrDefault(child =>
-            child.LocalName is "semiHidden" or "unhideWhenUsed" or "qFormat");
-        if (normalizedUiPriority is null || canonicalInsertionPoint is null)
+        var normalizedStyle = NormalizeStyleForCompatibilityProof(style, removeTableLayout: true);
+        return IsValidIsolatedStyle(normalizedStyle, styles);
+    }
+
+    private static bool IsStyleTableLayoutCompatibilityWarning(ValidationErrorInfo error)
+    {
+        if (error.Id != "Sch_InvalidElementContentExpectingComplex"
+            || error.Part?.Uri.OriginalString != "/word/styles.xml"
+            || error.RelatedNode is not OpenXmlUnknownElement tableLayout
+            || tableLayout.LocalName != "tblLayout"
+            || tableLayout.NamespaceUri != WordprocessingNamespace
+            || tableLayout.Parent is not StyleTableProperties tableProperties
+            || tableProperties.Parent is not Style style
+            || style.Parent is not Styles styles
+            || tableProperties.ChildElements.Count(child =>
+                child.LocalName == "tblLayout"
+                && child.NamespaceUri == WordprocessingNamespace) != 1)
         {
             return false;
         }
 
-        normalizedUiPriority.Remove();
-        normalizedStyle.InsertBefore(normalizedUiPriority, canonicalInsertionPoint);
+        var normalizedStyle = NormalizeStyleForCompatibilityProof(style, removeTableLayout: true);
+        return IsValidIsolatedStyle(normalizedStyle, styles);
+    }
+
+    private static Style NormalizeStyleForCompatibilityProof(
+        Style style,
+        bool removeTableLayout)
+    {
+        var normalizedStyle = (Style)style.CloneNode(true);
+        if (removeTableLayout)
+        {
+            foreach (var tableLayout in normalizedStyle
+                .Elements<StyleTableProperties>()
+                .SelectMany(properties => properties.ChildElements)
+                .Where(child =>
+                    child.LocalName == "tblLayout"
+                    && child.NamespaceUri == WordprocessingNamespace)
+                .ToList())
+            {
+                tableLayout.Remove();
+            }
+        }
+
+        var normalizedUiPriority = normalizedStyle.GetFirstChild<UIPriority>();
+        var canonicalInsertionPoint = normalizedStyle.ChildElements.FirstOrDefault(child =>
+            child.LocalName is "semiHidden" or "unhideWhenUsed" or "qFormat");
+        if (normalizedUiPriority is not null && canonicalInsertionPoint is not null)
+        {
+            normalizedUiPriority.Remove();
+            normalizedStyle.InsertBefore(normalizedUiPriority, canonicalInsertionPoint);
+        }
+
+        return normalizedStyle;
+    }
+
+    private static bool IsValidIsolatedStyle(Style normalizedStyle, Styles styles)
+    {
         var normalizedStyles = (Styles)styles.CloneNode(false);
         normalizedStyles.Append(normalizedStyle);
         return !new OpenXmlValidator(FileFormatVersions.Microsoft365)

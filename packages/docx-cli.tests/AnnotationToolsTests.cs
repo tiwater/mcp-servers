@@ -1359,6 +1359,56 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void NormalizeOpenXml_repairs_wps_no_numbering_and_settings_order()
+    {
+        var output = Path.Combine(Path.GetTempPath(), $"normalized-wps-{Guid.NewGuid():N}.docx");
+        File.Copy(CreateAnnotatedFixture(), output);
+        ReplaceZipEntry(
+            output,
+            "word/document.xml",
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:pPr>
+                    <w:numPr>
+                      <w:ilvl w:val="-1"/>
+                      <w:numId w:val="0"/>
+                    </w:numPr>
+                  </w:pPr>
+                  <w:r><w:t>Not numbered</w:t></w:r>
+                </w:p>
+              </w:body>
+            </w:document>
+            """);
+        ReplaceZipEntry(
+            output,
+            "word/settings.xml",
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:doNotAutoCompressPictures/>
+              <w:themeFontLang/>
+              <w:clrSchemeMapping/>
+              <w:doNotIncludeSubdocsInStats/>
+            </w:settings>
+            """);
+
+        DocxPackageNormalizer.Normalize(output, output);
+
+        var documentXml = ReadZipEntry(output, "word/document.xml");
+        var settingsXml = ReadZipEntry(output, "word/settings.xml");
+        Assert.DoesNotContain("<w:numPr", documentXml);
+        Assert.True(settingsXml.IndexOf("<w:themeFontLang", StringComparison.Ordinal)
+            < settingsXml.IndexOf("<w:clrSchemeMapping", StringComparison.Ordinal));
+        Assert.True(settingsXml.IndexOf("<w:clrSchemeMapping", StringComparison.Ordinal)
+            < settingsXml.IndexOf("<w:doNotIncludeSubdocsInStats", StringComparison.Ordinal));
+        Assert.True(settingsXml.IndexOf("<w:doNotIncludeSubdocsInStats", StringComparison.Ordinal)
+            < settingsXml.IndexOf("<w:doNotAutoCompressPictures", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Edit_can_replace_header_paragraph_text()
     {
         var docPath = CreateSplitPlaceholderFixture();
