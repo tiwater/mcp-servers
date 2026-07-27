@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .format_evidence import _contract_path, atomic_write, canonical, file_sha, sha
+from .format_evidence import _contract_path, atomic_write, canonical, file_sha, runtime_identity, sha
 
 MANIFEST_SCHEMA_ID = "lucid.provider-contract-manifest"
 VERDICT_SCHEMA_ID = "tiwater.provider-contract-manifest-verdict/v1"
@@ -69,7 +69,7 @@ def build_manifest(schema_set_version: int, version: str) -> dict:
         "schema": MANIFEST_SCHEMA_ID,
         "schemaSetVersion": schema_set_version,
         "provider": provider,
-        "runtime": dict(provider),
+        "runtime": runtime_identity(version),
         "ports": [port],
     }
     material = {

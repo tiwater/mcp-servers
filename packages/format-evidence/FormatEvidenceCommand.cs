@@ -164,8 +164,12 @@ public static class FormatEvidenceCommand
             throw new InvalidOperationException("v2 request contract invalid");
         var expectedProvider = new JsonObject { ["id"] = tool, ["version"] = version };
         var expectedValidator = new JsonObject { ["id"] = $"{tool}-validator", ["version"] = version };
-        if (Canonical(request["provider"]) != Canonical(expectedProvider) || Canonical(request["validator"]) != Canonical(expectedValidator) || Canonical(request["runtime"]) != Canonical(expectedProvider))
+        if (Canonical(request["provider"]) != Canonical(expectedProvider) || Canonical(request["validator"]) != Canonical(expectedValidator))
             throw new InvalidOperationException("v2 provider identity mismatch");
+        // The runtime a request carries is the runtime identity this package
+        // publishes in its provider contract manifest, never the provider identity.
+        if (Canonical(request["runtime"]) != Canonical(ProviderContractManifestCommand.RuntimeIdentity()))
+            throw new InvalidOperationException("v2 runtime identity mismatch");
         var expectedEvidence = ContractRef("tiwater.format-evidence-v2.schema.json", "tiwater.format-evidence/v2");
         if (Canonical(request["expectedEvidenceContract"]) != Canonical(expectedEvidence))
             throw new InvalidOperationException("v2 evidence contract mismatch");

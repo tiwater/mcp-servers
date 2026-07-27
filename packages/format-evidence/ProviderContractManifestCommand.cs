@@ -221,7 +221,7 @@ public static class ProviderContractManifestCommand
     // deployed assembly was built for (net9.0), read from the assembly attribute
     // rather than hard-coded; producer and independent validator probe it the
     // same way on the same deployment.
-    private static JsonObject RuntimeIdentity()
+    public static JsonObject RuntimeIdentity()
     {
         var framework = typeof(ProviderContractManifestCommand).Assembly
             .GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName

@@ -207,7 +207,7 @@ public static class EffectExecutionCommand
     private static JsonObject BuildEvidence(Authority authority, ExecutionResult executed, Contract contract)
     {
         var receipt = Typed(
-            ContractRef(contract.ReceiptSchemaFile, contract.ReceiptSchemaId),
+            LucidContractRef(contract.ReceiptSchemaFile, contract.ReceiptSchemaId),
             executed.Receipt);
         var input = authority.ProviderRequest["inputArtifact"]?.DeepClone();
         var outputPath = authority.ProviderRequest["output"]!["path"]!.GetValue<string>();
@@ -243,7 +243,7 @@ public static class EffectExecutionCommand
             outputArtifact,
             outputEpochId,
             Typed(
-                ContractRef(
+                LucidContractRef(
                     "tiwater.provider-artifact-lineage-v1.schema.json",
                     "tiwater.provider-artifact-lineage/v1"),
                 lineageValue),
@@ -265,7 +265,9 @@ public static class EffectExecutionCommand
             ["inputArtifactVersionId"] = authority.ProviderRequest["inputArtifact"]?["artifactVersionId"]?.DeepClone(),
             ["outputBytesSha256"] = outputHash
         }))}";
-        var receipt = evidence["receipt"]!.AsObject();
+        var receipt = Typed(
+            LucidContractRef(contract.ReceiptSchemaFile, contract.ReceiptSchemaId),
+            evidence["receipt"]!["value"]!);
         var expectedEpoch = $"epoch-{Sha(Canonical(new JsonObject
         {
             ["effectId"] = authority.Effect["effectId"]!.DeepClone(),
@@ -280,7 +282,7 @@ public static class EffectExecutionCommand
             ["mediaType"] = authority.ProviderRequest["output"]!["mediaType"]!.DeepClone()
         };
         var lineage = Typed(
-            ContractRef(
+            LucidContractRef(
                 "tiwater.provider-artifact-lineage-v1.schema.json",
                 "tiwater.provider-artifact-lineage/v1"),
             LineageValue(authority, receipt, outputArtifact, expectedEpoch, contract));
@@ -305,7 +307,7 @@ public static class EffectExecutionCommand
         ["outputId"] = authority.ProviderRequest["outputId"]!.DeepClone(),
         ["mode"] = authority.ProviderRequest["mode"]!.DeepClone(),
         ["request"] = Typed(
-            ContractRef(
+            LucidContractRef(
                 "lucid.effect-execution-request-v1.schema.json",
                 "lucid.effect-execution-request/v1"),
             authority.Request),
@@ -319,8 +321,8 @@ public static class EffectExecutionCommand
         ["evidenceRefs"] = new JsonArray(
             EvidenceRef("authority", authority.BundleArtifact, authority.Request["effectBundleAuthority"]!["sha256"]!.GetValue<string>()),
             EvidenceRef("validator", authority.BundleVerdictArtifact, authority.Request["effectBundleVerdict"]!["sha256"]!.GetValue<string>()),
-            EvidenceRef("producer", authority.ProviderRequest["operationDerivationResult"]!.AsObject(), authority.ProviderRequest["operationDerivationResult"]!["sha256"]!.GetValue<string>()),
-            EvidenceRef("validator", authority.ProviderRequest["operationDerivationVerdict"]!.AsObject(), authority.ProviderRequest["operationDerivationVerdict"]!["sha256"]!.GetValue<string>()))
+            EvidenceRef("producer", LucidArtifactRef(authority.ProviderRequest["operationDerivationResult"]!.AsObject()), authority.ProviderRequest["operationDerivationResult"]!["sha256"]!.GetValue<string>()),
+            EvidenceRef("validator", LucidArtifactRef(authority.ProviderRequest["operationDerivationVerdict"]!.AsObject()), authority.ProviderRequest["operationDerivationVerdict"]!["sha256"]!.GetValue<string>()))
     };
 
     private static JsonObject LineageValue(
@@ -397,10 +399,23 @@ public static class EffectExecutionCommand
 
     private static JsonObject Artifact(string schemaFile, string schemaId, string path) => new()
     {
-        ["schema"] = ContractRef(schemaFile, schemaId),
+        ["schema"] = LucidContractRef(schemaFile, schemaId),
         ["path"] = Path.GetFullPath(path),
         ["sha256"] = FileSha(path)
     };
+
+    // A tiwater request references its artifacts with the schema bytes bound per
+    // reference; the same artifact inside the execution evidence keeps only the
+    // contract id.
+    private static JsonObject LucidArtifactRef(JsonObject artifact)
+    {
+        var projected = artifact.DeepClone().AsObject();
+        projected["schema"] = new JsonObject
+        {
+            ["id"] = artifact["schema"]!["id"]!.DeepClone()
+        };
+        return projected;
+    }
 
     private static JsonObject Finding(string code, string path) =>
         new() { ["code"] = code, ["path"] = path };
@@ -437,6 +452,16 @@ public static class EffectExecutionCommand
         var path = Path.Combine(AppContext.BaseDirectory, "contracts", file);
         if (!File.Exists(path)) throw new InvalidOperationException($"provider contract missing: {file}");
         return new JsonObject { ["id"] = id, ["sha256"] = FileSha(path) };
+    }
+
+    // lucid.execution-evidence/v2 closes every schema reference it carries over
+    // the contract id alone: the schema bytes are bound once by the Lucid schema
+    // set. Tiwater-owned documents keep the per-reference sha256.
+    private static JsonObject LucidContractRef(string file, string id)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "contracts", file);
+        if (!File.Exists(path)) throw new InvalidOperationException($"provider contract missing: {file}");
+        return new JsonObject { ["id"] = id };
     }
 
     private static void Write(string path, JsonNode value)
