@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.convert-provider-contract-manifest-verdict/v1",
+  "description": "Closed verdict of the independent provider contract manifest validator, which recomputes every identity, command, and schema byte hash from the deployed package.",
+  "type": "object",
+  "required": ["schema", "manifest_sha256", "validator", "decision", "findings"],
+  "properties": {
+    "schema": { "const": "tiwater.convert-provider-contract-manifest-verdict/v1" },
+    "manifest_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 of the validated manifest file bytes."
+    },
+    "validator": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "const": "tiwater-convert:provider-contract-manifest:validator" },
+        "version": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "decision": { "enum": ["pass", "failed"] },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
