@@ -38,9 +38,16 @@ public static class Validator
             foreach (var error in validator.Validate(spreadsheet))
             {
                 var xpath = error.Path?.XPath;
-                errors.Add(string.IsNullOrWhiteSpace(xpath)
+                var message = string.IsNullOrWhiteSpace(xpath)
                     ? error.Description
-                    : $"{xpath}: {error.Description}");
+                    : $"{xpath}: {error.Description}";
+                if (IsCompatibleFormControlExtension(error))
+                {
+                    warnings.Add(message);
+                    continue;
+                }
+
+                errors.Add(message);
             }
 
             ValidateSharedFormulas(spreadsheet, errors);
@@ -57,6 +64,19 @@ public static class Validator
             errors.Add($"File is not a valid XLSX package: {ex.Message}");
             return new XlsxValidationResult(file, false, errors, warnings);
         }
+    }
+
+    private static bool IsCompatibleFormControlExtension(ValidationErrorInfo error)
+    {
+        const string FormControlNamespace = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+        var node = error.Node;
+        if (node?.NamespaceUri != FormControlNamespace || node.LocalName != "formControlPr")
+        {
+            return false;
+        }
+
+        return error.Description is "The 'autoLine' attribute is not declared."
+            or "The 'print' attribute is not declared.";
     }
 
     private static void ValidateSharedFormulas(SpreadsheetDocument spreadsheet, List<string> errors)
