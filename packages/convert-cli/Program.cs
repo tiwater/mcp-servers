@@ -23,14 +23,6 @@ internal static class Program
         {
             switch (args[0])
             {
-                case "render":
-                    return RenderCommand.Run(args[1..]);
-                case "validate-render-evidence":
-                    return RenderEvidenceValidatorCommand.Run(args[1..]);
-                case "provider-contract-manifest":
-                    return ConvertProviderContractManifestCommand.RunProducer(args[1..]);
-                case "validate-provider-contract-manifest":
-                    return ConvertProviderContractManifestCommand.RunValidator(args[1..]);
                 case "xls-to-xlsx":
                     var result = WorkbookConverter.ConvertXlsToXlsx(args[1], args[2]);
                     Console.WriteLine(JsonSerializer.Serialize(new
@@ -101,10 +93,6 @@ internal static class Program
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
-        Console.WriteLine("  tiwater-convert render --request <request.json> --output <result.json>");
-        Console.WriteLine("  tiwater-convert validate-render-evidence --request <request.json> --result <result.json> --output <verdict.json>");
-        Console.WriteLine("  tiwater-convert provider-contract-manifest --schema-set-version <15> --output <manifest.json>");
-        Console.WriteLine("  tiwater-convert validate-provider-contract-manifest --manifest <manifest.json> --output <verdict.json>");
         Console.WriteLine("  tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>");
         Console.WriteLine("  tiwater-convert recalculate-xlsx <input.xlsx> <output.xlsx>");
         Console.WriteLine("  tiwater-convert <docx|xlsx|pptx|doc|xls|ppt|odt|ods|odp|rtf>-to-pdf <input> <output.pdf>");

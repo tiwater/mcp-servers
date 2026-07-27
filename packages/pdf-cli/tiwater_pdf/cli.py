@@ -17,7 +17,6 @@ from pathlib import Path
 import fitz
 from . import __version__
 from .format_evidence import run as run_format_evidence, run_v2 as run_format_evidence_v2
-from .provider_contract_manifest import run_producer as run_manifest_producer, run_validator as run_manifest_validator
 
 DEFAULT_OCR_MODEL = "qwen3.7-plus"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
@@ -1825,14 +1824,6 @@ def main() -> int:
     evidence_v2_validator_parser.add_argument("--evidence", type=Path, required=True)
     evidence_v2_validator_parser.add_argument("--output", type=Path, required=True)
 
-    manifest_parser = subparsers.add_parser("provider-contract-manifest", help="Emit the Set-15 observation-only provider contract manifest")
-    manifest_parser.add_argument("--schema-set-version", type=int, required=True, help="Lucid schema set version this manifest is built for (required; fails closed when omitted)")
-    manifest_parser.add_argument("--output", type=Path, required=True)
-
-    manifest_validator_parser = subparsers.add_parser("validate-provider-contract-manifest", help="Independently recompute the provider contract manifest")
-    manifest_validator_parser.add_argument("--manifest", type=Path, required=True)
-    manifest_validator_parser.add_argument("--output", type=Path, required=True)
-
     # extract-tables command
     extract_parser = subparsers.add_parser("extract-tables", help="Extract tables from PDF")
     extract_parser.add_argument("input", type=Path, help="PDF file to extract from")
@@ -1909,12 +1900,6 @@ def main() -> int:
 
         elif args.command == "validate-inspect-evidence-v2":
             return run_format_evidence_v2(args.request, args.output, lambda source: {"document": inspect(source), "tables": extract_table_details(source)}, __version__, args.evidence)
-
-        elif args.command == "provider-contract-manifest":
-            return run_manifest_producer(args.output, args.schema_set_version, __version__)
-
-        elif args.command == "validate-provider-contract-manifest":
-            return run_manifest_validator(args.manifest, args.output, __version__)
 
         elif args.command == "inspect":
             result = inspect(args.input)

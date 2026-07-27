@@ -121,7 +121,7 @@ public sealed class OperationDerivationCommandTests
         true,
         value =>
         {
-            var document = JsonSerializer.Deserialize<DocxEditDocument>(value.ToJsonString(), Dockit.Docx.Json.Options);
+            var document = JsonSerializer.Deserialize<DocxEditDocument>(value.ToJsonString(), Json.Options);
             Assert.NotNull(document);
             Assert.Single(document.Operations);
         });

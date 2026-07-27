@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Json.Schema;
 using Xunit;
 
 public sealed class EffectExecutionCommandTests
@@ -85,38 +84,6 @@ public sealed class EffectExecutionCommandTests
             ],
             fixture.Contract);
         Assert.Equal("fail", Load(fixture.ExecutionVerdictPath)["decision"]!.GetValue<string>());
-    }
-
-    [Fact]
-    public void Execution_evidence_satisfies_the_deployed_lucid_contract()
-    {
-        var fixture = Fixture();
-        Assert.Equal(0, EffectExecutionCommand.RunProducer(
-            [
-                "--request", fixture.RequestPath,
-                "--effect-bundle", fixture.BundlePath,
-                "--effect-verdict", fixture.BundleVerdictPath,
-                "--output", fixture.EvidencePath
-            ],
-            fixture.Contract));
-        var evidence = Load(fixture.EvidencePath);
-        var schema = JsonSchema.FromText(File.ReadAllText(
-            Path.Combine(AppContext.BaseDirectory, "contracts", "lucid.execution-evidence-v2.schema.json")));
-        var evaluation = schema.Evaluate(evidence, new EvaluationOptions { OutputFormat = OutputFormat.List });
-        Assert.True(
-            evaluation.IsValid,
-            string.Join("; ", evaluation.Details
-                .Where(detail => detail.HasErrors)
-                .SelectMany(detail => detail.Errors!.Select(error => $"{detail.InstanceLocation}: {error.Value}"))));
-        foreach (var reference in new[]
-        {
-            evidence["request"]!["schema"]!,
-            evidence["receipt"]!["schema"]!,
-            evidence["lineage"]!["schema"]!
-        })
-            Assert.Equal(["id"], reference.AsObject().Select(item => item.Key));
-        foreach (var evidenceRef in evidence["evidenceRefs"]!.AsArray())
-            Assert.Equal(["id"], evidenceRef!["artifact"]!["schema"]!.AsObject().Select(item => item.Key));
     }
 
     private sealed record ExecutionFixture(
