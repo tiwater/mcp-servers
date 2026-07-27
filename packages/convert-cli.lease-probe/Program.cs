@@ -7,7 +7,7 @@ var holdMilliseconds = int.Parse(args[2], System.Globalization.CultureInfo.Invar
 var timeoutMilliseconds = int.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
 try
 {
-    using var lease = WpsRpcSession.AcquireSpreadsheetLease(TimeSpan.FromMilliseconds(timeoutMilliseconds), lockPath);
+    using var lease = WpsRpcSession.AcquireEtLease(TimeSpan.FromMilliseconds(timeoutMilliseconds), lockPath);
     File.AppendAllText(eventLog, $"+{Environment.ProcessId}\n");
     Thread.Sleep(holdMilliseconds);
     File.AppendAllText(eventLog, $"-{Environment.ProcessId}\n");

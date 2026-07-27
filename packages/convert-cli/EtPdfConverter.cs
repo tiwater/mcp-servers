@@ -2,10 +2,10 @@ using System.Diagnostics;
 
 namespace Dockit.Convert;
 
-public static class WpsSpreadsheetPdfConverter
+public static class EtPdfConverter
 {
     internal static IDisposable AcquireRuntimeLease(TimeSpan? timeout = null, string? lockPath = null)
-        => WpsRpcSession.AcquireSpreadsheetLease(timeout, lockPath);
+        => WpsRpcSession.AcquireEtLease(timeout, lockPath);
 
     public static bool IsAvailable()
         => !string.IsNullOrWhiteSpace(FindWpsRpcPython())
@@ -17,17 +17,17 @@ public static class WpsSpreadsheetPdfConverter
         if (!File.Exists(input)) throw new InvalidOperationException($"Input file not found: {input}");
 
         var python = FindWpsRpcPython()
-            ?? throw new InvalidOperationException("WPS RPC python is required for WPS Spreadsheets PDF conversion. Set TIWATER_WPSRPC_PYTHON.");
-        var xvfb = WpsRpcSession.RequireCommand("xvfb-run", "WPS Spreadsheets PDF conversion");
-        var dbusRunSession = WpsRpcSession.RequireCommand("dbus-run-session", "WPS Spreadsheets PDF conversion");
-        if (string.IsNullOrWhiteSpace(FindOnPath("et"))) throw new InvalidOperationException("WPS Spreadsheets command not found: et");
+            ?? throw new InvalidOperationException("WPS RPC python is required for ET PDF conversion. Set TIWATER_WPSRPC_PYTHON.");
+        var xvfb = WpsRpcSession.RequireCommand("xvfb-run", "ET PDF conversion");
+        var dbusRunSession = WpsRpcSession.RequireCommand("dbus-run-session", "ET PDF conversion");
+        if (string.IsNullOrWhiteSpace(FindOnPath("et"))) throw new InvalidOperationException("ET command not found: et");
 
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
         if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
-        var temporaryRoot = Path.Combine(Path.GetTempPath(), $"tiwater-convert-wps-spreadsheet-{Guid.NewGuid():N}");
+        var temporaryRoot = Path.Combine(Path.GetTempPath(), $"tiwater-convert-et-{Guid.NewGuid():N}");
         Directory.CreateDirectory(temporaryRoot);
         var helperPath = Path.Combine(temporaryRoot, "spreadsheet_to_pdf_wps.py");
-        File.WriteAllText(helperPath, WpsHelperScript);
+        File.WriteAllText(helperPath, EtHelperScript);
 
         try
         {
@@ -35,13 +35,13 @@ public static class WpsSpreadsheetPdfConverter
             var startInfo = WpsRpcSession.CreateProcessStartInfo(
                 dbusRunSession, xvfb, python, helperPath, input, output, temporaryRoot);
             using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Failed to start WPS Spreadsheets RPC conversion.");
+                ?? throw new InvalidOperationException("Failed to start ET RPC conversion.");
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
-                throw new TimeoutException("WPS Spreadsheets RPC PDF conversion timed out after 180 seconds.");
+                throw new TimeoutException("ET RPC PDF conversion timed out after 180 seconds.");
             }
 
             var stdout = stdoutTask.GetAwaiter().GetResult();
@@ -49,7 +49,7 @@ public static class WpsSpreadsheetPdfConverter
             if (process.ExitCode != 0 || !IsPdf(output))
             {
                 var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));
-                throw new InvalidOperationException("WPS Spreadsheets RPC failed to convert workbook to PDF."
+                throw new InvalidOperationException("ET RPC failed to convert workbook to PDF."
                     + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
             }
         }
@@ -74,7 +74,7 @@ public static class WpsSpreadsheetPdfConverter
             var value = Environment.GetEnvironmentVariable(environmentName);
             if (!string.IsNullOrWhiteSpace(value) && File.Exists(value)) return Path.GetFullPath(value);
         }
-        var candidate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "lucid-docs", "wpsrpc-venv", "bin", "python");
+        var candidate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "tiwater", "wpsrpc-venv", "bin", "python");
         return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;
     }
 
@@ -88,7 +88,7 @@ public static class WpsSpreadsheetPdfConverter
         return null;
     }
 
-    private const string WpsHelperScript = """
+    private const string EtHelperScript = """
 import os
 import sys
 

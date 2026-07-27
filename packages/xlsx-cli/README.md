@@ -24,22 +24,12 @@ Outputs sheet-level metrics, placeholders, used ranges, formula counts, and merg
 ```bash
 tiwater-xlsx inspect <template.xlsx> [--json]
 ```
-*   `--json` returns structured output suitable for parsers.
+*   `--json` returns the complete technical workbook readback.
 *   Every addressed cell exposes style identity, number-format id/code, font/fill/border ids, horizontal/vertical alignment, and wrap state. Rich text cells also expose per-run text and formatting.
 
-The same inspector backs the closed published evidence ports; validation re-opens the workbook and independently recomputes the evidence.
+Inspection accepts current `.xls` and `.xlsx` sources; editing remains `.xlsx` only.
 
-```bash
-tiwater-xlsx inspect-evidence --request request.json --output evidence.json
-tiwater-xlsx validate-inspect-evidence --request request.json --evidence evidence.json --output verdict.json
-```
-
-The published inspection ports accept current `.xls` and `.xlsx` sources. Evidence
-keeps the uploaded source format and byte hash while exposing the same normalized
-`xlsx.inspection` observation; editing and delivery remain `.xlsx` only.
-
-### 2. Fill a Template
-`tiwater-xlsx evidence <input.xlsx>` emits the versioned `tiwater.xlsx.evidence/v1`
+`tiwater-xlsx inspect <input.xlsx> --json` includes the versioned `tiwater.xlsx.evidence/v1`
 readback envelope. It includes typed raw cells, style identity and alignment,
 number formats, formula/shared-formula metadata, merges, dimensions, sheet view,
 print/page settings and workbook date system for independent baseline comparison.
@@ -47,7 +37,9 @@ Each physical cell also exposes its formatted display value, effective inherited
 style identifiers, and normalized number-format evidence (source, normalized code,
 semantic kind, and date classification). Numeric date/time cells include an ISO-8601
 value computed from the workbook's declared 1900 or 1904 date system. These are
-technical readback facts; the tool does not infer scenario semantics.
+technical readback facts; the tool does not infer business semantics.
+
+### 2. Fill a Template
 
 Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
 
@@ -136,5 +128,5 @@ Validates an `.xlsx` workbook as an Open XML spreadsheet package and returns JSO
 tiwater-xlsx validate <input.xlsx>
 ```
 
-Scenario-specific fixed-layout planning workflows now live in Lucid skills and scripts. This CLI remains the generic workbook runtime for inspection, export, template filling, explicit edit application, and package validation.
+The CLI is a generic workbook runtime for inspection, export, template filling, explicit edit application, and package validation.
 `export-json` also includes each cell's complete `style` evidence and `richTextRuns`, so downstream planners and independent validators can prove formats without parsing package XML directly.

@@ -4,7 +4,6 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System.Text.Json;
 using Xunit;
-using Tiwater.FormatEvidence;
 using System.Security.Cryptography;
 
 namespace Dockit.Xlsx.Tests;

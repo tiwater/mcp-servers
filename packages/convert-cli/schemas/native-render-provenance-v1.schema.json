@@ -5,7 +5,7 @@
   "required": ["schema", "backend", "wps", "runtime", "fonts", "input", "output", "page_count"],
   "properties": {
     "schema": { "const": "tiwater.convert-native-render-provenance/v1" },
-    "backend": { "enum": ["wps-writer", "wps-spreadsheet", "wps-presentation"] },
+    "backend": { "enum": ["wps", "et", "wpp"] },
     "wps": {
       "type": "object",
       "required": ["package", "build_version", "executable_sha256"],

@@ -6,7 +6,6 @@ using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
 using System.Text.Json;
 using System.Security.Cryptography;
-using Tiwater.FormatEvidence;
 using Xunit;
 
 namespace Dockit.Xlsx.Tests;
@@ -22,7 +21,7 @@ public class LegacyXlsTests
             Inspector.InspectPublishedEvidence(path, (_, _) =>
                 new WorkbookConverter.ConversionResult("libreoffice", "WPS unavailable")));
 
-        Assert.Contains("requires authoritative WPS Spreadsheet conversion without fallback", error.Message);
+        Assert.Contains("requires authoritative ET conversion without fallback", error.Message);
     }
 
     [Fact]
@@ -51,11 +50,11 @@ public class LegacyXlsTests
             sheet.CreateRow(0).CreateCell(0).SetCellValue("Condition");
             using var stream = File.Create(output);
             workbook.Write(stream);
-            return new WorkbookConverter.ConversionResult("wps-spreadsheet");
+            return new WorkbookConverter.ConversionResult("et");
         });
 
         Assert.True(called);
-        Assert.Equal("wps-spreadsheet", evidence.GetProperty("conversion").GetProperty("backend").GetString());
+        Assert.Equal("et", evidence.GetProperty("conversion").GetProperty("backend").GetString());
     }
 
     [Fact]

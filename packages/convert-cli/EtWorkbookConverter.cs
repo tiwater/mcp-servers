@@ -3,7 +3,7 @@ using NPOI.XSSF.UserModel;
 
 namespace Dockit.Convert;
 
-public static class WpsSpreadsheetConverter
+public static class EtWorkbookConverter
 {
     public static bool IsAvailable()
         => !string.IsNullOrWhiteSpace(FindWpsRpcPython())
@@ -27,7 +27,7 @@ public static class WpsSpreadsheetConverter
         var dbusRunSession = WpsRpcSession.RequireCommand("dbus-run-session", "WPS XLS conversion");
         if (string.IsNullOrWhiteSpace(FindOnPath("et")))
         {
-            throw new InvalidOperationException("WPS Spreadsheets command not found: et");
+            throw new InvalidOperationException("ET command not found: et");
         }
 
         var outputDir = Path.GetDirectoryName(Path.GetFullPath(output));
@@ -39,11 +39,11 @@ public static class WpsSpreadsheetConverter
         var tempRoot = Path.Combine(Path.GetTempPath(), $"tiwater-convert-wps-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
         var helperPath = Path.Combine(tempRoot, "xls_to_xlsx_wps.py");
-        File.WriteAllText(helperPath, WpsHelperScript);
+        File.WriteAllText(helperPath, EtHelperScript);
 
         try
         {
-            using var lease = WpsRpcSession.AcquireSpreadsheetLease();
+            using var lease = WpsRpcSession.AcquireEtLease();
             var startInfo = WpsRpcSession.CreateProcessStartInfo(
                 dbusRunSession, xvfb, python, helperPath, input, output, tempRoot);
 
@@ -109,7 +109,7 @@ public static class WpsSpreadsheetConverter
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (!string.IsNullOrWhiteSpace(home))
         {
-            var candidate = Path.Combine(home, ".local", "share", "lucid-docs", "wpsrpc-venv", "bin", "python");
+            var candidate = Path.Combine(home, ".local", "share", "tiwater", "wpsrpc-venv", "bin", "python");
             if (File.Exists(candidate))
             {
                 return Path.GetFullPath(candidate);
@@ -133,7 +133,7 @@ public static class WpsSpreadsheetConverter
         return null;
     }
 
-    private const string WpsHelperScript = """
+    private const string EtHelperScript = """
 import os
 import sys
 

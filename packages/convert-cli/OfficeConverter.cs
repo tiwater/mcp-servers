@@ -60,75 +60,75 @@ public static class OfficeConverter
         var spreadsheetFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "xls", "xlsx" };
         var presentationFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ppt", "pptx", "odp" };
         var requestedBackend = (Environment.GetEnvironmentVariable("TIWATER_OFFICE_PDF_BACKEND") ?? "auto").Trim().ToLowerInvariant();
-        if (!new[] { "auto", "wps-writer", "wps-spreadsheet", "wps-presentation", "libreoffice" }.Contains(requestedBackend))
+        if (!new[] { "auto", "wps", "et", "wpp", "libreoffice" }.Contains(requestedBackend))
         {
             throw new InvalidOperationException($"Unsupported TIWATER_OFFICE_PDF_BACKEND: {requestedBackend}");
         }
 
-        if (requestedBackend == "wps-writer" && !writerFormats.Contains(normalizedFormat))
-            throw new InvalidOperationException($"WPS Writer PDF backend does not support {normalizedFormat} input.");
-        if (requestedBackend == "wps-spreadsheet" && !spreadsheetFormats.Contains(normalizedFormat))
-            throw new InvalidOperationException($"WPS Spreadsheets PDF backend does not support {normalizedFormat} input.");
-        if (requestedBackend == "wps-presentation" && !presentationFormats.Contains(normalizedFormat))
-            throw new InvalidOperationException($"WPS Presentation PDF backend does not support {normalizedFormat} input.");
+        if (requestedBackend == "wps" && !writerFormats.Contains(normalizedFormat))
+            throw new InvalidOperationException($"WPS PDF backend does not support {normalizedFormat} input.");
+        if (requestedBackend == "et" && !spreadsheetFormats.Contains(normalizedFormat))
+            throw new InvalidOperationException($"ET PDF backend does not support {normalizedFormat} input.");
+        if (requestedBackend == "wpp" && !presentationFormats.Contains(normalizedFormat))
+            throw new InvalidOperationException($"WPP PDF backend does not support {normalizedFormat} input.");
 
         if (writerFormats.Contains(normalizedFormat) && requestedBackend != "libreoffice")
         {
-            if (WpsWriterPdfConverter.IsAvailable())
+            if (WpsPdfConverter.IsAvailable())
             {
-                WpsWriterPdfConverter.ConvertToPdf(input, output);
-                return NativeWpsResult(input, output, "wps-writer");
+                WpsPdfConverter.ConvertToPdf(input, output);
+                return NativeWpsResult(input, output, "wps");
             }
-            if (LimaWpsWriterPdfConverter.IsAvailable())
+            if (LimaWpsPdfConverter.IsAvailable())
             {
-                return new OfficePdfConversionResult("wps-writer", NativeRenderProvenance: LimaWpsWriterPdfConverter.ConvertToPdf(input, output));
+                return new OfficePdfConversionResult("wps", NativeRenderProvenance: LimaWpsPdfConverter.ConvertToPdf(input, output));
             }
-            if (requestedBackend == "wps-writer")
+            if (requestedBackend == "wps")
             {
-                throw new InvalidOperationException("WPS Writer PDF backend was required but neither a local WPS Writer runtime nor a configured Lima WPS Writer instance is available.");
+                throw new InvalidOperationException("WPS PDF backend was required but neither a local WPS runtime nor a configured Lima WPS instance is available.");
             }
         }
 
         if (spreadsheetFormats.Contains(normalizedFormat) && requestedBackend != "libreoffice")
         {
-            if (WpsSpreadsheetPdfConverter.IsAvailable())
+            if (EtPdfConverter.IsAvailable())
             {
-                WpsSpreadsheetPdfConverter.ConvertToPdf(input, output);
-                return NativeWpsResult(input, output, "wps-spreadsheet");
+                EtPdfConverter.ConvertToPdf(input, output);
+                return NativeWpsResult(input, output, "et");
             }
-            if (LimaWpsWriterPdfConverter.IsAvailable())
+            if (LimaWpsPdfConverter.IsAvailable())
             {
-                return new OfficePdfConversionResult("wps-spreadsheet", NativeRenderProvenance: LimaWpsWriterPdfConverter.ConvertSpreadsheetToPdf(input, output));
+                return new OfficePdfConversionResult("et", NativeRenderProvenance: LimaWpsPdfConverter.ConvertSpreadsheetToPdf(input, output));
             }
-            if (requestedBackend == "wps-spreadsheet")
+            if (requestedBackend == "et")
             {
-                throw new InvalidOperationException("WPS Spreadsheets PDF backend was required but neither a local WPS Spreadsheets runtime nor a configured Lima WPS instance is available.");
+                throw new InvalidOperationException("ET PDF backend was required but neither a local ET runtime nor a configured Lima WPS instance is available.");
             }
         }
 
         if (presentationFormats.Contains(normalizedFormat) && requestedBackend != "libreoffice")
         {
-            if (WpsPresentationPdfConverter.IsAvailable())
+            if (WppPdfConverter.IsAvailable())
             {
-                WpsPresentationPdfConverter.ConvertToPdf(input, output);
-                return NativeWpsResult(input, output, "wps-presentation");
+                WppPdfConverter.ConvertToPdf(input, output);
+                return NativeWpsResult(input, output, "wpp");
             }
-            if (LimaWpsWriterPdfConverter.IsAvailable())
+            if (LimaWpsPdfConverter.IsAvailable())
             {
-                return new OfficePdfConversionResult("wps-presentation", NativeRenderProvenance: LimaWpsWriterPdfConverter.ConvertPresentationToPdf(input, output));
+                return new OfficePdfConversionResult("wpp", NativeRenderProvenance: LimaWpsPdfConverter.ConvertPresentationToPdf(input, output));
             }
-            if (requestedBackend == "wps-presentation")
+            if (requestedBackend == "wpp")
             {
-                throw new InvalidOperationException("WPS Presentation PDF backend was required but neither a local WPS Presentation runtime nor a configured Lima WPS instance is available.");
+                throw new InvalidOperationException("WPP PDF backend was required but neither a local WPP runtime nor a configured Lima WPS instance is available.");
             }
         }
 
         ConvertWithSoffice(input, output, "pdf", sofficePath);
         var fallbackReason = writerFormats.Contains(normalizedFormat)
-            ? "wps-writer-unavailable"
+            ? "wps-unavailable"
             : spreadsheetFormats.Contains(normalizedFormat)
-                ? "wps-spreadsheet-unavailable"
-                : presentationFormats.Contains(normalizedFormat) ? "wps-presentation-unavailable" : null;
+                ? "et-unavailable"
+                : presentationFormats.Contains(normalizedFormat) ? "wpp-unavailable" : null;
         return new OfficePdfConversionResult("libreoffice", fallbackReason);
     }
 

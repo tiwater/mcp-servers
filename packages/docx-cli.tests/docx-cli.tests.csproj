@@ -17,6 +17,5 @@
 
   <ItemGroup>
     <ProjectReference Include="../docx-cli/docx.csproj" />
-    <None Include="../format-evidence/contracts/*.schema.json" Link="contracts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
