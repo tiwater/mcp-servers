@@ -1206,6 +1206,37 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_and_inspect_preserve_line_breaks_in_plain_and_rich_table_cell_text()
+    {
+        var source = CreateTwoCellTableFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"table-line-breaks-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(source, output, [
+            new DocxEditOperation(
+                "replaceTableCellText",
+                TableIndex: 0,
+                RowIndex: 0,
+                CellIndex: 0,
+                Text: "plain first\r\nplain second"),
+            new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: 0,
+                CellIndex: 1,
+                RichText: [new DocxRichTextSegment("rich first\rrich second", Color: "FF0000")])
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        var cells = Assert.Single(Inspector.InspectTables(output).Tables).Rows[0].Cells;
+        Assert.Equal("plain first\nplain second", cells[0].Text);
+        Assert.Equal("plain first\nplain second", Assert.Single(cells[0].Paragraphs).Text);
+        Assert.Equal("plain first\nplain second", Assert.Single(cells[0].Paragraphs[0].Runs).Text);
+        Assert.Equal("rich first\nrich second", cells[1].Text);
+        Assert.Equal("rich first\nrich second", Assert.Single(cells[1].Paragraphs).Text);
+        Assert.Equal("rich first\nrich second", Assert.Single(cells[1].Paragraphs[0].Runs).Text);
+    }
+
+    [Fact]
     public void Edit_can_set_table_cell_font_size_and_row_height()
     {
         var docPath = CreateTwoCellTableFixture();
