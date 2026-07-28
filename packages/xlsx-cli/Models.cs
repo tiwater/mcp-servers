@@ -100,7 +100,9 @@ public sealed record XlsxEditOperation(
     bool? PreserveMergedRanges = null,
     string? Range = null,
     string? Column = null,
-    double? Width = null);
+    double? Width = null,
+    int? FitToPagesWide = null,
+    int? FitToPagesTall = null);
 
 internal sealed class PrimitiveJsonValueConverter : JsonConverter<string?>
 {

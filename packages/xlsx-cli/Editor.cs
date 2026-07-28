@@ -77,6 +77,7 @@ public static class Editor
         {
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
             "setPrintArea" => SetPrintAreaOperation(workbookPart, operation),
+            "setPageSetup" => SetPageSetupOperation(workbookPart, operation),
             "setColumnWidth" => SetColumnWidthOperation(workbookPart, operation),
             "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
@@ -234,6 +235,46 @@ public static class Editor
         foreach (var column in rewritten.OrderBy(column => column.Min?.Value ?? uint.MaxValue)) columns.Append(column);
         worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Set column width {operation.Sheet}!{operation.Column}:{operation.Column}");
+    }
+
+    private static XlsxEditAppliedOperation SetPageSetupOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet)
+            || operation.FitToPagesWide is null
+            || operation.FitToPagesWide is < 1 or > 32767
+            || operation.FitToPagesTall is null
+            || operation.FitToPagesTall is < 0 or > 32767)
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet, fitToPagesWide in [1, 32767], and fitToPagesTall in [0, 32767] are required");
+
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        var worksheet = worksheetPart.Worksheet;
+        var sheetProperties = worksheet.GetFirstChild<SheetProperties>();
+        if (sheetProperties is null)
+        {
+            sheetProperties = new SheetProperties();
+            worksheet.PrependChild(sheetProperties);
+        }
+        var setupProperties = sheetProperties.GetFirstChild<PageSetupProperties>();
+        if (setupProperties is null)
+        {
+            setupProperties = new PageSetupProperties();
+            sheetProperties.Append(setupProperties);
+        }
+        setupProperties.FitToPage = true;
+
+        var pageSetup = worksheet.GetFirstChild<PageSetup>();
+        if (pageSetup is null)
+        {
+            pageSetup = new PageSetup();
+            var margins = worksheet.GetFirstChild<PageMargins>();
+            if (margins is not null) worksheet.InsertAfter(pageSetup, margins);
+            else worksheet.Append(pageSetup);
+        }
+        pageSetup.FitToWidth = (uint)operation.FitToPagesWide.Value;
+        pageSetup.FitToHeight = (uint)operation.FitToPagesTall.Value;
+        worksheet.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Set page fit {operation.Sheet} to {operation.FitToPagesWide}x{operation.FitToPagesTall}");
     }
 
     private static XlsxEditAppliedOperation SetRangeValuesOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -1562,6 +1603,12 @@ public static class Editor
             return TryParseWritableCell(operation.Cell, out _, out _) ? null : "cell must be a bounded A1 reference";
         if (operation.Type == "setPrintArea")
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
+        if (operation.Type == "setPageSetup")
+            return !string.IsNullOrWhiteSpace(operation.Sheet)
+                && operation.FitToPagesWide is >= 1 and <= 32767
+                && operation.FitToPagesTall is >= 0 and <= 32767
+                ? null
+                : "sheet and bounded fit-to-page dimensions are required";
         if (operation.Type == "setColumnWidth")
             return TryParseWritableColumn(operation.Column, out _)
                 && operation.Width is not null
