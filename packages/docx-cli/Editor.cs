@@ -1808,7 +1808,9 @@ public static class Editor
 
     private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null, Run? fallbackRun = null)
     {
-        var ownRun = cell.Descendants<Run>().FirstOrDefault();
+        var graphicParagraphs = CaptureGraphicParagraphs(cell);
+        var ownRun = cell.Descendants<Run>().FirstOrDefault(run => run.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)))
+            ?? cell.Descendants<Run>().FirstOrDefault();
         var firstRun = ownRun ?? fallbackRun;
         var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
@@ -1819,6 +1821,7 @@ public static class Editor
             ApplyParagraphAlignment(paragraph, alignment);
         }
         cell.Append(paragraph);
+        foreach (var graphic in graphicParagraphs) cell.Append(graphic);
     }
 
     private static DocxEditAppliedOperation ReplaceTableCellRichText(Body body, DocxEditOperation operation)
@@ -1853,7 +1856,9 @@ public static class Editor
 
     private static void ReplaceTableCellRichText(TableCell cell, IReadOnlyList<DocxRichTextSegment> segments, string? alignment = null, Run? fallbackRun = null)
     {
-        var ownRun = cell.Descendants<Run>().FirstOrDefault();
+        var graphicParagraphs = CaptureGraphicParagraphs(cell);
+        var ownRun = cell.Descendants<Run>().FirstOrDefault(run => run.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)))
+            ?? cell.Descendants<Run>().FirstOrDefault();
         var firstRun = ownRun ?? fallbackRun;
         var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
@@ -1867,6 +1872,24 @@ public static class Editor
             ApplyParagraphAlignment(paragraph, alignment);
         }
         cell.Append(paragraph);
+        foreach (var graphic in graphicParagraphs) cell.Append(graphic);
+    }
+
+    private static List<Paragraph> CaptureGraphicParagraphs(TableCell cell)
+    {
+        var result = new List<Paragraph>();
+        foreach (var paragraph in cell.Elements<Paragraph>())
+        {
+            var graphicRuns = paragraph.Elements<Run>()
+                .Where(run => run.Descendants<Drawing>().Any() || run.Descendants<Picture>().Any())
+                .Select(run => (Run)run.CloneNode(true))
+                .ToList();
+            if (graphicRuns.Count == 0) continue;
+            var clone = CreateParagraphLike(paragraph);
+            foreach (var run in graphicRuns) clone.AppendChild(run);
+            result.Add(clone);
+        }
+        return result;
     }
 
     private static Run? FindNearestTableRun(IReadOnlyList<TableRow> rows, int rowIndex, int cellIndex)

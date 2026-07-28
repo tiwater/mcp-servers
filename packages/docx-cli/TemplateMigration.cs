@@ -1159,6 +1159,12 @@ public static class TemplateMigration
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-media-part-unresolved", copy.SourceObjectId, copy.BaselineObjectId));
                 continue;
             }
+            if (sourceObject.Provenance.TryGetValue("sha256", out var sourceHash)
+                && outputObject.Provenance.TryGetValue("sha256", out var outputHash)
+                && string.Equals(sourceHash, outputHash, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             using var sourceStream = sourceImage.GetStream(FileMode.Open, FileAccess.Read);
             using var outputStream = outputImage.GetStream(FileMode.Create, FileAccess.Write);
             sourceStream.CopyTo(outputStream);
@@ -1284,7 +1290,8 @@ public static class TemplateMigration
             foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((cell, index) => (cell, index)))
             {
                 var cellId = $"{rowId}:cell:{cellIndex}";
-                objects.Add(Object(cellId, "table-cell", scope, rowId, string.Concat(cell.Elements<Paragraph>().SelectMany(paragraph => paragraph.Descendants<Text>()).Select(text => text.Text)).Trim(), null, EmptyProvenance));
+                objects.Add(Object(cellId, "table-cell", scope, rowId, string.Concat(cell.Elements<Paragraph>().SelectMany(paragraph => paragraph.Descendants<Text>()).Select(text => text.Text)).Trim(), null, EmptyProvenance,
+                    new TemplateMigrationTopology(tableId, rowIndex, cellIndex)));
                 foreach (var (paragraph, paragraphIndex) in cell.Elements<Paragraph>().Select((paragraph, index) => (paragraph, index)))
                 {
                     AddRunObjects(objects, paragraph, cellId, scope, paragraphIndex);
@@ -1428,8 +1435,8 @@ public static class TemplateMigration
         return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(text)));
     }
 
-    private static TemplateMigrationObject Object(string id, string kind, string scope, string? parentId, string? text, string? style, IReadOnlyDictionary<string, string> provenance)
-        => new(id, kind, scope, parentId, text, style, provenance);
+    private static TemplateMigrationObject Object(string id, string kind, string scope, string? parentId, string? text, string? style, IReadOnlyDictionary<string, string> provenance, TemplateMigrationTopology? topology = null)
+        => new(id, kind, scope, parentId, text, style, provenance, topology);
 
     private static string? ParagraphStyle(Paragraph paragraph) => paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
 

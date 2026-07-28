@@ -15,6 +15,7 @@
           "type": {
             "enum": [
               "setCellValue",
+              "setColumnWidth",
               "setPrintArea",
               "setRichTextCellValue",
               "setRangeValues",
@@ -54,7 +55,8 @@
           "preserveStyle": { "type": ["boolean", "null"] },
           "preserveFormulas": { "type": ["boolean", "null"] },
           "preserveMergedRanges": { "type": ["boolean", "null"] },
-          "range": { "type": ["string", "null"] }
+          "range": { "type": ["string", "null"] },
+          "width": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 255 }
         }
       }
     }

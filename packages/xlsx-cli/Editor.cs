@@ -12,6 +12,7 @@ public static class Editor
     private static readonly Regex NumericTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", RegexOptions.Compiled);
     private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
     private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
+    private static readonly Regex ColumnRangePattern = new(@"^\$?(?<first>[A-Za-z]{1,3})(?::\$?(?<last>[A-Za-z]{1,3}))?$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex PrintAreaRangePattern = new(@"^\$?(?<startColumn>[A-Za-z]{1,3})\$?(?<startRow>[1-9]\d*):\$?(?<endColumn>[A-Za-z]{1,3})\$?(?<endRow>[1-9]\d*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static int RunEdit(string[] args)
@@ -76,6 +77,7 @@ public static class Editor
         return operation.Type switch
         {
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
+            "setColumnWidth" => SetColumnWidthOperation(workbookPart, operation),
             "setPrintArea" => SetPrintAreaOperation(workbookPart, operation),
             "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
@@ -128,6 +130,60 @@ public static class Editor
         }
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated {operation.Sheet}!{operation.Cell}");
+    }
+
+    private static XlsxEditAppliedOperation SetColumnWidthOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || !TryParseColumnRange(operation.Range, out var first, out var last) || !IsWritableColumnWidth(operation.Width))
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet, a bounded ordered column range, and a width within (0, 255] are required");
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+
+        var worksheet = worksheetPart.Worksheet;
+        var columns = worksheet.GetFirstChild<Columns>();
+        if (columns is null)
+        {
+            columns = new Columns();
+            var sheetData = worksheet.GetFirstChild<SheetData>();
+            if (sheetData is null) worksheet.AppendChild(columns); else worksheet.InsertBefore(columns, sheetData);
+        }
+
+        Column? covered = null;
+        foreach (var column in columns.Elements<Column>().ToList())
+        {
+            var min = (int)(column.Min?.Value ?? 0u);
+            var max = (int)(column.Max?.Value ?? 0u);
+            if (max < first || min > last) continue;
+            covered ??= (Column)column.CloneNode(true);
+            if (min < first)
+            {
+                var head = (Column)column.CloneNode(true);
+                head.Max = (uint)(first - 1);
+                columns.InsertBefore(head, column);
+            }
+            if (max > last)
+            {
+                var tail = (Column)column.CloneNode(true);
+                tail.Min = (uint)(last + 1);
+                columns.InsertBefore(tail, column);
+            }
+            column.Remove();
+        }
+
+        var resized = covered ?? new Column();
+        resized.Min = (uint)first;
+        resized.Max = (uint)last;
+        resized.Width = operation.Width!.Value;
+        resized.CustomWidth = true;
+        resized.BestFit = null;
+        columns.Append(resized);
+        var ordered = columns.Elements<Column>().OrderBy(column => column.Min?.Value ?? 0u).ToList();
+        foreach (var column in ordered) column.Remove();
+        foreach (var column in ordered) columns.Append(column);
+
+        worksheet.Save();
+        var changed = $"{GetColumnReference(first)}:{GetColumnReference(last)}";
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Set column width {operation.Sheet}!{changed}", operation.Sheet, changed);
     }
 
     private static XlsxEditAppliedOperation SetPrintAreaOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -1340,23 +1396,53 @@ public static class Editor
 
         var sourceStyleIndex = cell.StyleIndex?.Value ?? 0U;
         var sourceFormat = stylesheet.CellFormats!.Elements<CellFormat>().ElementAtOrDefault((int)sourceStyleIndex) ?? stylesheet.CellFormats.Elements<CellFormat>().First();
-        var sourceFontIndex = sourceFormat.FontId?.Value ?? 0U;
+        var baseFormatIndex = sourceFormat.FormatId?.Value;
+        var baseFormat = baseFormatIndex is not null
+            ? stylesheet.CellStyleFormats?.Elements<CellFormat>().ElementAtOrDefault((int)baseFormatIndex.Value)
+            : null;
+        var sourceFontIndex = sourceFormat.ApplyFont?.Value == false
+            ? baseFormat?.FontId?.Value ?? 0U
+            : sourceFormat.FontId?.Value ?? (sourceFormat.ApplyFont?.Value == true ? 0U : baseFormat?.FontId?.Value ?? 0U);
         var sourceFont = stylesheet.Fonts!.Elements<Font>().ElementAtOrDefault((int)sourceFontIndex) ?? stylesheet.Fonts.Elements<Font>().First();
 
         var targetFont = (Font)sourceFont.CloneNode(true);
-        if (targetFont.Bold is null)
+        if (bold)
         {
-            targetFont.Bold = new Bold();
+            targetFont.Bold ??= new Bold();
+            targetFont.Bold.Val = true;
         }
-        targetFont.Bold.Val = bold;
-
-        var fontIndex = (uint)stylesheet.Fonts!.Count();
-        stylesheet.Fonts!.Append(targetFont);
+        else
+        {
+            targetFont.Bold?.Remove();
+        }
+        var existingFonts = stylesheet.Fonts!.Elements<Font>().ToList();
+        var equivalentFontIndex = existingFonts.FindIndex(font => font.OuterXml == targetFont.OuterXml);
+        uint fontIndex;
+        if (equivalentFontIndex >= 0)
+        {
+            fontIndex = (uint)equivalentFontIndex;
+        }
+        else
+        {
+            fontIndex = (uint)existingFonts.Count;
+            stylesheet.Fonts.Append(targetFont);
+        }
 
         var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
         targetFormat.FontId = fontIndex;
-        var formatIndex = (uint)stylesheet.CellFormats!.Count();
-        stylesheet.CellFormats!.Append(targetFormat);
+        targetFormat.ApplyFont = true;
+        var existingFormats = stylesheet.CellFormats!.Elements<CellFormat>().ToList();
+        var equivalentFormatIndex = existingFormats.FindIndex(format => format.OuterXml == targetFormat.OuterXml);
+        uint formatIndex;
+        if (equivalentFormatIndex >= 0)
+        {
+            formatIndex = (uint)equivalentFormatIndex;
+        }
+        else
+        {
+            formatIndex = (uint)existingFormats.Count;
+            stylesheet.CellFormats.Append(targetFormat);
+        }
         stylesheet.CellFormats.Count = (uint)stylesheet.CellFormats.Elements<CellFormat>().Count();
         stylesheet.Fonts.Count = (uint)stylesheet.Fonts.Elements<Font>().Count();
         stylesPart.Stylesheet.Save();
@@ -1486,6 +1572,11 @@ public static class Editor
             return TryParseWritableCell(operation.Cell, out _, out _) ? null : "cell must be a bounded A1 reference";
         if (operation.Type == "setPrintArea")
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
+        if (operation.Type == "setColumnWidth")
+        {
+            if (!TryParseColumnRange(operation.Range, out _, out _)) return "range must be a bounded ordered column range";
+            if (!IsWritableColumnWidth(operation.Width)) return "width must be within (0, 255]";
+        }
         if (operation.Type == "setRangeValues")
         {
             if (!TryParseWritableCell(operation.StartCell, out var column, out var row)) return "startCell must be a bounded A1 reference";
@@ -1495,6 +1586,19 @@ public static class Editor
         }
         return null;
     }
+
+    private static bool TryParseColumnRange(string? range, out int first, out int last)
+    {
+        first = 0; last = 0;
+        var match = ColumnRangePattern.Match(range ?? string.Empty);
+        if (!match.Success) return false;
+        first = GetColumnIndex(match.Groups["first"].Value);
+        last = match.Groups["last"].Success ? GetColumnIndex(match.Groups["last"].Value) : first;
+        return first >= 1 && last <= 16384 && first <= last;
+    }
+
+    private static bool IsWritableColumnWidth(double? width) =>
+        width is double value && double.IsFinite(value) && value > 0 && value <= 255;
 
     private static bool TryParseWritableCell(string? reference, out int column, out int row)
     {

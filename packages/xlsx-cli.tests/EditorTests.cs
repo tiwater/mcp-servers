@@ -188,6 +188,100 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_sets_a_custom_column_width_reported_by_inspection_evidence()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-column-width-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setColumnWidth", Sheet: "Sheet1", Range: "C:E", Width: 24.5)]);
+
+        var applied = result.AppliedOperations.Single();
+        Assert.True(applied.Applied, applied.Detail);
+        Assert.Equal("C:E", applied.ChangedRange);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var column = Assert.Single(spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.Elements<Columns>().Single().Elements<Column>());
+        Assert.Equal<uint>(3, column.Min!.Value);
+        Assert.Equal<uint>(5, column.Max!.Value);
+        Assert.Equal(24.5, column.Width!.Value);
+        Assert.True(column.CustomWidth!.Value);
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+        var dimensions = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("columnDimensions");
+        Assert.Equal(24.5, dimensions.EnumerateArray().Single(entry => entry.GetProperty("min").GetUInt32() == 3).GetProperty("width").GetDouble());
+    }
+
+    [Fact]
+    public void Edit_resizes_only_the_requested_columns_of_an_existing_span_and_keeps_their_other_attributes()
+    {
+        var path = CreateColumnSpanWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-column-width-split-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setColumnWidth", Sheet: "Sheet1", Range: "D", Width: 40)]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var columns = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.Elements<Columns>().Single().Elements<Column>().ToList();
+        Assert.Equal([(1u, 3u, 8.43), (4u, 4u, 40d), (5u, 8u, 8.43)],
+            columns.Select(column => (column.Min!.Value, column.Max!.Value, column.Width!.Value)));
+        Assert.All(columns, column => Assert.Equal<uint>(7, column.Style!.Value));
+        Assert.True(columns[1].CustomWidth!.Value);
+        Assert.Null(columns[1].BestFit);
+        Assert.True(columns[0].BestFit!.Value);
+        Assert.True(columns[2].BestFit!.Value);
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Fact]
+    public void Edit_applies_the_last_width_for_a_column_without_duplicating_definitions()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-column-width-repeat-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setColumnWidth", Sheet: "Sheet1", Range: "B:D", Width: 18),
+            new XlsxEditOperation("setColumnWidth", Sheet: "Sheet1", Range: "B:D", Width: 32)
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var column = Assert.Single(spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.Elements<Columns>().Single().Elements<Column>());
+        Assert.Equal(32d, column.Width!.Value);
+        Assert.Equal<uint>(2, column.Min!.Value);
+        Assert.Equal<uint>(4, column.Max!.Value);
+    }
+
+    [Theory]
+    [InlineData("E:C", 20)]
+    [InlineData("C:E", 0)]
+    [InlineData("C:E", -12)]
+    [InlineData("C:E", 255.5)]
+    [InlineData("C1:E3", 20)]
+    [InlineData("XFE", 20)]
+    [InlineData(" C:E", 20)]
+    [InlineData("C:", 20)]
+    public void Edit_rejects_unwritable_column_widths_before_mutation(string range, double width)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-column-width-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setColumnWidth", Sheet: "Sheet1", Range: range, Width: width)]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void Edit_rejects_a_column_width_operation_without_a_width()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-missing-column-width-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [new XlsxEditOperation("setColumnWidth", Sheet: "Sheet1", Range: "C:E")]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
     public void Edit_materializes_inherited_alignment_preserves_other_style_and_reuses_equivalent_cell_xf()
     {
         var path = CreateInheritedAlignmentWorkbookFixture();
@@ -434,6 +528,30 @@ public class EditorTests
         ));
         var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
         sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateColumnSpanWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-column-span-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new Fonts(new Font()) { Count = 1 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellFormats(Enumerable.Range(0, 8).Select(_ => (OpenXmlElement)new CellFormat())) { Count = 8 });
+        stylesPart.Stylesheet.Save();
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        worksheetPart.Worksheet = new Worksheet(
+            new Columns(new Column { Min = 1, Max = 8, Width = 8.43, Style = 7, CustomWidth = true, BestFit = true }),
+            new SheetData(CreateRow(1, ("D1", "备注"))));
+        var sheets = workbookPart.Workbook.AppendChild(new Sheets());
+        sheets.AppendChild(new Sheet { Id = workbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
         workbookPart.Workbook.Save();
         worksheetPart.Worksheet.Save();
         return path;

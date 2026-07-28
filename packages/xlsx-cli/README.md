@@ -25,7 +25,7 @@ Outputs sheet-level metrics, placeholders, used ranges, formula counts, and merg
 tiwater-xlsx inspect <template.xlsx> [--json]
 ```
 *   `--json` returns the complete technical workbook readback.
-*   Every addressed cell exposes style identity, number-format id/code, font/fill/border ids, horizontal/vertical alignment, and wrap state. Rich text cells also expose per-run text and formatting.
+*   Every addressed cell exposes style identity, number-format id/code, font/fill/border ids, effective font bold, horizontal/vertical alignment, and wrap state. Rich text cells also expose per-run text and formatting.
 
 Inspection accepts current `.xls` and `.xlsx` sources; editing remains `.xlsx` only.
 
@@ -71,6 +71,7 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 ### 3. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType`, `bold`, `shrinkToFit`, and `wrapText`
+- `setColumnWidth` with required `sheet`, column `range` (`C` or `C:E`), and `width` in Excel character units within `(0, 255]`; the requested columns become custom-width and every other column keeps its own width and attributes
 - `setPrintArea` with required `sheet` and A1-style `range`
 - `setRichTextCellValue` with required `sheet`, `cell`, `value`, and `bold`; writes one explicit rich-text run so value and all-run bold state are one operation
 - `setRangeValues` with required `sheet`, `startCell`, and `values`; optional `valueType`
@@ -112,6 +113,7 @@ Example operations file:
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "E2", "value": "10.2" },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "F2", "value": "a value that must remain visible", "shrinkToFit": true },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "G2", "value": "a long value that may use multiple lines", "wrapText": true },
+    { "type": "setColumnWidth", "sheet": "Sheet1", "range": "G:G", "width": 42.5 },
     { "type": "setPrintArea", "sheet": "Sheet1", "range": "A1:G12" },
     { "type": "setRangeValues", "sheet": "Sheet1", "startCell": "F2", "values": [["233988", "383789"], ["252353", "341366"]], "valueType": "number" },
     { "type": "insertRows", "sheet": "RP", "startRow": 8, "count": 2 },
