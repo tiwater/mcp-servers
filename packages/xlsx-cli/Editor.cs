@@ -240,10 +240,10 @@ public static class Editor
     private static XlsxEditAppliedOperation SetPageSetupOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
     {
         if (string.IsNullOrWhiteSpace(operation.Sheet)
-            || operation.FitToPagesWide is null
+            || (operation.FitToPagesWide is null && operation.FitToPagesTall is null)
             || operation.FitToPagesWide is < 1 or > 32767
             || operation.FitToPagesTall is < 1 or > 32767)
-            return new XlsxEditAppliedOperation(operation.Type, false, "sheet, fitToPagesWide in [1, 32767], and optional fitToPagesTall in [1, 32767] are required");
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet and at least one bounded fit-to-page dimension are required");
 
         var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
         if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
@@ -270,7 +270,7 @@ public static class Editor
             if (margins is not null) worksheet.InsertAfter(pageSetup, margins);
             else worksheet.Append(pageSetup);
         }
-        pageSetup.FitToWidth = (uint)operation.FitToPagesWide.Value;
+        pageSetup.FitToWidth = operation.FitToPagesWide is null ? null : (uint)operation.FitToPagesWide.Value;
         pageSetup.FitToHeight = operation.FitToPagesTall is null ? null : (uint)operation.FitToPagesTall.Value;
         worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Set page fit {operation.Sheet} to {operation.FitToPagesWide}x{operation.FitToPagesTall}");
@@ -1604,7 +1604,8 @@ public static class Editor
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
         if (operation.Type == "setPageSetup")
             return !string.IsNullOrWhiteSpace(operation.Sheet)
-                && operation.FitToPagesWide is >= 1 and <= 32767
+                && (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null)
+                && (operation.FitToPagesWide is null or (>= 1 and <= 32767))
                 && (operation.FitToPagesTall is null or (>= 1 and <= 32767))
                 ? null
                 : "sheet and bounded fit-to-page dimensions are required";
