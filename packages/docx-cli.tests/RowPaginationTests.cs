@@ -72,9 +72,11 @@ public sealed class RowPaginationTests
                 main.Document.Save();
             }
 
+            Assert.True(Inspector.Inspect(input).Content.HasTrailingEmptySection);
             var result = Editor.Apply(input, output, [new DocxEditOperation("collapseTrailingEmptySection")]);
 
             Assert.True(Assert.Single(result.AppliedOperations).Applied);
+            Assert.False(Inspector.Inspect(output).Content.HasTrailingEmptySection);
             var validation = OpenXmlValidation.Validate(output);
             Assert.True(validation.Pass, string.Join(Environment.NewLine, validation.Errors.Select(error => error.Description)));
             using var edited = WordprocessingDocument.Open(output, false);
