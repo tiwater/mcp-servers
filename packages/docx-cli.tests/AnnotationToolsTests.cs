@@ -82,6 +82,85 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_analysis_publishes_canonical_table_cell_topology()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"migration-topology-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var table = new Table(
+                new TableRow(
+                    new TableCell(new Paragraph(new Run(new Text("a")))),
+                    new TableCell(new Paragraph(new Run(new Text("b"))))),
+                new TableRow(
+                    new TableCell(new Paragraph(new Run(new Text("c")))),
+                    new TableCell(new Paragraph(new Run(new Text("d"))))));
+            main.Document = new Document(new Body(table));
+            main.Document.Save();
+        }
+
+        var analysis = TemplateMigration.Analyze(source, source);
+        var cell = Assert.Single(analysis.Source.Objects, item => item.Id == "body:table:0:row:1:cell:1");
+        Assert.NotNull(cell.Topology);
+        Assert.Equal("body:table:0", cell.Topology!.ContainerObjectId);
+        Assert.Equal(1, cell.Topology.Row);
+        Assert.Equal(1, cell.Topology.Column);
+        Assert.All(analysis.Source.Objects.Where(item => item.Kind == "table-cell"), item => Assert.NotNull(item.Topology));
+        Assert.All(analysis.Source.Objects.Where(item => item.Kind != "table-cell"), item => Assert.Null(item.Topology));
+    }
+
+    [Fact]
+    public void Edit_replace_table_cell_text_preserves_embedded_drawings()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"cell-drawing-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var image = main.AddImagePart(ImagePartType.Png);
+            image.FeedData(new MemoryStream([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]));
+            var drawing = new Drawing(
+                new DW.Inline(
+                    new DW.Extent { Cx = 990000L, Cy = 990000L },
+                    new DW.DocProperties { Id = 1U, Name = "cell-image" },
+                    new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                    new A.Graphic(new A.GraphicData(
+                        new PIC.Picture(
+                            new PIC.NonVisualPictureProperties(
+                                new PIC.NonVisualDrawingProperties { Id = 0U, Name = "cell-image" },
+                                new PIC.NonVisualPictureDrawingProperties()),
+                            new PIC.BlipFill(
+                                new A.Blip { Embed = main.GetIdOfPart(image) },
+                                new A.Stretch(new A.FillRectangle())),
+                            new PIC.ShapeProperties(
+                                new A.Transform2D(new A.Offset { X = 0L, Y = 0L }, new A.Extents { Cx = 990000L, Cy = 990000L }),
+                                new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }))
+                        ) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })));
+            var cell = new TableCell(
+                new Paragraph(new Run(drawing)),
+                new Paragraph(new Run(new Text("old label"))));
+            main.Document = new Document(new Body(new Table(new TableRow(cell, new TableCell(new Paragraph(new Run(new Text("other"))))))));
+            main.Document.Save();
+        }
+
+        var output = Path.Combine(Path.GetTempPath(), $"cell-drawing-out-{Guid.NewGuid():N}.docx");
+        var result = Editor.Apply(source, output, [
+            new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 0, Text: "new label")
+        ]);
+        Assert.All(result.AppliedOperations, op => Assert.True(op.Applied, op.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var editedCell = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().Single().Elements<TableCell>().First();
+        Assert.Contains(editedCell.Descendants<Text>(), text => text.Text == "new label");
+        Assert.Single(editedCell.Descendants<Drawing>());
+        Assert.Equal(mainRelationshipId(source), editedCell.Descendants<A.Blip>().Single().Embed!.Value);
+
+        static string mainRelationshipId(string path)
+        {
+            using var document = WordprocessingDocument.Open(path, false);
+            return document.MainDocumentPart!.GetIdOfPart(document.MainDocumentPart.ImageParts.Single());
+        }
+    }
+
+    [Fact]
     public void InspectTables_versions_the_view_and_addresses_nested_tables_without_leaking_nested_text()
     {
         var source = Path.Combine(Path.GetTempPath(), $"inspect-nested-{Guid.NewGuid():N}.docx");

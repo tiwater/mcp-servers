@@ -47,8 +47,9 @@ tiwater-docx validate-template-transform <source-template.docx> <target-template
 ### 3a. Analyze Cross-Template Migration
 
 Exports hash-attested source and baseline object inventories plus unresolved
-structural/content/style differences. It does not infer a business mapping or
-modify either document.
+structural/content/style differences. Table-cell objects include canonical
+`Topology` (`ContainerObjectId`, `Row`, `Column`). It does not infer a business
+mapping or modify either document.
 
 ```bash
 tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
