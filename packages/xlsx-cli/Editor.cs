@@ -270,8 +270,8 @@ public static class Editor
             if (margins is not null) worksheet.InsertAfter(pageSetup, margins);
             else worksheet.Append(pageSetup);
         }
-        pageSetup.FitToWidth = operation.FitToPagesWide is null ? null : (uint)operation.FitToPagesWide.Value;
-        pageSetup.FitToHeight = operation.FitToPagesTall is null ? null : (uint)operation.FitToPagesTall.Value;
+        pageSetup.FitToWidth = operation.FitToPagesWide is null ? 0u : (uint)operation.FitToPagesWide.Value;
+        pageSetup.FitToHeight = operation.FitToPagesTall is null ? 0u : (uint)operation.FitToPagesTall.Value;
         worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Set page fit {operation.Sheet} to {operation.FitToPagesWide}x{operation.FitToPagesTall}");
     }

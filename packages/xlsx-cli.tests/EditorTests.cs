@@ -111,7 +111,7 @@ public class EditorTests
         Assert.True(worksheet.GetFirstChild<SheetProperties>()!.GetFirstChild<PageSetupProperties>()!.FitToPage!.Value);
         var setup = worksheet.GetFirstChild<PageSetup>()!;
         Assert.Equal<uint>(1, setup.FitToWidth!.Value);
-        Assert.Null(setup.FitToHeight);
+        Assert.Equal<uint>(0, setup.FitToHeight!.Value);
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }
 
@@ -128,7 +128,7 @@ public class EditorTests
         Assert.True(result.AppliedOperations.Single().Applied);
         using var spreadsheet = SpreadsheetDocument.Open(output, false);
         var setup = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.GetFirstChild<PageSetup>()!;
-        Assert.Null(setup.FitToWidth);
+        Assert.Equal<uint>(0, setup.FitToWidth!.Value);
         Assert.Equal<uint>(1, setup.FitToHeight!.Value);
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }
