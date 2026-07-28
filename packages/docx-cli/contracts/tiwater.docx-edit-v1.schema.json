@@ -50,6 +50,7 @@
             "applyDocumentFontPolicy",
             "setTableRowHeight",
             "setTableRowCantSplit",
+            "setTableRowKeepNext",
             "mergeTableCells",
             "unmergeTableRowHorizontalCells",
             "unmergeTableColumnVerticalCells",
@@ -120,6 +121,7 @@
         "removePrecedingPageBreak": { "type": ["boolean", "null"] },
         "noWrap": { "type": ["boolean", "null"] },
         "cantSplit": { "type": ["boolean", "null"] },
+        "keepNext": { "type": ["boolean", "null"] },
         "richText": {
           "oneOf": [
             { "type": "null" },

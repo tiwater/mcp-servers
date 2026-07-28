@@ -101,6 +101,7 @@ public sealed record TableRowDetail(
     int CellCount,
     int GridWidth,
     bool CantSplit,
+    bool KeepNext,
     IReadOnlyList<TableCellDetail> Cells);
 
 public sealed record TableDetail(
@@ -379,6 +380,7 @@ public sealed record DocxEditOperation(
     bool? RemovePrecedingPageBreak = null,
     bool? NoWrap = null,
     bool? CantSplit = null,
+    bool? KeepNext = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null,
     DocxFontPolicy? FontPolicy = null);
 

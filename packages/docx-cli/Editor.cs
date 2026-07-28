@@ -105,6 +105,7 @@ public static class Editor
             "applyDocumentFontPolicy" => ApplyDocumentFontPolicy(body, operation),
             "setTableRowHeight" => SetTableRowHeight(body, operation),
             "setTableRowCantSplit" => SetTableRowCantSplit(body, operation),
+            "setTableRowKeepNext" => SetTableRowKeepNext(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
             "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
             "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
@@ -942,6 +943,35 @@ public static class Editor
 
         return new DocxEditAppliedOperation(operation.Type, true,
             $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}] cantSplit={operation.CantSplit.Value.ToString().ToLowerInvariant()}");
+    }
+
+    private static DocxEditAppliedOperation SetTableRowKeepNext(Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.KeepNext is null)
+            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex, rowIndex, and keepNext are required");
+
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
+            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
+
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value < 0 || operation.RowIndex.Value >= rows.Count)
+            return new DocxEditAppliedOperation(operation.Type, false, $"rowIndex {operation.RowIndex} is out of range");
+
+        var paragraphs = rows[operation.RowIndex.Value].Elements<TableCell>()
+            .SelectMany(cell => cell.Elements<Paragraph>()).ToList();
+        if (paragraphs.Count == 0)
+            return new DocxEditAppliedOperation(operation.Type, false, $"row {operation.RowIndex} has no paragraphs");
+
+        foreach (var paragraph in paragraphs)
+        {
+            var properties = paragraph.ParagraphProperties ?? paragraph.PrependChild(new ParagraphProperties());
+            properties.RemoveAllChildren<KeepNext>();
+            if (operation.KeepNext.Value) properties.AddChild(new KeepNext(), true);
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true,
+            $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}] keepNext={operation.KeepNext.Value.ToString().ToLowerInvariant()}");
     }
 
     private static string? NormalizeFontSize(string? value)
