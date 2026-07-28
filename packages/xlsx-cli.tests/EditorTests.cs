@@ -115,6 +115,24 @@ public class EditorTests
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }
 
+    [Fact]
+    public void Edit_sets_fit_to_page_height_without_constraining_width()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-page-height-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", FitToPagesTall: 1)
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var setup = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.GetFirstChild<PageSetup>()!;
+        Assert.Null(setup.FitToWidth);
+        Assert.Equal<uint>(1, setup.FitToHeight!.Value);
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
     [Theory]
     [InlineData(0, 1)]
     [InlineData(1, 0)]
