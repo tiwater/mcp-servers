@@ -146,7 +146,7 @@ public static class Inspector
             else if (element is Table table)
             {
                 var rows = table.Descendants<TableRow>().Select(row => row.Descendants<TableCell>()
-                    .Select(cell => string.Concat(cell.Descendants<Text>().Select(value => value.Text)).Trim()).ToList()).ToList();
+                    .Select(cell => string.Join("\n", cell.Elements<Paragraph>().Select(GetParagraphText)).Trim()).ToList()).ToList();
                 nodes.Add(new { type = "table", tableIndex, rows });
                 tableIndex += 1;
             }
@@ -191,7 +191,7 @@ public static class Inspector
                     var widthType = GetValAttribute(properties?.TableCellWidth);
                     var verticalAlignment = GetValAttribute(properties?.TableCellVerticalAlignment);
                     var shadingFill = properties?.Shading?.Fill?.Value;
-                    var text = string.Concat(paragraphDetails.Select(paragraph => paragraph.Text)).Trim();
+                    var text = string.Join("\n", paragraphDetails.Select(paragraph => paragraph.Text)).Trim();
 
                     cellDetails.Add(new TableCellDetail(
                         CellIndex: cellIndex,
@@ -388,8 +388,18 @@ public static class Inspector
         }
     }
 
+    private static string GetInlineText(OpenXmlElement root)
+        => string.Concat(root.Descendants<OpenXmlElement>().Select(element => element switch
+        {
+            Text text => text.Text,
+            Break => "\n",
+            CarriageReturn => "\n",
+            TabChar => "\t",
+            _ => string.Empty,
+        }));
+
     public static string GetParagraphText(Paragraph paragraph)
-        => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text)).Trim();
+        => GetInlineText(paragraph).Trim();
 
     private static IReadOnlyList<TableParagraphDetail> BuildTableParagraphDetails(TableCell cell)
     {
@@ -422,7 +432,7 @@ public static class Inspector
         var fonts = properties?.RunFonts;
         return new TableRunDetail(
             RunIndex: runIndex,
-            Text: string.Concat(run.Descendants<Text>().Select(node => node.Text)),
+            Text: GetInlineText(run),
             Style: properties?.RunStyle?.Val?.Value,
             Color: properties?.Color?.Val?.Value,
             Underline: properties?.Underline is null ? null : GetValAttribute(properties.Underline) ?? "single",

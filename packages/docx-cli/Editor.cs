@@ -1566,7 +1566,7 @@ public static class Editor
 
     private static void AppendTextWithLineBreaks(Run run, string text)
     {
-        var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
         for (var i = 0; i < lines.Length; i++)
         {
             if (i > 0)
