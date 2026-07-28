@@ -51,6 +51,7 @@
             "setTableRowHeight",
             "setTableRowCantSplit",
             "setTableRowKeepNext",
+            "collapseTrailingEmptySection",
             "mergeTableCells",
             "unmergeTableRowHorizontalCells",
             "unmergeTableColumnVerticalCells",

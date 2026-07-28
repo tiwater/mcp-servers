@@ -106,6 +106,7 @@ public static class Editor
             "setTableRowHeight" => SetTableRowHeight(body, operation),
             "setTableRowCantSplit" => SetTableRowCantSplit(body, operation),
             "setTableRowKeepNext" => SetTableRowKeepNext(body, operation),
+            "collapseTrailingEmptySection" => CollapseTrailingEmptySection(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
             "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
             "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
@@ -972,6 +973,54 @@ public static class Editor
 
         return new DocxEditAppliedOperation(operation.Type, true,
             $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}] keepNext={operation.KeepNext.Value.ToString().ToLowerInvariant()}");
+    }
+
+    private static DocxEditAppliedOperation CollapseTrailingEmptySection(Body body, DocxEditOperation operation)
+    {
+        var children = body.ChildElements.ToList();
+        var finalSection = children.LastOrDefault() as SectionProperties;
+        if (finalSection is null)
+            return new DocxEditAppliedOperation(operation.Type, false, "final body section properties are required");
+
+        var boundaryIndex = -1;
+        Paragraph? boundaryParagraph = null;
+        SectionProperties? precedingSection = null;
+        for (var index = children.Count - 2; index >= 0; index--)
+        {
+            if (children[index] is not Paragraph paragraph) continue;
+            var section = paragraph.ParagraphProperties?.SectionProperties;
+            if (section is null) continue;
+            boundaryIndex = index;
+            boundaryParagraph = paragraph;
+            precedingSection = section;
+            break;
+        }
+
+        if (boundaryParagraph is null || precedingSection is null)
+            return new DocxEditAppliedOperation(operation.Type, false, "preceding section boundary is required");
+
+        var trailingEmptyParagraphs = new List<Paragraph>();
+        foreach (var child in children.Skip(boundaryIndex + 1).Take(children.Count - boundaryIndex - 2))
+        {
+            if (child is BookmarkStart or BookmarkEnd) continue;
+            if (child is Paragraph paragraph && string.IsNullOrWhiteSpace(paragraph.InnerText) && !paragraph.Descendants<Drawing>().Any())
+            {
+                trailingEmptyParagraphs.Add(paragraph);
+                continue;
+            }
+            return new DocxEditAppliedOperation(operation.Type, false, "trailing section contains renderable content");
+        }
+
+        if (trailingEmptyParagraphs.Count == 0)
+            return new DocxEditAppliedOperation(operation.Type, false, "trailing section has no removable empty paragraph");
+
+        var replacement = (SectionProperties)precedingSection.CloneNode(true);
+        precedingSection.Remove();
+        foreach (var paragraph in trailingEmptyParagraphs) paragraph.Remove();
+        finalSection.Remove();
+        body.AppendChild(replacement);
+
+        return new DocxEditAppliedOperation(operation.Type, true, "Collapsed one trailing empty section");
     }
 
     private static string? NormalizeFontSize(string? value)
