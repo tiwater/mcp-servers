@@ -69,6 +69,7 @@ public static class EvidenceInspector
                     style = new {
                         baseStyleIndex = baseFormatIndex,
                         fontId,
+                        bold = EffectiveFontBold(fonts, fontId),
                         fillId,
                         borderId,
                         fontFingerprint = ComponentFingerprint(fonts, fontId, "font"),
@@ -179,6 +180,14 @@ public static class EvidenceInspector
         if (applyDirect == false) return baseId ?? 0U;
         if (directId is not null) return directId.Value;
         return applyDirect == true ? 0U : baseId ?? 0U;
+    }
+
+    private static bool EffectiveFontBold(IReadOnlyList<Font> fonts, uint fontId)
+    {
+        if (fonts.Count == 0 && fontId == 0) return false;
+        if (fontId >= fonts.Count) throw new InvalidDataException($"Workbook font id is out of range: {fontId}");
+        var bold = fonts[(int)fontId].Bold;
+        return bold is not null && (bold.Val?.Value ?? true);
     }
 
     private static Protection? EffectiveProtection(CellFormat? format, CellFormat? baseFormat)

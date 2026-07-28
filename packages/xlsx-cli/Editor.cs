@@ -1340,23 +1340,53 @@ public static class Editor
 
         var sourceStyleIndex = cell.StyleIndex?.Value ?? 0U;
         var sourceFormat = stylesheet.CellFormats!.Elements<CellFormat>().ElementAtOrDefault((int)sourceStyleIndex) ?? stylesheet.CellFormats.Elements<CellFormat>().First();
-        var sourceFontIndex = sourceFormat.FontId?.Value ?? 0U;
+        var baseFormatIndex = sourceFormat.FormatId?.Value;
+        var baseFormat = baseFormatIndex is not null
+            ? stylesheet.CellStyleFormats?.Elements<CellFormat>().ElementAtOrDefault((int)baseFormatIndex.Value)
+            : null;
+        var sourceFontIndex = sourceFormat.ApplyFont?.Value == false
+            ? baseFormat?.FontId?.Value ?? 0U
+            : sourceFormat.FontId?.Value ?? (sourceFormat.ApplyFont?.Value == true ? 0U : baseFormat?.FontId?.Value ?? 0U);
         var sourceFont = stylesheet.Fonts!.Elements<Font>().ElementAtOrDefault((int)sourceFontIndex) ?? stylesheet.Fonts.Elements<Font>().First();
 
         var targetFont = (Font)sourceFont.CloneNode(true);
-        if (targetFont.Bold is null)
+        if (bold)
         {
-            targetFont.Bold = new Bold();
+            targetFont.Bold ??= new Bold();
+            targetFont.Bold.Val = true;
         }
-        targetFont.Bold.Val = bold;
-
-        var fontIndex = (uint)stylesheet.Fonts!.Count();
-        stylesheet.Fonts!.Append(targetFont);
+        else
+        {
+            targetFont.Bold?.Remove();
+        }
+        var existingFonts = stylesheet.Fonts!.Elements<Font>().ToList();
+        var equivalentFontIndex = existingFonts.FindIndex(font => font.OuterXml == targetFont.OuterXml);
+        uint fontIndex;
+        if (equivalentFontIndex >= 0)
+        {
+            fontIndex = (uint)equivalentFontIndex;
+        }
+        else
+        {
+            fontIndex = (uint)existingFonts.Count;
+            stylesheet.Fonts.Append(targetFont);
+        }
 
         var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
         targetFormat.FontId = fontIndex;
-        var formatIndex = (uint)stylesheet.CellFormats!.Count();
-        stylesheet.CellFormats!.Append(targetFormat);
+        targetFormat.ApplyFont = true;
+        var existingFormats = stylesheet.CellFormats!.Elements<CellFormat>().ToList();
+        var equivalentFormatIndex = existingFormats.FindIndex(format => format.OuterXml == targetFormat.OuterXml);
+        uint formatIndex;
+        if (equivalentFormatIndex >= 0)
+        {
+            formatIndex = (uint)equivalentFormatIndex;
+        }
+        else
+        {
+            formatIndex = (uint)existingFormats.Count;
+            stylesheet.CellFormats.Append(targetFormat);
+        }
         stylesheet.CellFormats.Count = (uint)stylesheet.CellFormats.Elements<CellFormat>().Count();
         stylesheet.Fonts.Count = (uint)stylesheet.Fonts.Elements<Font>().Count();
         stylesPart.Stylesheet.Save();

@@ -38,6 +38,7 @@ public record CellStyleReport(
     uint NumberFormatId,
     string? NumberFormatCode,
     uint FontId,
+    bool Bold,
     uint FillId,
     uint BorderId,
     string? HorizontalAlignment,
