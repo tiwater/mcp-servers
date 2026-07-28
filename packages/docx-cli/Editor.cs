@@ -977,42 +977,8 @@ public static class Editor
 
     private static DocxEditAppliedOperation CollapseTrailingEmptySection(Body body, DocxEditOperation operation)
     {
-        var children = body.ChildElements.ToList();
-        var finalSection = children.LastOrDefault() as SectionProperties;
-        if (finalSection is null)
-            return new DocxEditAppliedOperation(operation.Type, false, "final body section properties are required");
-
-        var boundaryIndex = -1;
-        Paragraph? boundaryParagraph = null;
-        SectionProperties? precedingSection = null;
-        for (var index = children.Count - 2; index >= 0; index--)
-        {
-            if (children[index] is not Paragraph paragraph) continue;
-            var section = paragraph.ParagraphProperties?.SectionProperties;
-            if (section is null) continue;
-            boundaryIndex = index;
-            boundaryParagraph = paragraph;
-            precedingSection = section;
-            break;
-        }
-
-        if (boundaryParagraph is null || precedingSection is null)
-            return new DocxEditAppliedOperation(operation.Type, false, "preceding section boundary is required");
-
-        var trailingEmptyParagraphs = new List<Paragraph>();
-        foreach (var child in children.Skip(boundaryIndex + 1).Take(children.Count - boundaryIndex - 2))
-        {
-            if (child is BookmarkStart or BookmarkEnd) continue;
-            if (child is Paragraph paragraph && string.IsNullOrWhiteSpace(paragraph.InnerText) && !paragraph.Descendants<Drawing>().Any())
-            {
-                trailingEmptyParagraphs.Add(paragraph);
-                continue;
-            }
-            return new DocxEditAppliedOperation(operation.Type, false, "trailing section contains renderable content");
-        }
-
-        if (trailingEmptyParagraphs.Count == 0)
-            return new DocxEditAppliedOperation(operation.Type, false, "trailing section has no removable empty paragraph");
+        if (!TryFindTrailingEmptySection(body, out var precedingSection, out var finalSection, out var trailingEmptyParagraphs))
+            return new DocxEditAppliedOperation(operation.Type, false, "no collapsible trailing empty section");
 
         var replacement = (SectionProperties)precedingSection.CloneNode(true);
         precedingSection.Remove();
@@ -1021,6 +987,49 @@ public static class Editor
         body.AppendChild(replacement);
 
         return new DocxEditAppliedOperation(operation.Type, true, "Collapsed one trailing empty section");
+    }
+
+    internal static bool HasTrailingEmptySection(Body body)
+        => TryFindTrailingEmptySection(body, out _, out _, out _);
+
+    private static bool TryFindTrailingEmptySection(
+        Body body,
+        out SectionProperties precedingSection,
+        out SectionProperties finalSection,
+        out List<Paragraph> trailingEmptyParagraphs)
+    {
+        precedingSection = null!;
+        finalSection = null!;
+        trailingEmptyParagraphs = [];
+        var children = body.ChildElements.ToList();
+        if (children.LastOrDefault() is not SectionProperties final) return false;
+
+        var boundaryIndex = -1;
+        SectionProperties? preceding = null;
+        for (var index = children.Count - 2; index >= 0; index--)
+        {
+            if (children[index] is not Paragraph paragraph) continue;
+            preceding = paragraph.ParagraphProperties?.SectionProperties;
+            if (preceding is null) continue;
+            boundaryIndex = index;
+            break;
+        }
+        if (preceding is null) return false;
+
+        foreach (var child in children.Skip(boundaryIndex + 1).Take(children.Count - boundaryIndex - 2))
+        {
+            if (child is BookmarkStart or BookmarkEnd) continue;
+            if (child is not Paragraph paragraph
+                || !string.IsNullOrWhiteSpace(paragraph.InnerText)
+                || paragraph.Descendants<Drawing>().Any())
+                return false;
+            trailingEmptyParagraphs.Add(paragraph);
+        }
+        if (trailingEmptyParagraphs.Count == 0) return false;
+
+        precedingSection = preceding;
+        finalSection = final;
+        return true;
     }
 
     private static string? NormalizeFontSize(string? value)

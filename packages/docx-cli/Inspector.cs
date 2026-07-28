@@ -83,6 +83,7 @@ public static class Inspector
                 ParagraphCount: allParagraphs.Count,
                 TableCount: allTables.Count,
                 SectionCount: body.Descendants<SectionProperties>().Count(),
+                HasTrailingEmptySection: Editor.HasTrailingEmptySection(body),
                 HeaderPartCount: mainPart.HeaderParts.Count(),
                 FooterPartCount: mainPart.FooterParts.Count(),
                 Headings: headings.Take(50).ToList(),

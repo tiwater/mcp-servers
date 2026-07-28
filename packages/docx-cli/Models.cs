@@ -15,6 +15,7 @@ public sealed record ContentSummary(
     int ParagraphCount,
     int TableCount,
     int SectionCount,
+    bool HasTrailingEmptySection,
     int HeaderPartCount,
     int FooterPartCount,
     IReadOnlyList<HeadingInfo> Headings,
