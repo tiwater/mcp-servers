@@ -25,7 +25,7 @@ Outputs sheet-level metrics, placeholders, used ranges, formula counts, and merg
 tiwater-xlsx inspect <template.xlsx> [--json]
 ```
 *   `--json` returns the complete technical workbook readback.
-*   Every addressed cell exposes style identity, number-format id/code, font/fill/border ids, horizontal/vertical alignment, and wrap state. Rich text cells also expose per-run text and formatting.
+*   Every addressed cell exposes style identity, number-format id/code, font/fill/border ids, effective font bold, horizontal/vertical alignment, and wrap state. Rich text cells also expose per-run text and formatting.
 
 Inspection accepts current `.xls` and `.xlsx` sources; editing remains `.xlsx` only.
 

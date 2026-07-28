@@ -225,11 +225,20 @@ public static class Inspector
     {
         var styleIndex = cell.StyleIndex?.Value ?? 0U;
         var format = stylesheet?.CellFormats?.Elements<CellFormat>().ElementAtOrDefault((int)styleIndex);
+        var baseFormatIndex = format?.FormatId?.Value;
+        var baseFormat = baseFormatIndex is not null
+            ? stylesheet?.CellStyleFormats?.Elements<CellFormat>().ElementAtOrDefault((int)baseFormatIndex.Value)
+            : null;
         var numberFormatId = format?.NumberFormatId?.Value ?? 0U;
         var custom = stylesheet?.NumberingFormats?.Elements<NumberingFormat>().FirstOrDefault(item => item.NumberFormatId?.Value == numberFormatId)?.FormatCode?.Value;
         var code = custom ?? numberFormatId switch { 0 => "General", 1 => "0", 2 => "0.00", 9 => "0%", 10 => "0.00%", 14 => "m/d/yy", 49 => "@", _ => null };
         var alignment = format?.Alignment;
-        return new CellStyleReport(styleIndex, numberFormatId, code, format?.FontId?.Value ?? 0U, format?.FillId?.Value ?? 0U,
+        var fontId = format?.ApplyFont?.Value == false
+            ? baseFormat?.FontId?.Value ?? 0U
+            : format?.FontId?.Value ?? (format?.ApplyFont?.Value == true ? 0U : baseFormat?.FontId?.Value ?? 0U);
+        var font = stylesheet?.Fonts?.Elements<Font>().ElementAtOrDefault((int)fontId);
+        var bold = font?.Bold is not null && (font.Bold.Val?.Value ?? true);
+        return new CellStyleReport(styleIndex, numberFormatId, code, fontId, bold, format?.FillId?.Value ?? 0U,
             format?.BorderId?.Value ?? 0U, alignment?.Horizontal?.InnerText, alignment?.Vertical?.InnerText, alignment?.WrapText?.Value ?? false);
     }
 
