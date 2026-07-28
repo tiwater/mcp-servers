@@ -96,6 +96,43 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_sets_fit_to_page_dimensions()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-page-setup-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", FitToPagesWide: 1, FitToPagesTall: 0)
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet;
+        Assert.True(worksheet.GetFirstChild<SheetProperties>()!.GetFirstChild<PageSetupProperties>()!.FitToPage!.Value);
+        var setup = worksheet.GetFirstChild<PageSetup>()!;
+        Assert.Equal<uint>(1, setup.FitToWidth!.Value);
+        Assert.Equal<uint>(0, setup.FitToHeight!.Value);
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, -1)]
+    [InlineData(32768, 0)]
+    public void Edit_rejects_invalid_fit_to_page_dimensions(int wide, int tall)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-page-setup-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", FitToPagesWide: wide, FitToPagesTall: tall)
+        ]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
     public void Edit_sets_one_column_width_and_preserves_adjacent_column_geometry()
     {
         var path = CreateWorkbookFixture();
