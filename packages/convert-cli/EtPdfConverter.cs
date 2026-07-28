@@ -44,11 +44,10 @@ public static class EtPdfConverter
                 throw new TimeoutException("ET RPC PDF conversion timed out after 180 seconds.");
             }
 
-            var stdout = stdoutTask.GetAwaiter().GetResult();
-            var stderr = stderrTask.GetAwaiter().GetResult();
+            var details = WpsRpcSession.CollectDiagnosticOutput(
+                stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
             if (process.ExitCode != 0 || !IsPdf(output))
             {
-                var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));
                 throw new InvalidOperationException("ET RPC failed to convert workbook to PDF."
                     + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
             }

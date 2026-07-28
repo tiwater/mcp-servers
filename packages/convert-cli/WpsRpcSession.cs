@@ -84,6 +84,26 @@ internal static class WpsRpcSession
         return startInfo;
     }
 
+    internal static (string Stdout, string Stderr) CollectProcessOutput(
+        Task<string> stdout,
+        Task<string> stderr,
+        TimeSpan wait)
+    {
+        try { Task.WhenAll(stdout, stderr).Wait(wait); } catch { }
+        return (
+            stdout.IsCompletedSuccessfully ? stdout.Result.Trim() : string.Empty,
+            stderr.IsCompletedSuccessfully ? stderr.Result.Trim() : string.Empty);
+    }
+
+    internal static string CollectDiagnosticOutput(
+        Task<string> stdout,
+        Task<string> stderr,
+        TimeSpan wait)
+    {
+        var output = CollectProcessOutput(stdout, stderr, wait);
+        return string.Join(" ", new[] { output.Stdout, output.Stderr }.Where(value => value.Length > 0));
+    }
+
     private static string? FindOnPath(string command)
     {
         foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)

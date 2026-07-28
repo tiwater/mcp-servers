@@ -65,11 +65,10 @@ public static class EtWorkbookConverter
                 throw new TimeoutException("WPS RPC XLS conversion timed out after 120 seconds.");
             }
 
-            var stdout = stdoutTask.GetAwaiter().GetResult();
-            var stderr = stderrTask.GetAwaiter().GetResult();
+            var details = WpsRpcSession.CollectDiagnosticOutput(
+                stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
             if (process.ExitCode != 0 || !File.Exists(output))
             {
-                var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static s => !string.IsNullOrWhiteSpace(s)));
                 throw new InvalidOperationException(
                     $"WPS RPC failed to convert {input} to XLSX."
                     + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));

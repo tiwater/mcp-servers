@@ -210,12 +210,11 @@ public static class OfficeConverter
                 throw new TimeoutException($"LibreOffice/soffice {targetFormat} conversion timed out after 120 seconds.");
             }
 
-            var stdout = stdoutTask.GetAwaiter().GetResult();
-            var stderr = stderrTask.GetAwaiter().GetResult();
+            var details = WpsRpcSession.CollectDiagnosticOutput(
+                stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
             var generated = Path.Combine(exportDir, $"{Path.GetFileNameWithoutExtension(input)}.{targetFormat}");
             if (process.ExitCode != 0 || !File.Exists(generated))
             {
-                var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static s => !string.IsNullOrWhiteSpace(s)));
                 throw new InvalidOperationException(
                     $"LibreOffice/soffice failed to convert {input} to {targetFormat.ToUpperInvariant()}."
                     + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));

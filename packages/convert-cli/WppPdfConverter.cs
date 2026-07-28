@@ -68,11 +68,10 @@ public static class WppPdfConverter
             throw new TimeoutException("WPP RPC PDF conversion timed out after 180 seconds.");
         }
 
-        var stdout = stdoutTask.GetAwaiter().GetResult();
-        var stderr = stderrTask.GetAwaiter().GetResult();
+        var details = WpsRpcSession.CollectDiagnosticOutput(
+            stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
         if (process.ExitCode != 0 || !IsPdf(output))
         {
-            var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));
             throw new InvalidOperationException("WPP RPC failed to convert presentation to PDF."
                 + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
         }

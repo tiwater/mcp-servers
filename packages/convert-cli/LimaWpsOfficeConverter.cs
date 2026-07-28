@@ -112,8 +112,10 @@ internal static class LimaWpsPdfConverter
             throw new TimeoutException($"Lima {backend} PDF conversion timed out after 180 seconds.");
         }
 
-        var stdout = stdoutTask.GetAwaiter().GetResult();
-        var stderr = stderrTask.GetAwaiter().GetResult();
+        var outputText = WpsRpcSession.CollectProcessOutput(
+            stdoutTask, stderrTask, TimeSpan.FromSeconds(1));
+        var stdout = outputText.Stdout;
+        var stderr = outputText.Stderr;
         if (process.ExitCode != 0)
         {
             var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));
@@ -178,8 +180,10 @@ internal static class LimaWpsPdfConverter
             try { process.Kill(entireProcessTree: true); } catch { }
             throw new TimeoutException($"Lima ET {command} timed out after 600 seconds.");
         }
-        var stdout = stdoutTask.GetAwaiter().GetResult();
-        var stderr = stderrTask.GetAwaiter().GetResult();
+        var outputText = WpsRpcSession.CollectProcessOutput(
+            stdoutTask, stderrTask, TimeSpan.FromSeconds(1));
+        var stdout = outputText.Stdout;
+        var stderr = outputText.Stderr;
         if (process.ExitCode != 0)
         {
             var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static value => !string.IsNullOrWhiteSpace(value)));

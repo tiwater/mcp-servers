@@ -132,7 +132,7 @@ public class ConvertCliTests
     {
         var inheritedPipe = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = Stopwatch.StartNew();
-        var details = EtRecalculator.CollectDiagnosticOutput(
+        var details = WpsRpcSession.CollectDiagnosticOutput(
             inheritedPipe.Task,
             Task.FromResult("helper diagnostic"),
             TimeSpan.FromMilliseconds(20));
