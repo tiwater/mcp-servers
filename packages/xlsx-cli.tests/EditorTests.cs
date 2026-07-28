@@ -102,7 +102,7 @@ public class EditorTests
         var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-page-setup-{Guid.NewGuid():N}.xlsx");
 
         var result = Editor.Apply(path, output, [
-            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", FitToPagesWide: 1, FitToPagesTall: 0)
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", FitToPagesWide: 1)
         ]);
 
         Assert.True(result.AppliedOperations.Single().Applied);
@@ -111,12 +111,13 @@ public class EditorTests
         Assert.True(worksheet.GetFirstChild<SheetProperties>()!.GetFirstChild<PageSetupProperties>()!.FitToPage!.Value);
         var setup = worksheet.GetFirstChild<PageSetup>()!;
         Assert.Equal<uint>(1, setup.FitToWidth!.Value);
-        Assert.Equal<uint>(0, setup.FitToHeight!.Value);
+        Assert.Null(setup.FitToHeight);
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }
 
     [Theory]
-    [InlineData(0, 0)]
+    [InlineData(0, 1)]
+    [InlineData(1, 0)]
     [InlineData(1, -1)]
     [InlineData(32768, 0)]
     public void Edit_rejects_invalid_fit_to_page_dimensions(int wide, int tall)
