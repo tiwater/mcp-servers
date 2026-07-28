@@ -240,12 +240,13 @@ public static class Editor
     private static XlsxEditAppliedOperation SetPageSetupOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
     {
         if (string.IsNullOrWhiteSpace(operation.Sheet)
-            || (operation.FitToPagesWide is null && operation.FitToPagesTall is null && operation.Orientation is null)
+            || (operation.FitToPagesWide is null && operation.FitToPagesTall is null && operation.Orientation is null && operation.PaperSize is null)
             || operation.FitToPagesWide is < 1 or > 32767
             || operation.FitToPagesTall is < 1 or > 32767
             || (operation.Orientation is not null
                 && !string.Equals(operation.Orientation, "portrait", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase)))
+                && !string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase))
+            || !TryResolvePaperSize(operation.PaperSize, out var paperSizeCode))
             return new XlsxEditAppliedOperation(operation.Type, false, "sheet and at least one valid page setup property are required");
 
         var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
@@ -284,8 +285,25 @@ public static class Editor
                 ? OrientationValues.Landscape
                 : OrientationValues.Portrait;
         }
+        if (paperSizeCode is not null) pageSetup.PaperSize = paperSizeCode.Value;
         worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Set page setup for {operation.Sheet}");
+    }
+
+    private static bool TryResolvePaperSize(string? paperSize, out uint? code)
+    {
+        code = paperSize?.ToLowerInvariant() switch
+        {
+            null => null,
+            "letter" => 1u,
+            "legal" => 5u,
+            "a3" => 8u,
+            "a4" => 9u,
+            _ => uint.MaxValue,
+        };
+        if (code != uint.MaxValue) return true;
+        code = null;
+        return false;
     }
 
     private static XlsxEditAppliedOperation SetRangeValuesOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -1616,12 +1634,13 @@ public static class Editor
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
         if (operation.Type == "setPageSetup")
             return !string.IsNullOrWhiteSpace(operation.Sheet)
-                && (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null || operation.Orientation is not null)
+                && (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null || operation.Orientation is not null || operation.PaperSize is not null)
                 && (operation.FitToPagesWide is null or (>= 1 and <= 32767))
                 && (operation.FitToPagesTall is null or (>= 1 and <= 32767))
                 && (operation.Orientation is null
                     || string.Equals(operation.Orientation, "portrait", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase))
+                && TryResolvePaperSize(operation.PaperSize, out _)
                 ? null
                 : "sheet and valid page setup properties are required";
         if (operation.Type == "setColumnWidth")

@@ -140,13 +140,14 @@ public class EditorTests
         var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-page-orientation-{Guid.NewGuid():N}.xlsx");
 
         var result = Editor.Apply(path, output, [
-            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", Orientation: "landscape")
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", Orientation: "landscape", PaperSize: "a3")
         ]);
 
         Assert.True(result.AppliedOperations.Single().Applied);
         using var spreadsheet = SpreadsheetDocument.Open(output, false);
         var setup = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.GetFirstChild<PageSetup>()!;
         Assert.Equal(OrientationValues.Landscape, setup.Orientation!.Value);
+        Assert.Equal<uint>(8, setup.PaperSize!.Value);
         Assert.Null(setup.FitToWidth);
         Assert.Null(setup.FitToHeight);
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
@@ -160,6 +161,20 @@ public class EditorTests
 
         var result = Editor.Apply(path, output, [
             new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", Orientation: "diagonal")
+        ]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void Edit_rejects_invalid_paper_size()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-paper-size-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", PaperSize: "poster")
         ]);
 
         Assert.False(result.AppliedOperations.Single().Applied);
