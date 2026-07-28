@@ -128,6 +128,20 @@ public class ConvertCliTests
     }
 
     [Fact]
+    public void Wps_xlsx_recalculation_does_not_wait_for_inherited_diagnostic_pipes()
+    {
+        var inheritedPipe = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = Stopwatch.StartNew();
+        var details = EtRecalculator.CollectDiagnosticOutput(
+            inheritedPipe.Task,
+            Task.FromResult("helper diagnostic"),
+            TimeSpan.FromMilliseconds(20));
+
+        Assert.Equal("helper diagnostic", details);
+        Assert.InRange(started.ElapsedMilliseconds, 0, 500);
+    }
+
+    [Fact]
     public void Lima_recalculation_transport_invokes_the_versioned_remote_command()
     {
         var start = LimaWpsPdfConverter.CreateSpreadsheetConversionStartInfo("/usr/bin/limactl", "wps", "/shared/input.xlsx", "/shared/output.xlsx", "recalculate-xlsx");

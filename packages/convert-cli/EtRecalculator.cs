@@ -27,11 +27,20 @@ public static class EtRecalculator
             using var process = Process.Start(WpsRpcSession.CreateProcessStartInfo(dbus, xvfb, python, helper, input, output, root)) ?? throw new InvalidOperationException("Failed to start WPS XLSX recalculation.");
             var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(TimeSpan.FromMinutes(10))) { try { process.Kill(entireProcessTree: true); } catch { } throw new TimeoutException("WPS XLSX recalculation timed out after 600 seconds."); }
-            var details = string.Join(" ", new[] { stdout.GetAwaiter().GetResult().Trim(), stderr.GetAwaiter().GetResult().Trim() }.Where(value => value.Length > 0));
+            var details = CollectDiagnosticOutput(stdout, stderr, TimeSpan.FromMilliseconds(250));
             if (process.ExitCode != 0 || !File.Exists(output)) throw new InvalidOperationException("WPS XLSX recalculation failed." + (details.Length > 0 ? $" {details}" : string.Empty));
             using var stream = File.OpenRead(output); using var workbook = new XSSFWorkbook(stream); if (workbook.NumberOfSheets < 1) throw new InvalidOperationException("WPS recalculation produced an XLSX without worksheets.");
         }
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    internal static string CollectDiagnosticOutput(Task<string> stdout, Task<string> stderr, TimeSpan wait)
+    {
+        try { Task.WhenAll(stdout, stderr).Wait(wait); } catch { }
+        return string.Join(" ", new[] { stdout, stderr }
+            .Where(task => task.IsCompletedSuccessfully)
+            .Select(task => task.Result.Trim())
+            .Where(value => value.Length > 0));
     }
 
     private static string? FindPython()
