@@ -240,10 +240,13 @@ public static class Editor
     private static XlsxEditAppliedOperation SetPageSetupOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
     {
         if (string.IsNullOrWhiteSpace(operation.Sheet)
-            || (operation.FitToPagesWide is null && operation.FitToPagesTall is null)
+            || (operation.FitToPagesWide is null && operation.FitToPagesTall is null && operation.Orientation is null)
             || operation.FitToPagesWide is < 1 or > 32767
-            || operation.FitToPagesTall is < 1 or > 32767)
-            return new XlsxEditAppliedOperation(operation.Type, false, "sheet and at least one bounded fit-to-page dimension are required");
+            || operation.FitToPagesTall is < 1 or > 32767
+            || (operation.Orientation is not null
+                && !string.Equals(operation.Orientation, "portrait", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase)))
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet and at least one valid page setup property are required");
 
         var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
         if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
@@ -270,10 +273,19 @@ public static class Editor
             if (margins is not null) worksheet.InsertAfter(pageSetup, margins);
             else worksheet.Append(pageSetup);
         }
-        pageSetup.FitToWidth = operation.FitToPagesWide is null ? 0u : (uint)operation.FitToPagesWide.Value;
-        pageSetup.FitToHeight = operation.FitToPagesTall is null ? 0u : (uint)operation.FitToPagesTall.Value;
+        if (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null)
+        {
+            pageSetup.FitToWidth = operation.FitToPagesWide is null ? 0u : (uint)operation.FitToPagesWide.Value;
+            pageSetup.FitToHeight = operation.FitToPagesTall is null ? 0u : (uint)operation.FitToPagesTall.Value;
+        }
+        if (operation.Orientation is not null)
+        {
+            pageSetup.Orientation = string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase)
+                ? OrientationValues.Landscape
+                : OrientationValues.Portrait;
+        }
         worksheet.Save();
-        return new XlsxEditAppliedOperation(operation.Type, true, $"Set page fit {operation.Sheet} to {operation.FitToPagesWide}x{operation.FitToPagesTall}");
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Set page setup for {operation.Sheet}");
     }
 
     private static XlsxEditAppliedOperation SetRangeValuesOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -1604,11 +1616,14 @@ public static class Editor
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
         if (operation.Type == "setPageSetup")
             return !string.IsNullOrWhiteSpace(operation.Sheet)
-                && (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null)
+                && (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null || operation.Orientation is not null)
                 && (operation.FitToPagesWide is null or (>= 1 and <= 32767))
                 && (operation.FitToPagesTall is null or (>= 1 and <= 32767))
+                && (operation.Orientation is null
+                    || string.Equals(operation.Orientation, "portrait", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase))
                 ? null
-                : "sheet and bounded fit-to-page dimensions are required";
+                : "sheet and valid page setup properties are required";
         if (operation.Type == "setColumnWidth")
             return TryParseWritableColumn(operation.Column, out _)
                 && operation.Width is not null
