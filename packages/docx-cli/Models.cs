@@ -196,7 +196,13 @@ public sealed record TemplateMigrationObject(
     string? ParentId,
     string? Text,
     string? Style,
-    IReadOnlyDictionary<string, string> Provenance);
+    IReadOnlyDictionary<string, string> Provenance,
+    TemplateMigrationTopology? Topology = null);
+
+public sealed record TemplateMigrationTopology(
+    string ContainerObjectId,
+    int Row,
+    int Column);
 
 public sealed record TemplateMigrationInventory(
     string File,
