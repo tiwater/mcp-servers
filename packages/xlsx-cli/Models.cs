@@ -99,7 +99,8 @@ public sealed record XlsxEditOperation(
     bool? PreserveStyle = null,
     bool? PreserveFormulas = null,
     bool? PreserveMergedRanges = null,
-    string? Range = null);
+    string? Range = null,
+    double? Width = null);
 
 internal sealed class PrimitiveJsonValueConverter : JsonConverter<string?>
 {
