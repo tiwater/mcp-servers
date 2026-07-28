@@ -77,6 +77,7 @@ public static class Editor
         {
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
             "setPrintArea" => SetPrintAreaOperation(workbookPart, operation),
+            "setColumnWidth" => SetColumnWidthOperation(workbookPart, operation),
             "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
             "insertRows" => InsertRowsOperation(workbookPart, operation),
@@ -158,6 +159,81 @@ public static class Editor
         });
         workbookPart.Workbook.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Set print area {operation.Sheet}!{operation.Range}");
+    }
+
+    private static XlsxEditAppliedOperation SetColumnWidthOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet)
+            || !TryParseWritableColumn(operation.Column, out var columnIndex)
+            || operation.Width is null
+            || !double.IsFinite(operation.Width.Value)
+            || operation.Width.Value is <= 0 or > 255)
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet, a bounded column, and width in (0, 255] are required");
+
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        var worksheet = worksheetPart.Worksheet;
+        var columns = worksheet.GetFirstChild<Columns>();
+        if (columns is null)
+        {
+            var sheetData = worksheet.GetFirstChild<SheetData>()
+                ?? throw new InvalidOperationException("Worksheet sheet data not found.");
+            columns = worksheet.InsertBefore(new Columns(), sheetData);
+        }
+
+        var existing = columns.Elements<Column>().ToList();
+        var covering = existing.Where(column => column.Min?.Value <= (uint)columnIndex && column.Max?.Value >= (uint)columnIndex).ToList();
+        if (covering.Count > 1)
+            return new XlsxEditAppliedOperation(operation.Type, false, $"Column geometry is ambiguous: {operation.Sheet}!{operation.Column}");
+
+        var rewritten = new List<Column>();
+        foreach (var current in existing)
+        {
+            if (covering.Count == 0 || !ReferenceEquals(current, covering[0]))
+            {
+                rewritten.Add((Column)current.CloneNode(true));
+                continue;
+            }
+
+            var min = current.Min?.Value ?? throw new InvalidOperationException("Column minimum is missing.");
+            var max = current.Max?.Value ?? throw new InvalidOperationException("Column maximum is missing.");
+            if (min < (uint)columnIndex)
+            {
+                var before = (Column)current.CloneNode(true);
+                before.Min = min;
+                before.Max = (uint)columnIndex - 1;
+                rewritten.Add(before);
+            }
+            var target = (Column)current.CloneNode(true);
+            target.Min = target.Max = (uint)columnIndex;
+            target.Width = operation.Width.Value;
+            target.CustomWidth = true;
+            target.BestFit = false;
+            rewritten.Add(target);
+            if ((uint)columnIndex < max)
+            {
+                var after = (Column)current.CloneNode(true);
+                after.Min = (uint)columnIndex + 1;
+                after.Max = max;
+                rewritten.Add(after);
+            }
+        }
+
+        if (covering.Count == 0)
+        {
+            rewritten.Add(new Column
+            {
+                Min = (uint)columnIndex,
+                Max = (uint)columnIndex,
+                Width = operation.Width.Value,
+                CustomWidth = true,
+                BestFit = false,
+            });
+        }
+        columns.RemoveAllChildren<Column>();
+        foreach (var column in rewritten.OrderBy(column => column.Min?.Value ?? uint.MaxValue)) columns.Append(column);
+        worksheet.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Set column width {operation.Sheet}!{operation.Column}:{operation.Column}");
     }
 
     private static XlsxEditAppliedOperation SetRangeValuesOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -1516,6 +1592,13 @@ public static class Editor
             return TryParseWritableCell(operation.Cell, out _, out _) ? null : "cell must be a bounded A1 reference";
         if (operation.Type == "setPrintArea")
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
+        if (operation.Type == "setColumnWidth")
+            return TryParseWritableColumn(operation.Column, out _)
+                && operation.Width is not null
+                && double.IsFinite(operation.Width.Value)
+                && operation.Width.Value is > 0 and <= 255
+                ? null
+                : "column must be bounded and width must be in (0, 255]";
         if (operation.Type == "setRangeValues")
         {
             if (!TryParseWritableCell(operation.StartCell, out var column, out var row)) return "startCell must be a bounded A1 reference";
@@ -1533,6 +1616,14 @@ public static class Editor
         if (!match.Success || !int.TryParse(match.Groups["row"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out row)) return false;
         column = GetColumnIndex(match.Groups["column"].Value);
         return column is >= 1 and <= 16384 && row is >= 1 and <= 1048576;
+    }
+
+    private static bool TryParseWritableColumn(string? name, out int column)
+    {
+        column = 0;
+        if (!Regex.IsMatch(name ?? string.Empty, "^[A-Za-z]{1,3}$", RegexOptions.CultureInvariant)) return false;
+        column = GetColumnIndex(name!);
+        return column is >= 1 and <= 16384;
     }
 
     private static int GetColumnIndex(string columnName)

@@ -95,6 +95,54 @@ public class EditorTests
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }
 
+    [Fact]
+    public void Edit_sets_one_column_width_and_preserves_adjacent_column_geometry()
+    {
+        var path = CreateWorkbookFixture();
+        using (var spreadsheet = SpreadsheetDocument.Open(path, true))
+        {
+            var worksheet = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet;
+            worksheet.GetFirstChild<Columns>()?.Remove();
+            worksheet.InsertBefore(
+                new Columns(new Column { Min = 1, Max = 3, Width = 12, CustomWidth = true }),
+                worksheet.GetFirstChild<SheetData>());
+            worksheet.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-column-width-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setColumnWidth", Sheet: "Sheet1", Column: "B", Width: 24.5)
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var edited = SpreadsheetDocument.Open(output, false);
+        var columns = edited.WorkbookPart!.WorksheetParts.Single().Worksheet
+            .GetFirstChild<Columns>()!.Elements<Column>().ToList();
+        Assert.Collection(columns,
+            column => { Assert.Equal<uint>(1, column.Min!.Value); Assert.Equal<uint>(1, column.Max!.Value); Assert.Equal(12, column.Width!.Value); },
+            column => { Assert.Equal<uint>(2, column.Min!.Value); Assert.Equal<uint>(2, column.Max!.Value); Assert.Equal(24.5, column.Width!.Value); Assert.True(column.CustomWidth!.Value); },
+            column => { Assert.Equal<uint>(3, column.Min!.Value); Assert.Equal<uint>(3, column.Max!.Value); Assert.Equal(12, column.Width!.Value); });
+        Assert.Empty(new OpenXmlValidator().Validate(edited));
+    }
+
+    [Theory]
+    [InlineData("A", 0)]
+    [InlineData("A", 256)]
+    [InlineData("XFE", 10)]
+    [InlineData("A1", 10)]
+    public void Edit_rejects_invalid_column_width_coordinates_before_mutation(string column, double width)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-column-width-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setColumnWidth", Sheet: "Sheet1", Column: column, Width: width)
+        ]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
     [Theory]
     [InlineData("A0")]
     [InlineData("XFE1")]

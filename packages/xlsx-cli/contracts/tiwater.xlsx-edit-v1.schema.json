@@ -16,6 +16,7 @@
             "enum": [
               "setCellValue",
               "setPrintArea",
+              "setColumnWidth",
               "setRichTextCellValue",
               "setRangeValues",
               "insertRows",
@@ -55,6 +56,9 @@
           "preserveFormulas": { "type": ["boolean", "null"] },
           "preserveMergedRanges": { "type": ["boolean", "null"] },
           "range": { "type": ["string", "null"] }
+          ,
+          "column": { "type": ["string", "null"], "pattern": "^[A-Za-z]{1,3}$" },
+          "width": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 255 }
         }
       }
     }
