@@ -72,7 +72,7 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType`, `bold`, `shrinkToFit`, and `wrapText`
 - `setPrintArea` with required `sheet` and A1-style `range`
-- `setPageSetup` with required `sheet` and at least one of `fitToPagesWide` or `fitToPagesTall`
+- `setPageSetup` with required `sheet` and at least one of `fitToPagesWide` or `fitToPagesTall`; an omitted dimension remains unconstrained
 - `setColumnWidth` with required `sheet`, bounded A1-style `column`, and Excel-compatible `width`
 - `setRichTextCellValue` with required `sheet`, `cell`, `value`, and `bold`; writes one explicit rich-text run so value and all-run bold state are one operation
 - `setRangeValues` with required `sheet`, `startCell`, and `values`; optional `valueType`
