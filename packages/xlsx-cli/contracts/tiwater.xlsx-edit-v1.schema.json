@@ -61,7 +61,8 @@
           "column": { "type": ["string", "null"], "pattern": "^[A-Za-z]{1,3}$" },
           "width": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 255 },
           "fitToPagesWide": { "type": ["integer", "null"], "minimum": 1, "maximum": 32767 },
-          "fitToPagesTall": { "type": ["integer", "null"], "minimum": 1, "maximum": 32767 }
+          "fitToPagesTall": { "type": ["integer", "null"], "minimum": 1, "maximum": 32767 },
+          "orientation": { "type": ["string", "null"], "enum": ["portrait", "landscape", null] }
         }
       }
     }

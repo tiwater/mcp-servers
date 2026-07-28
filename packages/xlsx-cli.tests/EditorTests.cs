@@ -133,6 +133,39 @@ public class EditorTests
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }
 
+    [Fact]
+    public void Edit_sets_page_orientation_without_changing_fit_dimensions()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-page-orientation-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", Orientation: "landscape")
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var setup = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.GetFirstChild<PageSetup>()!;
+        Assert.Equal(OrientationValues.Landscape, setup.Orientation!.Value);
+        Assert.Null(setup.FitToWidth);
+        Assert.Null(setup.FitToHeight);
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Fact]
+    public void Edit_rejects_invalid_page_orientation()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-page-orientation-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", Orientation: "diagonal")
+        ]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
     [Theory]
     [InlineData(0, 1)]
     [InlineData(1, 0)]
