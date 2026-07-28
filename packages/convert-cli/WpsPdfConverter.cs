@@ -74,11 +74,10 @@ public static class WpsPdfConverter
             try { process.Kill(entireProcessTree: true); } catch { }
             throw new TimeoutException("WPS RPC PDF conversion timed out after 180 seconds.");
         }
-        var stdout = stdoutTask.GetAwaiter().GetResult();
-        var stderr = stderrTask.GetAwaiter().GetResult();
+        var details = WpsRpcSession.CollectDiagnosticOutput(
+            stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
         if (process.ExitCode != 0 || !IsPdf(output))
         {
-            var details = string.Join(" ", new[] { stdout.Trim(), stderr.Trim() }.Where(static s => !string.IsNullOrWhiteSpace(s)));
             throw new InvalidOperationException($"WPS RPC failed to convert {input} to PDF." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
         }
     }
