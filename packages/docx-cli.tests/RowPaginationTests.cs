@@ -8,6 +8,46 @@ namespace Dockit.Docx.Tests;
 public sealed class RowPaginationTests
 {
     [Fact]
+    public void Body_paragraph_keep_next_is_set_without_changing_paragraph_content()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"docx-paragraph-pagination-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var input = Path.Combine(root, "input.docx");
+        var output = Path.Combine(root, "output.docx");
+        try
+        {
+            using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(
+                        new ParagraphProperties(new Justification { Val = JustificationValues.Left }),
+                        new Run(new Text("first note"))),
+                    new Paragraph(new Run(new Text("second note")))));
+                main.Document.Save();
+            }
+
+            var result = Editor.Apply(
+                input,
+                output,
+                [new DocxEditOperation("setBodyParagraphKeepNext", ParagraphIndex: 0, KeepNext: true)]);
+
+            Assert.True(Assert.Single(result.AppliedOperations).Applied);
+            var validation = OpenXmlValidation.Validate(output);
+            Assert.True(validation.Pass, string.Join(Environment.NewLine, validation.Errors.Select(error => error.Description)));
+            using var edited = WordprocessingDocument.Open(output, false);
+            var paragraphs = edited.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ToList();
+            Assert.Equal("first note", paragraphs[0].InnerText);
+            Assert.NotNull(paragraphs[0].ParagraphProperties?.GetFirstChild<KeepNext>());
+            Assert.Null(paragraphs[1].ParagraphProperties?.GetFirstChild<KeepNext>());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Keep_next_is_written_in_schema_order_and_reported_by_inspection()
     {
         var root = Path.Combine(Path.GetTempPath(), $"docx-row-pagination-{Guid.NewGuid():N}");

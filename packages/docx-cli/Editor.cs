@@ -106,6 +106,7 @@ public static class Editor
             "setTableRowHeight" => SetTableRowHeight(body, operation),
             "setTableRowCantSplit" => SetTableRowCantSplit(body, operation),
             "setTableRowKeepNext" => SetTableRowKeepNext(body, operation),
+            "setBodyParagraphKeepNext" => SetBodyParagraphKeepNext(body, operation),
             "collapseTrailingEmptySection" => CollapseTrailingEmptySection(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
             "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
@@ -973,6 +974,24 @@ public static class Editor
 
         return new DocxEditAppliedOperation(operation.Type, true,
             $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}] keepNext={operation.KeepNext.Value.ToString().ToLowerInvariant()}");
+    }
+
+    private static DocxEditAppliedOperation SetBodyParagraphKeepNext(Body body, DocxEditOperation operation)
+    {
+        if (operation.ParagraphIndex is null || operation.KeepNext is null)
+            return new DocxEditAppliedOperation(operation.Type, false, "paragraphIndex and keepNext are required");
+
+        var paragraphs = body.Elements<Paragraph>().ToList();
+        if (operation.ParagraphIndex.Value < 0 || operation.ParagraphIndex.Value >= paragraphs.Count)
+            return new DocxEditAppliedOperation(operation.Type, false, $"paragraphIndex {operation.ParagraphIndex} is out of range");
+
+        var paragraph = paragraphs[operation.ParagraphIndex.Value];
+        var properties = paragraph.ParagraphProperties ?? paragraph.PrependChild(new ParagraphProperties());
+        properties.RemoveAllChildren<KeepNext>();
+        if (operation.KeepNext.Value) properties.AddChild(new KeepNext(), true);
+
+        return new DocxEditAppliedOperation(operation.Type, true,
+            $"Updated body paragraph[{operation.ParagraphIndex}] keepNext={operation.KeepNext.Value.ToString().ToLowerInvariant()}");
     }
 
     private static DocxEditAppliedOperation CollapseTrailingEmptySection(Body body, DocxEditOperation operation)
