@@ -576,13 +576,17 @@ public static class TemplateMigration
         var mediaCopies = new List<TemplateMigrationMediaCopy>();
         var reviewRequired = false;
 
-        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v1" or "tiwater.docx.template-migration-plan/v2"))
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v1" or "tiwater.docx.template-migration-plan/v2" or "tiwater.docx.template-migration-plan/v3"))
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-schema-invalid", Detail: plan.Schema));
         }
         if (string.Equals(plan.Schema, "tiwater.docx.template-migration-plan/v1", StringComparison.Ordinal) && (plan.BodyAppends?.Count ?? 0) != 0)
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v1-body-append-forbidden"));
+        }
+        if (plan.Schema is not "tiwater.docx.template-migration-plan/v3" && (plan.BaselineClears?.Count ?? 0) != 0)
+        {
+            failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-baseline-clear-schema-invalid"));
         }
         if (!string.Equals(plan.SourceSha256, analysis.Source.Sha256, StringComparison.Ordinal))
         {
@@ -597,8 +601,55 @@ public static class TemplateMigration
         var baselineById = analysis.Baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var mappingsBySource = new Dictionary<string, TemplateMigrationMapping>(StringComparer.Ordinal);
         var copyTargets = new HashSet<string>(StringComparer.Ordinal);
+        var clearTargets = new HashSet<string>(StringComparer.Ordinal);
         var appendedSourceIds = new HashSet<string>(StringComparer.Ordinal);
         var bodyAppends = new List<TemplateMigrationBodyAppend>();
+
+        foreach (var clear in plan.BaselineClears ?? [])
+        {
+            if (!baselineById.TryGetValue(clear.BaselineObjectId, out var selected)
+                || selected.Kind is not ("paragraph" or "table-cell"))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-object-invalid", BaselineObjectId: clear.BaselineObjectId));
+                continue;
+            }
+            IReadOnlyList<TemplateMigrationObject> targets;
+            if (string.Equals(clear.Mode, "cell", StringComparison.Ordinal))
+            {
+                targets = [selected];
+            }
+            else if (string.Equals(clear.Mode, "row", StringComparison.Ordinal)
+                && selected.Kind == "table-cell"
+                && selected.Topology is not null)
+            {
+                targets = analysis.Baseline.Objects
+                    .Where(item => item.Kind == "table-cell"
+                        && item.Topology?.ContainerObjectId == selected.Topology.ContainerObjectId
+                        && item.Topology.Row == selected.Topology.Row)
+                    .OrderBy(item => item.Topology!.Column)
+                    .ToList();
+            }
+            else
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-mode-invalid", BaselineObjectId: clear.BaselineObjectId, Detail: clear.Mode));
+                continue;
+            }
+            foreach (var target in targets)
+            {
+                if (!clearTargets.Add(target.Id))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-duplicate", BaselineObjectId: target.Id));
+                    continue;
+                }
+                var operation = BuildCopyTextOperation(target.Id, string.Empty);
+                if (operation is null)
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-operation-unsupported", BaselineObjectId: target.Id));
+                    continue;
+                }
+                operations.Add(operation);
+            }
+        }
 
         foreach (var append in plan.BodyAppends ?? [])
         {
@@ -652,6 +703,11 @@ public static class TemplateMigration
                 if (!copyTargets.Add(mapping.BaselineObjectId))
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-duplicate", mapping.SourceObjectId, mapping.BaselineObjectId));
+                    continue;
+                }
+                if (clearTargets.Contains(mapping.BaselineObjectId))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-copy-conflict", mapping.SourceObjectId, mapping.BaselineObjectId));
                     continue;
                 }
                 var operation = BuildCopyTextOperation(mapping.BaselineObjectId, sourceObject.Text ?? string.Empty);
@@ -979,6 +1035,25 @@ public static class TemplateMigration
                     || !string.Equals(sourceHash, outputHash, StringComparison.Ordinal)))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-media-mismatch", mapping.SourceObjectId, mapping.BaselineObjectId));
+            }
+        }
+
+        foreach (var clear in plan.BaselineClears ?? [])
+        {
+            var selected = baselineInventory.Objects.SingleOrDefault(item => item.Id == clear.BaselineObjectId);
+            if (selected is null) continue;
+            var targets = string.Equals(clear.Mode, "row", StringComparison.Ordinal) && selected.Topology is not null
+                ? baselineInventory.Objects.Where(item => item.Kind == "table-cell"
+                    && item.Topology?.ContainerObjectId == selected.Topology.ContainerObjectId
+                    && item.Topology.Row == selected.Topology.Row)
+                : [selected];
+            foreach (var target in targets)
+            {
+                if (!outputById.TryGetValue(target.Id, out var outputObject)
+                    || !string.IsNullOrEmpty(outputObject.Text))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-clear-mismatch", BaselineObjectId: target.Id));
+                }
             }
         }
 

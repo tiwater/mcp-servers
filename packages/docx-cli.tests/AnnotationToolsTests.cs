@@ -657,6 +657,62 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_preview_clears_attested_baseline_placeholders_and_remains_review_required()
+    {
+        var source = CreateTextMigrationFixture("source fact");
+        var baseline = CreateBaselineClearFixture("{{approval}}", "{{effectiveDate}}");
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v3",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            [new TemplateMigrationMapping("body:paragraph:0", null, "review-required", "source-layout-not-representable")],
+            BaselineClears:
+            [
+                new TemplateMigrationBaselineClear("body:table:0:row:0:cell:0", "cell"),
+                new TemplateMigrationBaselineClear("body:table:0:row:1:cell:0", "row")
+            ]);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-review-preview-{Guid.NewGuid():N}.docx");
+
+        var preview = TemplateMigration.Preview(source, baseline, plan, output);
+
+        Assert.False(preview.Pass);
+        Assert.True(preview.ReviewRequired);
+        Assert.True(preview.OutputVerified, string.Join("; ", preview.Readback?.Failures.Select(item => item.Reason) ?? []));
+        using var document = WordprocessingDocument.Open(output, false);
+        var rows = document.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ToList();
+        Assert.Equal(string.Empty, rows[0].Elements<TableCell>().First().InnerText);
+        Assert.All(rows[1].Elements<TableCell>(), cell => Assert.Equal(string.Empty, cell.InnerText));
+    }
+
+    [Fact]
+    public void TemplateMigration_rejects_unbound_or_conflicting_baseline_clear()
+    {
+        var source = CreateTextMigrationFixture("source fact");
+        var baseline = CreateBaselineClearFixture("target", "other");
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var unknown = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v3",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            [],
+            BaselineClears: [new TemplateMigrationBaselineClear("body:table:9:row:9:cell:9", "cell")]);
+        Assert.Contains(TemplateMigration.BuildOperations(source, baseline, unknown).Failures,
+            failure => failure.Reason == "template-migration-baseline-clear-object-invalid");
+
+        var conflictSource = CreateBaselineClearFixture("source fact", "other");
+        var conflictAnalysis = TemplateMigration.Analyze(conflictSource, baseline);
+        var conflict = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v3",
+            conflictAnalysis.Source.Sha256,
+            conflictAnalysis.Baseline.Sha256,
+            [new TemplateMigrationMapping("body:table:0:row:0:cell:0", "body:table:0:row:0:cell:0", "copy-text")],
+            BaselineClears: [new TemplateMigrationBaselineClear("body:table:0:row:0:cell:0", "cell")]);
+        Assert.Contains(TemplateMigration.BuildOperations(conflictSource, baseline, conflict).Failures,
+            failure => failure.Reason == "template-migration-baseline-clear-copy-conflict");
+    }
+
+    [Fact]
     public void TemplateMigration_rejects_an_ambiguous_semantic_body_append_selector()
     {
         var source = CreateBodyAppendFixture(includeDuplicateRevisionTable: true, baseline: false);
@@ -2537,6 +2593,22 @@ public class AnnotationToolsTests
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
         main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateBaselineClearFixture(string first, string second)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-baseline-clear-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(new Table(
+            new TableRow(
+                new TableCell(new Paragraph(new Run(new Text(first)))),
+                new TableCell(new Paragraph(new Run(new Text("header"))))),
+            new TableRow(
+                new TableCell(new Paragraph(new Run(new Text(second)))),
+                new TableCell(new Paragraph(new Run(new Text("baseline default"))))))));
         main.Document.Save();
         return path;
     }
