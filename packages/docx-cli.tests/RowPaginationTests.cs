@@ -90,6 +90,54 @@ public sealed class RowPaginationTests
     }
 
     [Fact]
+    public void Body_paragraph_keep_next_is_written_and_reported_by_document_flow()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"docx-paragraph-pagination-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var input = Path.Combine(root, "input.docx");
+        var output = Path.Combine(root, "output.docx");
+        try
+        {
+            using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                Paragraph Numbered(string text) => new(
+                    new ParagraphProperties(
+                        new NumberingProperties(
+                            new NumberingLevelReference { Val = 0 },
+                            new NumberingId { Val = 2 })),
+                    new Run(new Text(text)));
+                main.Document = new Document(new Body(Numbered("first"), Numbered("second"), Numbered("last")));
+                main.Document.Save();
+            }
+
+            var result = Editor.Apply(
+                input,
+                output,
+                [new DocxEditOperation("setBodyParagraphKeepNext", ParagraphIndex: 1, KeepNext: true)]);
+
+            Assert.True(Assert.Single(result.AppliedOperations).Applied);
+            var validation = OpenXmlValidation.Validate(output);
+            Assert.True(validation.Pass, string.Join(Environment.NewLine, validation.Errors.Select(error => error.Description)));
+            using (var edited = WordprocessingDocument.Open(output, false))
+            {
+                var paragraphs = edited.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ToList();
+                Assert.Null(paragraphs[0].ParagraphProperties!.GetFirstChild<KeepNext>());
+                Assert.NotNull(paragraphs[1].ParagraphProperties!.GetFirstChild<KeepNext>());
+                Assert.Null(paragraphs[2].ParagraphProperties!.GetFirstChild<KeepNext>());
+            }
+            var flowJson = System.Text.Json.JsonSerializer.Serialize(Inspector.InspectDocumentFlow(output));
+            Assert.Contains("\"paragraphIndex\":1", flowJson, StringComparison.Ordinal);
+            Assert.Contains("\"numberingId\":2", flowJson, StringComparison.Ordinal);
+            Assert.Contains("\"keepNext\":true", flowJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Trailing_empty_section_is_collapsed_without_changing_the_content_section()
     {
         var root = Path.Combine(Path.GetTempPath(), $"docx-empty-section-{Guid.NewGuid():N}");
