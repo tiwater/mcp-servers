@@ -132,7 +132,7 @@ public static class EtWorkbookConverter
         return null;
     }
 
-    private const string EtHelperScript = """
+    internal const string EtHelperScript = """
 import os
 import sys
 
@@ -154,6 +154,7 @@ if hr != S_OK:
 
 try:
     app.Visible = False
+    app.DisplayAlerts = False
     hr, books = app.get_Workbooks()
     if hr != S_OK:
         raise SystemExit(f"get_Workbooks failed: {hex(hr & 0xffffffff)}")

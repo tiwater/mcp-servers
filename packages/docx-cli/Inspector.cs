@@ -141,7 +141,12 @@ public static class Inspector
             {
                 var text = GetParagraphText(paragraph).Trim();
                 var style = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-                if (!string.IsNullOrEmpty(text)) nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, text });
+                var numbering = paragraph.ParagraphProperties?.NumberingProperties;
+                var numberingId = numbering?.NumberingId?.Val?.Value;
+                var numberingLevel = numbering?.NumberingLevelReference?.Val?.Value;
+                var keepNext = paragraph.ParagraphProperties?.GetFirstChild<KeepNext>() is not null;
+                if (!string.IsNullOrEmpty(text) || numberingId is not null)
+                    nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, text });
                 bodyParagraphIndex += 1;
             }
             else if (element is Table table)

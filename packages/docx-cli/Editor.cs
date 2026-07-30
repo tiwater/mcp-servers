@@ -2144,11 +2144,16 @@ public static class Editor
         if (forceBold || segment.Bold == true)
         {
             properties.RemoveAllChildren<Bold>();
+            properties.RemoveAllChildren<BoldComplexScript>();
             properties.AppendChild(new Bold());
+            properties.AppendChild(new BoldComplexScript());
         }
         else if (segment.Bold == false)
         {
             properties.RemoveAllChildren<Bold>();
+            properties.RemoveAllChildren<BoldComplexScript>();
+            properties.AppendChild(new Bold { Val = false });
+            properties.AppendChild(new BoldComplexScript { Val = false });
         }
 
         if (!string.IsNullOrWhiteSpace(segment.Color))

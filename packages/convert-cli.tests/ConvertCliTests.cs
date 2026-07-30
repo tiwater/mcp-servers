@@ -128,6 +128,13 @@ public class ConvertCliTests
     }
 
     [Fact]
+    public void Wps_xls_conversion_suppresses_interactive_save_as_prompts()
+    {
+        Assert.Contains("app.DisplayAlerts = False", EtWorkbookConverter.EtHelperScript);
+        Assert.Contains("book.SaveAs(output_path", EtWorkbookConverter.EtHelperScript);
+    }
+
+    [Fact]
     public void Wps_xlsx_recalculation_does_not_wait_for_inherited_diagnostic_pipes()
     {
         var inheritedPipe = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);

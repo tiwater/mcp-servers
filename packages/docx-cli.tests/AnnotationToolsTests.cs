@@ -1285,6 +1285,48 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_rich_text_bold_false_overrides_inherited_paragraph_bold()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"rich-cell-inherited-bold-{Guid.NewGuid():N}.docx");
+        using (var source = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var main = source.AddMainDocumentPart();
+            main.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(),
+                    new TableGrid(new GridColumn { Width = "2400" }),
+                    new TableRow(
+                        new TableCell(
+                            new Paragraph(
+                                new ParagraphProperties(
+                                    new ParagraphMarkRunProperties(new Bold(), new BoldComplexScript())),
+                                new Run(new Text("inherited bold"))))))));
+            main.Document.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"rich-cell-inherited-bold-edited-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: 0,
+                CellIndex: 0,
+                RichText: [new DocxRichTextSegment("normal text", Bold: false, FontName: "Times New Roman")])
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var paragraph = edited.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single()
+            .Elements<Paragraph>().Single();
+        Assert.NotNull(paragraph.ParagraphProperties!.ParagraphMarkRunProperties!.GetFirstChild<Bold>());
+        var runProperties = paragraph.Elements<Run>().Single().RunProperties!;
+        Assert.False(runProperties.GetFirstChild<Bold>()!.Val!.Value);
+        Assert.False(runProperties.GetFirstChild<BoldComplexScript>()!.Val!.Value);
+        var validationErrors = new OpenXmlValidator().Validate(edited).Select(error => error.Description).ToList();
+        Assert.True(validationErrors.Count == 0, string.Join(Environment.NewLine, validationErrors));
+    }
+
+    [Fact]
     public void Edit_and_inspect_preserve_line_breaks_in_plain_and_rich_table_cell_text()
     {
         var source = CreateTwoCellTableFixture();
