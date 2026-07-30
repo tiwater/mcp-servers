@@ -17,6 +17,7 @@
               "setCellValue",
               "setPrintArea",
               "setPageSetup",
+              "setRowPageBreaks",
               "setColumnWidth",
               "setRichTextCellValue",
               "setRangeValues",
@@ -65,7 +66,13 @@
           "orientation": { "type": ["string", "null"], "enum": ["portrait", "landscape", null] },
           "paperSize": { "type": ["string", "null"], "enum": ["letter", "legal", "a3", "a4", null] },
           "repeatRowsStart": { "type": ["integer", "null"], "minimum": 1, "maximum": 1048576 },
-          "repeatRowsEnd": { "type": ["integer", "null"], "minimum": 1, "maximum": 1048576 }
+          "repeatRowsEnd": { "type": ["integer", "null"], "minimum": 1, "maximum": 1048576 },
+          "breakBeforeRows": {
+            "type": ["array", "null"],
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "integer", "minimum": 2, "maximum": 1048576 }
+          }
         }
       }
     }

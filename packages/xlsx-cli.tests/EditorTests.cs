@@ -208,6 +208,44 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_sets_exact_manual_row_page_breaks_and_exposes_them_as_evidence()
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-row-breaks-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setRowPageBreaks", Sheet: "Sheet1", BreakBeforeRows: [12, 27])
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var rowBreaks = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.GetFirstChild<RowBreaks>()!;
+        Assert.Equal<uint>(2, rowBreaks.Count!.Value);
+        Assert.Equal<uint>(2, rowBreaks.ManualBreakCount!.Value);
+        Assert.Equal([11U, 26U], rowBreaks.Elements<Break>().Select(item => item.Id!.Value));
+        Assert.All(rowBreaks.Elements<Break>(), item => Assert.True(item.ManualPageBreak!.Value));
+        var evidence = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print");
+        Assert.Equal([12U, 27U], evidence.GetProperty("breakBeforeRows").EnumerateArray().Select(item => item.GetUInt32()));
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Fact]
+    public void Edit_rejects_missing_duplicate_descending_or_unbounded_row_page_breaks()
+    {
+        var path = CreateWorkbookFixture();
+        var invalid = new IReadOnlyList<int>?[] { null, [], [1], [12, 12], [27, 12], [1_048_577] };
+        foreach (var rows in invalid)
+        {
+            var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-row-breaks-{Guid.NewGuid():N}.xlsx");
+            var result = Editor.Apply(path, output, [
+                new XlsxEditOperation("setRowPageBreaks", Sheet: "Sheet1", BreakBeforeRows: rows)
+            ]);
+            Assert.False(result.AppliedOperations.Single().Applied);
+            Assert.False(File.Exists(output));
+        }
+    }
+
+    [Fact]
     public void Edit_rejects_invalid_page_orientation()
     {
         var path = CreateWorkbookFixture();

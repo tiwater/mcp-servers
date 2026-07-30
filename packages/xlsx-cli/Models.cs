@@ -106,7 +106,8 @@ public sealed record XlsxEditOperation(
     string? Orientation = null,
     string? PaperSize = null,
     int? RepeatRowsStart = null,
-    int? RepeatRowsEnd = null);
+    int? RepeatRowsEnd = null,
+    IReadOnlyList<int>? BreakBeforeRows = null);
 
 internal sealed class PrimitiveJsonValueConverter : JsonConverter<string?>
 {

@@ -79,6 +79,7 @@ public static class Editor
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
             "setPrintArea" => SetPrintAreaOperation(workbookPart, operation),
             "setPageSetup" => SetPageSetupOperation(workbookPart, operation),
+            "setRowPageBreaks" => SetRowPageBreaksOperation(workbookPart, operation),
             "setColumnWidth" => SetColumnWidthOperation(workbookPart, operation),
             "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
@@ -340,6 +341,38 @@ public static class Editor
         });
         workbookPart.Workbook.Save();
     }
+
+    private static XlsxEditAppliedOperation SetRowPageBreaksOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || !TryValidateBreakBeforeRows(operation.BreakBeforeRows))
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet and a strictly increasing list of rows in [2, 1048576] are required");
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        var worksheet = worksheetPart.Worksheet;
+        worksheet.GetFirstChild<RowBreaks>()?.Remove();
+        var rowBreaks = new RowBreaks
+        {
+            Count = (uint)operation.BreakBeforeRows!.Count,
+            ManualBreakCount = (uint)operation.BreakBeforeRows.Count,
+        };
+        foreach (var row in operation.BreakBeforeRows)
+        {
+            rowBreaks.Append(new Break
+            {
+                Id = (uint)(row - 1),
+                Max = 16_383U,
+                ManualPageBreak = true,
+            });
+        }
+        worksheet.AddChild(rowBreaks, true);
+        worksheet.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Set {operation.BreakBeforeRows.Count} row page breaks for {operation.Sheet}");
+    }
+
+    private static bool TryValidateBreakBeforeRows(IReadOnlyList<int>? rows)
+        => rows is { Count: > 0 }
+            && rows.All(row => row is >= 2 and <= MaximumWorksheetRow)
+            && rows.Zip(rows.Skip(1), (left, right) => left < right).All(valid => valid);
 
     private static bool TryResolvePaperSize(string? paperSize, out uint? code)
     {
@@ -1700,6 +1733,10 @@ public static class Editor
                 && TryResolvePaperSize(operation.PaperSize, out _)
                 ? null
                 : "sheet and valid page setup properties are required";
+        if (operation.Type == "setRowPageBreaks")
+            return !string.IsNullOrWhiteSpace(operation.Sheet) && TryValidateBreakBeforeRows(operation.BreakBeforeRows)
+                ? null
+                : "sheet and a strictly increasing list of bounded rows are required";
         if (operation.Type == "setColumnWidth")
             return TryParseWritableColumn(operation.Column, out _)
                 && operation.Width is not null
