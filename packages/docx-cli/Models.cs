@@ -240,12 +240,21 @@ public sealed record TemplateMigrationBodyAppend(
     string SourceStartObjectId,
     string SourceEndObjectId);
 
+/// <summary>
+/// Clears baseline-owned placeholder content without supplying replacement
+/// business facts. The object id is bound to the admitted baseline inventory.
+/// </summary>
+public sealed record TemplateMigrationBaselineClear(
+    string BaselineObjectId,
+    string Mode);
+
 public sealed record TemplateMigrationPlan(
     string Schema,
     string SourceSha256,
     string BaselineSha256,
     IReadOnlyList<TemplateMigrationMapping> Mappings,
-    IReadOnlyList<TemplateMigrationBodyAppend>? BodyAppends = null);
+    IReadOnlyList<TemplateMigrationBodyAppend>? BodyAppends = null,
+    IReadOnlyList<TemplateMigrationBaselineClear>? BaselineClears = null);
 
 public sealed record TemplateMigrationSemanticSelector(
     string Kind,
