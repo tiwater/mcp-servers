@@ -63,7 +63,9 @@
           "fitToPagesWide": { "type": ["integer", "null"], "minimum": 1, "maximum": 32767 },
           "fitToPagesTall": { "type": ["integer", "null"], "minimum": 1, "maximum": 32767 },
           "orientation": { "type": ["string", "null"], "enum": ["portrait", "landscape", null] },
-          "paperSize": { "type": ["string", "null"], "enum": ["letter", "legal", "a3", "a4", null] }
+          "paperSize": { "type": ["string", "null"], "enum": ["letter", "legal", "a3", "a4", null] },
+          "repeatRowsStart": { "type": ["integer", "null"], "minimum": 1, "maximum": 1048576 },
+          "repeatRowsEnd": { "type": ["integer", "null"], "minimum": 1, "maximum": 1048576 }
         }
       }
     }

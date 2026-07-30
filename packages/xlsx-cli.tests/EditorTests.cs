@@ -154,6 +154,60 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_sets_repeating_title_rows_and_preserves_other_defined_names()
+    {
+        var path = CreateWorkbookFixture();
+        using (var source = SpreadsheetDocument.Open(path, true))
+        {
+            var workbook = source.WorkbookPart!.Workbook;
+            workbook.Sheets!.Elements<Sheet>().Single().Name = "O'Brien";
+            workbook.Append(new DefinedNames(
+                new DefinedName("0.25") { Name = "GlobalRate" },
+                new DefinedName("'O''Brien'!$A$1:$F$9") { Name = "_xlnm.Print_Area", LocalSheetId = 0 },
+                new DefinedName("'O''Brien'!$1:$1") { Name = "_xlnm.Print_Titles", LocalSheetId = 0 }));
+            workbook.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-repeat-rows-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "O'Brien", RepeatRowsStart: 2, RepeatRowsEnd: 3)
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var names = spreadsheet.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>().ToList();
+        Assert.Contains(names, name => name.Name?.Value == "GlobalRate" && name.Text == "0.25");
+        Assert.Contains(names, name => name.Name?.Value == "_xlnm.Print_Area" && name.Text == "'O''Brien'!$A$1:$F$9");
+        var titles = Assert.Single(names, name => name.Name?.Value == "_xlnm.Print_Titles");
+        Assert.Equal<uint>(0, titles.LocalSheetId!.Value);
+        Assert.Equal("'O''Brien'!$2:$3", titles.Text);
+        var print = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print");
+        Assert.Equal("'O''Brien'!$2:$3", print.GetProperty("repeatRows").GetString());
+        Assert.Equal("'O''Brien'!$2:$3", print.GetProperty("normalizedRepeatRows").GetString());
+        Assert.Null(spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.GetFirstChild<PageSetup>());
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Theory]
+    [InlineData(null, 1)]
+    [InlineData(1, null)]
+    [InlineData(0, 1)]
+    [InlineData(2, 1)]
+    [InlineData(1, 1048577)]
+    public void Edit_rejects_invalid_repeating_title_rows(int? startRow, int? endRow)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-repeat-rows-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", RepeatRowsStart: startRow, RepeatRowsEnd: endRow)
+        ]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
     public void Edit_rejects_invalid_page_orientation()
     {
         var path = CreateWorkbookFixture();
