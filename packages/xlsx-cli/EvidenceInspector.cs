@@ -103,13 +103,20 @@ public static class EvidenceInspector
             var margins = ws.GetFirstChild<PageMargins>();
             var printArea = wb.Workbook.DefinedNames?.Elements<DefinedName>()
                 .FirstOrDefault(x => x.Name?.Value == "_xlnm.Print_Area" && x.LocalSheetId?.Value == (uint)sheetIndex)?.Text;
+            var repeatRows = wb.Workbook.DefinedNames?.Elements<DefinedName>()
+                .FirstOrDefault(x => x.Name?.Value == "_xlnm.Print_Titles" && x.LocalSheetId?.Value == (uint)sheetIndex)?.Text;
+            var breakBeforeRows = ws.GetFirstChild<RowBreaks>()?.Elements<Break>()
+                .Where(item => item.ManualPageBreak?.Value == true && item.Id?.Value is not null)
+                .Select(item => item.Id!.Value + 1U)
+                .OrderBy(row => row)
+                .ToList() ?? [];
             return new {
                 name = sheet.Name?.Value, state = sheet.State?.InnerText, dimension = ws.SheetDimension?.Reference?.Value,
                 mergedRanges = ws.Elements<MergeCells>().SelectMany(x => x.Elements<MergeCell>()).Select(x => x.Reference?.Value).Where(x => x is not null).ToList(),
                 rowDimensions = ws.Descendants<Row>().Where(x => x.CustomHeight?.Value == true || x.Hidden?.Value == true).Select(x => new { row = x.RowIndex?.Value, height = x.Height?.Value, hidden = x.Hidden?.Value }).ToList(),
                 columnDimensions = ws.Elements<Columns>().SelectMany(x => x.Elements<Column>()).Select(x => new { min = x.Min?.Value, max = x.Max?.Value, width = x.Width?.Value, hidden = x.Hidden?.Value }).ToList(),
                 sheetView = view is null ? null : new { workbookViewId = view.WorkbookViewId?.Value, view = view.View?.InnerText, showGridLines = view.ShowGridLines?.Value, zoomScale = view.ZoomScale?.Value, topLeftCell = view.TopLeftCell?.Value },
-                print = new { area = printArea, normalizedArea = NormalizeDefinedNameText(printArea), orientation = setup?.Orientation?.InnerText, paperSize = setup?.PaperSize?.Value, scale = setup?.Scale?.Value, fitToWidth = setup?.FitToWidth?.Value, fitToHeight = setup?.FitToHeight?.Value, margins = margins is null ? null : new { left = margins.Left?.Value, right = margins.Right?.Value, top = margins.Top?.Value, bottom = margins.Bottom?.Value, header = margins.Header?.Value, footer = margins.Footer?.Value } },
+                print = new { area = printArea, normalizedArea = NormalizeDefinedNameText(printArea), repeatRows, normalizedRepeatRows = NormalizeDefinedNameText(repeatRows), breakBeforeRows, orientation = setup?.Orientation?.InnerText, paperSize = setup?.PaperSize?.Value, scale = setup?.Scale?.Value, fitToWidth = setup?.FitToWidth?.Value, fitToHeight = setup?.FitToHeight?.Value, margins = margins is null ? null : new { left = margins.Left?.Value, right = margins.Right?.Value, top = margins.Top?.Value, bottom = margins.Bottom?.Value, header = margins.Header?.Value, footer = margins.Footer?.Value } },
                 cells
             };
         }).ToList();

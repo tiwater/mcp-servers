@@ -9,6 +9,7 @@ namespace Dockit.Xlsx;
 
 public static class Editor
 {
+    private const int MaximumWorksheetRow = 1_048_576;
     private static readonly Regex NumericTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", RegexOptions.Compiled);
     private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
     private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
@@ -78,6 +79,7 @@ public static class Editor
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
             "setPrintArea" => SetPrintAreaOperation(workbookPart, operation),
             "setPageSetup" => SetPageSetupOperation(workbookPart, operation),
+            "setRowPageBreaks" => SetRowPageBreaksOperation(workbookPart, operation),
             "setColumnWidth" => SetColumnWidthOperation(workbookPart, operation),
             "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
@@ -240,9 +242,15 @@ public static class Editor
     private static XlsxEditAppliedOperation SetPageSetupOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
     {
         if (string.IsNullOrWhiteSpace(operation.Sheet)
-            || (operation.FitToPagesWide is null && operation.FitToPagesTall is null && operation.Orientation is null && operation.PaperSize is null)
+            || (operation.FitToPagesWide is null
+                && operation.FitToPagesTall is null
+                && operation.Orientation is null
+                && operation.PaperSize is null
+                && operation.RepeatRowsStart is null
+                && operation.RepeatRowsEnd is null)
             || operation.FitToPagesWide is < 1 or > 32767
             || operation.FitToPagesTall is < 1 or > 32767
+            || !TryValidateRepeatRows(operation.RepeatRowsStart, operation.RepeatRowsEnd)
             || (operation.Orientation is not null
                 && !string.Equals(operation.Orientation, "portrait", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase))
@@ -252,43 +260,119 @@ public static class Editor
         var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
         if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
         var worksheet = worksheetPart.Worksheet;
-        var sheetProperties = worksheet.GetFirstChild<SheetProperties>();
-        if (sheetProperties is null)
-        {
-            sheetProperties = new SheetProperties();
-            worksheet.PrependChild(sheetProperties);
-        }
-        var setupProperties = sheetProperties.GetFirstChild<PageSetupProperties>();
-        if (setupProperties is null)
-        {
-            setupProperties = new PageSetupProperties();
-            sheetProperties.Append(setupProperties);
-        }
-        setupProperties.FitToPage = true;
-
-        var pageSetup = worksheet.GetFirstChild<PageSetup>();
-        if (pageSetup is null)
-        {
-            pageSetup = new PageSetup();
-            var margins = worksheet.GetFirstChild<PageMargins>();
-            if (margins is not null) worksheet.InsertAfter(pageSetup, margins);
-            else worksheet.Append(pageSetup);
-        }
         if (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null)
         {
-            pageSetup.FitToWidth = operation.FitToPagesWide is null ? 0u : (uint)operation.FitToPagesWide.Value;
-            pageSetup.FitToHeight = operation.FitToPagesTall is null ? 0u : (uint)operation.FitToPagesTall.Value;
+            var sheetProperties = worksheet.GetFirstChild<SheetProperties>();
+            if (sheetProperties is null)
+            {
+                sheetProperties = new SheetProperties();
+                worksheet.PrependChild(sheetProperties);
+            }
+            var setupProperties = sheetProperties.GetFirstChild<PageSetupProperties>();
+            if (setupProperties is null)
+            {
+                setupProperties = new PageSetupProperties();
+                sheetProperties.Append(setupProperties);
+            }
+            setupProperties.FitToPage = true;
         }
-        if (operation.Orientation is not null)
+
+        if (operation.FitToPagesWide is not null
+            || operation.FitToPagesTall is not null
+            || operation.Orientation is not null
+            || operation.PaperSize is not null)
         {
-            pageSetup.Orientation = string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase)
-                ? OrientationValues.Landscape
-                : OrientationValues.Portrait;
+            var pageSetup = worksheet.GetFirstChild<PageSetup>();
+            if (pageSetup is null)
+            {
+                pageSetup = new PageSetup();
+                var margins = worksheet.GetFirstChild<PageMargins>();
+                if (margins is not null) worksheet.InsertAfter(pageSetup, margins);
+                else worksheet.Append(pageSetup);
+            }
+            if (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null)
+            {
+                pageSetup.FitToWidth = operation.FitToPagesWide is null ? 0u : (uint)operation.FitToPagesWide.Value;
+                pageSetup.FitToHeight = operation.FitToPagesTall is null ? 0u : (uint)operation.FitToPagesTall.Value;
+            }
+            if (operation.Orientation is not null)
+            {
+                pageSetup.Orientation = string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase)
+                    ? OrientationValues.Landscape
+                    : OrientationValues.Portrait;
+            }
+            if (paperSizeCode is not null) pageSetup.PaperSize = paperSizeCode.Value;
         }
-        if (paperSizeCode is not null) pageSetup.PaperSize = paperSizeCode.Value;
+        if (operation.RepeatRowsStart is not null && operation.RepeatRowsEnd is not null)
+            SetPrintTitleRows(workbookPart, operation.Sheet, operation.RepeatRowsStart.Value, operation.RepeatRowsEnd.Value);
         worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Set page setup for {operation.Sheet}");
     }
+
+    private static bool TryValidateRepeatRows(int? startRow, int? endRow)
+        => (startRow is null && endRow is null)
+            || (startRow is >= 1 and <= MaximumWorksheetRow
+                && endRow is >= 1 and <= MaximumWorksheetRow
+                && startRow <= endRow);
+
+    private static void SetPrintTitleRows(WorkbookPart workbookPart, string sheetName, int startRow, int endRow)
+    {
+        var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>().ToList() ?? [];
+        var sheetIndex = sheets.FindIndex(sheet => string.Equals(sheet.Name?.Value, sheetName, StringComparison.Ordinal));
+        if (sheetIndex < 0) throw new InvalidOperationException($"Worksheet not found: {sheetName}");
+        if (workbookPart.Workbook.DefinedNames is null)
+        {
+            var definedNames = new DefinedNames();
+            OpenXmlElement anchor = workbookPart.Workbook.ExternalReferences
+                ?? (OpenXmlElement?)workbookPart.Workbook.FunctionGroups
+                ?? workbookPart.Workbook.Sheets
+                ?? throw new InvalidOperationException("Workbook sheets are missing.");
+            workbookPart.Workbook.InsertAfter(definedNames, anchor);
+        }
+        var workbookDefinedNames = workbookPart.Workbook.DefinedNames!;
+        foreach (var existing in workbookDefinedNames.Elements<DefinedName>()
+            .Where(name => name.Name?.Value == "_xlnm.Print_Titles" && name.LocalSheetId?.Value == (uint)sheetIndex).ToList())
+            existing.Remove();
+        var escapedSheet = sheetName.Replace("'", "''", StringComparison.Ordinal);
+        workbookDefinedNames.Append(new DefinedName($"'{escapedSheet}'!${startRow}:${endRow}")
+        {
+            Name = "_xlnm.Print_Titles",
+            LocalSheetId = (uint)sheetIndex,
+        });
+        workbookPart.Workbook.Save();
+    }
+
+    private static XlsxEditAppliedOperation SetRowPageBreaksOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || !TryValidateBreakBeforeRows(operation.BreakBeforeRows))
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet and a strictly increasing list of rows in [2, 1048576] are required");
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        var worksheet = worksheetPart.Worksheet;
+        worksheet.GetFirstChild<RowBreaks>()?.Remove();
+        var rowBreaks = new RowBreaks
+        {
+            Count = (uint)operation.BreakBeforeRows!.Count,
+            ManualBreakCount = (uint)operation.BreakBeforeRows.Count,
+        };
+        foreach (var row in operation.BreakBeforeRows)
+        {
+            rowBreaks.Append(new Break
+            {
+                Id = (uint)(row - 1),
+                Max = 16_383U,
+                ManualPageBreak = true,
+            });
+        }
+        worksheet.AddChild(rowBreaks, true);
+        worksheet.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Set {operation.BreakBeforeRows.Count} row page breaks for {operation.Sheet}");
+    }
+
+    private static bool TryValidateBreakBeforeRows(IReadOnlyList<int>? rows)
+        => rows is { Count: > 0 }
+            && rows.All(row => row is >= 2 and <= MaximumWorksheetRow)
+            && rows.Zip(rows.Skip(1), (left, right) => left < right).All(valid => valid);
 
     private static bool TryResolvePaperSize(string? paperSize, out uint? code)
     {
@@ -1634,15 +1718,25 @@ public static class Editor
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
         if (operation.Type == "setPageSetup")
             return !string.IsNullOrWhiteSpace(operation.Sheet)
-                && (operation.FitToPagesWide is not null || operation.FitToPagesTall is not null || operation.Orientation is not null || operation.PaperSize is not null)
+                && (operation.FitToPagesWide is not null
+                    || operation.FitToPagesTall is not null
+                    || operation.Orientation is not null
+                    || operation.PaperSize is not null
+                    || operation.RepeatRowsStart is not null
+                    || operation.RepeatRowsEnd is not null)
                 && (operation.FitToPagesWide is null or (>= 1 and <= 32767))
                 && (operation.FitToPagesTall is null or (>= 1 and <= 32767))
+                && TryValidateRepeatRows(operation.RepeatRowsStart, operation.RepeatRowsEnd)
                 && (operation.Orientation is null
                     || string.Equals(operation.Orientation, "portrait", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase))
                 && TryResolvePaperSize(operation.PaperSize, out _)
                 ? null
                 : "sheet and valid page setup properties are required";
+        if (operation.Type == "setRowPageBreaks")
+            return !string.IsNullOrWhiteSpace(operation.Sheet) && TryValidateBreakBeforeRows(operation.BreakBeforeRows)
+                ? null
+                : "sheet and a strictly increasing list of bounded rows are required";
         if (operation.Type == "setColumnWidth")
             return TryParseWritableColumn(operation.Column, out _)
                 && operation.Width is not null
