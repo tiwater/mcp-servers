@@ -149,6 +149,10 @@ public static class Transforms
     {
         public Dictionary<string, string>? CellValues { get; set; } = new();
         public Dictionary<string, string>? TableSlots { get; set; } = new();
+        public Dictionary<string, List<Dictionary<string, string>>>? RowGroups { get; set; } = new();
+        public List<string>? SelectedOptions { get; set; } = [];
+        public List<string>? RemoveRowsContaining { get; set; } = [];
+        public Dictionary<string, string>? UniqueTextValues { get; set; } = new();
     }
 
     public static int RunFillTemplate(string[] args)
@@ -169,6 +173,23 @@ public static class Transforms
 
         using var doc = WordprocessingDocument.Open(output, true);
         var body = doc.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+
+        if (data.RowGroups != null)
+        {
+            ExpandRowGroups(doc, data.RowGroups);
+        }
+        if (data.SelectedOptions != null)
+        {
+            MarkSelectedOptions(doc, data.SelectedOptions);
+        }
+        if (data.RemoveRowsContaining != null)
+        {
+            RemoveRowsContaining(doc, data.RemoveRowsContaining);
+        }
+        if (data.UniqueTextValues != null)
+        {
+            ReplaceUniqueTextValues(doc, data.UniqueTextValues);
+        }
 
         if (data.CellValues != null)
         {
@@ -217,6 +238,136 @@ public static class Transforms
         return 0;
     }
 
+    private static void ExpandRowGroups(
+        WordprocessingDocument doc,
+        IReadOnlyDictionary<string, List<Dictionary<string, string>>> groups)
+    {
+        foreach (var group in groups)
+        {
+            var marker = "{{" + group.Key + "}}";
+            var matches = Inspector.GetRoots(doc)
+                .SelectMany(root => root.Descendants<Table>())
+                .SelectMany(table => table.Elements<TableRow>())
+                .Where(row => row.InnerText.Contains(marker, StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count == 0)
+            {
+                throw new InvalidOperationException($"fill-template-row-group-marker-missing:{group.Key}");
+            }
+            foreach (var markerRow in matches)
+            {
+                var table = markerRow.Parent as Table
+                    ?? throw new InvalidOperationException($"fill-template-row-group-table-missing:{group.Key}");
+                var rows = table.Elements<TableRow>().ToList();
+                var markerIndex = rows.IndexOf(markerRow);
+                if (markerIndex < 0 || markerIndex + 1 >= rows.Count)
+                {
+                    throw new InvalidOperationException($"fill-template-row-group-prototype-missing:{group.Key}");
+                }
+                var prototype = rows[markerIndex + 1];
+                ReplaceText(markerRow, marker, string.Empty);
+                foreach (var values in group.Value)
+                {
+                    var clone = (TableRow)prototype.CloneNode(true);
+                    foreach (var value in values)
+                    {
+                        ReplaceText(clone, "{{" + value.Key + "}}", value.Value ?? string.Empty);
+                        ReplaceText(clone, "[" + value.Key + "]", value.Value ?? string.Empty);
+                    }
+                    table.InsertBefore(clone, prototype);
+                }
+                prototype.Remove();
+            }
+        }
+    }
+
+    private static void ReplaceUniqueTextValues(
+        WordprocessingDocument doc,
+        IReadOnlyDictionary<string, string> values)
+    {
+        foreach (var value in values)
+        {
+            var matches = Inspector.GetRoots(doc)
+                .SelectMany(root => root.Descendants<Paragraph>())
+                .Where(paragraph => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text))
+                    .Contains(value.Key, StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count != 1)
+            {
+                throw new InvalidOperationException($"fill-template-unique-text-match-count:{value.Key}:{matches.Count}");
+            }
+            ReplaceText(matches[0], value.Key, value.Value ?? string.Empty);
+        }
+    }
+
+    private static void MarkSelectedOptions(WordprocessingDocument doc, IReadOnlyList<string> options)
+    {
+        foreach (var option in options)
+        {
+            var expected = NormalizeVisibleText(option);
+            var matches = Inspector.GetRoots(doc)
+                .SelectMany(root => root.Descendants<Paragraph>())
+                .Where(paragraph => string.Equals(
+                    NormalizeVisibleText(string.Concat(paragraph.Descendants<Text>().Select(text => text.Text))),
+                    expected,
+                    StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count != 1)
+            {
+                throw new InvalidOperationException($"fill-template-selected-option-match-count:{option}:{matches.Count}");
+            }
+            var paragraph = matches[0];
+            var drawings = paragraph.Descendants<Drawing>().ToList();
+            if (drawings.Count == 0)
+            {
+                throw new InvalidOperationException($"fill-template-selected-option-marker-missing:{option}");
+            }
+            foreach (var drawing in drawings) drawing.Remove();
+            var firstRun = paragraph.Elements<Run>().FirstOrDefault();
+            var marker = new Run(new Text("☒ ") { Space = SpaceProcessingModeValues.Preserve });
+            if (firstRun is null) paragraph.Append(marker);
+            else paragraph.InsertBefore(marker, firstRun);
+        }
+    }
+
+    private static void RemoveRowsContaining(WordprocessingDocument doc, IReadOnlyList<string> markers)
+    {
+        foreach (var marker in markers)
+        {
+            var expected = NormalizeVisibleText(marker);
+            var matches = Inspector.GetRoots(doc)
+                .SelectMany(root => root.Descendants<TableRow>())
+                .Where(row => NormalizeVisibleText(row.InnerText).Contains(expected, StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count != 1)
+            {
+                throw new InvalidOperationException($"fill-template-remove-row-match-count:{marker}:{matches.Count}");
+            }
+            matches[0].Remove();
+        }
+    }
+
+    private static string NormalizeVisibleText(string value)
+        => string.Concat((value ?? string.Empty).Where(character => !char.IsWhiteSpace(character)));
+
+    private static void ReplaceText(OpenXmlElement root, string token, string value)
+    {
+        var paragraphs = root is Paragraph paragraphRoot
+            ? [paragraphRoot]
+            : root.Descendants<Paragraph>().ToList();
+        foreach (var paragraph in paragraphs)
+        {
+            var texts = paragraph.Descendants<Text>().ToList();
+            if (texts.Count == 0) continue;
+            var combined = string.Concat(texts.Select(text => text.Text));
+            var updated = combined.Replace(token, value, StringComparison.Ordinal);
+            if (string.Equals(combined, updated, StringComparison.Ordinal)) continue;
+            texts[0].Text = updated;
+            texts[0].Space = SpaceProcessingModeValues.Preserve;
+            foreach (var extra in texts.Skip(1)) extra.Text = string.Empty;
+        }
+    }
+
     private static int ReplaceCellValuePlaceholders(WordprocessingDocument doc, IReadOnlyDictionary<string, string> values)
     {
         var replacedParagraphs = 0;
@@ -257,6 +408,7 @@ public static class Transforms
         foreach (var kvp in values)
         {
             updated = updated.Replace("{{" + kvp.Key + "}}", kvp.Value ?? string.Empty, StringComparison.Ordinal);
+            updated = updated.Replace("[" + kvp.Key + "]", kvp.Value ?? string.Empty, StringComparison.Ordinal);
         }
         return updated;
     }

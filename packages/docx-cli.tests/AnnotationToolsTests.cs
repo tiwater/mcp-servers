@@ -329,6 +329,52 @@ public class AnnotationToolsTests
         var contextResolved = TemplateMigration.ResolveSemanticCandidate(contextualSource, contextualBaseline, contextualCandidate);
         Assert.Contains(contextResolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1" && item.Disposition == "copy-text");
 
+        var blankBaseline = CreateTextMigrationFixture("before target", "", "after target");
+        var blankSource = CreateTextMigrationFixture("before source", "current fact", "after source");
+        var blankCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "current fact"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", PreviousText: "before target", NextText: "after target", Empty: true),
+                    "copy-text")
+            ]);
+        var blankResolved = TemplateMigration.ResolveSemanticCandidate(blankSource, blankBaseline, blankCandidate);
+        Assert.True(blankResolved.Pass, string.Join("; ", blankResolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(blankResolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1");
+
+        var overrideSource = CreateTextMigrationFixture("shared fact");
+        var overrideBaseline = CreateTextMigrationFixture("shared fact", "preferred target slot");
+        var overrideCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "shared fact"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "preferred target slot"),
+                    "copy-text")
+            ]);
+        var overridden = TemplateMigration.ResolveSemanticCandidate(overrideSource, overrideBaseline, overrideCandidate);
+        Assert.True(overridden.Pass, string.Join("; ", overridden.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(overridden.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:0" && item.BaselineObjectId == "body:paragraph:1");
+
+        var repeatedRows = CreateRepeatedRowMigrationFixture();
+        var repeatedCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector(
+                        "table-cell",
+                        Scope: "body",
+                        Text: "Reviewed by",
+                        ParentText: "Reviewed by",
+                        PreviousParentText: "Prepared by",
+                        NextParentText: "Reviewed by"),
+                    null,
+                    "out-of-scope")
+            ]);
+        var repeatedResolved = TemplateMigration.ResolveSemanticCandidate(repeatedRows, repeatedRows, repeatedCandidate);
+        Assert.Contains(repeatedResolved.Plan.Mappings, item => item.SourceObjectId == "body:table:0:row:1:cell:0" && item.Disposition == "out-of-scope");
+
         var invalidCandidate = Path.Combine(Path.GetTempPath(), $"migration-semantic-invalid-{Guid.NewGuid():N}.json");
         File.WriteAllText(invalidCandidate, """
         {"schema":"tiwater.docx.template-migration-semantic-candidate/v1","mappings":[{"source":{"kind":"paragraph","text":"legacy factual content","sourceObjectId":"body:paragraph:0"},"baseline":{"kind":"paragraph","text":"target format placeholder"},"disposition":"copy-text"}]}
@@ -1712,7 +1758,8 @@ public class AnnotationToolsTests
             """
             {
               "cellValues": {
-                "effectiveDate": "2024-09-18"
+                "effectiveDate": "2024-09-18",
+                "nodeName": "Prepared by"
               }
             }
             """,
@@ -1726,10 +1773,73 @@ public class AnnotationToolsTests
         using var doc = WordprocessingDocument.Open(output, false);
         var bodyText = string.Concat(doc.MainDocumentPart!.Document!.Descendants<Text>().Select(text => text.Text));
         Assert.Contains("2024-09-18", bodyText);
+        Assert.Contains("Prepared by", bodyText);
+        Assert.DoesNotContain("[nodeName]", bodyText);
 
         var headerText = string.Concat(
             doc.MainDocumentPart.HeaderParts.SelectMany(part => part.Header!.Descendants<Text>()).Select(text => text.Text));
         Assert.Contains("2024-09-18", headerText);
+    }
+
+    [Fact]
+    public void FillTemplate_expands_observable_table_row_groups()
+    {
+        var input = Path.Combine(Path.GetTempPath(), $"row-group-{Guid.NewGuid():N}.docx");
+        var dataPath = Path.Combine(Path.GetTempPath(), $"row-group-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"row-group-filled-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+        {
+            var main = doc.AddMainDocumentPart();
+            main.Document = new Document(new Body(
+                new Paragraph(new Run(new Drawing()), new Run(new Text("Quality Assurance"))),
+                new Paragraph(new Run(new Text("Version 1.0"))),
+                new Table(
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("{{people}}")))), new TableCell(new Paragraph(new Run(new Text("Name"))))),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("[role]")))), new TableCell(new Paragraph(new Run(new Text("[name]"))))),
+                    new TableRow(new TableCell(new Paragraph(new Run(new Text("default revision"))))))));
+            main.Document.Save();
+        }
+        File.WriteAllText(dataPath, """
+        {
+          "rowGroups": {
+            "people": [
+              {"role":"Prepared by","name":"Alice"},
+              {"role":"Approved by","name":"Bob"}
+            ]
+          },
+          "selectedOptions": ["Quality Assurance"],
+          "removeRowsContaining": ["default revision"],
+          "uniqueTextValues": {"Version 1.0":"Version 02"}
+        }
+        """);
+
+        Transforms.RunFillTemplate([input, dataPath, output]);
+
+        using var filled = WordprocessingDocument.Open(output, false);
+        var rows = filled.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ToList();
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("Name", rows[0].InnerText);
+        Assert.Equal("Prepared byAlice", rows[1].InnerText);
+        Assert.Equal("Approved byBob", rows[2].InnerText);
+        var selection = filled.MainDocumentPart.Document.Body.Elements<Paragraph>().Single();
+        Assert.Equal("☒ Quality Assurance", selection.InnerText);
+        Assert.Empty(selection.Descendants<Drawing>());
+        Assert.Contains("Version 02", filled.MainDocumentPart.Document.Body.InnerText);
+    }
+
+    private static string CreateRepeatedRowMigrationFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"repeated-rows-{Guid.NewGuid():N}.docx");
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = doc.AddMainDocumentPart();
+        main.Document = new Document(new Body(
+            new Table(
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("Prepared by"))))),
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("Reviewed by"))))),
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("Reviewed by"))))),
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("Approved by"))))))));
+        main.Document.Save();
+        return path;
     }
 
     private static string CreateAnnotatedFixture()
@@ -1988,6 +2098,8 @@ public class AnnotationToolsTests
                 new Run(new Text("{{")),
                 new Run(new Text("effectiveDate")),
                 new Run(new Text("}}"))));
+        body.Append(new Paragraph(new Run(new Text("[nodeName]"))));
+        body.Append(new Paragraph(new Run(new Text("Version 1.0"))));
         body.Append(new Paragraph(new Run(new Text("after"))));
         body.Append(sectionProps);
 

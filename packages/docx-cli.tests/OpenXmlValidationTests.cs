@@ -30,6 +30,15 @@ public class OpenXmlValidationTests
               <w:uiPriority w:val="99"/>
               <w:tblPr/>
             </w:style>
+            """,
+            """
+            <w:style w:type="paragraph" w:styleId="PriorityAfterSemiHidden">
+              <w:name w:val="Priority after semiHidden"/>
+              <w:hidden/>
+              <w:semiHidden/>
+              <w:uiPriority w:val="99"/>
+              <w:rPr/>
+            </w:style>
             """);
 
         var result = OpenXmlValidation.Validate(input);
@@ -40,7 +49,7 @@ public class OpenXmlValidationTests
                 Environment.NewLine,
                 result.Errors.Select(error => $"{error.Id}: {error.Description} ({error.Path})")));
         Assert.Empty(result.Errors);
-        Assert.Equal(2, result.WarningCount);
+        Assert.Equal(3, result.WarningCount);
         Assert.All(result.Warnings, warning =>
             Assert.Equal("wordprocessing-style-trailing-ui-priority", warning.CompatibilityCode));
     }
