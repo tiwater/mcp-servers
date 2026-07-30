@@ -105,6 +105,7 @@ public static class EvidenceInspector
                 .FirstOrDefault(x => x.Name?.Value == "_xlnm.Print_Area" && x.LocalSheetId?.Value == (uint)sheetIndex)?.Text;
             var repeatRows = wb.Workbook.DefinedNames?.Elements<DefinedName>()
                 .FirstOrDefault(x => x.Name?.Value == "_xlnm.Print_Titles" && x.LocalSheetId?.Value == (uint)sheetIndex)?.Text;
+            repeatRows = ExtractPrintTitleRowReference(repeatRows);
             var breakBeforeRows = ws.GetFirstChild<RowBreaks>()?.Elements<Break>()
                 .Where(item => item.ManualPageBreak?.Value == true && item.Id?.Value is not null)
                 .Select(item => item.Id!.Value + 1U)
@@ -137,6 +138,36 @@ public static class EvidenceInspector
             .ThenBy(name => name.hidden)
             .ToList() ?? [];
         return new { schema = "tiwater.xlsx.evidence/v1", toolVersion = XlsxToolVersion.Current, file = Path.GetFullPath(path), dateSystem = uses1904Dates ? "1904" : "1900", definedNames, sheets };
+    }
+
+    private static string? ExtractPrintTitleRowReference(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var start = 0;
+        var quoted = false;
+        for (var index = 0; index <= text.Length; index++)
+        {
+            if (index < text.Length && text[index] == '\'')
+            {
+                if (quoted && index + 1 < text.Length && text[index + 1] == '\'')
+                {
+                    index++;
+                    continue;
+                }
+                quoted = !quoted;
+                continue;
+            }
+            if (index < text.Length && (text[index] != ',' || quoted)) continue;
+            var reference = text[start..index].Trim();
+            var separator = reference.LastIndexOf('!');
+            if (separator > 0 && System.Text.RegularExpressions.Regex.IsMatch(
+                reference[(separator + 1)..].Trim(),
+                @"^\$[1-9]\d*:\$[1-9]\d*$",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+                return reference;
+            start = index + 1;
+        }
+        return null;
     }
 
     private static string? NormalizeDefinedNameText(string? text)
