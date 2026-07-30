@@ -160,30 +160,30 @@ public class EditorTests
         using (var source = SpreadsheetDocument.Open(path, true))
         {
             var workbook = source.WorkbookPart!.Workbook;
-            workbook.Sheets!.Elements<Sheet>().Single().Name = "O'Brien";
+            workbook.Sheets!.Elements<Sheet>().Single().Name = "O'Brien, East";
             workbook.Append(new DefinedNames(
                 new DefinedName("0.25") { Name = "GlobalRate" },
-                new DefinedName("'O''Brien'!$A$1:$F$9") { Name = "_xlnm.Print_Area", LocalSheetId = 0 },
-                new DefinedName("'O''Brien'!$1:$1") { Name = "_xlnm.Print_Titles", LocalSheetId = 0 }));
+                new DefinedName("'O''Brien, East'!$A$1:$F$9") { Name = "_xlnm.Print_Area", LocalSheetId = 0 },
+                new DefinedName("'O''Brien, East'!$A:$B,'O''Brien, East'!$1:$1") { Name = "_xlnm.Print_Titles", LocalSheetId = 0 }));
             workbook.Save();
         }
         var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-repeat-rows-{Guid.NewGuid():N}.xlsx");
 
         var result = Editor.Apply(path, output, [
-            new XlsxEditOperation("setPageSetup", Sheet: "O'Brien", RepeatRowsStart: 2, RepeatRowsEnd: 3)
+            new XlsxEditOperation("setPageSetup", Sheet: "O'Brien, East", RepeatRowsStart: 2, RepeatRowsEnd: 3)
         ]);
 
         Assert.True(result.AppliedOperations.Single().Applied);
         using var spreadsheet = SpreadsheetDocument.Open(output, false);
         var names = spreadsheet.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>().ToList();
         Assert.Contains(names, name => name.Name?.Value == "GlobalRate" && name.Text == "0.25");
-        Assert.Contains(names, name => name.Name?.Value == "_xlnm.Print_Area" && name.Text == "'O''Brien'!$A$1:$F$9");
+        Assert.Contains(names, name => name.Name?.Value == "_xlnm.Print_Area" && name.Text == "'O''Brien, East'!$A$1:$F$9");
         var titles = Assert.Single(names, name => name.Name?.Value == "_xlnm.Print_Titles");
         Assert.Equal<uint>(0, titles.LocalSheetId!.Value);
-        Assert.Equal("'O''Brien'!$2:$3", titles.Text);
+        Assert.Equal("'O''Brien, East'!$A:$B,'O''Brien, East'!$2:$3", titles.Text);
         var print = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print");
-        Assert.Equal("'O''Brien'!$2:$3", print.GetProperty("repeatRows").GetString());
-        Assert.Equal("'O''Brien'!$2:$3", print.GetProperty("normalizedRepeatRows").GetString());
+        Assert.Equal("'O''Brien, East'!$2:$3", print.GetProperty("repeatRows").GetString());
+        Assert.Equal("'O''Brien, East'!$2:$3", print.GetProperty("normalizedRepeatRows").GetString());
         Assert.Null(spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.GetFirstChild<PageSetup>());
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }

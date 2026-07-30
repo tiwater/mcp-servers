@@ -14,6 +14,7 @@ public static class Editor
     private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
     private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
     private static readonly Regex PrintAreaRangePattern = new(@"^\$?(?<startColumn>[A-Za-z]{1,3})\$?(?<startRow>[1-9]\d*):\$?(?<endColumn>[A-Za-z]{1,3})\$?(?<endRow>[1-9]\d*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex PrintTitleRowRangePattern = new(@"^\$[1-9]\d*:\$[1-9]\d*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static int RunEdit(string[] args)
     {
@@ -330,16 +331,63 @@ public static class Editor
             workbookPart.Workbook.InsertAfter(definedNames, anchor);
         }
         var workbookDefinedNames = workbookPart.Workbook.DefinedNames!;
-        foreach (var existing in workbookDefinedNames.Elements<DefinedName>()
-            .Where(name => name.Name?.Value == "_xlnm.Print_Titles" && name.LocalSheetId?.Value == (uint)sheetIndex).ToList())
+        var existingTitles = workbookDefinedNames.Elements<DefinedName>()
+            .Where(name => name.Name?.Value == "_xlnm.Print_Titles" && name.LocalSheetId?.Value == (uint)sheetIndex)
+            .ToList();
+        var preservedReferences = existingTitles
+            .SelectMany(name => SplitDefinedNameReferences(name.Text))
+            .Where(reference => !IsPrintTitleRowReference(reference, sheetName))
+            .ToList();
+        foreach (var existing in existingTitles)
             existing.Remove();
         var escapedSheet = sheetName.Replace("'", "''", StringComparison.Ordinal);
-        workbookDefinedNames.Append(new DefinedName($"'{escapedSheet}'!${startRow}:${endRow}")
+        preservedReferences.Add($"'{escapedSheet}'!${startRow}:${endRow}");
+        workbookDefinedNames.Append(new DefinedName(string.Join(",", preservedReferences))
         {
             Name = "_xlnm.Print_Titles",
             LocalSheetId = (uint)sheetIndex,
         });
         workbookPart.Workbook.Save();
+    }
+
+    private static IReadOnlyList<string> SplitDefinedNameReferences(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        var references = new List<string>();
+        var start = 0;
+        var quoted = false;
+        for (var index = 0; index < text.Length; index++)
+        {
+            if (text[index] == '\'')
+            {
+                if (quoted && index + 1 < text.Length && text[index + 1] == '\'')
+                {
+                    index++;
+                    continue;
+                }
+                quoted = !quoted;
+            }
+            else if (text[index] == ',' && !quoted)
+            {
+                var reference = text[start..index].Trim();
+                if (reference.Length > 0) references.Add(reference);
+                start = index + 1;
+            }
+        }
+        var finalReference = text[start..].Trim();
+        if (finalReference.Length > 0) references.Add(finalReference);
+        return references;
+    }
+
+    private static bool IsPrintTitleRowReference(string reference, string sheetName)
+    {
+        var separator = reference.LastIndexOf('!');
+        if (separator <= 0) return false;
+        var referenceSheet = reference[..separator].TrimStart('=').Trim();
+        if (referenceSheet.Length >= 2 && referenceSheet[0] == '\'' && referenceSheet[^1] == '\'')
+            referenceSheet = referenceSheet[1..^1].Replace("''", "'", StringComparison.Ordinal);
+        return string.Equals(referenceSheet, sheetName, StringComparison.Ordinal)
+            && PrintTitleRowRangePattern.IsMatch(reference[(separator + 1)..].Trim());
     }
 
     private static XlsxEditAppliedOperation SetRowPageBreaksOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
