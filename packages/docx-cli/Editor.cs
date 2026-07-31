@@ -1159,7 +1159,11 @@ public static class Editor
         properties.PrependChild(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct });
     }
 
-    private static TableRow BuildReplacementRow(TableRow? templateRow, IReadOnlyList<DocxTableCellInput> cells, bool isHeader)
+    private static TableRow BuildReplacementRow(
+        TableRow? templateRow,
+        IReadOnlyList<DocxTableCellInput> cells,
+        bool isHeader,
+        bool inheritCompleteTemplateCellStyle = false)
     {
         var row = new TableRow();
         var templateProperties = templateRow?.GetFirstChild<TableRowProperties>();
@@ -1180,7 +1184,7 @@ public static class Editor
         for (var cellIndex = 0; cellIndex < cells.Count; cellIndex++)
         {
             var templateCell = templateCells.ElementAtOrDefault(Math.Min(cellIndex, Math.Max(0, templateCells.Count - 1)));
-            row.AppendChild(BuildReplacementCell(templateCell, cells[cellIndex], isHeader));
+            row.AppendChild(BuildReplacementCell(templateCell, cells[cellIndex], isHeader, inheritCompleteTemplateCellStyle));
         }
 
         return row;
@@ -1214,7 +1218,12 @@ public static class Editor
         }
 
         var templateRow = templateRowResult.Row;
-        InsertBuiltRows(table, existingRows.ElementAtOrDefault(insertBeforeIndex), templateRow, operation.Rows);
+        InsertBuiltRows(
+            table,
+            existingRows.ElementAtOrDefault(insertBeforeIndex),
+            templateRow,
+            operation.Rows,
+            inheritCompleteTemplateCellStyle: true);
         return new DocxEditAppliedOperation(operation.Type, true, $"Inserted {operation.Rows.Count} row(s) into table[{operation.TableIndex}] before row[{insertBeforeIndex}]");
     }
 
@@ -1309,12 +1318,17 @@ public static class Editor
         TableRow? beforeRow,
         TableRow? templateRow,
         IReadOnlyList<IReadOnlyList<DocxTableCellInput>> rows,
-        IReadOnlyList<TableRow>? templateCandidates = null)
+        IReadOnlyList<TableRow>? templateCandidates = null,
+        bool inheritCompleteTemplateCellStyle = false)
     {
         foreach (var rowInput in rows)
         {
             var rowTemplate = ResolveReplacementRowTemplate(rowInput, templateCandidates, templateRow);
-            var row = BuildReplacementRow(rowTemplate, rowInput, rowInput.Any(cell => cell.Header == true));
+            var row = BuildReplacementRow(
+                rowTemplate,
+                rowInput,
+                rowInput.Any(cell => cell.Header == true),
+                inheritCompleteTemplateCellStyle);
             if (beforeRow is null)
             {
                 table.AppendChild(row);
@@ -1515,15 +1529,21 @@ public static class Editor
         return cell;
     }
 
-    private static TableCell BuildReplacementCell(TableCell? templateCell, DocxTableCellInput input, bool rowIsHeader)
+    private static TableCell BuildReplacementCell(
+        TableCell? templateCell,
+        DocxTableCellInput input,
+        bool rowIsHeader,
+        bool inheritCompleteTemplateStyle = false)
     {
-        var cell = new TableCell();
+        var cell = inheritCompleteTemplateStyle && templateCell is not null
+            ? (TableCell)templateCell.CloneNode(true)
+            : new TableCell();
         var templateProperties = templateCell?.GetFirstChild<TableCellProperties>();
-        if (templateProperties is not null)
+        if (cell.GetFirstChild<TableCellProperties>() is null && templateProperties is not null)
         {
             cell.AppendChild((TableCellProperties)templateProperties.CloneNode(true));
         }
-        else
+        else if (cell.GetFirstChild<TableCellProperties>() is null)
         {
             cell.AppendChild(new TableCellProperties());
         }
@@ -1554,6 +1574,31 @@ public static class Editor
             properties.AppendChild(new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = hexColor });
         }
         NormalizeTableCellProperties(properties);
+
+        if (inheritCompleteTemplateStyle && templateCell is not null)
+        {
+            if (input.RichText is { Count: > 0 } inheritedRichText)
+            {
+                ReplaceTableCellRichText(cell, inheritedRichText, input.Alignment);
+            }
+            else
+            {
+                ReplaceTableCellText(cell, input.Text ?? string.Empty, input.Alignment);
+            }
+
+            if (input.Bold == true || rowIsHeader)
+            {
+                foreach (var run in cell.Descendants<Run>().Where(run => run.Descendants<Text>().Any()))
+                {
+                    var runProperties = run.RunProperties ?? run.PrependChild(new RunProperties());
+                    runProperties.RemoveAllChildren<Bold>();
+                    runProperties.RemoveAllChildren<BoldComplexScript>();
+                    runProperties.AppendChild(new Bold());
+                    runProperties.AppendChild(new BoldComplexScript());
+                }
+            }
+            return cell;
+        }
 
         var paragraph = CreateParagraphLike(templateCell?.Elements<Paragraph>().FirstOrDefault());
         var paragraphProperties = paragraph.GetFirstChild<ParagraphProperties>() ?? paragraph.PrependChild(new ParagraphProperties());
