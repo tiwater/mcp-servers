@@ -103,9 +103,10 @@ public static class EvidenceInspector
             var margins = ws.GetFirstChild<PageMargins>();
             var printArea = wb.Workbook.DefinedNames?.Elements<DefinedName>()
                 .FirstOrDefault(x => x.Name?.Value == "_xlnm.Print_Area" && x.LocalSheetId?.Value == (uint)sheetIndex)?.Text;
-            var repeatRows = wb.Workbook.DefinedNames?.Elements<DefinedName>()
+            var printTitles = wb.Workbook.DefinedNames?.Elements<DefinedName>()
                 .FirstOrDefault(x => x.Name?.Value == "_xlnm.Print_Titles" && x.LocalSheetId?.Value == (uint)sheetIndex)?.Text;
-            repeatRows = ExtractPrintTitleRowReference(repeatRows);
+            var repeatRows = ExtractPrintTitleReference(printTitles, @"^\$[1-9]\d*:\$[1-9]\d*$");
+            var repeatCols = ExtractPrintTitleReference(printTitles, @"^\$[A-Za-z]{1,3}:\$[A-Za-z]{1,3}$");
             var breakBeforeRows = ws.GetFirstChild<RowBreaks>()?.Elements<Break>()
                 .Where(item => item.ManualPageBreak?.Value == true && item.Id?.Value is not null)
                 .Select(item => item.Id!.Value + 1U)
@@ -117,7 +118,7 @@ public static class EvidenceInspector
                 rowDimensions = ws.Descendants<Row>().Where(x => x.CustomHeight?.Value == true || x.Hidden?.Value == true).Select(x => new { row = x.RowIndex?.Value, height = x.Height?.Value, hidden = x.Hidden?.Value }).ToList(),
                 columnDimensions = ws.Elements<Columns>().SelectMany(x => x.Elements<Column>()).Select(x => new { min = x.Min?.Value, max = x.Max?.Value, width = x.Width?.Value, hidden = x.Hidden?.Value }).ToList(),
                 sheetView = view is null ? null : new { workbookViewId = view.WorkbookViewId?.Value, view = view.View?.InnerText, showGridLines = view.ShowGridLines?.Value, zoomScale = view.ZoomScale?.Value, topLeftCell = view.TopLeftCell?.Value },
-                print = new { area = printArea, normalizedArea = NormalizeDefinedNameText(printArea), repeatRows, normalizedRepeatRows = NormalizeDefinedNameText(repeatRows), breakBeforeRows, orientation = setup?.Orientation?.InnerText, paperSize = setup?.PaperSize?.Value, scale = setup?.Scale?.Value, fitToWidth = setup?.FitToWidth?.Value, fitToHeight = setup?.FitToHeight?.Value, margins = margins is null ? null : new { left = margins.Left?.Value, right = margins.Right?.Value, top = margins.Top?.Value, bottom = margins.Bottom?.Value, header = margins.Header?.Value, footer = margins.Footer?.Value } },
+                print = new { area = printArea, normalizedArea = NormalizeDefinedNameText(printArea), repeatRows, normalizedRepeatRows = NormalizeDefinedNameText(repeatRows), repeatCols, normalizedRepeatCols = NormalizeDefinedNameText(repeatCols), breakBeforeRows, orientation = setup?.Orientation?.InnerText, paperSize = setup?.PaperSize?.Value, scale = setup?.Scale?.Value, fitToWidth = setup?.FitToWidth?.Value, fitToHeight = setup?.FitToHeight?.Value, margins = margins is null ? null : new { left = margins.Left?.Value, right = margins.Right?.Value, top = margins.Top?.Value, bottom = margins.Bottom?.Value, header = margins.Header?.Value, footer = margins.Footer?.Value } },
                 cells
             };
         }).ToList();
@@ -140,7 +141,7 @@ public static class EvidenceInspector
         return new { schema = "tiwater.xlsx.evidence/v1", toolVersion = XlsxToolVersion.Current, file = Path.GetFullPath(path), dateSystem = uses1904Dates ? "1904" : "1900", definedNames, sheets };
     }
 
-    private static string? ExtractPrintTitleRowReference(string? text)
+    private static string? ExtractPrintTitleReference(string? text, string rangePattern)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
         var start = 0;
@@ -162,7 +163,7 @@ public static class EvidenceInspector
             var separator = reference.LastIndexOf('!');
             if (separator > 0 && System.Text.RegularExpressions.Regex.IsMatch(
                 reference[(separator + 1)..].Trim(),
-                @"^\$[1-9]\d*:\$[1-9]\d*$",
+                rangePattern,
                 System.Text.RegularExpressions.RegexOptions.CultureInvariant))
                 return reference;
             start = index + 1;

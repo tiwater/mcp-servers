@@ -24,6 +24,8 @@ public class EvidenceTests
         Assert.Equal("pageBreakPreview", sheet.GetProperty("sheetView").GetProperty("view").GetString(), ignoreCase: true);
         Assert.Equal("landscape", sheet.GetProperty("print").GetProperty("orientation").GetString(), ignoreCase: true);
         Assert.Equal("'Sheet1'!$1:$2", sheet.GetProperty("print").GetProperty("repeatRows").GetString());
+        Assert.Equal("'Sheet1'!$A:$B", sheet.GetProperty("print").GetProperty("repeatCols").GetString());
+        Assert.Equal("'Sheet1'!$A:$B", sheet.GetProperty("print").GetProperty("normalizedRepeatCols").GetString());
         Assert.Equal([12U], sheet.GetProperty("print").GetProperty("breakBeforeRows").EnumerateArray().Select(item => item.GetUInt32()));
         var cell = sheet.GetProperty("cells").EnumerateArray().Single(x => x.GetProperty("reference").GetString() == "B2");
         Assert.Equal((uint)1, cell.GetProperty("styleIndex").GetUInt32());
@@ -462,7 +464,7 @@ public class EvidenceTests
         var ws = wb.AddNewPart<WorksheetPart>();
         ws.Worksheet = new Worksheet(new SheetDimension { Reference = "A1:B2" }, new SheetViews(new SheetView { WorkbookViewId = 0, View = SheetViewValues.PageBreakPreview, ShowGridLines = false }), new SheetData(new Row(new Cell { CellReference = "A2", StyleIndex = 2, CellValue = new CellValue("2") }, new Cell { CellReference = "B2", StyleIndex = 1, CellFormula = new CellFormula("A2*2"), CellValue = new CellValue("4") }) { RowIndex = 2 }), new MergeCells(new MergeCell { Reference = "A1:B1" }), new PageMargins { Left = .7, Right = .7, Top = .75, Bottom = .75, Header = .3, Footer = .3 }, new PageSetup { Orientation = OrientationValues.Landscape }, new RowBreaks(new Break { Id = 11U, Max = 16_383U, ManualPageBreak = true }) { Count = 1U, ManualBreakCount = 1U });
         wb.Workbook.DefinedNames = new DefinedNames(
-            new DefinedName("'Sheet1'!$1:$2") { Name = "_xlnm.Print_Titles", LocalSheetId = 0 });
+            new DefinedName("'Sheet1'!$A:$B,'Sheet1'!$1:$2") { Name = "_xlnm.Print_Titles", LocalSheetId = 0 });
         wb.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Report" });
         wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
         return path;
