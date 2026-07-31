@@ -67,6 +67,8 @@
           "paperSize": { "type": ["string", "null"], "enum": ["letter", "legal", "a3", "a4", null] },
           "repeatRowsStart": { "type": ["integer", "null"], "minimum": 1, "maximum": 1048576 },
           "repeatRowsEnd": { "type": ["integer", "null"], "minimum": 1, "maximum": 1048576 },
+          "repeatColumnsStart": { "type": ["integer", "null"], "minimum": 1, "maximum": 16384 },
+          "repeatColumnsEnd": { "type": ["integer", "null"], "minimum": 1, "maximum": 16384 },
           "breakBeforeRows": {
             "type": ["array", "null"],
             "minItems": 1,

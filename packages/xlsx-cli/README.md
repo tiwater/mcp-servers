@@ -72,7 +72,7 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType`, `bold`, `shrinkToFit`, and `wrapText`
 - `setPrintArea` with required `sheet` and A1-style `range`
-- `setPageSetup` with required `sheet` and at least one of `fitToPagesWide`, `fitToPagesTall`, `orientation` (`portrait` or `landscape`), `paperSize` (`letter`, `legal`, `a3`, or `a4`), or the paired `repeatRowsStart` / `repeatRowsEnd`; an omitted fit dimension remains unconstrained, and repeated rows are persisted as the sheet-local standard Excel print-title definition
+- `setPageSetup` with required `sheet` and at least one of `fitToPagesWide`, `fitToPagesTall`, `orientation` (`portrait` or `landscape`), `paperSize` (`letter`, `legal`, `a3`, or `a4`), the paired `repeatRowsStart` / `repeatRowsEnd`, or the paired `repeatColumnsStart` / `repeatColumnsEnd`; an omitted fit dimension remains unconstrained, and repeated rows/columns are persisted as the sheet-local standard Excel print-title definition (each axis replaces only its own print-title references and preserves the other)
 - `setRowPageBreaks` with required `sheet` and a strictly increasing `breakBeforeRows` list; replaces the sheet's manual horizontal page breaks so every listed row begins a new printed page
 - `setColumnWidth` with required `sheet`, bounded A1-style `column`, and Excel-compatible `width`
 - `setRichTextCellValue` with required `sheet`, `cell`, `value`, and `bold`; writes one explicit rich-text run so value and all-run bold state are one operation

@@ -184,7 +184,38 @@ public class EditorTests
         var print = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print");
         Assert.Equal("'O''Brien, East'!$2:$3", print.GetProperty("repeatRows").GetString());
         Assert.Equal("'O''Brien, East'!$2:$3", print.GetProperty("normalizedRepeatRows").GetString());
+        Assert.Equal("'O''Brien, East'!$A:$B", print.GetProperty("repeatColumns").GetString());
+        Assert.Equal("'O''Brien, East'!$A:$B", print.GetProperty("normalizedRepeatColumns").GetString());
         Assert.Null(spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet.GetFirstChild<PageSetup>());
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Fact]
+    public void Edit_sets_repeating_title_columns_and_preserves_title_rows()
+    {
+        var path = CreateWorkbookFixture();
+        using (var source = SpreadsheetDocument.Open(path, true))
+        {
+            var workbook = source.WorkbookPart!.Workbook;
+            workbook.Append(new DefinedNames(
+                new DefinedName("'Sheet1'!$1:$2") { Name = "_xlnm.Print_Titles", LocalSheetId = 0 }));
+            workbook.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-repeat-cols-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", RepeatColumnsStart: 1, RepeatColumnsEnd: 2)
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var titles = Assert.Single(
+            spreadsheet.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>(),
+            name => name.Name?.Value == "_xlnm.Print_Titles");
+        Assert.Equal("'Sheet1'!$1:$2,'Sheet1'!$A:$B", titles.Text);
+        var print = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print");
+        Assert.Equal("'Sheet1'!$1:$2", print.GetProperty("normalizedRepeatRows").GetString());
+        Assert.Equal("'Sheet1'!$A:$B", print.GetProperty("normalizedRepeatColumns").GetString());
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }
 
@@ -201,6 +232,25 @@ public class EditorTests
 
         var result = Editor.Apply(path, output, [
             new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", RepeatRowsStart: startRow, RepeatRowsEnd: endRow)
+        ]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
+    [Theory]
+    [InlineData(null, 1)]
+    [InlineData(1, null)]
+    [InlineData(0, 1)]
+    [InlineData(2, 1)]
+    [InlineData(1, 16385)]
+    public void Edit_rejects_invalid_repeating_title_columns(int? startColumn, int? endColumn)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-repeat-cols-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", RepeatColumnsStart: startColumn, RepeatColumnsEnd: endColumn)
         ]);
 
         Assert.False(result.AppliedOperations.Single().Applied);

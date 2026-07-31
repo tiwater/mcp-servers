@@ -10,11 +10,13 @@ namespace Dockit.Xlsx;
 public static class Editor
 {
     private const int MaximumWorksheetRow = 1_048_576;
+    private const int MaximumWorksheetColumn = 16_384;
     private static readonly Regex NumericTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", RegexOptions.Compiled);
     private static readonly Regex PercentTextPattern = new(@"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$", RegexOptions.Compiled);
     private static readonly Regex FormulaCellReferencePattern = new(@"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)", RegexOptions.Compiled);
     private static readonly Regex PrintAreaRangePattern = new(@"^\$?(?<startColumn>[A-Za-z]{1,3})\$?(?<startRow>[1-9]\d*):\$?(?<endColumn>[A-Za-z]{1,3})\$?(?<endRow>[1-9]\d*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex PrintTitleRowRangePattern = new(@"^\$[1-9]\d*:\$[1-9]\d*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex PrintTitleColumnRangePattern = new(@"^\$[A-Za-z]{1,3}:\$[A-Za-z]{1,3}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static int RunEdit(string[] args)
     {
@@ -248,10 +250,13 @@ public static class Editor
                 && operation.Orientation is null
                 && operation.PaperSize is null
                 && operation.RepeatRowsStart is null
-                && operation.RepeatRowsEnd is null)
+                && operation.RepeatRowsEnd is null
+                && operation.RepeatColumnsStart is null
+                && operation.RepeatColumnsEnd is null)
             || operation.FitToPagesWide is < 1 or > 32767
             || operation.FitToPagesTall is < 1 or > 32767
             || !TryValidateRepeatRows(operation.RepeatRowsStart, operation.RepeatRowsEnd)
+            || !TryValidateRepeatColumns(operation.RepeatColumnsStart, operation.RepeatColumnsEnd)
             || (operation.Orientation is not null
                 && !string.Equals(operation.Orientation, "portrait", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase))
@@ -306,6 +311,8 @@ public static class Editor
         }
         if (operation.RepeatRowsStart is not null && operation.RepeatRowsEnd is not null)
             SetPrintTitleRows(workbookPart, operation.Sheet, operation.RepeatRowsStart.Value, operation.RepeatRowsEnd.Value);
+        if (operation.RepeatColumnsStart is not null && operation.RepeatColumnsEnd is not null)
+            SetPrintTitleColumns(workbookPart, operation.Sheet, operation.RepeatColumnsStart.Value, operation.RepeatColumnsEnd.Value);
         worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Set page setup for {operation.Sheet}");
     }
@@ -316,7 +323,35 @@ public static class Editor
                 && endRow is >= 1 and <= MaximumWorksheetRow
                 && startRow <= endRow);
 
+    private static bool TryValidateRepeatColumns(int? startColumn, int? endColumn)
+        => (startColumn is null && endColumn is null)
+            || (startColumn is >= 1 and <= MaximumWorksheetColumn
+                && endColumn is >= 1 and <= MaximumWorksheetColumn
+                && startColumn <= endColumn);
+
     private static void SetPrintTitleRows(WorkbookPart workbookPart, string sheetName, int startRow, int endRow)
+        => ReplacePrintTitleReferences(
+            workbookPart,
+            sheetName,
+            reference => IsPrintTitleRowReference(reference, sheetName),
+            $"'{sheetName.Replace("'", "''", StringComparison.Ordinal)}'!${startRow}:${endRow}");
+
+    private static void SetPrintTitleColumns(WorkbookPart workbookPart, string sheetName, int startColumn, int endColumn)
+    {
+        var startName = GetColumnReference(startColumn);
+        var endName = GetColumnReference(endColumn);
+        ReplacePrintTitleReferences(
+            workbookPart,
+            sheetName,
+            reference => IsPrintTitleColumnReference(reference, sheetName),
+            $"'{sheetName.Replace("'", "''", StringComparison.Ordinal)}'!${startName}:${endName}");
+    }
+
+    private static void ReplacePrintTitleReferences(
+        WorkbookPart workbookPart,
+        string sheetName,
+        Func<string, bool> isReplacedReference,
+        string replacementReference)
     {
         var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>().ToList() ?? [];
         var sheetIndex = sheets.FindIndex(sheet => string.Equals(sheet.Name?.Value, sheetName, StringComparison.Ordinal));
@@ -336,12 +371,11 @@ public static class Editor
             .ToList();
         var preservedReferences = existingTitles
             .SelectMany(name => SplitDefinedNameReferences(name.Text))
-            .Where(reference => !IsPrintTitleRowReference(reference, sheetName))
+            .Where(reference => !isReplacedReference(reference))
             .ToList();
         foreach (var existing in existingTitles)
             existing.Remove();
-        var escapedSheet = sheetName.Replace("'", "''", StringComparison.Ordinal);
-        preservedReferences.Add($"'{escapedSheet}'!${startRow}:${endRow}");
+        preservedReferences.Add(replacementReference);
         workbookDefinedNames.Append(new DefinedName(string.Join(",", preservedReferences))
         {
             Name = "_xlnm.Print_Titles",
@@ -380,6 +414,12 @@ public static class Editor
     }
 
     private static bool IsPrintTitleRowReference(string reference, string sheetName)
+        => IsPrintTitleReference(reference, sheetName, PrintTitleRowRangePattern);
+
+    private static bool IsPrintTitleColumnReference(string reference, string sheetName)
+        => IsPrintTitleReference(reference, sheetName, PrintTitleColumnRangePattern);
+
+    private static bool IsPrintTitleReference(string reference, string sheetName, Regex rangePattern)
     {
         var separator = reference.LastIndexOf('!');
         if (separator <= 0) return false;
@@ -387,7 +427,7 @@ public static class Editor
         if (referenceSheet.Length >= 2 && referenceSheet[0] == '\'' && referenceSheet[^1] == '\'')
             referenceSheet = referenceSheet[1..^1].Replace("''", "'", StringComparison.Ordinal);
         return string.Equals(referenceSheet, sheetName, StringComparison.Ordinal)
-            && PrintTitleRowRangePattern.IsMatch(reference[(separator + 1)..].Trim());
+            && rangePattern.IsMatch(reference[(separator + 1)..].Trim());
     }
 
     private static XlsxEditAppliedOperation SetRowPageBreaksOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -1771,10 +1811,13 @@ public static class Editor
                     || operation.Orientation is not null
                     || operation.PaperSize is not null
                     || operation.RepeatRowsStart is not null
-                    || operation.RepeatRowsEnd is not null)
+                    || operation.RepeatRowsEnd is not null
+                    || operation.RepeatColumnsStart is not null
+                    || operation.RepeatColumnsEnd is not null)
                 && (operation.FitToPagesWide is null or (>= 1 and <= 32767))
                 && (operation.FitToPagesTall is null or (>= 1 and <= 32767))
                 && TryValidateRepeatRows(operation.RepeatRowsStart, operation.RepeatRowsEnd)
+                && TryValidateRepeatColumns(operation.RepeatColumnsStart, operation.RepeatColumnsEnd)
                 && (operation.Orientation is null
                     || string.Equals(operation.Orientation, "portrait", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(operation.Orientation, "landscape", StringComparison.OrdinalIgnoreCase))
