@@ -1175,6 +1175,157 @@ public class AnnotationToolsTests
         }
     }
 
+    [Fact]
+    public void Edit_insert_empty_table_rows_preserves_paragraph_mark_and_empty_run_style_for_later_values()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-insert-empty-row-style-{Guid.NewGuid():N}.docx");
+        CreateEmptyInsertRowStyleFixture(path);
+        var output = Path.Combine(Path.GetTempPath(), $"insert-empty-row-style-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "insertTableRows",
+                TableIndex: 0,
+                RowIndex: 3,
+                TemplateRowIndex: 1,
+                Rows: [[new DocxTableCellInput(), new DocxTableCellInput()]]),
+            new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: 3,
+                CellIndex: 0,
+                RichText: [new DocxRichTextSegment("alpha"), new DocxRichTextSegment("beta")]),
+            new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: 3,
+                CellIndex: 1,
+                RichText: [new DocxRichTextSegment("check")])
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var inserted = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ElementAt(3);
+        AssertInheritedCellStyle(inserted.Elements<TableCell>().ElementAt(0), "DDEBF7", JustificationValues.Center, "Aptos", "22", "1F4E78", UnderlineValues.Single);
+        AssertInheritedCellStyle(inserted.Elements<TableCell>().ElementAt(1), "E2F0D9", JustificationValues.Right, "Aptos", "22", "1F4E78", UnderlineValues.Single);
+    }
+
+    [Fact]
+    public void Edit_insert_empty_table_rows_honors_template_index_mutation_across_multiple_rows()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-insert-empty-row-mutation-{Guid.NewGuid():N}.docx");
+        CreateEmptyInsertRowStyleFixture(path);
+        var output = Path.Combine(Path.GetTempPath(), $"insert-empty-row-mutation-{Guid.NewGuid():N}.docx");
+
+        var operations = new List<DocxEditOperation>
+        {
+            new(
+                "insertTableRows",
+                TableIndex: 0,
+                RowIndex: 3,
+                TemplateRowIndex: 2,
+                Rows: [
+                    [new DocxTableCellInput(), new DocxTableCellInput()],
+                    [new DocxTableCellInput(), new DocxTableCellInput()]
+                ])
+        };
+        foreach (var rowIndex in new[] { 3, 4 })
+        {
+            operations.Add(new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: rowIndex,
+                CellIndex: 0,
+                RichText: [new DocxRichTextSegment($"row-{rowIndex}-left")]));
+            operations.Add(new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: rowIndex,
+                CellIndex: 1,
+                RichText: [new DocxRichTextSegment("one"), new DocxRichTextSegment("two")]));
+        }
+
+        var result = Editor.Apply(path, output, operations);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var rows = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ToList();
+        Assert.Equal(6, rows.Count);
+        foreach (var inserted in rows.Skip(3).Take(2))
+        {
+            AssertInheritedCellStyle(inserted.Elements<TableCell>().ElementAt(0), "FCE4D6", JustificationValues.Left, "Courier New", "28", "C00000", UnderlineValues.Double);
+            AssertInheritedCellStyle(inserted.Elements<TableCell>().ElementAt(1), "FFF2CC", JustificationValues.Both, "Courier New", "28", "C00000", UnderlineValues.Double);
+        }
+    }
+
+    private static void CreateEmptyInsertRowStyleFixture(string path)
+    {
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        mainPart.Document = new Document(new Body(
+            new Table(
+                new TableProperties(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct }),
+                new TableGrid(new GridColumn { Width = "2500" }, new GridColumn { Width = "2500" }),
+                new TableRow(
+                    CreateInsertRowStyleCell("header-a", "D9EAD3", JustificationValues.Center, "Aptos", "20", "000000", UnderlineValues.None),
+                    CreateInsertRowStyleCell("header-b", "D9EAD3", JustificationValues.Center, "Aptos", "20", "000000", UnderlineValues.None)),
+                new TableRow(
+                    CreateParagraphMarkOnlyStyleCell("DDEBF7", JustificationValues.Center, "Aptos", "22", "1F4E78", UnderlineValues.Single),
+                    CreateEmptyRunStyleCell("E2F0D9", JustificationValues.Right, "Aptos", "22", "1F4E78", UnderlineValues.Single)),
+                new TableRow(
+                    CreateParagraphMarkOnlyStyleCell("FCE4D6", JustificationValues.Left, "Courier New", "28", "C00000", UnderlineValues.Double),
+                    CreateEmptyRunStyleCell("FFF2CC", JustificationValues.Both, "Courier New", "28", "C00000", UnderlineValues.Double)),
+                new TableRow(
+                    new TableCell(new Paragraph(new Run(new Text("footer-a")))),
+                    new TableCell(new Paragraph(new Run(new Text("footer-b"))))))));
+        mainPart.Document.Save();
+    }
+
+    private static TableCell CreateParagraphMarkOnlyStyleCell(
+        string fill,
+        JustificationValues justification,
+        string font,
+        string fontSize,
+        string color,
+        UnderlineValues underline)
+        => new(
+            CreateInsertRowCellProperties(fill),
+            new Paragraph(new ParagraphProperties(
+                new Justification { Val = justification },
+                new SpacingBetweenLines { Before = "40", After = "80" },
+                new KeepNext(),
+                new ParagraphMarkRunProperties(CreateInsertRowRunStyle(font, fontSize, color, underline).ChildElements.Select(element => element.CloneNode(true))))));
+
+    private static TableCell CreateEmptyRunStyleCell(
+        string fill,
+        JustificationValues justification,
+        string font,
+        string fontSize,
+        string color,
+        UnderlineValues underline)
+        => new(
+            CreateInsertRowCellProperties(fill),
+            new Paragraph(
+                new ParagraphProperties(
+                    new Justification { Val = justification },
+                    new SpacingBetweenLines { Before = "40", After = "80" },
+                    new KeepNext()),
+                new Run(CreateInsertRowRunStyle(font, fontSize, color, underline))));
+
+    private static TableCellProperties CreateInsertRowCellProperties(string fill)
+        => new(
+            new TableCellWidth { Width = "2500", Type = TableWidthUnitValues.Dxa },
+            new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = fill },
+            new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center });
+
+    private static RunProperties CreateInsertRowRunStyle(string font, string fontSize, string color, UnderlineValues underline)
+        => new(
+            new RunFonts { Ascii = font, HighAnsi = font, EastAsia = font, ComplexScript = font },
+            new FontSize { Val = fontSize },
+            new FontSizeComplexScript { Val = fontSize },
+            new Color { Val = color },
+            new Underline { Val = underline });
+
     private static void CreateInsertRowStyleFixture(string path)
     {
         using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
