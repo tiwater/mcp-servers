@@ -1,0 +1,36 @@
+name: CLI Surface Publish Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  cli-surface-gate:
+    name: Smoke local packed CLI surfaces
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build tooling
+        run: python -m pip install --upgrade pip build
+
+      - name: Prove surface boundary checks fail closed
+        run: python scripts/test_cli_surface_smoke.py
+
+      - name: Pack, install, and smoke the five CLI surfaces
+        run: python scripts/cli_surface_smoke.py
