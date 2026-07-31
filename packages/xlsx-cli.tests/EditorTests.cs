@@ -188,6 +188,121 @@ public class EditorTests
         Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
     }
 
+    [Fact]
+    public void Edit_sets_repeating_title_rows_and_columns_with_standard_cross_page_openxml()
+    {
+        var path = CreateWorkbookFixture();
+        using (var source = SpreadsheetDocument.Open(path, true))
+        {
+            var workbook = source.WorkbookPart!.Workbook;
+            workbook.Sheets!.Elements<Sheet>().Single().Name = "Neutral, West";
+            workbook.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-edited-repeat-titles-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation(
+                "setPageSetup",
+                Sheet: "Neutral, West",
+                RepeatRowsStart: 3,
+                RepeatRowsEnd: 4,
+                RepeatColsStart: 2,
+                RepeatColsEnd: 3)
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var titles = Assert.Single(
+            spreadsheet.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>(),
+            name => name.Name?.Value == "_xlnm.Print_Titles");
+        Assert.Equal("'Neutral, West'!$B:$C,'Neutral, West'!$3:$4", titles.Text);
+        var print = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print");
+        Assert.Equal("'Neutral, West'!$B:$C", print.GetProperty("repeatCols").GetString());
+        Assert.Equal("'Neutral, West'!$B:$C", print.GetProperty("normalizedRepeatCols").GetString());
+        Assert.Equal("'Neutral, West'!$3:$4", print.GetProperty("repeatRows").GetString());
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Fact]
+    public void Edit_cli_accepts_the_repeat_column_json_contract()
+    {
+        var path = CreateWorkbookFixture();
+        var operations = Path.Combine(Path.GetTempPath(), $"xlsx-repeat-column-contract-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-repeat-column-contract-{Guid.NewGuid():N}.xlsx");
+        File.WriteAllText(operations,
+            """{"operations":[{"type":"setPageSetup","sheet":"Sheet1","repeatColsStart":1,"repeatColsEnd":3}]}""");
+
+        var exitCode = Editor.RunEdit([path, operations, output]);
+
+        Assert.Equal(0, exitCode);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var titles = Assert.Single(spreadsheet.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>());
+        Assert.Equal("'Sheet1'!$A:$C", titles.Text);
+    }
+
+    [Theory]
+    [InlineData(1, 1, "$A:$A")]
+    [InlineData(16384, 16384, "$XFD:$XFD")]
+    public void Edit_accepts_boundary_repeating_title_columns(int startColumn, int endColumn, string expectedRange)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-repeat-column-boundary-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", RepeatColsStart: startColumn, RepeatColsEnd: endColumn)
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var titles = Assert.Single(spreadsheet.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>());
+        Assert.Equal($"'Sheet1'!{expectedRange}", titles.Text);
+        Assert.Empty(new OpenXmlValidator().Validate(spreadsheet));
+    }
+
+    [Fact]
+    public void Edit_replaces_repeating_title_columns_without_removing_existing_title_rows()
+    {
+        var path = CreateWorkbookFixture();
+        using (var source = SpreadsheetDocument.Open(path, true))
+        {
+            source.WorkbookPart!.Workbook.Append(new DefinedNames(
+                new DefinedName("'Sheet1'!$D:$E,'Sheet1'!$5:$6") { Name = "_xlnm.Print_Titles", LocalSheetId = 0 }));
+            source.WorkbookPart.Workbook.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-replace-repeat-columns-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", RepeatColsStart: 1, RepeatColsEnd: 2)
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var titles = Assert.Single(spreadsheet.WorkbookPart!.Workbook.DefinedNames!.Elements<DefinedName>());
+        Assert.Equal("'Sheet1'!$5:$6,'Sheet1'!$A:$B", titles.Text);
+        var print = Inspector.InspectEvidence(output).GetProperty("evidence").GetProperty("sheets")[0].GetProperty("print");
+        Assert.Equal("'Sheet1'!$A:$B", print.GetProperty("repeatCols").GetString());
+        Assert.Equal("'Sheet1'!$5:$6", print.GetProperty("repeatRows").GetString());
+    }
+
+    [Theory]
+    [InlineData(null, 1)]
+    [InlineData(1, null)]
+    [InlineData(0, 1)]
+    [InlineData(2, 1)]
+    [InlineData(1, 16385)]
+    public void Edit_rejects_invalid_repeating_title_columns(int? startColumn, int? endColumn)
+    {
+        var path = CreateWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-repeat-columns-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setPageSetup", Sheet: "Sheet1", RepeatColsStart: startColumn, RepeatColsEnd: endColumn)
+        ]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.False(File.Exists(output));
+    }
+
     [Theory]
     [InlineData(null, 1)]
     [InlineData(1, null)]
