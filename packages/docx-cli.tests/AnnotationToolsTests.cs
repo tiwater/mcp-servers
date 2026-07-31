@@ -1114,6 +1114,156 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_insert_table_rows_inherits_complete_style_from_text_bearing_template_run()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-insert-row-complete-style-{Guid.NewGuid():N}.docx");
+        CreateInsertRowStyleFixture(path);
+        var output = Path.Combine(Path.GetTempPath(), $"insert-row-complete-style-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "insertTableRows",
+                TableIndex: 0,
+                RowIndex: 3,
+                TemplateRowIndex: 1,
+                Rows: [[
+                    new DocxTableCellInput("alpha"),
+                    new DocxTableCellInput(RichText: [new DocxRichTextSegment("check")])
+                ]])
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var inserted = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ElementAt(3);
+        AssertInheritedCellStyle(inserted.Elements<TableCell>().ElementAt(0), "DDEBF7", JustificationValues.Center, "Aptos", "22", "1F4E78", UnderlineValues.Single);
+        AssertInheritedCellStyle(inserted.Elements<TableCell>().ElementAt(1), "E2F0D9", JustificationValues.Right, "Aptos", "22", "1F4E78", UnderlineValues.Single);
+    }
+
+    [Fact]
+    public void Edit_insert_table_rows_honors_template_index_mutation_for_every_inserted_row_and_segment()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-insert-row-template-mutation-{Guid.NewGuid():N}.docx");
+        CreateInsertRowStyleFixture(path);
+        var output = Path.Combine(Path.GetTempPath(), $"insert-row-template-mutation-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "insertTableRows",
+                TableIndex: 0,
+                RowIndex: 3,
+                TemplateRowIndex: 2,
+                Rows: [
+                    [
+                        new DocxTableCellInput("first"),
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("one"), new DocxRichTextSegment("two")])
+                    ],
+                    [
+                        new DocxTableCellInput(RichText: [new DocxRichTextSegment("second")]),
+                        new DocxTableCellInput("third")
+                    ]
+                ])
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var rows = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single().Elements<TableRow>().ToList();
+        Assert.Equal(6, rows.Count);
+        foreach (var inserted in rows.Skip(3).Take(2))
+        {
+            AssertInheritedCellStyle(inserted.Elements<TableCell>().ElementAt(0), "FCE4D6", JustificationValues.Left, "Courier New", "28", "C00000", UnderlineValues.Double);
+            AssertInheritedCellStyle(inserted.Elements<TableCell>().ElementAt(1), "FFF2CC", JustificationValues.Both, "Courier New", "28", "C00000", UnderlineValues.Double);
+        }
+    }
+
+    private static void CreateInsertRowStyleFixture(string path)
+    {
+        using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var mainPart = doc.AddMainDocumentPart();
+        mainPart.Document = new Document(new Body(
+            new Table(
+                new TableProperties(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct }),
+                new TableGrid(new GridColumn { Width = "2500" }, new GridColumn { Width = "2500" }),
+                new TableRow(
+                    CreateInsertRowStyleCell("header-a", "D9EAD3", JustificationValues.Center, "Aptos", "20", "000000", UnderlineValues.None),
+                    CreateInsertRowStyleCell("header-b", "D9EAD3", JustificationValues.Center, "Aptos", "20", "000000", UnderlineValues.None)),
+                new TableRow(
+                    CreateInsertRowStyleCell("template-a1", "DDEBF7", JustificationValues.Center, "Aptos", "22", "1F4E78", UnderlineValues.Single),
+                    CreateInsertRowStyleCell("template-a2", "E2F0D9", JustificationValues.Right, "Aptos", "22", "1F4E78", UnderlineValues.Single)),
+                new TableRow(
+                    CreateInsertRowStyleCell("template-b1", "FCE4D6", JustificationValues.Left, "Courier New", "28", "C00000", UnderlineValues.Double),
+                    CreateInsertRowStyleCell("template-b2", "FFF2CC", JustificationValues.Both, "Courier New", "28", "C00000", UnderlineValues.Double)),
+                new TableRow(
+                    new TableCell(new Paragraph(new Run(new Text("footer-a")))),
+                    new TableCell(new Paragraph(new Run(new Text("footer-b"))))))));
+        mainPart.Document.Save();
+    }
+
+    private static TableCell CreateInsertRowStyleCell(
+        string text,
+        string fill,
+        JustificationValues justification,
+        string font,
+        string fontSize,
+        string color,
+        UnderlineValues underline)
+        => new(
+            new TableCellProperties(
+                new TableCellWidth { Width = "2500", Type = TableWidthUnitValues.Dxa },
+                new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = fill },
+                new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }),
+            new Paragraph(
+                new ParagraphProperties(
+                    new Justification { Val = justification },
+                    new SpacingBetweenLines { Before = "40", After = "80" },
+                    new KeepNext()),
+                new Run(new TabChar()),
+                new Run(
+                    new RunProperties(
+                        new RunFonts { Ascii = font, HighAnsi = font, EastAsia = font, ComplexScript = font },
+                        new FontSize { Val = fontSize },
+                        new FontSizeComplexScript { Val = fontSize },
+                        new Color { Val = color },
+                        new Underline { Val = underline }),
+                    new Text(text))));
+
+    private static void AssertInheritedCellStyle(
+        TableCell cell,
+        string fill,
+        JustificationValues justification,
+        string font,
+        string fontSize,
+        string color,
+        UnderlineValues underline)
+    {
+        var cellProperties = cell.GetFirstChild<TableCellProperties>();
+        Assert.Equal(fill, cellProperties!.GetFirstChild<Shading>()!.Fill!.Value);
+        Assert.Equal(TableVerticalAlignmentValues.Center, cellProperties.GetFirstChild<TableCellVerticalAlignment>()!.Val!.Value);
+        var paragraphProperties = cell.Elements<Paragraph>().Single().ParagraphProperties;
+        Assert.Equal(justification, paragraphProperties!.Justification!.Val!.Value);
+        Assert.Equal("40", paragraphProperties.SpacingBetweenLines!.Before!.Value);
+        Assert.Equal("80", paragraphProperties.SpacingBetweenLines.After!.Value);
+        Assert.NotNull(paragraphProperties.KeepNext);
+        var runs = cell.Descendants<Run>().Where(run => run.Descendants<Text>().Any()).ToList();
+        Assert.NotEmpty(runs);
+        Assert.All(runs, run =>
+        {
+            var properties = run.RunProperties;
+            Assert.NotNull(properties);
+            Assert.NotNull(properties.RunFonts);
+            Assert.NotNull(properties.FontSize);
+            Assert.NotNull(properties.FontSizeComplexScript);
+            Assert.NotNull(properties.Color);
+            Assert.NotNull(properties.Underline);
+            Assert.Equal(font, properties.RunFonts.Ascii!.Value);
+            Assert.Equal(font, properties.RunFonts.HighAnsi!.Value);
+            Assert.Equal(fontSize, properties.FontSize.Val!.Value);
+            Assert.Equal(fontSize, properties.FontSizeComplexScript.Val!.Value);
+            Assert.Equal(color, properties.Color.Val!.Value);
+            Assert.Equal(underline, properties.Underline.Val!.Value);
+        });
+    }
+
+    [Fact]
     public void Edit_replace_table_rows_matches_template_row_shape_and_preserves_widths()
     {
         var path = Path.Combine(Path.GetTempPath(), $"fixture-mixed-row-shapes-{Guid.NewGuid():N}.docx");
