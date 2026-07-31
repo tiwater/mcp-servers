@@ -1,18 +1,37 @@
 name: Publish Shared Runtimes
 
+# Release authority and operator rules are defined in RELEASING.md.
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'v*.*.*'
+    branches:
+      - main
+
+concurrency:
+  group: publish-shared-runtimes
+  cancel-in-progress: false
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
+  release-gate:
+    name: Require main release authority
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject non-main release refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Published packages must come from refs/heads/main; got ${GITHUB_REF}." >&2
+            exit 1
+          fi
+
   publish-dotnet:
     name: Publish .NET Global Tools
+    needs: release-gate
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -95,6 +114,7 @@ jobs:
 
   publish-python:
     name: Publish Python Runtime (tiwater-pdf)
+    needs: release-gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
