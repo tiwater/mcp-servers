@@ -1961,8 +1961,7 @@ public static class Editor
     private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null, Run? fallbackRun = null)
     {
         var graphicParagraphs = CaptureGraphicParagraphs(cell);
-        var ownRun = cell.Descendants<Run>().FirstOrDefault(run => run.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)))
-            ?? cell.Descendants<Run>().FirstOrDefault();
+        var ownRun = FindCellStyleTemplateRun(cell);
         var firstRun = ownRun ?? fallbackRun;
         var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
@@ -2009,8 +2008,7 @@ public static class Editor
     private static void ReplaceTableCellRichText(TableCell cell, IReadOnlyList<DocxRichTextSegment> segments, string? alignment = null, Run? fallbackRun = null)
     {
         var graphicParagraphs = CaptureGraphicParagraphs(cell);
-        var ownRun = cell.Descendants<Run>().FirstOrDefault(run => run.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)))
-            ?? cell.Descendants<Run>().FirstOrDefault();
+        var ownRun = FindCellStyleTemplateRun(cell);
         var firstRun = ownRun ?? fallbackRun;
         var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
@@ -2025,6 +2023,39 @@ public static class Editor
         }
         cell.Append(paragraph);
         foreach (var graphic in graphicParagraphs) cell.Append(graphic);
+    }
+
+    private static Run? FindCellStyleTemplateRun(TableCell cell)
+    {
+        var paragraph = cell.Elements<Paragraph>().FirstOrDefault();
+        var run = cell.Descendants<Run>().FirstOrDefault(candidate => candidate.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)))
+            ?? cell.Descendants<Run>().FirstOrDefault();
+        var paragraphMark = paragraph?.ParagraphProperties?.ParagraphMarkRunProperties;
+        if (paragraphMark is null)
+        {
+            return run;
+        }
+
+        var effectiveProperties = new RunProperties();
+        OverlayRunProperties(effectiveProperties, paragraphMark.ChildElements);
+        if (run?.RunProperties is not null)
+        {
+            OverlayRunProperties(effectiveProperties, run.RunProperties.ChildElements);
+        }
+        NormalizeRunProperties(effectiveProperties);
+        return new Run(effectiveProperties);
+    }
+
+    private static void OverlayRunProperties(RunProperties target, IEnumerable<OpenXmlElement> source)
+    {
+        foreach (var property in source)
+        {
+            foreach (var existing in target.ChildElements.Where(candidate => candidate.GetType() == property.GetType()).ToList())
+            {
+                existing.Remove();
+            }
+            target.Append(property.CloneNode(true));
+        }
     }
 
     private static List<Paragraph> CaptureGraphicParagraphs(TableCell cell)
