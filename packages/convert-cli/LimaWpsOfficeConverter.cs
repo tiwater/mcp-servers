@@ -14,17 +14,17 @@ internal static class LimaWpsPdfConverter
             && !string.IsNullOrWhiteSpace(InstanceName())
             && !string.IsNullOrWhiteSpace(FindOnPath("limactl"));
 
+    internal static IDisposable AcquireOfficeHostLease(TimeSpan? timeout = null, string? lockPath = null)
+        => WpsRpcSession.AcquireOfficeLease(timeout, lockPath);
+
     internal static IDisposable AcquireEtHostLease(TimeSpan? timeout = null, string? lockPath = null)
-        => WpsRpcSession.AcquireEtLease(timeout, lockPath);
+        => AcquireOfficeHostLease(timeout, lockPath);
 
     internal static NativeRenderProvenance ConvertToPdf(string input, string output)
         => ConvertToPdf(input, output, "wps");
 
     internal static NativeRenderProvenance ConvertSpreadsheetToPdf(string input, string output)
-    {
-        using var lease = AcquireEtHostLease();
-        return ConvertToPdf(input, output, "et");
-    }
+        => ConvertToPdf(input, output, "et");
 
     internal static NativeRenderProvenance ConvertPresentationToPdf(string input, string output)
         => ConvertToPdf(input, output, "wpp");
@@ -85,7 +85,11 @@ internal static class LimaWpsPdfConverter
 
         try
         {
-            var provenance = Run(limactl, instance, stagedInput, stagedOutput, backend);
+            NativeRenderProvenance provenance;
+            using (AcquireOfficeHostLease())
+            {
+                provenance = Run(limactl, instance, stagedInput, stagedOutput, backend);
+            }
             if (!IsPdf(stagedOutput)) throw new InvalidOperationException($"Lima {backend} did not produce a valid PDF.");
             var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
             if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);

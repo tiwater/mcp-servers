@@ -15,15 +15,17 @@ namespace Dockit.Convert.Tests;
 public class ConvertCliTests
 {
     [Fact]
-    public async Task Wps_spreadsheet_lease_serializes_four_processes()
+    public async Task Wps_office_lease_serializes_mixed_backends_across_processes()
     {
         var root = Path.Combine(Path.GetTempPath(), $"wps-lease-{Guid.NewGuid():N}");
-        var lockPath = Path.Combine(root, "spreadsheet.lock");
+        var lockPath = Path.Combine(root, "office.lock");
         Directory.CreateDirectory(root);
         var eventLog = Path.Combine(root, "events.log");
         try
         {
-            var processes = Enumerable.Range(0, 4).Select(_ => StartLeaseProbe(lockPath, eventLog, 150, 5_000)).ToArray();
+            var processes = new[] { "writer", "spreadsheet", "presentation", "lima" }
+                .Select(route => StartLeaseProbe(route, lockPath, eventLog, 150, 5_000))
+                .ToArray();
             await Task.WhenAll(processes.Select(WaitForExit));
             Assert.All(processes, process => Assert.Equal(0, process.ExitCode));
             var active = 0;
@@ -52,11 +54,11 @@ public class ConvertCliTests
         var eventLog = Path.Combine(root, "events.log");
         try
         {
-            using var killed = StartLeaseProbe(lockPath, eventLog, 60_000, 5_000);
+            using var killed = StartLeaseProbe("writer", lockPath, eventLog, 60_000, 5_000);
             await WaitForEvent(eventLog, '+', TimeSpan.FromSeconds(5));
             killed.Kill(entireProcessTree: true);
             await WaitForExit(killed);
-            using var successor = StartLeaseProbe(lockPath, eventLog, 0, 2_000);
+            using var successor = StartLeaseProbe("presentation", lockPath, eventLog, 0, 2_000);
             await WaitForExit(successor);
             Assert.Equal(0, successor.ExitCode);
         }
@@ -75,9 +77,9 @@ public class ConvertCliTests
         Directory.CreateDirectory(root);
         try
         {
-            using var holder = StartLeaseProbe(lockPath, eventLog, 60_000, 5_000);
+            using var holder = StartLeaseProbe("spreadsheet", lockPath, eventLog, 60_000, 5_000);
             await WaitForEvent(eventLog, '+', TimeSpan.FromSeconds(5));
-            using var blocked = StartLeaseProbe(lockPath, eventLog, 0, 150);
+            using var blocked = StartLeaseProbe("writer", lockPath, eventLog, 0, 150);
             await WaitForExit(blocked);
             Assert.Equal(23, blocked.ExitCode);
             Assert.Contains(File.ReadAllLines(eventLog), line => line.StartsWith('!'));
@@ -91,7 +93,7 @@ public class ConvertCliTests
     }
 
     [Fact]
-    public void Local_and_lima_spreadsheet_routes_share_one_host_lease_without_nested_acquisition()
+    public void Local_and_lima_office_routes_share_one_host_lease()
     {
         var root = Path.Combine(Path.GetTempPath(), $"wps-lease-{Guid.NewGuid():N}");
         var lockPath = Path.Combine(root, "spreadsheet.lock");
@@ -101,10 +103,14 @@ public class ConvertCliTests
             using (EtPdfConverter.AcquireRuntimeLease(TimeSpan.FromSeconds(1), lockPath))
             {
                 Assert.Throws<TimeoutException>(() =>
-                    LimaWpsPdfConverter.AcquireEtHostLease(TimeSpan.FromMilliseconds(150), lockPath));
+                    WpsPdfConverter.AcquireRuntimeLease(TimeSpan.FromMilliseconds(150), lockPath));
+                Assert.Throws<TimeoutException>(() =>
+                    WppPdfConverter.AcquireRuntimeLease(TimeSpan.FromMilliseconds(150), lockPath));
+                Assert.Throws<TimeoutException>(() =>
+                    LimaWpsPdfConverter.AcquireOfficeHostLease(TimeSpan.FromMilliseconds(150), lockPath));
             }
 
-            using var limaLease = LimaWpsPdfConverter.AcquireEtHostLease(TimeSpan.FromSeconds(1), lockPath);
+            using var limaLease = LimaWpsPdfConverter.AcquireOfficeHostLease(TimeSpan.FromSeconds(1), lockPath);
             Assert.Throws<TimeoutException>(() =>
                 EtPdfConverter.AcquireRuntimeLease(TimeSpan.FromMilliseconds(150), lockPath));
         }
@@ -387,7 +393,7 @@ public class ConvertCliTests
         Assert.DoesNotContain("ExportAsFixedFormat", helperScript);
     }
 
-    private static Process StartLeaseProbe(string lockPath, string eventLog, int holdMilliseconds, int timeoutMilliseconds)
+    private static Process StartLeaseProbe(string route, string lockPath, string eventLog, int holdMilliseconds, int timeoutMilliseconds)
     {
         var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent?.Name
             ?? throw new InvalidOperationException("Test configuration directory is unavailable.");
@@ -403,7 +409,7 @@ public class ConvertCliTests
             FileName = "dotnet",
             UseShellExecute = false,
         };
-        foreach (var argument in new[] { probe, lockPath, eventLog, holdMilliseconds.ToString(), timeoutMilliseconds.ToString() })
+        foreach (var argument in new[] { probe, route, lockPath, eventLog, holdMilliseconds.ToString(), timeoutMilliseconds.ToString() })
             start.ArgumentList.Add(argument);
         return Process.Start(start) ?? throw new InvalidOperationException("Failed to start WPS lease probe.");
     }

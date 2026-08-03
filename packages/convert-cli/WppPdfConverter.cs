@@ -4,6 +4,9 @@ namespace Dockit.Convert;
 
 public static class WppPdfConverter
 {
+    internal static IDisposable AcquireRuntimeLease(TimeSpan? timeout = null, string? lockPath = null)
+        => WpsRpcSession.AcquireOfficeLease(timeout, lockPath);
+
     public static bool IsAvailable()
         => !string.IsNullOrWhiteSpace(FindWpsRpcPython())
             && !string.IsNullOrWhiteSpace(FindOnPath("xvfb-run"))
@@ -31,6 +34,7 @@ public static class WppPdfConverter
 
         try
         {
+            using var lease = AcquireRuntimeLease();
             Exception? lastError = null;
             for (var attempt = 1; attempt <= 2; attempt++)
             {

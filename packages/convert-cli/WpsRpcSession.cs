@@ -4,7 +4,7 @@ namespace Dockit.Convert;
 
 internal static class WpsRpcSession
 {
-    private static readonly string EtLeasePath = Path.Combine(Path.GetTempPath(), "tiwater-et.lock");
+    private static readonly string OfficeLeasePath = Path.Combine(Path.GetTempPath(), "tiwater-office.lock");
 
     internal static bool IsAvailable()
         => FindOnPath("dbus-run-session") is not null
@@ -14,11 +14,14 @@ internal static class WpsRpcSession
         => FindOnPath(command)
             ?? throw new InvalidOperationException($"{command} is required for {purpose}.");
 
-    internal static IDisposable AcquireEtLease(TimeSpan? timeout = null, string? lockPath = null)
+    internal static IDisposable AcquireOfficeLease(TimeSpan? timeout = null, string? lockPath = null)
         => AcquireFileLease(
-            Path.GetFullPath(lockPath ?? EtLeasePath),
+            Path.GetFullPath(lockPath ?? OfficeLeasePath),
             timeout ?? TimeSpan.FromMinutes(5),
-            "WPS spreadsheet runtime");
+            "WPS Office runtime");
+
+    internal static IDisposable AcquireEtLease(TimeSpan? timeout = null, string? lockPath = null)
+        => AcquireOfficeLease(timeout, lockPath);
 
     internal static IDisposable AcquireContentLease(string lockPath, TimeSpan timeout)
         => AcquireFileLease(Path.GetFullPath(lockPath), timeout, "WPS spreadsheet content conversion");
