@@ -130,6 +130,17 @@ public class EvidenceTests
     }
 
     [Fact]
+    public void Evidence_exposes_effective_bold_for_direct_inherited_and_explicit_false_fonts()
+    {
+        var styles = CellStylesEvidence(BoldFixture());
+
+        Assert.True(styles["A1"].GetProperty("bold").GetBoolean());
+        Assert.True(styles["B1"].GetProperty("bold").GetBoolean());
+        Assert.False(styles["C1"].GetProperty("bold").GetBoolean());
+        Assert.False(styles["D1"].GetProperty("bold").GetBoolean());
+    }
+
+    [Fact]
     public void Number_format_fingerprint_ignores_id_but_preserves_literal_case_and_whitespace()
     {
         var baseline = CellStyleEvidence(NumberFormatFixture(164, "0 \"KG\""));
@@ -342,6 +353,39 @@ public class EvidenceTests
             new Cell { CellReference = "A1", StyleIndex = 1, CellValue = new CellValue("1") },
             new Cell { CellReference = "B1", StyleIndex = 2, CellValue = new CellValue("1") }) { RowIndex = 1 }));
         wb.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Styles" });
+        wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
+        return path;
+    }
+
+    private static string BoldFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-bold-evidence-{Guid.NewGuid():N}.xlsx");
+        using var doc = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var wb = doc.AddWorkbookPart();
+        wb.Workbook = new Workbook();
+        var styles = wb.AddNewPart<WorkbookStylesPart>();
+        styles.Stylesheet = new Stylesheet(
+            new Fonts(
+                new Font(),
+                new Font(new Bold()),
+                new Font(new Bold { Val = false })) { Count = 3 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellStyleFormats(
+                new CellFormat(),
+                new CellFormat { FontId = 1 }) { Count = 2 },
+            new CellFormats(
+                new CellFormat { FontId = 0 },
+                new CellFormat { FormatId = 1, FontId = 2, ApplyFont = false },
+                new CellFormat { FontId = 1, ApplyFont = true },
+                new CellFormat { FontId = 2, ApplyFont = true }) { Count = 4 });
+        var ws = wb.AddNewPart<WorksheetPart>();
+        ws.Worksheet = new Worksheet(new SheetData(new Row(
+            new Cell { CellReference = "A1", StyleIndex = 1, CellValue = new CellValue("1") },
+            new Cell { CellReference = "B1", StyleIndex = 2, CellValue = new CellValue("1") },
+            new Cell { CellReference = "C1", StyleIndex = 3, CellValue = new CellValue("1") },
+            new Cell { CellReference = "D1", StyleIndex = 0, CellValue = new CellValue("1") }) { RowIndex = 1 }));
+        wb.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Bold" });
         wb.Workbook.Save(); styles.Stylesheet.Save(); ws.Worksheet.Save();
         return path;
     }
