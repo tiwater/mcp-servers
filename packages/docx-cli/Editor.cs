@@ -78,6 +78,7 @@ public static class Editor
             "replaceParagraphRunText" => ReplaceParagraphRunText(body, operation),
             "replaceBodyText" => ReplaceBodyText(body, operation),
             "deleteBodyParagraph" => DeleteBodyParagraph(body, operation),
+            "deleteBodyDrawingBeforeParagraph" => DeleteBodyDrawingBeforeParagraph(body, operation),
             "deleteBodyRange" => DeleteBodyRange(body, operation),
             "startSectionBeforeParagraph" => StartSectionBeforeParagraph(body, operation),
             "replaceAllHeaderParagraphText" => ReplaceAllHeaderParagraphText(doc, operation),
@@ -314,6 +315,59 @@ public static class Editor
 
         matches[0].Remove();
         return new DocxEditAppliedOperation(operation.Type, true, $"Deleted body paragraph matching: {operation.FindText}");
+    }
+
+    private static DocxEditAppliedOperation DeleteBodyDrawingBeforeParagraph(Body body, DocxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.FindText))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "findText is required");
+        }
+
+        if (!TryResolveParagraphMatchMode(operation.MatchMode, out var matchMode, out var modeError))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, modeError);
+        }
+
+        var children = body.ChildElements.ToList();
+        var matches = children
+            .Select((child, index) => (child, index))
+            .Where(candidate => candidate.child is Paragraph paragraph
+                && ParagraphMatches(paragraph, operation.FindText, matchMode, operation.ParagraphStyle))
+            .ToList();
+        if (matches.Count != 1)
+        {
+            return new DocxEditAppliedOperation(
+                operation.Type,
+                false,
+                $"Expected exactly one direct body paragraph for {matchMode} selector '{operation.FindText}', found {matches.Count}");
+        }
+
+        var anchorIndex = matches[0].index;
+        if (anchorIndex == 0 || children[anchorIndex - 1] is not Paragraph drawingParagraph)
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "preceding direct body element is not a paragraph");
+        }
+
+        var drawings = drawingParagraph.Descendants<Drawing>().ToList();
+        if (drawings.Count != 1)
+        {
+            return new DocxEditAppliedOperation(
+                operation.Type,
+                false,
+                $"Expected exactly one drawing in the preceding body paragraph, found {drawings.Count}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(GetParagraphText(drawingParagraph)))
+        {
+            return new DocxEditAppliedOperation(operation.Type, false, "preceding drawing paragraph also contains text");
+        }
+
+        drawingParagraph.Remove();
+        return new DocxEditAppliedOperation(
+            operation.Type,
+            true,
+            $"Deleted the single drawing-only body paragraph before: {operation.FindText}");
     }
 
     private static DocxEditAppliedOperation DeleteBodyRange(Body body, DocxEditOperation operation)
