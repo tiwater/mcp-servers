@@ -23,6 +23,7 @@
             "replaceParagraphRunText",
             "replaceBodyText",
             "deleteBodyParagraph",
+            "deleteBodyDrawingBeforeParagraph",
             "deleteBodyRange",
             "startSectionBeforeParagraph",
             "replaceAllHeaderParagraphText",

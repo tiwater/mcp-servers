@@ -145,7 +145,10 @@ public static class Inspector
                 var numberingId = numbering?.NumberingId?.Val?.Value;
                 var numberingLevel = numbering?.NumberingLevelReference?.Val?.Value;
                 var keepNext = paragraph.ParagraphProperties?.GetFirstChild<KeepNext>() is not null;
-                if (!string.IsNullOrEmpty(text) || numberingId is not null)
+                var drawingCount = paragraph.Descendants<Drawing>().Count();
+                if (drawingCount > 0)
+                    nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, drawingCount, text });
+                else if (!string.IsNullOrEmpty(text) || numberingId is not null)
                     nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, text });
                 bodyParagraphIndex += 1;
             }
