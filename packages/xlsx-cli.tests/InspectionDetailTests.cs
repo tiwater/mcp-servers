@@ -73,6 +73,52 @@ public class InspectionDetailTests
         Assert.Equal("center", numericCell.GetProperty("style").GetProperty("horizontalAlignment").GetString());
     }
 
+    [Fact]
+    public void ExportJson_exposes_effective_bold_for_direct_inherited_and_explicit_false_fonts()
+    {
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-export-bold-{Guid.NewGuid():N}.json");
+        Extractor.RunExportJson([CreateBoldWorkbook(), output]);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(output));
+        var styles = document.RootElement[0].GetProperty("cells").EnumerateArray()
+            .ToDictionary(
+                cell => cell.GetProperty("reference").GetString()!,
+                cell => cell.GetProperty("style"));
+        Assert.True(styles["A1"].GetProperty("bold").GetBoolean());
+        Assert.True(styles["B1"].GetProperty("bold").GetBoolean());
+        Assert.False(styles["C1"].GetProperty("bold").GetBoolean());
+        Assert.False(styles["D1"].GetProperty("bold").GetBoolean());
+    }
+
+    private static string CreateBoldWorkbook()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-export-bold-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new Fonts(new Font(), new Font(new Bold()), new Font(new Bold { Val = false })) { Count = 3 },
+            new Fills(new Fill()) { Count = 1 },
+            new Borders(new Border()) { Count = 1 },
+            new CellStyleFormats(new CellFormat(), new CellFormat { FontId = 1 }) { Count = 2 },
+            new CellFormats(
+                new CellFormat { FontId = 0 },
+                new CellFormat { FormatId = 1, FontId = 2, ApplyFont = false },
+                new CellFormat { FontId = 1, ApplyFont = true },
+                new CellFormat { FontId = 2, ApplyFont = true }) { Count = 4 });
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        worksheetPart.Worksheet = new Worksheet(new SheetData(new Row(
+            new Cell { CellReference = "A1", StyleIndex = 1, CellValue = new CellValue("1") },
+            new Cell { CellReference = "B1", StyleIndex = 2, CellValue = new CellValue("1") },
+            new Cell { CellReference = "C1", StyleIndex = 3, CellValue = new CellValue("1") },
+            new Cell { CellReference = "D1", StyleIndex = 0, CellValue = new CellValue("1") }) { RowIndex = 1 }));
+        workbookPart.Workbook.AppendChild(new Sheets()).Append(
+            new Sheet { Id = workbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Bold" });
+        workbookPart.Workbook.Save(); stylesPart.Stylesheet.Save(); worksheetPart.Worksheet.Save();
+        return path;
+    }
+
     private static string CreateAna14LikeWorkbook()
     {
         var path = Path.Combine(Path.GetTempPath(), $"xlsx-inspection-detail-{Guid.NewGuid():N}.xlsx");

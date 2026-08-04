@@ -224,13 +224,37 @@ public static class Inspector
     private static CellStyleReport GetCellStyle(Cell cell, Stylesheet? stylesheet)
     {
         var styleIndex = cell.StyleIndex?.Value ?? 0U;
-        var format = stylesheet?.CellFormats?.Elements<CellFormat>().ElementAtOrDefault((int)styleIndex);
+        var formats = stylesheet?.CellFormats?.Elements<CellFormat>().ToList() ?? [];
+        var baseFormats = stylesheet?.CellStyleFormats?.Elements<CellFormat>().ToList() ?? [];
+        var fonts = stylesheet?.Fonts?.Elements<Font>().ToList() ?? [];
+        var format = formats.ElementAtOrDefault((int)styleIndex);
+        var baseFormatIndex = format?.FormatId?.Value;
+        var baseFormat = baseFormatIndex is not null && baseFormatIndex.Value < baseFormats.Count
+            ? baseFormats[(int)baseFormatIndex.Value]
+            : null;
+        var fontId = EffectiveComponentId(format?.FontId?.Value, format?.ApplyFont?.Value, baseFormat?.FontId?.Value);
         var numberFormatId = format?.NumberFormatId?.Value ?? 0U;
         var custom = stylesheet?.NumberingFormats?.Elements<NumberingFormat>().FirstOrDefault(item => item.NumberFormatId?.Value == numberFormatId)?.FormatCode?.Value;
         var code = custom ?? numberFormatId switch { 0 => "General", 1 => "0", 2 => "0.00", 9 => "0%", 10 => "0.00%", 14 => "m/d/yy", 49 => "@", _ => null };
         var alignment = format?.Alignment;
-        return new CellStyleReport(styleIndex, numberFormatId, code, format?.FontId?.Value ?? 0U, format?.FillId?.Value ?? 0U,
-            format?.BorderId?.Value ?? 0U, alignment?.Horizontal?.InnerText, alignment?.Vertical?.InnerText, alignment?.WrapText?.Value ?? false);
+        return new CellStyleReport(styleIndex, numberFormatId, code, fontId, format?.FillId?.Value ?? 0U,
+            format?.BorderId?.Value ?? 0U, alignment?.Horizontal?.InnerText, alignment?.Vertical?.InnerText,
+            alignment?.WrapText?.Value ?? false, EffectiveBold(fonts, fontId));
+    }
+
+    private static uint EffectiveComponentId(uint? directId, bool? applyDirect, uint? baseId)
+    {
+        if (applyDirect == false) return baseId ?? 0U;
+        if (directId is not null) return directId.Value;
+        return applyDirect == true ? 0U : baseId ?? 0U;
+    }
+
+    private static bool EffectiveBold(IReadOnlyList<Font> fonts, uint fontId)
+    {
+        if (fonts.Count == 0 && fontId == 0) return false;
+        if (fontId >= fonts.Count) throw new InvalidDataException($"Workbook font id is out of range: {fontId}");
+        var bold = fonts[(int)fontId].GetFirstChild<Bold>();
+        return bold is not null && (bold.Val?.Value ?? true);
     }
 
     private static string? GetVisibleCellText(Cell cell, SharedStringTable? sharedStrings)

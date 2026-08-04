@@ -42,7 +42,8 @@ public record CellStyleReport(
     uint BorderId,
     string? HorizontalAlignment,
     string? VerticalAlignment,
-    bool WrapText);
+    bool WrapText,
+    bool Bold);
 
 public record CellEvidenceReport(
     string Reference,
