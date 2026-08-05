@@ -39,7 +39,22 @@ semantic kind, and date classification). Numeric date/time cells include an ISO-
 value computed from the workbook's declared 1900 or 1904 date system. These are
 technical readback facts; the tool does not infer business semantics.
 
-### 2. Fill a Template
+### 2. Inventory Non-empty Regions
+
+Publishes a deterministic, versioned inventory of non-empty row bands. A completely
+empty row terminates one region and the next non-empty row starts another. Every
+material cell retains its address, row/column coordinates, raw value, formatted
+display value, and formula. The output is bound to the input SHA-256 and does not
+infer headers, record identities, methods, samples, or other business semantics.
+
+```bash
+tiwater-xlsx inventory-regions <input.xlsx> [<output.json>]
+```
+
+The output contract is `tiwater.xlsx.region-inventory/v1`; its JSON Schema is
+packaged as `contracts/tiwater.xlsx-region-inventory-v1.schema.json`.
+
+### 3. Fill a Template
 
 Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
 
@@ -68,7 +83,7 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 ```
 
 
-### 3. Apply Explicit Edit Operations
+### 4. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType`, `bold`, `shrinkToFit`, and `wrapText`
 - `setPrintArea` with required `sheet` and A1-style `range`
@@ -127,7 +142,7 @@ Example operations file:
 }
 ```
 
-### 4. Validate a Workbook Package
+### 5. Validate a Workbook Package
 Validates an `.xlsx` workbook as an Open XML spreadsheet package and returns JSON validation evidence. The command exits `0` when the workbook is valid and `1` when validation errors are found or the file is not a valid XLSX package.
 
 ```bash
