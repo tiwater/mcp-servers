@@ -46,6 +46,63 @@ public class OpenXmlValidationTests
     }
 
     [Fact]
+    public void Ui_priority_after_semi_hidden_or_unhide_when_used_is_a_warning()
+    {
+        var input = CreateFixture(
+            """
+            <w:style w:type="paragraph" w:styleId="PriorityAfterSemiHidden">
+              <w:name w:val="Priority after semiHidden"/>
+              <w:basedOn w:val="Normal"/>
+              <w:semiHidden/>
+              <w:uiPriority w:val="48"/>
+              <w:rPr/>
+            </w:style>
+            """,
+            """
+            <w:style w:type="paragraph" w:styleId="PriorityAfterUnhideWhenUsed">
+              <w:name w:val="Priority after unhideWhenUsed"/>
+              <w:basedOn w:val="Normal"/>
+              <w:unhideWhenUsed/>
+              <w:uiPriority w:val="49"/>
+              <w:rPr/>
+            </w:style>
+            """);
+
+        var result = OpenXmlValidation.Validate(input);
+
+        Assert.True(
+            result.Pass,
+            string.Join(
+                Environment.NewLine,
+                result.Errors.Select(error => $"{error.Id}: {error.Description} ({error.Path})")));
+        Assert.Empty(result.Errors);
+        Assert.Equal(2, result.WarningCount);
+        Assert.All(result.Warnings, warning =>
+            Assert.Equal("wordprocessing-style-trailing-ui-priority", warning.CompatibilityCode));
+    }
+
+    [Fact]
+    public void Unrelated_style_child_ordering_errors_remain_hard_failures()
+    {
+        var input = CreateFixture(
+            """
+            <w:style w:type="paragraph" w:styleId="MisorderedPayload">
+              <w:name w:val="Misordered payload"/>
+              <w:uiPriority w:val="1"/>
+              <w:rPr/>
+              <w:pPr/>
+            </w:style>
+            """);
+
+        var result = OpenXmlValidation.Validate(input);
+
+        Assert.False(result.Pass);
+        Assert.Equal(0, result.WarningCount);
+        Assert.Single(result.Errors);
+        Assert.Null(result.Errors[0].CompatibilityCode);
+    }
+
+    [Fact]
     public void Other_ui_priority_ordering_errors_remain_hard_failures()
     {
         var input = CreateFixture(
