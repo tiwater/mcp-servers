@@ -25,6 +25,7 @@ internal static class Cli
             {
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
+                "inventory-regions" => Task.FromResult(RegionInventory.Run(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 "validate" => RunValidateAsync(args[1..]),
@@ -102,6 +103,7 @@ internal static class Cli
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.xlsx> [--json]");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
+        Console.WriteLine("  inventory-regions <input.xlsx> [<output.json>]");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");
         Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");
         Console.WriteLine("  validate <input.xlsx>");
