@@ -118,7 +118,7 @@ public static class OpenXmlValidation
         var uiPriorityIndex = children.IndexOf(uiPriority);
         if (uiPriorityIndex <= 0
             || children.Count(child => child is UIPriority) != 1
-            || children[uiPriorityIndex - 1].LocalName is not ("qFormat" or "unhideWhenUsed")
+            || children[uiPriorityIndex - 1].LocalName is not ("semiHidden" or "unhideWhenUsed" or "qFormat")
             || children.Take(uiPriorityIndex).Any(child =>
                 child.NamespaceUri != WordprocessingNamespace
                 || !AllowedLeadingStyleMetadata.Contains(child.LocalName))
