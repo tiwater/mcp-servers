@@ -605,7 +605,8 @@ public class AnnotationToolsTests
             ("stable after", "Source"));
         var baseline = CreateStyledTextMigrationFixture(
             ("stable before", "Before"),
-            ("stable after", "After"));
+            ("stable after", "After"),
+            ("target owned", "After"));
         var candidate = new TemplateMigrationSemanticCandidate(
             "tiwater.docx.template-migration-semantic-candidate/v3",
             [],
@@ -627,12 +628,16 @@ public class AnnotationToolsTests
         Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => item.Reason) ?? []));
         using var document = WordprocessingDocument.Open(output, false);
         var paragraphs = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ToList();
-        Assert.Equal(["stable before", "new first", "new second", "stable after"], paragraphs.Select(item => item.InnerText).ToArray());
-        Assert.Equal(["Before", "After", "After", "After"], paragraphs.Select(item => item.ParagraphProperties?.ParagraphStyleId?.Val?.Value).ToArray());
+        Assert.Equal(["stable before", "new first", "new second", "stable after", "target owned"], paragraphs.Select(item => item.InnerText).ToArray());
+        Assert.Equal(["Before", "After", "After", "After", "After"], paragraphs.Select(item => item.ParagraphProperties?.ParagraphStyleId?.Val?.Value).ToArray());
 
         var tampered = Path.Combine(Path.GetTempPath(), $"migration-body-insertion-tampered-{Guid.NewGuid():N}.docx");
         Editor.Apply(output, tampered, [new DocxEditOperation("replaceParagraphText", ParagraphIndex: 1, Text: "changed")]);
         Assert.Contains(TemplateMigration.ValidateReadback(source, baseline, tampered, resolved.Plan).Failures, item => item.Reason == "template-migration-readback-body-insertion-content-mismatch");
+
+        var baselineTampered = Path.Combine(Path.GetTempPath(), $"migration-body-insertion-baseline-tampered-{Guid.NewGuid():N}.docx");
+        Editor.Apply(output, baselineTampered, [new DocxEditOperation("replaceParagraphRunText", ParagraphIndex: 4, RunIndex: 0, Text: "changed target content")]);
+        Assert.Contains(TemplateMigration.ValidateReadback(source, baseline, baselineTampered, resolved.Plan).Failures, item => item.Reason == "template-migration-readback-baseline-content-drift");
         Assert.Contains(TemplateMigration.BuildOperations(source, baseline, resolved.Plan with { BodyInsertions = [] }).Failures, item => item.Reason == "template-migration-plan-v5-body-insertion-required");
     }
 

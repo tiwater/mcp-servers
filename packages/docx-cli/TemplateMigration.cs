@@ -1465,6 +1465,8 @@ public static class TemplateMigration
             }
         }
 
+        ValidateImmutableBaselineRuns(baselineInventory, outputInventory, plan, baselineOutputIds, failures);
+
         if ((plan.BodyAppends?.Count ?? 0) == 0 && (plan.BodyInsertions?.Count ?? 0) == 0)
         {
             var baselineStructure = baselineInventory.Objects
@@ -1507,6 +1509,54 @@ public static class TemplateMigration
         }
 
         return new TemplateMigrationReadback(failures.Count == 0, failures);
+    }
+
+    private static void ValidateImmutableBaselineRuns(
+        TemplateMigrationInventory baseline,
+        TemplateMigrationInventory output,
+        TemplateMigrationPlan plan,
+        IReadOnlyDictionary<string, string> baselineOutputIds,
+        List<TemplateMigrationPlanFailure> failures)
+    {
+        var baselineById = baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var outputById = output.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var mutableIds = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var mapping in (plan.Mappings ?? []).Where(item =>
+                     string.Equals(item.Disposition, "copy-text", StringComparison.Ordinal)
+                     && !string.IsNullOrWhiteSpace(item.BaselineObjectId)))
+        {
+            if (baselineById.ContainsKey(mapping.BaselineObjectId!))
+                mutableIds.UnionWith(DescendantsOf(baseline.Objects, [mapping.BaselineObjectId!]));
+        }
+        foreach (var projection in plan.ValueProjections ?? [])
+        {
+            if (baselineById.ContainsKey(projection.BaselineParentObjectId))
+                mutableIds.UnionWith(DescendantsOf(baseline.Objects, [projection.BaselineParentObjectId]));
+        }
+        foreach (var clear in plan.BaselineClears ?? [])
+        {
+            var selected = baseline.Objects.SingleOrDefault(item => item.Id == clear.BaselineObjectId);
+            if (selected is null) continue;
+            var roots = string.Equals(clear.Mode, "row", StringComparison.Ordinal) && selected.Topology is not null
+                ? baseline.Objects.Where(item => item.Kind == "table-cell"
+                    && item.Topology?.ContainerObjectId == selected.Topology.ContainerObjectId
+                    && item.Topology.Row == selected.Topology.Row).Select(item => item.Id)
+                : [selected.Id];
+            mutableIds.UnionWith(DescendantsOf(baseline.Objects, roots));
+        }
+
+        foreach (var baselineRun in baseline.Objects.Where(item => item.Kind == "run" && !mutableIds.Contains(item.Id)))
+        {
+            var outputId = baselineOutputIds.GetValueOrDefault(baselineRun.Id, baselineRun.Id);
+            if (!outputById.TryGetValue(outputId, out var outputRun)
+                || !string.Equals(baselineRun.Text, outputRun.Text, StringComparison.Ordinal)
+                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("runPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("runPropertiesSha256"), StringComparison.Ordinal)
+                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), StringComparison.Ordinal))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-content-drift", BaselineObjectId: baselineRun.Id));
+            }
+        }
     }
 
     private static IReadOnlyList<TemplateMigrationPlanFailure> ValidatePlainBodyInsertionContent(
