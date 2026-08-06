@@ -182,9 +182,9 @@ public static class DocxPackageNormalizer
         NormalizeNamespaces(document.Root);
         NormalizeChildOrder(document.Root);
         NormalizeWpsNoNumbering(document.Root);
-        MaterializeInheritedSectionHeadersAndFooters(document.Root);
         if (collapseEquivalentNextPageSections)
         {
+            MaterializeInheritedSectionHeadersAndFooters(document.Root);
             CollapseEquivalentNextPageSections(document.Root);
         }
         normalized = document.Declaration is null

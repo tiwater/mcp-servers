@@ -2472,7 +2472,7 @@ public class AnnotationToolsTests
     }
 
     [Fact]
-    public void NormalizeOpenXml_materializes_inherited_section_headers_and_footers()
+    public void NormalizeOpenXml_preserves_inherited_section_headers_and_footers_in_delivery_artifacts()
     {
         var output = Path.Combine(Path.GetTempPath(), $"normalized-sections-{Guid.NewGuid():N}.docx");
         using (var document = WordprocessingDocument.Create(output, WordprocessingDocumentType.Document))
@@ -2502,13 +2502,14 @@ public class AnnotationToolsTests
         using var normalized = WordprocessingDocument.Open(output, false);
         var sections = normalized.MainDocumentPart!.Document!.Descendants<SectionProperties>().ToList();
         Assert.Equal(4, sections.Count);
-        Assert.All(sections, section => Assert.NotNull(section.GetFirstChild<HeaderReference>()?.Id?.Value));
-        Assert.All(sections, section => Assert.NotNull(section.GetFirstChild<FooterReference>()?.Id?.Value));
-        Assert.Equal(
-            ["shared header", "shared header", "alternate header", "alternate header"],
-            sections.Select(section => normalized.MainDocumentPart.GetPartById(section.GetFirstChild<HeaderReference>()!.Id!.Value!) as HeaderPart)
-                .Select(part => part!.Header!.InnerText).ToArray());
-        Assert.All(sections, section => Assert.Equal("shared footer", ((FooterPart)normalized.MainDocumentPart.GetPartById(section.GetFirstChild<FooterReference>()!.Id!.Value!)).Footer!.InnerText));
+        Assert.NotNull(sections[0].GetFirstChild<HeaderReference>()?.Id?.Value);
+        Assert.NotNull(sections[0].GetFirstChild<FooterReference>()?.Id?.Value);
+        Assert.Null(sections[1].GetFirstChild<HeaderReference>());
+        Assert.Null(sections[1].GetFirstChild<FooterReference>());
+        Assert.NotNull(sections[2].GetFirstChild<HeaderReference>()?.Id?.Value);
+        Assert.Null(sections[2].GetFirstChild<FooterReference>());
+        Assert.Null(sections[3].GetFirstChild<HeaderReference>());
+        Assert.Null(sections[3].GetFirstChild<FooterReference>());
     }
 
     [Fact]
