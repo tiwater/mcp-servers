@@ -83,9 +83,6 @@ public sealed record XlsxEditOperation(
     string? Cell = null,
     [property: JsonConverter(typeof(PrimitiveJsonValueConverter))] string? Value = null,
     string? ValueType = null,
-    string? NumberFormat = null,
-    string? SourceSheet = null,
-    string? SourceCell = null,
     string? StartCell = null,
     IReadOnlyList<IReadOnlyList<string>>? Values = null,
     bool? Bold = null,
@@ -113,7 +110,10 @@ public sealed record XlsxEditOperation(
     int? RepeatRowsEnd = null,
     int? RepeatColsStart = null,
     int? RepeatColsEnd = null,
-    IReadOnlyList<int>? BreakBeforeRows = null);
+    IReadOnlyList<int>? BreakBeforeRows = null,
+    string? NumberFormat = null,
+    string? SourceSheet = null,
+    string? SourceCell = null);
 
 internal sealed class PrimitiveJsonValueConverter : JsonConverter<string?>
 {

@@ -715,6 +715,88 @@ public class EditorTests
         Assert.False(result.AppliedOperations.Single().Applied);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("yyyy-mm-dd\n")]
+    [InlineData("yyyy-mm-dd\\")]
+    [InlineData("yyyy-mm-dd_")]
+    [InlineData("yyyy-mm-dd*")]
+    [InlineData("[Red")]
+    [InlineData("[]0")]
+    [InlineData("[[Red]]0")]
+    [InlineData("\"unterminated")]
+    [InlineData("0;0;0;0;0")]
+    public void Edit_rejects_invalid_explicit_number_format_grammar(string formatCode)
+    {
+        var path = CreateNumberFormatMutationWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-format-grammar-{Guid.NewGuid():N}.xlsx");
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", NumberFormat: formatCode)
+        ]);
+        Assert.False(result.AppliedOperations.Single().Applied);
+    }
+
+    [Theory]
+    [InlineData("yyyy-mm-dd")]
+    [InlineData("0.00;[Red]-0.00")]
+    [InlineData("0.0 \"kg\"")]
+    [InlineData("[$-409]mmm\\ d,\\ yyyy")]
+    public void Edit_accepts_balanced_excel_number_format_grammar(string formatCode)
+    {
+        var path = CreateNumberFormatMutationWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-valid-format-grammar-{Guid.NewGuid():N}.xlsx");
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", NumberFormat: formatCode)
+        ]);
+        Assert.True(result.AppliedOperations.Single().Applied, result.AppliedOperations.Single().Detail);
+    }
+
+    [Theory]
+    [InlineData("XFE1")]
+    [InlineData("A1048577")]
+    [InlineData("ZZZ9999999")]
+    public void Edit_rejects_out_of_bounds_number_format_source_cell(string sourceCell)
+    {
+        var path = CreateNumberFormatMutationWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-format-source-coordinate-{Guid.NewGuid():N}.xlsx");
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", SourceSheet: "Sheet1", SourceCell: sourceCell)
+        ]);
+        Assert.False(result.AppliedOperations.Single().Applied);
+    }
+
+    [Theory]
+    [InlineData("target")]
+    [InlineData("source")]
+    public void Edit_rejects_out_of_range_style_indices_in_number_format_bindings(string invalidCell)
+    {
+        var path = CreateNumberFormatMutationWorkbookFixture();
+        using (var spreadsheet = SpreadsheetDocument.Open(path, true))
+        {
+            var worksheet = spreadsheet.WorkbookPart!.WorksheetParts.Single().Worksheet;
+            GetCell(worksheet, invalidCell == "target" ? "B2" : "A2").StyleIndex = 999;
+            worksheet.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-format-style-{Guid.NewGuid():N}.xlsx");
+        var operation = invalidCell == "target"
+            ? new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", NumberFormat: "yyyy-mm-dd")
+            : new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", SourceSheet: "Sheet1", SourceCell: "A2");
+        var result = Editor.Apply(path, output, [operation]);
+        Assert.False(result.AppliedOperations.Single().Applied);
+        Assert.Contains("style invalid", result.AppliedOperations.Single().Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Edit_operation_keeps_new_number_format_fields_after_the_legacy_positional_surface()
+    {
+        var parameters = typeof(XlsxEditOperation).GetConstructors().Single().GetParameters().Select(parameter => parameter.Name).ToList();
+        var breakBeforeRows = parameters.FindIndex(name => string.Equals(name, "BreakBeforeRows", StringComparison.OrdinalIgnoreCase));
+        Assert.True(parameters.FindIndex(name => string.Equals(name, "NumberFormat", StringComparison.OrdinalIgnoreCase)) > breakBeforeRows);
+        Assert.True(parameters.FindIndex(name => string.Equals(name, "SourceSheet", StringComparison.OrdinalIgnoreCase)) > breakBeforeRows);
+        Assert.True(parameters.FindIndex(name => string.Equals(name, "SourceCell", StringComparison.OrdinalIgnoreCase)) > breakBeforeRows);
+    }
+
     [Fact]
     public void Edit_keeps_numeric_text_as_text_when_target_cell_is_text_formatted()
     {

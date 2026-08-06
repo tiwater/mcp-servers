@@ -160,15 +160,19 @@ public static class Editor
         {
             return new XlsxEditAppliedOperation(operation.Type, false, $"Target cell not found: {operation.Sheet}!{operation.Cell}");
         }
+        if (!TryGetCellFormat(workbookPart, targetCell, out var targetFormat, out error))
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, $"Target cell style invalid: {operation.Sheet}!{operation.Cell}: {error}");
+        }
 
         uint numberFormatId;
         string formatDescription;
         if (hasExplicitFormat)
         {
-            var formatCode = operation.NumberFormat!.Trim();
-            if (formatCode.Length > 255)
+            var formatCode = operation.NumberFormat!;
+            if (!TryValidateNumberFormatCode(formatCode, out error))
             {
-                return new XlsxEditAppliedOperation(operation.Type, false, "numberFormat must contain at most 255 characters");
+                return new XlsxEditAppliedOperation(operation.Type, false, error!);
             }
             numberFormatId = GetOrCreateNumberFormatId(workbookPart, formatCode);
             formatDescription = formatCode;
@@ -182,11 +186,15 @@ public static class Editor
             {
                 return new XlsxEditAppliedOperation(operation.Type, false, $"Source cell not found: {operation.SourceSheet}!{operation.SourceCell}");
             }
-            numberFormatId = GetCellNumberFormatId(sourceCell, workbookPart);
+            if (!TryGetCellFormat(workbookPart, sourceCell, out var sourceFormat, out error)
+                || !TryGetCellNumberFormatId(sourceFormat, workbookPart, out numberFormatId, out error))
+            {
+                return new XlsxEditAppliedOperation(operation.Type, false, $"Source cell style invalid: {operation.SourceSheet}!{operation.SourceCell}: {error}");
+            }
             formatDescription = GetNumberFormatCode(sourceCell, workbookPart) ?? $"builtin:{numberFormatId}";
         }
 
-        ApplyCellNumberFormat(workbookPart, targetCell, numberFormatId);
+        ApplyCellNumberFormat(workbookPart, targetCell, targetFormat, numberFormatId);
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(
             operation.Type,
@@ -194,6 +202,90 @@ public static class Editor
             $"Set number format {operation.Sheet}!{operation.Cell} to {formatDescription}",
             operation.Sheet,
             operation.Cell);
+    }
+
+    private static bool TryValidateNumberFormatCode(string formatCode, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(formatCode) || formatCode.Length > 255)
+        {
+            error = "numberFormat must contain between 1 and 255 non-whitespace characters";
+            return false;
+        }
+
+        var quoted = false;
+        var bracketed = false;
+        var bracketHasContent = false;
+        var sections = 1;
+        for (var index = 0; index < formatCode.Length; index++)
+        {
+            var character = formatCode[index];
+            if (char.IsControl(character))
+            {
+                error = "numberFormat must not contain control characters";
+                return false;
+            }
+            if (character is '\\' or '_' or '*')
+            {
+                if (index + 1 >= formatCode.Length || char.IsControl(formatCode[index + 1]))
+                {
+                    error = "numberFormat escape, spacing, and repetition tokens require one printable following character";
+                    return false;
+                }
+                index++;
+                if (bracketed) bracketHasContent = true;
+                continue;
+            }
+            if (character == '"')
+            {
+                if (bracketed)
+                {
+                    error = "numberFormat quoted literals are not allowed inside bracket expressions";
+                    return false;
+                }
+                quoted = !quoted;
+                continue;
+            }
+            if (quoted) continue;
+            if (character == '[')
+            {
+                if (bracketed)
+                {
+                    error = "numberFormat bracket expressions must not be nested";
+                    return false;
+                }
+                bracketed = true;
+                bracketHasContent = false;
+                continue;
+            }
+            if (character == ']')
+            {
+                if (!bracketed || !bracketHasContent)
+                {
+                    error = "numberFormat bracket expressions must be balanced and non-empty";
+                    return false;
+                }
+                bracketed = false;
+                continue;
+            }
+            if (bracketed)
+            {
+                bracketHasContent = true;
+                continue;
+            }
+            if (character == ';' && ++sections > 4)
+            {
+                error = "numberFormat must contain at most four sections";
+                return false;
+            }
+        }
+
+        if (quoted || bracketed)
+        {
+            error = "numberFormat contains an unterminated quoted literal or bracket expression";
+            return false;
+        }
+        error = null;
+        return true;
     }
 
     private static XlsxEditAppliedOperation SetPrintAreaOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -1782,13 +1874,10 @@ public static class Editor
         cell.StyleIndex = formatIndex;
     }
 
-    private static void ApplyCellNumberFormat(WorkbookPart workbookPart, Cell cell, uint numberFormatId)
+    private static void ApplyCellNumberFormat(WorkbookPart workbookPart, Cell cell, CellFormat sourceFormat, uint numberFormatId)
     {
         var stylesPart = EnsureStylesPart(workbookPart);
         var formats = stylesPart.Stylesheet.CellFormats!;
-        var sourceStyleIndex = cell.StyleIndex?.Value ?? 0U;
-        var sourceFormat = formats.Elements<CellFormat>().ElementAtOrDefault((int)sourceStyleIndex)
-            ?? formats.Elements<CellFormat>().First();
         var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
         targetFormat.NumberFormatId = numberFormatId;
         targetFormat.ApplyNumberFormat = true;
@@ -1853,21 +1942,34 @@ public static class Editor
         return numberFormatId;
     }
 
-    private static uint GetCellNumberFormatId(Cell cell, WorkbookPart workbookPart)
+    private static bool TryGetCellFormat(WorkbookPart workbookPart, Cell cell, out CellFormat format, out string? error)
     {
-        var stylesPart = workbookPart.WorkbookStylesPart;
-        var formats = stylesPart?.Stylesheet.CellFormats?.Elements<CellFormat>().ToList();
-        var baseFormats = stylesPart?.Stylesheet.CellStyleFormats?.Elements<CellFormat>().ToList();
+        var stylesPart = EnsureStylesPart(workbookPart);
+        var formats = stylesPart.Stylesheet.CellFormats!.Elements<CellFormat>().ToList();
         var styleIndex = cell.StyleIndex?.Value ?? 0U;
-        if (formats is null || styleIndex >= formats.Count) return 0U;
-        var format = formats[(int)styleIndex];
+        if (styleIndex >= formats.Count)
+        {
+            format = null!; error = $"style index {styleIndex} is outside cellXfs count {formats.Count}"; return false;
+        }
+        format = formats[(int)styleIndex]; error = null; return true;
+    }
+
+    private static bool TryGetCellNumberFormatId(CellFormat format, WorkbookPart workbookPart, out uint numberFormatId, out string? error)
+    {
+        var baseFormats = workbookPart.WorkbookStylesPart?.Stylesheet.CellStyleFormats?.Elements<CellFormat>().ToList() ?? [];
         var baseFormatIndex = format.FormatId?.Value;
-        var baseNumberFormatId = baseFormats is not null && baseFormatIndex is not null && baseFormatIndex.Value < baseFormats.Count
-            ? baseFormats[(int)baseFormatIndex.Value].NumberFormatId?.Value
-            : null;
-        if (format.ApplyNumberFormat?.Value == false) return baseNumberFormatId ?? 0U;
-        if (format.NumberFormatId?.Value is uint directId) return directId;
-        return format.ApplyNumberFormat?.Value == true ? 0U : baseNumberFormatId ?? 0U;
+        if (baseFormatIndex is not null && baseFormatIndex.Value >= baseFormats.Count)
+        {
+            numberFormatId = 0U; error = $"base style index {baseFormatIndex.Value} is outside cellStyleXfs count {baseFormats.Count}"; return false;
+        }
+        var baseNumberFormatId = baseFormatIndex is not null ? baseFormats[(int)baseFormatIndex.Value].NumberFormatId?.Value : null;
+        numberFormatId = format.ApplyNumberFormat?.Value switch
+        {
+            false => baseNumberFormatId ?? 0U,
+            true => format.NumberFormatId?.Value ?? 0U,
+            _ => format.NumberFormatId?.Value ?? baseNumberFormatId ?? 0U,
+        };
+        error = null; return true;
     }
 
     private static Alignment MaterializeAlignment(Alignment? inherited, Alignment? explicitAlignment)
@@ -1903,7 +2005,8 @@ public static class Editor
             return null;
         }
 
-        var numberFormatId = GetCellNumberFormatId(cell, workbookPart);
+        if (!TryGetCellFormat(workbookPart, cell, out var format, out _)
+            || !TryGetCellNumberFormatId(format, workbookPart, out var numberFormatId, out _)) return null;
 
         if (stylesPart.Stylesheet.NumberingFormats is not null)
         {
@@ -1936,8 +2039,13 @@ public static class Editor
 
     private static string? ValidateWritableCoordinates(XlsxEditOperation operation)
     {
-        if (operation.Type is "setCellValue" or "setRichTextCellValue" or "setCellNumberFormat")
+        if (operation.Type is "setCellValue" or "setRichTextCellValue")
             return TryParseWritableCell(operation.Cell, out _, out _) ? null : "cell must be a bounded A1 reference";
+        if (operation.Type == "setCellNumberFormat")
+            return TryParseWritableCell(operation.Cell, out _, out _)
+                && (operation.SourceCell is null || TryParseWritableCell(operation.SourceCell, out _, out _))
+                ? null
+                : "target cell and optional sourceCell must be bounded A1 references";
         if (operation.Type == "setPrintArea")
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";
         if (operation.Type == "setPageSetup")
