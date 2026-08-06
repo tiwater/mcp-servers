@@ -55,6 +55,8 @@
           "sourceRow": { "type": ["integer", "null"], "minimum": 1 },
           "targetRow": { "type": ["integer", "null"], "minimum": 1 },
           "translateFormulas": { "type": ["boolean", "null"] },
+          "preserveHorizontalMergedRanges": { "type": ["boolean", "null"] },
+          "expandAdjacentVerticalMergedRanges": { "type": ["boolean", "null"] },
           "anchorText": { "type": ["string", "null"] },
           "exampleRows": { "type": ["integer", "null"], "minimum": 1 },
           "targetRows": { "type": ["integer", "null"], "minimum": 1 },

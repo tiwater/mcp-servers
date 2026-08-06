@@ -36,25 +36,54 @@ public static class Editor
 
     public static XlsxEditResult Apply(string input, string output, IReadOnlyList<XlsxEditOperation> operations)
     {
+        var fullInput = Path.GetFullPath(input);
+        var fullOutput = Path.GetFullPath(output);
         var preflight = operations.Select(ValidateWritableCoordinates).ToList();
         if (preflight.Any(error => error is not null))
         {
-            return new XlsxEditResult(Path.GetFullPath(input), Path.GetFullPath(output), operations.Select((operation, index) =>
+            return new XlsxEditResult(fullInput, fullOutput, operations.Select((operation, index) =>
                 new XlsxEditAppliedOperation(operation.Type, false, preflight[index] ?? "operation batch aborted by coordinate preflight")).ToList());
         }
-        File.Copy(input, output, overwrite: true);
-        using var spreadsheet = SpreadsheetDocument.Open(output, true);
-        var workbookPart = spreadsheet.WorkbookPart ?? throw new InvalidOperationException("Workbook part not found.");
+        var outputDirectory = Path.GetDirectoryName(fullOutput) ?? Directory.GetCurrentDirectory();
+        var temporaryOutput = Path.Combine(outputDirectory, $".{Path.GetFileName(fullOutput)}.{Guid.NewGuid():N}.tmp");
         var applied = new List<XlsxEditAppliedOperation>();
-
-        foreach (var operation in operations)
+        try
         {
-            applied.Add(ApplyOperation(workbookPart, operation));
-        }
+            File.Copy(fullInput, temporaryOutput, overwrite: false);
+            using (var spreadsheet = SpreadsheetDocument.Open(temporaryOutput, true))
+            {
+                var workbookPart = spreadsheet.WorkbookPart ?? throw new InvalidOperationException("Workbook part not found.");
+                for (var index = 0; index < operations.Count; index++)
+                {
+                    var result = ApplyOperation(workbookPart, operations[index]);
+                    applied.Add(result);
+                    if (!result.Applied)
+                    {
+                        for (var remaining = index + 1; remaining < operations.Count; remaining++)
+                        {
+                            applied.Add(new XlsxEditAppliedOperation(
+                                operations[remaining].Type,
+                                false,
+                                "operation batch aborted after prior failure"));
+                        }
+                        return new XlsxEditResult(fullInput, fullOutput, applied);
+                    }
+                }
 
-        workbookPart.Workbook.Save();
-        spreadsheet.Save();
-        return new XlsxEditResult(Path.GetFullPath(input), Path.GetFullPath(output), applied);
+                workbookPart.Workbook.Save();
+                spreadsheet.Save();
+            }
+
+            File.Move(temporaryOutput, fullOutput, overwrite: true);
+            return new XlsxEditResult(fullInput, fullOutput, applied);
+        }
+        finally
+        {
+            if (File.Exists(temporaryOutput))
+            {
+                File.Delete(temporaryOutput);
+            }
+        }
     }
 
     private static XlsxEditDocument LoadOperations(string path)
@@ -713,7 +742,11 @@ public static class Editor
         ShiftWorksheetDimension(worksheet, startRow.Value, operation.Count.Value);
         if (preserveMergedRanges)
         {
-            ShiftMergedRanges(worksheet, startRow.Value, operation.Count.Value);
+            ShiftMergedRanges(
+                worksheet,
+                startRow.Value,
+                operation.Count.Value,
+                operation.ExpandAdjacentVerticalMergedRanges == true);
         }
         ShiftPrintAreasForInsertedRows(workbookPart, operation.Sheet, startRow.Value, operation.Count.Value, expandAdjacentPrintArea);
         ShiftFormulasForInsertedRows(workbookPart, operation.Sheet, startRow.Value, operation.Count.Value);
@@ -763,6 +796,13 @@ public static class Editor
         }
 
         var worksheet = worksheetPart.Worksheet;
+        var sourceMergedRanges = operation.PreserveHorizontalMergedRanges == true
+            ? GetHorizontalMergedRangesOnRows(worksheet, operation.SourceRow.Value, 1).ToList()
+            : [];
+        if (!CanDuplicateHorizontalMergedRanges(worksheet, sourceMergedRanges, operation.TargetRow.Value, out var mergeError))
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, mergeError!);
+        }
         MaterializeSharedFormulas(worksheet);
         var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
         if (!TryCopyRow(
@@ -777,6 +817,7 @@ public static class Editor
         {
             return new XlsxEditAppliedOperation(operation.Type, false, copyError!);
         }
+        DuplicateHorizontalMergedRanges(worksheet, sourceMergedRanges, operation.TargetRow.Value);
 
         worksheet.Save();
 
@@ -1223,7 +1264,7 @@ public static class Editor
         dimension.Reference = $"{GetCellReference(startColumn, startRow)}:{GetCellReference(endColumn, endRow)}";
     }
 
-    private static void ShiftMergedRanges(Worksheet worksheet, int startRow, int rowDelta)
+    private static void ShiftMergedRanges(Worksheet worksheet, int startRow, int rowDelta, bool expandAdjacentVerticalMergedRanges = false)
     {
         foreach (var mergeCell in worksheet.Descendants<MergeCell>())
         {
@@ -1240,6 +1281,10 @@ public static class Editor
                 mergeEndRow += rowDelta;
             }
             else if (mergeEndRow >= startRow)
+            {
+                mergeEndRow += rowDelta;
+            }
+            else if (expandAdjacentVerticalMergedRanges && mergeStartRow < mergeEndRow && mergeEndRow == startRow - 1)
             {
                 mergeEndRow += rowDelta;
             }
@@ -1312,6 +1357,83 @@ public static class Editor
             if (mergeStartRow == mergeEndRow && mergeStartRow >= firstRow && mergeStartRow <= lastRow)
             {
                 yield return (mergeStartRow, startColumn, endColumn);
+            }
+        }
+    }
+
+    private static bool CanDuplicateHorizontalMergedRanges(
+        Worksheet worksheet,
+        IReadOnlyList<(int Row, int StartColumn, int EndColumn)> sourceMergedRanges,
+        int targetRow,
+        out string? error)
+    {
+        if (sourceMergedRanges.Count == 0)
+        {
+            error = null;
+            return true;
+        }
+
+        var desired = sourceMergedRanges
+            .Select(merge => (merge.StartColumn, merge.EndColumn))
+            .ToHashSet();
+        foreach (var mergeCell in worksheet.Descendants<MergeCell>())
+        {
+            if (mergeCell.Reference?.Value is not string reference
+                || !TryParseRangeReference(reference, out var startCell, out var endCell))
+            {
+                continue;
+            }
+
+            var (startColumn, startRow) = ParseCellReference(startCell);
+            var (endColumn, endRow) = ParseCellReference(endCell);
+            if (targetRow < startRow || targetRow > endRow)
+            {
+                continue;
+            }
+
+            if (startRow == targetRow && endRow == targetRow && desired.Contains((startColumn, endColumn)))
+            {
+                continue;
+            }
+
+            if (sourceMergedRanges.Any(source => source.StartColumn <= endColumn && source.EndColumn >= startColumn))
+            {
+                error = $"Target row {targetRow} intersects an incompatible merged range: {reference}";
+                return false;
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
+    private static void DuplicateHorizontalMergedRanges(
+        Worksheet worksheet,
+        IReadOnlyList<(int Row, int StartColumn, int EndColumn)> sourceMergedRanges,
+        int targetRow)
+    {
+        if (sourceMergedRanges.Count == 0)
+        {
+            return;
+        }
+
+        var mergeCells = worksheet.GetFirstChild<MergeCells>();
+        if (mergeCells is null)
+        {
+            mergeCells = new MergeCells();
+            worksheet.Append(mergeCells);
+        }
+
+        var existingReferences = mergeCells.Elements<MergeCell>()
+            .Select(merge => merge.Reference?.Value)
+            .Where(reference => !string.IsNullOrWhiteSpace(reference))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var merge in sourceMergedRanges)
+        {
+            var reference = $"{GetCellReference(merge.StartColumn, targetRow)}:{GetCellReference(merge.EndColumn, targetRow)}";
+            if (existingReferences.Add(reference))
+            {
+                mergeCells.AppendChild(new MergeCell { Reference = reference });
             }
         }
     }

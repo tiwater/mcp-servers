@@ -70,6 +70,110 @@ public class StructuralEditTests
     }
 
     [Fact]
+    public void Edit_copyRow_preserves_declared_horizontal_merged_ranges()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-copy-row-merges-{Guid.NewGuid():N}.xlsx");
+
+        using (var template = SpreadsheetDocument.Open(path, true))
+        {
+            var templateWorksheet = GetWorksheet(template.WorkbookPart!, "RP");
+            var mergeCells = templateWorksheet.GetFirstChild<MergeCells>() ?? templateWorksheet.AppendChild(new MergeCells());
+            mergeCells.AppendChild(new MergeCell { Reference = "H12:I12" });
+            templateWorksheet.Save();
+        }
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation(
+                "copyRow",
+                Sheet: "RP",
+                SourceRow: 12,
+                TargetRow: 14,
+                TranslateFormulas: true,
+                PreserveHorizontalMergedRanges: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+        var merges = worksheet.Elements<MergeCells>().Single().Elements<MergeCell>().Select(merge => merge.Reference?.Value).ToList();
+        Assert.Contains("H12:I12", merges);
+        Assert.Contains("H14:I14", merges);
+    }
+
+    [Fact]
+    public void Edit_insertRows_expands_only_adjacent_vertical_merged_ranges_when_declared()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-insert-adjacent-vertical-merge-{Guid.NewGuid():N}.xlsx");
+
+        using (var template = SpreadsheetDocument.Open(path, true))
+        {
+            var templateWorksheet = GetWorksheet(template.WorkbookPart!, "RP");
+            var mergeCells = templateWorksheet.GetFirstChild<MergeCells>() ?? templateWorksheet.AppendChild(new MergeCells());
+            mergeCells.Append(
+                new MergeCell { Reference = "H10:H12" },
+                new MergeCell { Reference = "I12:J12" });
+            templateWorksheet.Save();
+        }
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation(
+                "insertRows",
+                Sheet: "RP",
+                StartRow: 13,
+                Count: 2,
+                ExpandAdjacentVerticalMergedRanges: true)
+        ]);
+
+        var operation = Assert.Single(result.AppliedOperations);
+        Assert.True(operation.Applied, operation.Detail);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
+        var merges = worksheet.Elements<MergeCells>().Single().Elements<MergeCell>().Select(merge => merge.Reference?.Value).ToList();
+        Assert.Contains("H10:H14", merges);
+        Assert.Contains("I12:J12", merges);
+    }
+
+    [Fact]
+    public void Edit_failed_batch_leaves_existing_output_unchanged()
+    {
+        var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-atomic-failure-{Guid.NewGuid():N}.xlsx");
+        var sentinel = new byte[] { 17, 29, 43, 71 };
+        File.WriteAllBytes(output, sentinel);
+
+        using (var template = SpreadsheetDocument.Open(path, true))
+        {
+            var templateWorksheet = GetWorksheet(template.WorkbookPart!, "RP");
+            var mergeCells = templateWorksheet.GetFirstChild<MergeCells>() ?? templateWorksheet.AppendChild(new MergeCells());
+            mergeCells.Append(
+                new MergeCell { Reference = "H12:I12" },
+                new MergeCell { Reference = "H14:H15" });
+            templateWorksheet.Save();
+        }
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("insertRows", Sheet: "RP", StartRow: 8, Count: 1),
+            new XlsxEditOperation(
+                "copyRow",
+                Sheet: "RP",
+                SourceRow: 13,
+                TargetRow: 15,
+                TranslateFormulas: true,
+                PreserveHorizontalMergedRanges: true),
+            new XlsxEditOperation("setCellValue", Sheet: "RP", Cell: "A1", Value: "must not run")
+        ]);
+
+        Assert.True(result.AppliedOperations[0].Applied);
+        Assert.False(result.AppliedOperations[1].Applied);
+        Assert.Contains("incompatible merged range", result.AppliedOperations[1].Detail, StringComparison.Ordinal);
+        Assert.False(result.AppliedOperations[2].Applied);
+        Assert.Equal(sentinel, File.ReadAllBytes(output));
+    }
+
+    [Fact]
     public void Edit_expandSectionRows_expands_existing_template_section_in_place()
     {
         var path = WorkbookFixtures.CreateAna14LikeWorkbookWithStyles();
@@ -325,10 +429,7 @@ public class StructuralEditTests
         var operation = Assert.Single(result.AppliedOperations);
         Assert.False(operation.Applied);
         Assert.Contains("row < 1", operation.Detail, StringComparison.Ordinal);
-
-        using var spreadsheet = SpreadsheetDocument.Open(output, false);
-        var worksheet = GetWorksheet(spreadsheet.WorkbookPart!, "RP");
-        Assert.DoesNotContain(worksheet.Descendants<Cell>(), cell => cell.CellReference?.Value == "C1");
+        Assert.False(File.Exists(output));
     }
 
     [Fact]
