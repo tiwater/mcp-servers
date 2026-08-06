@@ -137,6 +137,16 @@ in the selected table row. Missing, ambiguous, duplicate, unsupported, or
 copy-conflicting selections fail closed. Composite clear/projection/insertion/
 choice plans use plan v7, and independent readback verifies both the declared
 empty targets and every untouched baseline run's text and formatting hashes.
+
+Semantic candidate v6 can select an inventory object whose normalized `Text`
+is empty with `textState: "empty"`. The predicate is mutually exclusive with
+`text`, `sha256`, and `descendantText`, requires an explicit scope plus at least one current
+semantic context (`parentText`, `previousText`, or `nextText`), and still must
+resolve to exactly one object in the fresh hash-attested inventory. It does not
+accept object ids, table coordinates, or an unbound empty string. Each consumer
+continues to enforce its existing mapping, range, projection, choice, or clear
+semantics after selection.
+
 For repeated legacy container labels with no business content, an
 `out-of-scope` mapping may explicitly use `cardinality: all`; this terminates
 every current hash-bound semantic match. `all` is forbidden for copy, retain,

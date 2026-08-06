@@ -360,6 +360,138 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_v6_resolves_one_context_bound_empty_baseline_target_and_validates_output_independently()
+    {
+        var source = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: "source heading");
+        var baseline = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: null);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v6",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("table-cell", "header", Text: "source heading"),
+                new TemplateMigrationSemanticSelector("table-cell", "header", ParentText: "document context", TextState: "empty"),
+                "copy-text")]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var mapping = Assert.Single(resolved.Plan.Mappings, item => item.Reason == "semantic-candidate-resolved");
+        Assert.Equal("header:0:table:0:row:0:cell:0", mapping.BaselineObjectId);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-empty-target-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        using (var document = WordprocessingDocument.Open(output, false))
+        {
+            Assert.Equal("source heading", document.MainDocumentPart!.HeaderParts.Single().Header!.Descendants<TableCell>().First().InnerText);
+        }
+        var planPath = Path.Combine(Path.GetTempPath(), $"migration-empty-target-plan-{Guid.NewGuid():N}.json");
+        File.WriteAllText(planPath, JsonSerializer.Serialize(resolved.Plan, Json.Options));
+        var validation = TemplateMigration.ValidateOutput(source, baseline, planPath, output, resolved.Plan);
+        Assert.True(validation.Pass, string.Join("; ", validation.Failures.Select(item => item.Reason)));
+
+        var candidatePath = Path.Combine(Path.GetTempPath(), $"migration-empty-target-candidate-{Guid.NewGuid():N}.json");
+        File.WriteAllText(candidatePath, """
+        {
+          "schema": "tiwater.docx.template-migration-semantic-candidate/v6",
+          "mappings": [
+            {
+              "source": { "kind": "table-cell", "scope": "header", "text": "source heading" },
+              "baseline": { "kind": "table-cell", "scope": "header", "parentText": "document context", "textState": "empty" },
+              "disposition": "copy-text"
+            }
+          ]
+        }
+        """);
+        Assert.Equal(0, TemplateMigration.RunResolveSemanticCandidate([source, baseline, candidatePath]));
+    }
+
+    [Fact]
+    public void TemplateMigration_v6_rejects_ambiguous_empty_targets_and_unbound_empty_selectors()
+    {
+        var source = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: "source heading");
+        var ambiguous = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: null, duplicateEmptyTarget: true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v6",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("table-cell", "header", Text: "source heading"),
+                new TemplateMigrationSemanticSelector("table-cell", "header", ParentText: "document context", TextState: "empty"),
+                "copy-text")]);
+
+        var result = TemplateMigration.ResolveSemanticCandidate(source, ambiguous, candidate);
+
+        Assert.False(result.Pass);
+        Assert.Contains(result.Unresolved, item => item.Reason == "template-migration-semantic-baseline-ambiguous");
+        var unbound = candidate with
+        {
+            Mappings = [candidate.Mappings.Single() with
+            {
+                Baseline = new TemplateMigrationSemanticSelector("table-cell", "header", TextState: "empty")
+            }]
+        };
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, ambiguous, unbound));
+        Assert.Equal("template-migration-semantic-baseline-empty-context-required", error.Message);
+        var mixedPrimary = candidate with
+        {
+            Mappings = [candidate.Mappings.Single() with
+            {
+                Baseline = new TemplateMigrationSemanticSelector(
+                    "table-cell",
+                    "header",
+                    Text: "document context",
+                    ParentText: "document context",
+                    TextState: "empty")
+            }]
+        };
+        var mixedError = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, ambiguous, mixedPrimary));
+        Assert.Equal("template-migration-semantic-baseline-selector-required", mixedError.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_v6_keeps_nonempty_selectors_compatible_and_prior_schemas_reject_text_state()
+    {
+        var source = CreateTextMigrationFixture("source fact");
+        var baseline = CreateTextMigrationFixture("target slot");
+        var v6 = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v6",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", "body", Text: "source fact"),
+                new TemplateMigrationSemanticSelector("paragraph", "body", Text: "target slot"),
+                "copy-text")]);
+
+        Assert.True(TemplateMigration.ResolveSemanticCandidate(source, baseline, v6).Pass);
+        var v5WithTextState = v6 with
+        {
+            Schema = "tiwater.docx.template-migration-semantic-candidate/v5",
+            Mappings = [v6.Mappings.Single() with
+            {
+                Baseline = new TemplateMigrationSemanticSelector("paragraph", "body", ParentText: "context", TextState: "empty")
+            }]
+        };
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, v5WithTextState));
+        Assert.Equal("template-migration-semantic-baseline-text-state-schema-invalid", error.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_v6_empty_selectors_reach_existing_consumer_validation_without_selector_whitelists()
+    {
+        var source = CreateTextMigrationFixture("source context", string.Empty);
+        var baseline = CreateTextMigrationFixture("target context", "target value");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v6",
+            [],
+            ValueProjections:
+            [new TemplateMigrationSemanticCandidateValueProjection(
+                new TemplateMigrationSemanticSelector("paragraph", "body", PreviousText: "source context", TextState: "empty"),
+                new TemplateMigrationSemanticSelector("paragraph", "body", Text: "target value"),
+                "declared-value",
+                "text",
+                "whole-parent")]);
+
+        var result = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+
+        Assert.False(result.Pass);
+        Assert.Contains(result.Unresolved, item => item.Reason == "template-migration-semantic-value-source-empty");
+    }
+
+    [Fact]
     public void TemplateMigration_projects_a_multi_run_source_value_into_one_target_run()
     {
         var source = CreateSemanticValueProjectionFixture(["Source caption: ", "AX", "-", "17"]);
@@ -595,7 +727,7 @@ public class AnnotationToolsTests
         Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(
             source,
             baseline,
-            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v6" }));
+            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v7" }));
 
         var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, SemanticValueCandidate("Source: R9", "Target: old", "token"));
         var stale = resolved.Plan with { SourceSha256 = new string('0', 64) };
@@ -2903,6 +3035,37 @@ public class AnnotationToolsTests
         main.Document.Save();
         header.Header.Save();
         footer.Footer.Save();
+        return path;
+    }
+
+    private static string CreateContextBoundEmptyHeaderMigrationFixture(string? sourceText, bool duplicateEmptyTarget = false)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"header-empty-target-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        var rows = new List<TableRow>
+        {
+            new(
+                new TableCell(new Paragraph(new Run(new Text(sourceText ?? string.Empty)))),
+                new TableCell(new Paragraph(new Run(new Text("document context")))))
+        };
+        if (duplicateEmptyTarget)
+        {
+            rows.Add(new TableRow(
+                new TableCell(new Paragraph(new Run(new Text(string.Empty)))),
+                new TableCell(new Paragraph(new Run(new Text("document context"))))));
+        }
+        var table = new Table(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "2400" }, new GridColumn { Width = "4800" }));
+        table.Append(rows);
+        header.Header = new Header(table);
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("shared body"))),
+            new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));
+        main.Document.Save();
+        header.Header.Save();
         return path;
     }
 
