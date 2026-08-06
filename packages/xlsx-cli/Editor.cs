@@ -80,6 +80,7 @@ public static class Editor
         return operation.Type switch
         {
             "setCellValue" => SetCellValueOperation(workbookPart, operation),
+            "setCellNumberFormat" => SetCellNumberFormatOperation(workbookPart, operation),
             "setPrintArea" => SetPrintAreaOperation(workbookPart, operation),
             "setPageSetup" => SetPageSetupOperation(workbookPart, operation),
             "setRowPageBreaks" => SetRowPageBreaksOperation(workbookPart, operation),
@@ -135,6 +136,64 @@ public static class Editor
         }
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated {operation.Sheet}!{operation.Cell}");
+    }
+
+    private static XlsxEditAppliedOperation SetCellNumberFormatOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || string.IsNullOrWhiteSpace(operation.Cell))
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "sheet and cell are required");
+        }
+
+        var hasExplicitFormat = !string.IsNullOrWhiteSpace(operation.NumberFormat);
+        var hasSourceBinding = !string.IsNullOrWhiteSpace(operation.SourceSheet) || !string.IsNullOrWhiteSpace(operation.SourceCell);
+        if (hasExplicitFormat == hasSourceBinding
+            || hasSourceBinding && (string.IsNullOrWhiteSpace(operation.SourceSheet) || string.IsNullOrWhiteSpace(operation.SourceCell)))
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "provide exactly one of numberFormat or sourceSheet/sourceCell");
+        }
+
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        var targetCell = FindCell(worksheetPart, operation.Cell);
+        if (targetCell is null)
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, $"Target cell not found: {operation.Sheet}!{operation.Cell}");
+        }
+
+        uint numberFormatId;
+        string formatDescription;
+        if (hasExplicitFormat)
+        {
+            var formatCode = operation.NumberFormat!.Trim();
+            if (formatCode.Length > 255)
+            {
+                return new XlsxEditAppliedOperation(operation.Type, false, "numberFormat must contain at most 255 characters");
+            }
+            numberFormatId = GetOrCreateNumberFormatId(workbookPart, formatCode);
+            formatDescription = formatCode;
+        }
+        else
+        {
+            var sourceWorksheetPart = GetWorksheetPart(workbookPart, operation.SourceSheet!, out error);
+            if (sourceWorksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+            var sourceCell = FindCell(sourceWorksheetPart, operation.SourceCell!);
+            if (sourceCell is null)
+            {
+                return new XlsxEditAppliedOperation(operation.Type, false, $"Source cell not found: {operation.SourceSheet}!{operation.SourceCell}");
+            }
+            numberFormatId = GetCellNumberFormatId(sourceCell, workbookPart);
+            formatDescription = GetNumberFormatCode(sourceCell, workbookPart) ?? $"builtin:{numberFormatId}";
+        }
+
+        ApplyCellNumberFormat(workbookPart, targetCell, numberFormatId);
+        worksheetPart.Worksheet.Save();
+        return new XlsxEditAppliedOperation(
+            operation.Type,
+            true,
+            $"Set number format {operation.Sheet}!{operation.Cell} to {formatDescription}",
+            operation.Sheet,
+            operation.Cell);
     }
 
     private static XlsxEditAppliedOperation SetPrintAreaOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -977,6 +1036,13 @@ public static class Editor
         return cell;
     }
 
+    private static Cell? FindCell(WorksheetPart worksheetPart, string cellReference)
+    {
+        var normalizedReference = cellReference.ToUpperInvariant();
+        return worksheetPart.Worksheet.Descendants<Cell>()
+            .FirstOrDefault(cell => string.Equals(cell.CellReference?.Value, normalizedReference, StringComparison.Ordinal));
+    }
+
     private static void InsertRow(SheetData sheetData, Row row)
     {
         var nextRow = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex != null && r.RowIndex.Value > row.RowIndex!.Value);
@@ -1716,6 +1782,94 @@ public static class Editor
         cell.StyleIndex = formatIndex;
     }
 
+    private static void ApplyCellNumberFormat(WorkbookPart workbookPart, Cell cell, uint numberFormatId)
+    {
+        var stylesPart = EnsureStylesPart(workbookPart);
+        var formats = stylesPart.Stylesheet.CellFormats!;
+        var sourceStyleIndex = cell.StyleIndex?.Value ?? 0U;
+        var sourceFormat = formats.Elements<CellFormat>().ElementAtOrDefault((int)sourceStyleIndex)
+            ?? formats.Elements<CellFormat>().First();
+        var targetFormat = (CellFormat)sourceFormat.CloneNode(true);
+        targetFormat.NumberFormatId = numberFormatId;
+        targetFormat.ApplyNumberFormat = true;
+
+        var existingFormats = formats.Elements<CellFormat>().ToList();
+        var equivalentIndex = existingFormats.FindIndex(format => format.OuterXml == targetFormat.OuterXml);
+        uint formatIndex;
+        if (equivalentIndex >= 0)
+        {
+            formatIndex = (uint)equivalentIndex;
+        }
+        else
+        {
+            formatIndex = (uint)existingFormats.Count;
+            formats.Append(targetFormat);
+        }
+        formats.Count = (uint)formats.Elements<CellFormat>().Count();
+        stylesPart.Stylesheet.Save();
+        cell.StyleIndex = formatIndex;
+    }
+
+    private static WorkbookStylesPart EnsureStylesPart(WorkbookPart workbookPart)
+    {
+        var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet ??= new Stylesheet
+        {
+            Fonts = new Fonts(new Font()),
+            Fills = new Fills(new Fill()),
+            Borders = new Borders(new Border()),
+            CellStyleFormats = new CellStyleFormats(new CellFormat()),
+            CellFormats = new CellFormats(new CellFormat()),
+        };
+        stylesPart.Stylesheet.Fonts ??= new Fonts(new Font());
+        stylesPart.Stylesheet.Fills ??= new Fills(new Fill());
+        stylesPart.Stylesheet.Borders ??= new Borders(new Border());
+        stylesPart.Stylesheet.CellStyleFormats ??= new CellStyleFormats(new CellFormat());
+        stylesPart.Stylesheet.CellFormats ??= new CellFormats(new CellFormat());
+        return stylesPart;
+    }
+
+    private static uint GetOrCreateNumberFormatId(WorkbookPart workbookPart, string formatCode)
+    {
+        var stylesPart = EnsureStylesPart(workbookPart);
+        var stylesheet = stylesPart.Stylesheet;
+        stylesheet.NumberingFormats ??= new NumberingFormats();
+        var existing = stylesheet.NumberingFormats.Elements<NumberingFormat>()
+            .FirstOrDefault(format => string.Equals(format.FormatCode?.Value, formatCode, StringComparison.Ordinal));
+        if (existing?.NumberFormatId?.Value is uint existingId) return existingId;
+
+        var usedIds = stylesheet.NumberingFormats.Elements<NumberingFormat>()
+            .Where(format => format.NumberFormatId?.Value is not null)
+            .Select(format => format.NumberFormatId!.Value)
+            .Concat(stylesheet.CellFormats!.Elements<CellFormat>()
+                .Where(format => format.NumberFormatId?.Value is not null)
+                .Select(format => format.NumberFormatId!.Value))
+            .ToHashSet();
+        var numberFormatId = 164U;
+        while (usedIds.Contains(numberFormatId)) numberFormatId++;
+        stylesheet.NumberingFormats.Append(new NumberingFormat { NumberFormatId = numberFormatId, FormatCode = formatCode });
+        stylesheet.NumberingFormats.Count = (uint)stylesheet.NumberingFormats.Elements<NumberingFormat>().Count();
+        stylesheet.Save();
+        return numberFormatId;
+    }
+
+    private static uint GetCellNumberFormatId(Cell cell, WorkbookPart workbookPart)
+    {
+        var stylesPart = workbookPart.WorkbookStylesPart;
+        var formats = stylesPart?.Stylesheet.CellFormats?.Elements<CellFormat>().ToList();
+        var baseFormats = stylesPart?.Stylesheet.CellStyleFormats?.Elements<CellFormat>().ToList();
+        var styleIndex = cell.StyleIndex?.Value ?? 0U;
+        if (formats is null || styleIndex >= formats.Count) return 0U;
+        var format = formats[(int)styleIndex];
+        var baseFormatIndex = format.FormatId?.Value;
+        var baseNumberFormatId = baseFormats is not null && baseFormatIndex is not null && baseFormatIndex.Value < baseFormats.Count
+            ? baseFormats[(int)baseFormatIndex.Value].NumberFormatId?.Value
+            : null;
+        if (format.ApplyNumberFormat?.Value == false) return baseNumberFormatId ?? 0U;
+        if (format.NumberFormatId?.Value is uint directId) return directId;
+        return format.ApplyNumberFormat?.Value == true ? 0U : baseNumberFormatId ?? 0U;
+    }
+
     private static Alignment MaterializeAlignment(Alignment? inherited, Alignment? explicitAlignment)
     {
         var effective = inherited is null ? new Alignment() : (Alignment)inherited.CloneNode(true);
@@ -1743,36 +1897,25 @@ public static class Editor
 
     private static string? GetNumberFormatCode(Cell cell, WorkbookPart workbookPart)
     {
-        var styleIndex = cell.StyleIndex?.Value;
         var stylesPart = workbookPart.WorkbookStylesPart;
-        if (styleIndex is null || stylesPart?.Stylesheet.CellFormats is null)
+        if (stylesPart?.Stylesheet.CellFormats is null)
         {
             return null;
         }
 
-        var cellFormats = stylesPart.Stylesheet.CellFormats.Elements<CellFormat>().ToList();
-        if (styleIndex.Value >= cellFormats.Count)
-        {
-            return null;
-        }
-
-        var numberFormatId = cellFormats[(int)styleIndex.Value].NumberFormatId?.Value;
-        if (numberFormatId is null)
-        {
-            return null;
-        }
+        var numberFormatId = GetCellNumberFormatId(cell, workbookPart);
 
         if (stylesPart.Stylesheet.NumberingFormats is not null)
         {
             var custom = stylesPart.Stylesheet.NumberingFormats.Elements<NumberingFormat>()
-                .FirstOrDefault(format => format.NumberFormatId?.Value == numberFormatId.Value);
+                .FirstOrDefault(format => format.NumberFormatId?.Value == numberFormatId);
             if (custom?.FormatCode?.Value is string formatCode)
             {
                 return formatCode;
             }
         }
 
-        return numberFormatId.Value switch
+        return numberFormatId switch
         {
             9 or 10 => "0%",
             49 => "@",
@@ -1793,7 +1936,7 @@ public static class Editor
 
     private static string? ValidateWritableCoordinates(XlsxEditOperation operation)
     {
-        if (operation.Type is "setCellValue" or "setRichTextCellValue")
+        if (operation.Type is "setCellValue" or "setRichTextCellValue" or "setCellNumberFormat")
             return TryParseWritableCell(operation.Cell, out _, out _) ? null : "cell must be a bounded A1 reference";
         if (operation.Type == "setPrintArea")
             return !string.IsNullOrWhiteSpace(operation.Range) && TryParsePrintAreaRange(operation.Range, out _, out _) ? null : "range must be a bounded ordered A1 range";

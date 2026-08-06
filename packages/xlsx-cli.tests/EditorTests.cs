@@ -646,6 +646,76 @@ public class EditorTests
     }
 
     [Fact]
+    public void Edit_sets_explicit_number_format_on_existing_target_without_changing_value_or_other_style_components()
+    {
+        var path = CreateNumberFormatMutationWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-explicit-number-format-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellValue", Sheet: "Sheet1", Cell: "B2", Value: "2026-02-14", ValueType: "date"),
+            new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", NumberFormat: "yyyy-mm-dd")
+        ]);
+
+        Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var workbookPart = spreadsheet.WorkbookPart!;
+        var cell = GetCell(workbookPart.WorksheetParts.Single().Worksheet, "B2");
+        Assert.Null(cell.DataType);
+        Assert.Equal(DateTime.Parse("2026-02-14").ToOADate(), double.Parse(cell.CellValue!.Text, System.Globalization.CultureInfo.InvariantCulture));
+        var format = workbookPart.WorkbookStylesPart!.Stylesheet.CellFormats!.Elements<CellFormat>().ElementAt((int)cell.StyleIndex!.Value);
+        Assert.Equal<UInt32Value>(2, format.FontId!);
+        Assert.Equal<UInt32Value>(1, format.FillId!);
+        Assert.Equal<UInt32Value>(1, format.BorderId!);
+        Assert.Equal(HorizontalAlignmentValues.Center, format.Alignment!.Horizontal!.Value);
+        var numberFormat = workbookPart.WorkbookStylesPart.Stylesheet.NumberingFormats!.Elements<NumberingFormat>()
+            .Single(item => item.NumberFormatId!.Value == format.NumberFormatId!.Value);
+        Assert.Equal("yyyy-mm-dd", numberFormat.FormatCode!.Value);
+    }
+
+    [Fact]
+    public void Edit_copies_observed_number_format_from_same_workbook_peer()
+    {
+        var path = CreateNumberFormatMutationWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-peer-number-format-{Guid.NewGuid():N}.xlsx");
+
+        var result = Editor.Apply(path, output, [
+            new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", SourceSheet: "Sheet1", SourceCell: "A2")
+        ]);
+
+        Assert.True(result.AppliedOperations.Single().Applied, result.AppliedOperations.Single().Detail);
+        using var spreadsheet = SpreadsheetDocument.Open(output, false);
+        var workbookPart = spreadsheet.WorkbookPart!;
+        var worksheet = workbookPart.WorksheetParts.Single().Worksheet;
+        var source = GetCell(worksheet, "A2");
+        var target = GetCell(worksheet, "B2");
+        var formats = workbookPart.WorkbookStylesPart!.Stylesheet.CellFormats!.Elements<CellFormat>().ToList();
+        Assert.Equal(formats[(int)source.StyleIndex!.Value].NumberFormatId!.Value, formats[(int)target.StyleIndex!.Value].NumberFormatId!.Value);
+        Assert.Equal("123", target.CellValue!.Text);
+        Assert.Equal<UInt32Value>(2, formats[(int)target.StyleIndex.Value].FontId!);
+        Assert.Equal<UInt32Value>(1, formats[(int)target.StyleIndex.Value].BorderId!);
+    }
+
+    [Theory]
+    [InlineData("missing-target")]
+    [InlineData("missing-source")]
+    [InlineData("ambiguous-selector")]
+    public void Edit_number_format_mutation_fails_closed_when_cell_binding_is_unproven(string variant)
+    {
+        var path = CreateNumberFormatMutationWorkbookFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"xlsx-invalid-number-format-{Guid.NewGuid():N}.xlsx");
+        var operation = variant switch
+        {
+            "missing-target" => new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "C3", NumberFormat: "yyyy-mm-dd"),
+            "missing-source" => new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", SourceSheet: "Sheet1", SourceCell: "C3"),
+            _ => new XlsxEditOperation("setCellNumberFormat", Sheet: "Sheet1", Cell: "B2", NumberFormat: "yyyy-mm-dd", SourceSheet: "Sheet1", SourceCell: "A2"),
+        };
+
+        var result = Editor.Apply(path, output, [operation]);
+
+        Assert.False(result.AppliedOperations.Single().Applied);
+    }
+
+    [Fact]
     public void Edit_keeps_numeric_text_as_text_when_target_cell_is_text_formatted()
     {
         var path = CreateTextFormattedWorkbookFixture();
@@ -831,6 +901,48 @@ public class EditorTests
         ));
         var sheets = spreadsheet.WorkbookPart!.Workbook.AppendChild(new Sheets());
         sheets.AppendChild(new Sheet { Id = spreadsheet.WorkbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateNumberFormatMutationWorkbookFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-number-format-mutation-fixture-{Guid.NewGuid():N}.xlsx");
+        using var spreadsheet = SpreadsheetDocument.Create(path, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+        var workbookPart = spreadsheet.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new NumberingFormats(new NumberingFormat { NumberFormatId = 164, FormatCode = "dd-mmm-yyyy" }) { Count = 1 },
+            new Fonts(new Font(), new Font(), new Font(new Bold())) { Count = 3 },
+            new Fills(new Fill(), new Fill(new PatternFill { PatternType = PatternValues.Solid })) { Count = 2 },
+            new Borders(new Border(), new Border(new LeftBorder { Style = BorderStyleValues.Thin })) { Count = 2 },
+            new CellFormats(
+                new CellFormat { NumberFormatId = 0, ApplyNumberFormat = false },
+                new CellFormat { NumberFormatId = 164, ApplyNumberFormat = true, FontId = 1 },
+                new CellFormat {
+                    NumberFormatId = 0,
+                    ApplyNumberFormat = false,
+                    FontId = 2,
+                    FillId = 1,
+                    BorderId = 1,
+                    ApplyAlignment = true,
+                    Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Center }
+                }
+            ) { Count = 3 }
+        );
+        stylesPart.Stylesheet.Save();
+
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        worksheetPart.Worksheet = new Worksheet(new SheetData(
+            CreateRow(1, ("A1", "Peer date"), ("B1", "Target")),
+            new Row(
+                new Cell { CellReference = "A2", StyleIndex = 1, CellValue = new CellValue("46067") },
+                new Cell { CellReference = "B2", StyleIndex = 2, CellValue = new CellValue("123") }
+            ) { RowIndex = 2 }
+        ));
+        workbookPart.Workbook.AppendChild(new Sheets()).Append(new Sheet { Id = workbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Sheet1" });
         workbookPart.Workbook.Save();
         worksheetPart.Worksheet.Save();
         return path;
