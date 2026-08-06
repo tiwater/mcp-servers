@@ -1851,10 +1851,14 @@ public static class TemplateMigration
         var descendants = DescendantsOf(objects, [rootId]);
         var rows = objects.Where(item => descendants.Contains(item.Id)).Select(item => new
         {
-            RelativeId = item.Id == rootId ? string.Empty : item.Id[rootId.Length..],
+            RelativeId = item.Id == rootId ? string.Empty
+                : item.Id.StartsWith(rootId + ":", StringComparison.Ordinal) ? item.Id[rootId.Length..]
+                : "external:" + item.Id,
             item.Kind,
             item.Style,
-            RelativeParent = item.ParentId is null ? null : item.ParentId == rootId ? string.Empty : item.ParentId.StartsWith(rootId, StringComparison.Ordinal) ? item.ParentId[rootId.Length..] : item.ParentId,
+            RelativeParent = item.ParentId is null ? null : item.ParentId == rootId ? string.Empty
+                : item.ParentId.StartsWith(rootId + ":", StringComparison.Ordinal) ? item.ParentId[rootId.Length..]
+                : "external:" + item.ParentId,
             item.Topology
         });
         return HashCanonical(rows);
