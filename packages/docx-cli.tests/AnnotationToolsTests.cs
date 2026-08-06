@@ -1683,6 +1683,96 @@ public class AnnotationToolsTests
         Assert.True(validationErrors.Count == 0, string.Join(Environment.NewLine, validationErrors));
     }
 
+    [Theory]
+    [InlineData("replaceTableCellText")]
+    [InlineData("replaceTableCellRichText")]
+    public void Edit_blank_table_cell_text_overrides_inherited_paragraph_superscript(string operationType)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"blank-cell-inherited-superscript-{Guid.NewGuid():N}.docx");
+        using (var source = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var main = source.AddMainDocumentPart();
+            main.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(),
+                    new TableGrid(new GridColumn { Width = "2400" }),
+                    new TableRow(
+                        new TableCell(
+                            new Paragraph(
+                                new ParagraphProperties(
+                                    new ParagraphMarkRunProperties(
+                                        new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman" },
+                                        new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }))))))));
+            main.Document.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"blank-cell-inherited-superscript-edited-{Guid.NewGuid():N}.docx");
+        var operation = operationType == "replaceTableCellText"
+            ? new DocxEditOperation(operationType, TableIndex: 0, RowIndex: 0, CellIndex: 0, Text: "ordinary text")
+            : new DocxEditOperation(
+                operationType,
+                TableIndex: 0,
+                RowIndex: 0,
+                CellIndex: 0,
+                RichText: [new DocxRichTextSegment("ordinary text")]);
+
+        var result = Editor.Apply(path, output, [operation]);
+
+        Assert.All(result.AppliedOperations, applied => Assert.True(applied.Applied, applied.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var paragraph = edited.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single()
+            .Elements<Paragraph>().Single();
+        Assert.Equal(
+            VerticalPositionValues.Superscript,
+            paragraph.ParagraphProperties!.ParagraphMarkRunProperties!
+                .GetFirstChild<VerticalTextAlignment>()!.Val!.Value);
+        var runProperties = paragraph.Elements<Run>().Single().RunProperties!;
+        Assert.Equal(
+            VerticalPositionValues.Baseline,
+            runProperties.GetFirstChild<VerticalTextAlignment>()!.Val!.Value);
+        var validationErrors = new OpenXmlValidator().Validate(edited).Select(error => error.Description).ToList();
+        Assert.True(validationErrors.Count == 0, string.Join(Environment.NewLine, validationErrors));
+    }
+
+    [Fact]
+    public void Edit_nonblank_table_cell_preserves_existing_superscript()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"nonblank-cell-superscript-{Guid.NewGuid():N}.docx");
+        using (var source = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var main = source.AddMainDocumentPart();
+            main.Document = new Document(new Body(
+                new Table(
+                    new TableProperties(),
+                    new TableGrid(new GridColumn { Width = "2400" }),
+                    new TableRow(
+                        new TableCell(
+                            new Paragraph(
+                                new Run(
+                                    new RunProperties(
+                                        new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }),
+                                    new Text("existing marker"))))))));
+            main.Document.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"nonblank-cell-superscript-edited-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: 0,
+                CellIndex: 0,
+                RichText: [new DocxRichTextSegment("replacement marker")])
+        ]);
+
+        Assert.All(result.AppliedOperations, applied => Assert.True(applied.Applied, applied.Detail));
+        using var edited = WordprocessingDocument.Open(output, false);
+        var runProperties = edited.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single()
+            .Descendants<Run>().Single().RunProperties!;
+        Assert.Equal(
+            VerticalPositionValues.Superscript,
+            runProperties.GetFirstChild<VerticalTextAlignment>()!.Val!.Value);
+    }
+
     [Fact]
     public void Edit_and_inspect_preserve_line_breaks_in_plain_and_rich_table_cell_text()
     {

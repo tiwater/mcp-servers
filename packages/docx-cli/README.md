@@ -200,7 +200,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 `startSectionBeforeParagraph` accepts `findText` and `orientation` (`landscape` or `portrait`); it inserts a section break before the matching direct body paragraph and applies the requested orientation to the following section.
 `replaceTableCellRichText` accepts `richText` segments with `text`, optional `color`, `underline`, `bold`, and `fontName`.
 An explicit `bold: false` writes an off override for both Latin and complex-script bold so paragraph- or style-level bold is not inherited.
-When the target cell is empty, the generated runs inherit font-related formatting from the nearest table run so blank template cells do not fall back to Office default font size; emphasis such as bold/italic is not inherited from fallback runs.
+When the target cell is empty, the generated runs inherit font-related formatting from the nearest table run so blank template cells do not fall back to Office default font size; emphasis such as bold/italic is not inherited from fallback runs. Ordinary text written into a blank cell explicitly uses baseline vertical alignment, so paragraph-mark residue cannot turn new content into superscript or subscript. Existing text-bearing cells continue to preserve their declared vertical alignment.
 `replaceTable` row cell objects may use the same `richText` segments instead of plain `text`.
 `insertTableRows` inserts `rows` before `rowIndex`; `templateRowIndex` controls which existing row supplies row/cell/run styling.
 `deleteTableRows` deletes inclusive `startRowIndex`..`endRowIndex`, preserving the surrounding table.

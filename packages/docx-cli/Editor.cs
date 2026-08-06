@@ -2015,12 +2015,17 @@ public static class Editor
     private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null, Run? fallbackRun = null)
     {
         var graphicParagraphs = CaptureGraphicParagraphs(cell);
+        var hasTextBearingRun = HasTextBearingRun(cell);
         var ownRun = FindCellStyleTemplateRun(cell);
         var firstRun = ownRun ?? fallbackRun;
         var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
         var paragraph = CreateParagraphLike(firstParagraph);
-        paragraph.AppendChild(CreateStyledRunLike(firstRun, replacementText, preserveEmphasis: ownRun is not null));
+        paragraph.AppendChild(CreateStyledRunLike(
+            firstRun,
+            replacementText,
+            preserveEmphasis: hasTextBearingRun,
+            forceBaselineVerticalAlignment: !hasTextBearingRun));
         if (!string.IsNullOrWhiteSpace(alignment))
         {
             ApplyParagraphAlignment(paragraph, alignment);
@@ -2062,6 +2067,7 @@ public static class Editor
     private static void ReplaceTableCellRichText(TableCell cell, IReadOnlyList<DocxRichTextSegment> segments, string? alignment = null, Run? fallbackRun = null)
     {
         var graphicParagraphs = CaptureGraphicParagraphs(cell);
+        var hasTextBearingRun = HasTextBearingRun(cell);
         var ownRun = FindCellStyleTemplateRun(cell);
         var firstRun = ownRun ?? fallbackRun;
         var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
@@ -2069,7 +2075,11 @@ public static class Editor
         var paragraph = CreateParagraphLike(firstParagraph);
         foreach (var segment in segments)
         {
-            paragraph.AppendChild(CreateRichRunLike(firstRun, segment, preserveEmphasis: ownRun is not null));
+            paragraph.AppendChild(CreateRichRunLike(
+                firstRun,
+                segment,
+                preserveEmphasis: hasTextBearingRun,
+                forceBaselineVerticalAlignment: !hasTextBearingRun));
         }
         if (!string.IsNullOrWhiteSpace(alignment))
         {
@@ -2099,6 +2109,10 @@ public static class Editor
         NormalizeRunProperties(effectiveProperties);
         return new Run(effectiveProperties);
     }
+
+    private static bool HasTextBearingRun(TableCell cell)
+        => cell.Descendants<Run>()
+            .Any(candidate => candidate.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)));
 
     private static void OverlayRunProperties(RunProperties target, IEnumerable<OpenXmlElement> source)
     {
@@ -2240,7 +2254,11 @@ public static class Editor
         });
     }
 
-    private static Run CreateStyledRunLike(Run? templateRun, string text, bool preserveEmphasis = true)
+    private static Run CreateStyledRunLike(
+        Run? templateRun,
+        string text,
+        bool preserveEmphasis = true,
+        bool forceBaselineVerticalAlignment = false)
     {
         var run = new Run();
         if (templateRun?.RunProperties is not null)
@@ -2250,13 +2268,28 @@ public static class Editor
             {
                 RemoveEmphasis(run.RunProperties);
             }
+            if (forceBaselineVerticalAlignment)
+            {
+                ForceBaselineVerticalAlignment(run.RunProperties);
+            }
+            NormalizeRunProperties(run.RunProperties);
+        }
+        else if (forceBaselineVerticalAlignment)
+        {
+            run.RunProperties = new RunProperties();
+            ForceBaselineVerticalAlignment(run.RunProperties);
             NormalizeRunProperties(run.RunProperties);
         }
         AppendTextWithLineBreaks(run, text);
         return run;
     }
 
-    private static Run CreateRichRunLike(Run? templateRun, DocxRichTextSegment segment, bool forceBold = false, bool preserveEmphasis = true)
+    private static Run CreateRichRunLike(
+        Run? templateRun,
+        DocxRichTextSegment segment,
+        bool forceBold = false,
+        bool preserveEmphasis = true,
+        bool forceBaselineVerticalAlignment = false)
     {
         var run = new Run();
         if (templateRun?.RunProperties is not null)
@@ -2269,6 +2302,10 @@ public static class Editor
         if (!preserveEmphasis)
         {
             RemoveEmphasis(properties);
+        }
+        if (forceBaselineVerticalAlignment)
+        {
+            ForceBaselineVerticalAlignment(properties);
         }
 
         if (forceBold || segment.Bold == true)
@@ -2323,6 +2360,12 @@ public static class Editor
         properties.RemoveAllChildren<BoldComplexScript>();
         properties.RemoveAllChildren<Italic>();
         properties.RemoveAllChildren<ItalicComplexScript>();
+    }
+
+    private static void ForceBaselineVerticalAlignment(RunProperties properties)
+    {
+        properties.RemoveAllChildren<VerticalTextAlignment>();
+        properties.AppendChild(new VerticalTextAlignment { Val = VerticalPositionValues.Baseline });
     }
 
     private static void RemoveTextFill(RunProperties properties)
