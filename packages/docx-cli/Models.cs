@@ -254,7 +254,20 @@ public sealed record TemplateMigrationPlan(
     string BaselineSha256,
     IReadOnlyList<TemplateMigrationMapping> Mappings,
     IReadOnlyList<TemplateMigrationBodyAppend>? BodyAppends = null,
-    IReadOnlyList<TemplateMigrationBaselineClear>? BaselineClears = null);
+    IReadOnlyList<TemplateMigrationBaselineClear>? BaselineClears = null,
+    IReadOnlyList<TemplateMigrationValueProjection>? ValueProjections = null);
+
+/// <summary>
+/// A semantic scalar projection between two current, hash-attested parent
+/// objects. The caller declares only the semantic identity and value shape;
+/// the provider derives the value, target runs, and edit operations.
+/// </summary>
+public sealed record TemplateMigrationValueProjection(
+    string SourceParentObjectId,
+    string BaselineParentObjectId,
+    string Semantic,
+    string ValueKind,
+    string Extraction);
 
 public sealed record TemplateMigrationSemanticSelector(
     string Kind,
@@ -275,10 +288,18 @@ public sealed record TemplateMigrationSemanticCandidateBodyAppend(
     TemplateMigrationSemanticSelector SourceStart,
     TemplateMigrationSemanticSelector SourceEnd);
 
+public sealed record TemplateMigrationSemanticCandidateValueProjection(
+    TemplateMigrationSemanticSelector SourceParent,
+    TemplateMigrationSemanticSelector BaselineParent,
+    string Semantic,
+    string ValueKind,
+    string Extraction);
+
 public sealed record TemplateMigrationSemanticCandidate(
     string Schema,
     IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings,
-    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null);
+    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateValueProjection>? ValueProjections = null);
 
 public sealed record TemplateMigrationMappingDerivation(
     string Schema,

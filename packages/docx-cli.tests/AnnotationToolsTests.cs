@@ -338,6 +338,235 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_projects_a_multi_run_source_value_into_one_target_run()
+    {
+        var source = CreateSemanticValueProjectionFixture(["Source caption: ", "AX", "-", "17"]);
+        var baseline = CreateSemanticValueProjectionFixture(["Destination label: ", "{{currentValue}}"]);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v2",
+            [],
+            ValueProjections:
+            [
+                new TemplateMigrationSemanticCandidateValueProjection(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Source caption: AX-17"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Destination label: {{currentValue}}"),
+                    "controlled-identifier",
+                    "token",
+                    "after-first-delimiter")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal("tiwater.docx.template-migration-plan/v4", resolved.Plan.Schema);
+        var projection = Assert.Single(resolved.Plan.ValueProjections!);
+        Assert.Equal("body:paragraph:0", projection.SourceParentObjectId);
+        Assert.Equal("body:paragraph:0", projection.BaselineParentObjectId);
+
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        var operation = Assert.Single(build.Operations);
+        Assert.Equal("replaceParagraphRunText", operation.Type);
+        Assert.Equal(1, operation.RunIndex);
+        Assert.Equal("AX-17", operation.Text);
+
+        var output = Path.Combine(Path.GetTempPath(), $"semantic-value-multi-single-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        Assert.Equal("Destination label: AX-17", ReadOnlyParagraphText(output));
+    }
+
+    [Fact]
+    public void TemplateMigration_projects_one_source_run_across_a_split_target_placeholder()
+    {
+        var source = CreateSemanticValueProjectionFixture(["Origin: ", "2026-08-06"]);
+        var baseline = CreateSemanticValueProjectionFixture(["Target wording: ", "{{", "effective", "Date}}"]);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v2",
+            [],
+            ValueProjections:
+            [
+                new TemplateMigrationSemanticCandidateValueProjection(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Origin: 2026-08-06"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Target wording: {{effectiveDate}}"),
+                    "effective-date",
+                    "date",
+                    "after-first-delimiter")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.Equal(3, build.Operations.Count);
+        Assert.Equal(["2026-08-06", "", ""], build.Operations.Select(item => item.Text).ToArray());
+
+        var output = Path.Combine(Path.GetTempPath(), $"semantic-value-single-multi-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        Assert.Equal("Target wording: 2026-08-06", ReadOnlyParagraphText(output));
+        Assert.True(TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan).Pass);
+    }
+
+    [Fact]
+    public void TemplateMigration_selects_one_typed_value_group_without_touching_sibling_fields()
+    {
+        var source = CreateMultiFieldProjectionFixture(
+            ["Source id: ", "ZX-44"],
+            ["Revision caption: ", "0", "2"],
+            ["Page: ", "1/8"]);
+        var baseline = CreateMultiFieldProjectionFixture(
+            ["Destination identifier: ", "OLD-1"],
+            ["Version wording: ", "1", ".", "0"],
+            ["Page: ", "1/6"]);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v2",
+            [],
+            ValueProjections:
+            [
+                new TemplateMigrationSemanticCandidateValueProjection(
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "Source id: ZX-44Revision caption: 02Page: 1/8"),
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "Destination identifier: OLD-1Version wording: 1.0Page: 1/6"),
+                    "document-identifier",
+                    "identifier",
+                    "unique-delimited-run-group"),
+                new TemplateMigrationSemanticCandidateValueProjection(
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "Source id: ZX-44Revision caption: 02Page: 1/8"),
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "Destination identifier: OLD-1Version wording: 1.0Page: 1/6"),
+                    "revision-version",
+                    "version",
+                    "unique-delimited-run-group")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.Equal(["ZX-44", "02", "", ""], build.Operations.Select(item => item.Text ?? string.Empty).ToArray());
+        Assert.Equal([0, 1, 1, 1], build.Operations.Select(operation => operation.ParagraphIndex).ToArray());
+
+        var output = Path.Combine(Path.GetTempPath(), $"semantic-value-multi-field-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => $"{item.Reason}:{item.Detail}") ?? []));
+        using var document = WordprocessingDocument.Open(output, false);
+        var cell = document.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single();
+        Assert.Equal(
+            ["Destination identifier: ZX-44", "Version wording: 02", "Page: 1/6"],
+            cell.Elements<Paragraph>().Select(paragraph => string.Concat(paragraph.Descendants<Text>().Select(item => item.Text))).ToArray());
+    }
+
+    [Fact]
+    public void TemplateMigration_projects_a_typed_value_from_one_paragraph_into_a_multi_field_table_cell()
+    {
+        var source = CreateSemanticValueProjectionFixture(["Revision: ", "0", "0", "\tPage: ", "1/1"]);
+        var baseline = CreateMultiFieldProjectionFixture(
+            ["Document No.: ", "OLD-1"],
+            ["Version: ", "1", ".", "0"],
+            ["Page: ", "1/17"]);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v2",
+            [],
+            ValueProjections:
+            [
+                new TemplateMigrationSemanticCandidateValueProjection(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Revision: 00\tPage: 1/1"),
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "Document No.: OLD-1Version: 1.0Page: 1/17"),
+                    "revision-version",
+                    "version",
+                    "unique-delimited-value")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"semantic-value-cross-parent-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => $"{item.Reason}:{item.Detail}") ?? []));
+        using var document = WordprocessingDocument.Open(output, false);
+        var cell = document.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single();
+        Assert.Equal(
+            ["Document No.: OLD-1", "Version: 00", "Page: 1/17"],
+            cell.Elements<Paragraph>().Select(paragraph => string.Concat(paragraph.Descendants<Text>().Select(item => item.Text))).ToArray());
+    }
+
+    [Fact]
+    public void TemplateMigration_semantic_value_projection_fails_closed_for_empty_ambiguous_duplicate_and_wrong_type_inputs()
+    {
+        var baseline = CreateSemanticValueProjectionFixture(["Target: ", "{{value}}"]);
+        var empty = CreateSemanticValueProjectionFixture(["Source: ", "   "]);
+        var emptyCandidate = SemanticValueCandidate("Source:", "Target: {{value}}", "text");
+        var emptyResult = TemplateMigration.ResolveSemanticCandidate(empty, baseline, emptyCandidate);
+        Assert.False(emptyResult.Pass);
+        Assert.Contains(emptyResult.Unresolved, item => item.Reason == "template-migration-semantic-value-source-empty");
+
+        var ambiguous = CreateSemanticValueProjectionFixture(["Source: ", "A"], duplicateParagraph: true);
+        var ambiguousResult = TemplateMigration.ResolveSemanticCandidate(ambiguous, baseline, SemanticValueCandidate("Source: A", "Target: {{value}}", "token"));
+        Assert.False(ambiguousResult.Pass);
+        Assert.Contains(ambiguousResult.Unresolved, item => item.Reason == "template-migration-semantic-value-source-ambiguous");
+
+        var source = CreateSemanticValueProjectionFixture(["Source: ", "A"]);
+        var duplicateCandidate = SemanticValueCandidate("Source: A", "Target: {{value}}", "token") with
+        {
+            ValueProjections =
+            [
+                SemanticValueCandidate("Source: A", "Target: {{value}}", "token").ValueProjections!.Single(),
+                SemanticValueCandidate("Source: A", "Target: {{value}}", "token").ValueProjections!.Single()
+            ]
+        };
+        var duplicateResult = TemplateMigration.ResolveSemanticCandidate(source, baseline, duplicateCandidate);
+        Assert.False(duplicateResult.Pass);
+        Assert.Contains(duplicateResult.Unresolved, item => item.Reason == "template-migration-semantic-value-binding-duplicate");
+
+        var wrongTarget = CreateSemanticValueProjectionFixture(["Target: ", "{{value}}"]);
+        var wrongType = SemanticValueCandidate("Source: A", "Target: {{value}}", "token") with
+        {
+            ValueProjections =
+            [
+                SemanticValueCandidate("Source: A", "Target: {{value}}", "token").ValueProjections!.Single() with
+                {
+                    BaselineParent = new TemplateMigrationSemanticSelector("run", "body", "{{value}}", ParentText: "Target: {{value}}")
+                }
+            ]
+        };
+        var wrongTypeResult = TemplateMigration.ResolveSemanticCandidate(source, wrongTarget, wrongType);
+        Assert.False(wrongTypeResult.Pass);
+        Assert.Contains(wrongTypeResult.Unresolved, item => item.Reason == "template-migration-semantic-value-parent-kind-mismatch");
+
+        var kindMismatch = TemplateMigration.ResolveSemanticCandidate(source, baseline, SemanticValueCandidate("Source: A", "Target: {{value}}", "date"));
+        Assert.False(kindMismatch.Pass);
+        Assert.Contains(kindMismatch.Unresolved, item => item.Reason == "template-migration-semantic-value-source-kind-mismatch");
+
+        var emptyTarget = CreateSemanticValueProjectionFixture(["Target: ", "   "]);
+        var emptyTargetResult = TemplateMigration.ResolveSemanticCandidate(source, emptyTarget, SemanticValueCandidate("Source: A", "Target:", "token"));
+        Assert.False(emptyTargetResult.Pass);
+        Assert.Contains(emptyTargetResult.Unresolved, item => item.Reason == "template-migration-semantic-value-baseline-empty");
+    }
+
+    [Fact]
+    public void TemplateMigration_semantic_value_projection_binds_candidate_plan_hashes_and_independent_readback()
+    {
+        var source = CreateSemanticValueProjectionFixture(["Source: ", "R", "9"]);
+        var baseline = CreateSemanticValueProjectionFixture(["Target: ", "old"]);
+        Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(
+            source,
+            baseline,
+            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v3" }));
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, SemanticValueCandidate("Source: R9", "Target: old", "token"));
+        var stale = resolved.Plan with { SourceSha256 = new string('0', 64) };
+        Assert.Contains(TemplateMigration.BuildOperations(source, baseline, stale).Failures, item => item.Reason == "template-migration-source-hash-mismatch");
+        var deleted = resolved.Plan with { ValueProjections = [] };
+        Assert.Contains(TemplateMigration.BuildOperations(source, baseline, deleted).Failures, item => item.Reason == "template-migration-plan-v4-value-projection-required");
+        var changedType = resolved.Plan with
+        {
+            ValueProjections = [resolved.Plan.ValueProjections!.Single() with { ValueKind = "date" }]
+        };
+        Assert.Contains(TemplateMigration.BuildOperations(source, baseline, changedType).Failures, item => item.Reason == "template-migration-semantic-value-source-kind-mismatch");
+
+        var output = Path.Combine(Path.GetTempPath(), $"semantic-value-readback-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        var tampered = Path.Combine(Path.GetTempPath(), $"semantic-value-tampered-{Guid.NewGuid():N}.docx");
+        Editor.Apply(output, tampered, [new DocxEditOperation("replaceParagraphRunText", ParagraphIndex: 0, RunIndex: 1, Text: "tampered")]);
+        var validation = TemplateMigration.ValidateReadback(source, baseline, tampered, resolved.Plan);
+        Assert.False(validation.Pass);
+        Assert.Contains(validation.Failures, item => item.Reason == "template-migration-readback-semantic-value-mismatch");
+    }
+
+    [Fact]
     public void TemplateMigration_resolves_an_explicit_source_exclusion_without_a_fake_target()
     {
         var source = CreateTextMigrationFixture("obsolete source section");
@@ -2986,6 +3215,53 @@ public class AnnotationToolsTests
         main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
         main.Document.Save();
         return path;
+    }
+
+    private static TemplateMigrationSemanticCandidate SemanticValueCandidate(string sourceText, string baselineText, string valueKind)
+        => new(
+            "tiwater.docx.template-migration-semantic-candidate/v2",
+            [],
+            ValueProjections:
+            [
+                new TemplateMigrationSemanticCandidateValueProjection(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", sourceText),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", baselineText),
+                    "declared-fact",
+                    valueKind,
+                    "after-first-delimiter")
+            ]);
+
+    private static string CreateSemanticValueProjectionFixture(IReadOnlyList<string> runs, bool duplicateParagraph = false, bool useTableCell = false)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-semantic-value-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        Paragraph ParagraphFromRuns() => new(runs.Select(text => new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve })));
+        OpenXmlElement root = useTableCell
+            ? new Table(new TableRow(new TableCell(ParagraphFromRuns())))
+            : ParagraphFromRuns();
+        var body = new Body(root);
+        if (duplicateParagraph) body.AppendChild(ParagraphFromRuns());
+        main.Document = new Document(body);
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateMultiFieldProjectionFixture(params IReadOnlyList<string>[] fields)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-semantic-multi-field-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var cell = new TableCell(fields.Select(field => new Paragraph(field.Select(text => new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve })))));
+        main.Document = new Document(new Body(new Table(new TableRow(cell))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string ReadOnlyParagraphText(string path)
+    {
+        using var document = WordprocessingDocument.Open(path, false);
+        return string.Concat(document.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>().First().Descendants<Text>().Select(item => item.Text));
     }
 
     private static string CreateBaselineClearFixture(string first, string second)

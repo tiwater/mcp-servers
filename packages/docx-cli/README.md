@@ -82,6 +82,17 @@ For an explicitly selected label-only parent, `retain-target-label` records
 that target label retention without inferring semantic equivalence or accepting
 coordinates; it emits no edit and readback verifies every target run unchanged.
 
+A versioned semantic candidate may project a typed value between uniquely
+selected current paragraph or table-cell parents even when labels, run splits,
+or parent kinds differ. The candidate declares only semantic identity, value
+kind (`text`, `token`, `date`, `identifier`, or `version`), and an extraction
+contract (`after-first-delimiter`, `unique-delimited-run-group`, or
+`unique-delimited-value`). Resolution binds current source/baseline hashes and
+object ids; the operation builder derives the value and affected target runs
+from those inventories. Empty, ambiguous, duplicate, or ill-typed values fail
+closed. Independent readback derives the expected value and target replacements
+again and verifies that sibling fields and target formatting remain unchanged.
+
 A semantic candidate may also declare one or more source body ranges to append.
 Each range is bounded by unique current paragraph/table selectors (a table may
 be selected by a unique descendant header). The runtime resolves those selectors
