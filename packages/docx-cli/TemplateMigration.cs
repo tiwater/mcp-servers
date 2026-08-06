@@ -568,13 +568,13 @@ public static class TemplateMigration
         {
             RequireOnlyFields(mapping, new HashSet<string>(["source", "baseline", "disposition", "cardinality"], StringComparer.Ordinal), "template-migration-semantic-candidate-mapping");
             if (!mapping.TryGetProperty("source", out var source)) throw new InvalidOperationException("template-migration-semantic-candidate-source-missing");
-            RequireOnlyFields(source, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-source");
+            RequireOnlyFields(source, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), "template-migration-semantic-candidate-source");
             var outOfScope = mapping.TryGetProperty("disposition", out var disposition)
                 && string.Equals(disposition.GetString(), "out-of-scope", StringComparison.Ordinal);
             if (mapping.TryGetProperty("baseline", out var baseline))
             {
                 if (outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");
-                RequireOnlyFields(baseline, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline");
+                RequireOnlyFields(baseline, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline");
             }
             else if (!outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-missing");
         }
@@ -587,7 +587,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceStart", "sourceEnd" })
                 {
                     if (!append.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -600,7 +600,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceParent", "baselineParent" })
                 {
                     if (!projection.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -613,7 +613,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceStart", "sourceEnd", "baselineBefore", "baselineAfter" })
                 {
                     if (!insertion.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -626,7 +626,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceMember", "baselineLabel" })
                 {
                     if (!choice.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -637,7 +637,7 @@ public static class TemplateMigration
             {
                 RequireOnlyFields(clear, new HashSet<string>(["baseline", "mode"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline-clear");
                 if (!clear.TryGetProperty("baseline", out var selector)) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-clear-selector-missing");
-                RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline-clear-selector");
+                RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline-clear-selector");
             }
         }
     }
@@ -650,16 +650,17 @@ public static class TemplateMigration
 
     private static void ValidateSemanticCandidate(TemplateMigrationSemanticCandidate candidate)
     {
-        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v1" or "tiwater.docx.template-migration-semantic-candidate/v2" or "tiwater.docx.template-migration-semantic-candidate/v3" or "tiwater.docx.template-migration-semantic-candidate/v4" or "tiwater.docx.template-migration-semantic-candidate/v5")) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
+        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v1" or "tiwater.docx.template-migration-semantic-candidate/v2" or "tiwater.docx.template-migration-semantic-candidate/v3" or "tiwater.docx.template-migration-semantic-candidate/v4" or "tiwater.docx.template-migration-semantic-candidate/v5" or "tiwater.docx.template-migration-semantic-candidate/v6")) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
         if (string.Equals(candidate.Schema, "tiwater.docx.template-migration-semantic-candidate/v1", StringComparison.Ordinal)
             && (candidate.ValueProjections?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-v1-value-projection-forbidden");
         if (candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v3"
             && candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v4"
             && candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v5"
+            && candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v6"
             && (candidate.BodyInsertions?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-body-insertion-schema-invalid");
-        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v4" or "tiwater.docx.template-migration-semantic-candidate/v5")
+        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v4" or "tiwater.docx.template-migration-semantic-candidate/v5" or "tiwater.docx.template-migration-semantic-candidate/v6")
             && (candidate.ChoiceSelections?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-choice-selection-schema-invalid");
-        if (candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v5"
+        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v5" or "tiwater.docx.template-migration-semantic-candidate/v6")
             && (candidate.BaselineClears?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-clear-schema-invalid");
         if ((candidate.Mappings is null || candidate.Mappings.Count == 0)
             && (candidate.BodyAppends is null || candidate.BodyAppends.Count == 0)
@@ -669,7 +670,7 @@ public static class TemplateMigration
             && (candidate.BaselineClears is null || candidate.BaselineClears.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
         foreach (var mapping in candidate.Mappings ?? [])
         {
-            ValidateSemanticSelector(mapping.Source, "source");
+            ValidateSemanticSelector(mapping.Source, "source", candidate.Schema);
             if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label" or "out-of-scope")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
             if (mapping.Cardinality is not (null or "one" or "all")) throw new InvalidOperationException("template-migration-semantic-candidate-cardinality-invalid");
             if (string.Equals(mapping.Cardinality, "all", StringComparison.Ordinal)
@@ -681,23 +682,23 @@ public static class TemplateMigration
             else
             {
                 if (mapping.Baseline is null) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-missing");
-                ValidateSemanticSelector(mapping.Baseline, "baseline");
+                ValidateSemanticSelector(mapping.Baseline, "baseline", candidate.Schema);
             }
         }
         foreach (var append in candidate.BodyAppends ?? [])
         {
-            ValidateSemanticSelector(append.SourceStart, "source-start");
-            ValidateSemanticSelector(append.SourceEnd, "source-end");
+            ValidateSemanticSelector(append.SourceStart, "source-start", candidate.Schema);
+            ValidateSemanticSelector(append.SourceEnd, "source-end", candidate.Schema);
         }
         foreach (var clear in candidate.BaselineClears ?? [])
         {
-            ValidateSemanticSelector(clear.Baseline, "baseline-clear");
+            ValidateSemanticSelector(clear.Baseline, "baseline-clear", candidate.Schema);
             if (clear.Mode is not ("cell" or "row")) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-clear-mode-invalid");
         }
         foreach (var projection in candidate.ValueProjections ?? [])
         {
-            ValidateSemanticSelector(projection.SourceParent, "value-source-parent");
-            ValidateSemanticSelector(projection.BaselineParent, "value-baseline-parent");
+            ValidateSemanticSelector(projection.SourceParent, "value-source-parent", candidate.Schema);
+            ValidateSemanticSelector(projection.BaselineParent, "value-baseline-parent", candidate.Schema);
             if (!Regex.IsMatch(projection.Semantic ?? string.Empty, "^[a-z][a-z0-9.-]{0,63}$", RegexOptions.CultureInvariant)) throw new InvalidOperationException("template-migration-semantic-value-identity-invalid");
             if (projection.ValueKind is not ("text" or "token" or "date" or "identifier" or "version")) throw new InvalidOperationException("template-migration-semantic-value-kind-invalid");
             if (projection.Extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value" or "whole-parent")) throw new InvalidOperationException("template-migration-semantic-value-extraction-invalid");
@@ -705,28 +706,50 @@ public static class TemplateMigration
         }
         foreach (var insertion in candidate.BodyInsertions ?? [])
         {
-            ValidateSemanticSelector(insertion.SourceStart, "insertion-source-start");
-            ValidateSemanticSelector(insertion.SourceEnd, "insertion-source-end");
-            ValidateSemanticSelector(insertion.BaselineBefore, "insertion-baseline-before");
-            ValidateSemanticSelector(insertion.BaselineAfter, "insertion-baseline-after");
+            ValidateSemanticSelector(insertion.SourceStart, "insertion-source-start", candidate.Schema);
+            ValidateSemanticSelector(insertion.SourceEnd, "insertion-source-end", candidate.Schema);
+            ValidateSemanticSelector(insertion.BaselineBefore, "insertion-baseline-before", candidate.Schema);
+            ValidateSemanticSelector(insertion.BaselineAfter, "insertion-baseline-after", candidate.Schema);
             if (!string.Equals(insertion.StylePolicy, "target-after-context", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-body-insertion-style-policy-invalid");
         }
         foreach (var choice in candidate.ChoiceSelections ?? [])
         {
-            ValidateSemanticSelector(choice.SourceMember, "choice-source-member");
-            ValidateSemanticSelector(choice.BaselineLabel, "choice-baseline-label");
+            ValidateSemanticSelector(choice.SourceMember, "choice-source-member", candidate.Schema);
+            ValidateSemanticSelector(choice.BaselineLabel, "choice-baseline-label", candidate.Schema);
             if (choice.BaselineLabel.Kind != "run") throw new InvalidOperationException("template-migration-semantic-choice-label-kind-invalid");
         }
     }
 
-    private static void ValidateSemanticSelector(TemplateMigrationSemanticSelector selector, string side)
+    private static void ValidateSemanticSelector(
+        TemplateMigrationSemanticSelector selector,
+        string side,
+        string schema)
     {
         if (string.IsNullOrWhiteSpace(selector.Kind)) throw new InvalidOperationException($"template-migration-semantic-{side}-kind-required");
         var text = !string.IsNullOrWhiteSpace(selector.Text);
         var sha = !string.IsNullOrWhiteSpace(selector.Sha256);
         var descendant = !string.IsNullOrWhiteSpace(selector.DescendantText);
-        if ((text ? 1 : 0) + (sha ? 1 : 0) + (descendant ? 1 : 0) != 1) throw new InvalidOperationException($"template-migration-semantic-{side}-selector-required");
+        var textState = !string.IsNullOrWhiteSpace(selector.TextState);
+        if (textState && !string.Equals(schema, "tiwater.docx.template-migration-semantic-candidate/v6", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"template-migration-semantic-{side}-text-state-schema-invalid");
+        }
+        if (textState && !string.Equals(selector.TextState, "empty", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"template-migration-semantic-{side}-text-state-invalid");
+        }
+        if ((text ? 1 : 0) + (sha ? 1 : 0) + (descendant ? 1 : 0) + (textState ? 1 : 0) != 1) throw new InvalidOperationException($"template-migration-semantic-{side}-selector-required");
         if (sha && !Regex.IsMatch(selector.Sha256!, "^[A-Fa-f0-9]{64}$", RegexOptions.CultureInvariant)) throw new InvalidOperationException($"template-migration-semantic-{side}-sha256-invalid");
+        if (textState)
+        {
+            if (string.IsNullOrWhiteSpace(selector.Scope)) throw new InvalidOperationException($"template-migration-semantic-{side}-empty-scope-required");
+            if (string.IsNullOrWhiteSpace(selector.ParentText)
+                && string.IsNullOrWhiteSpace(selector.PreviousText)
+                && string.IsNullOrWhiteSpace(selector.NextText))
+            {
+                throw new InvalidOperationException($"template-migration-semantic-{side}-empty-context-required");
+            }
+        }
     }
 
     private static List<TemplateMigrationObject> ResolveSelector(IReadOnlyList<TemplateMigrationObject> objects, TemplateMigrationSemanticSelector selector)
@@ -736,12 +759,14 @@ public static class TemplateMigration
         var normalizedPreviousText = selector.PreviousText is null ? null : NormalizeMappingText(selector.PreviousText);
         var normalizedNextText = selector.NextText is null ? null : NormalizeMappingText(selector.NextText);
         var normalizedDescendantText = selector.DescendantText is null ? null : NormalizeMappingText(selector.DescendantText);
+        var emptyText = string.Equals(selector.TextState, "empty", StringComparison.Ordinal);
         var byId = objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var siblings = objects.Where(item => string.Equals(item.Kind, selector.Kind, StringComparison.Ordinal)
                 && (string.IsNullOrWhiteSpace(selector.Scope) || string.Equals(item.Scope, selector.Scope, StringComparison.Ordinal)))
             .ToList();
         return siblings.Where(item =>
                 (normalizedText is null || string.Equals(NormalizeMappingText(item.Text), normalizedText, StringComparison.Ordinal))
+                && (!emptyText || string.IsNullOrEmpty(NormalizeMappingText(item.Text)))
                 && (selector.Sha256 is null || (item.Provenance.TryGetValue("sha256", out var hash) && string.Equals(hash, selector.Sha256, StringComparison.OrdinalIgnoreCase)))
                 && (normalizedDescendantText is null || HasDescendantText(objects, item, normalizedDescendantText))
                 && (normalizedParentText is null || (item.ParentId is not null && byId.TryGetValue(item.ParentId, out var parent) && string.Equals(NormalizeMappingText(parent.Text), normalizedParentText, StringComparison.Ordinal)))
