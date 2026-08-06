@@ -7,6 +7,7 @@ namespace Dockit.Docx;
 public static class DocxPackageNormalizer
 {
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    private static readonly XNamespace R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     private static readonly XNamespace Mc = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 
     private static readonly IReadOnlyDictionary<string, string> PrefixToNamespace = new Dictionary<string, string>
@@ -175,6 +176,8 @@ public static class DocxPackageNormalizer
         NormalizeNamespaces(document.Root);
         NormalizeChildOrder(document.Root);
         NormalizeWpsNoNumbering(document.Root);
+        MaterializeInheritedSectionHeadersAndFooters(document.Root);
+        CollapseEquivalentNextPageSections(document.Root);
         normalized = document.Declaration is null
             ? document.ToString(SaveOptions.DisableFormatting)
             : document.Declaration + document.ToString(SaveOptions.DisableFormatting);
@@ -264,6 +267,46 @@ public static class DocxPackageNormalizer
             {
                 numbering.Remove();
             }
+        }
+    }
+
+    private static void MaterializeInheritedSectionHeadersAndFooters(XElement root)
+    {
+        var inherited = new Dictionary<(XName Name, string Type), XElement>();
+        foreach (var section in root.Descendants(W + "sectPr"))
+        {
+            foreach (var reference in section.Elements().Where(element => element.Name == W + "headerReference" || element.Name == W + "footerReference"))
+            {
+                var type = reference.Attribute(W + "type")?.Value ?? "default";
+                if (string.IsNullOrWhiteSpace(reference.Attribute(R + "id")?.Value)) continue;
+                inherited[(reference.Name, type)] = new XElement(reference);
+            }
+            if (inherited.Count == 0) continue;
+            section.Elements().Where(element => element.Name == W + "headerReference" || element.Name == W + "footerReference").Remove();
+            var materialized = inherited
+                .OrderBy(item => item.Key.Name == W + "headerReference" ? 0 : 1)
+                .ThenBy(item => item.Key.Type switch { "default" => 0, "even" => 1, "first" => 2, _ => 3 })
+                .ThenBy(item => item.Key.Type, StringComparer.Ordinal)
+                .Select(item => new XElement(item.Value))
+                .ToList();
+            section.AddFirst(materialized);
+        }
+    }
+
+    private static void CollapseEquivalentNextPageSections(XElement root)
+    {
+        var sections = root.Descendants(W + "sectPr").ToList();
+        for (var index = 0; index + 1 < sections.Count; index++)
+        {
+            var current = sections[index];
+            var next = sections[index + 1];
+            var type = current.Element(W + "type")?.Attribute(W + "val")?.Value;
+            if (type is not null && type != "nextPage") continue;
+            if (!XNode.DeepEquals(current, next)) continue;
+            var paragraph = current.Parent?.Parent;
+            if (paragraph?.Name != W + "p" || current.Parent?.Name != W + "pPr") continue;
+            current.Remove();
+            paragraph.Add(new XElement(W + "r", new XElement(W + "br", new XAttribute(W + "type", "page"))));
         }
     }
 
