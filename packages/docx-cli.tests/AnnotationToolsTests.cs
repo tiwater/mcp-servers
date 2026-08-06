@@ -544,7 +544,7 @@ public class AnnotationToolsTests
         Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(
             source,
             baseline,
-            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v4" }));
+            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v5" }));
 
         var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, SemanticValueCandidate("Source: R9", "Target: old", "token"));
         var stale = resolved.Plan with { SourceSha256 = new string('0', 64) };
@@ -630,6 +630,47 @@ public class AnnotationToolsTests
         var nonAdjacentResult = TemplateMigration.ResolveSemanticCandidate(source, nonAdjacent, candidate);
         Assert.False(nonAdjacentResult.Pass);
         Assert.Contains(nonAdjacentResult.Unresolved, item => item.Reason == "template-migration-semantic-body-insertion-range-invalid");
+    }
+
+    [Fact]
+    public void TemplateMigration_selects_declared_members_without_changing_labels_or_unselected_choices()
+    {
+        var source = CreateTextMigrationFixture("North team", "Research unit");
+        var baseline = CreateChoiceMigrationFixture("North team", "South team", "Research unit");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v4",
+            [],
+            ChoiceSelections:
+            [
+                new TemplateMigrationSemanticCandidateChoiceSelection(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "North team"),
+                    new TemplateMigrationSemanticSelector("run", "body", "North team")),
+                new TemplateMigrationSemanticCandidateChoiceSelection(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Research unit"),
+                    new TemplateMigrationSemanticSelector("run", "body", "Research unit"))
+            ]);
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-choice-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        using var document = WordprocessingDocument.Open(output, false);
+        var paragraphs = document.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single().Elements<Paragraph>().ToList();
+        Assert.Equal(["North team", "South team", "Research unit"], paragraphs.Select(item => item.InnerText).ToArray());
+        var hashes = paragraphs.Select(item => item.Descendants<A.Blip>().Single().Embed!.Value!).Select(id =>
+        {
+            using var stream = document.MainDocumentPart.GetPartById(id).GetStream();
+            return Convert.ToHexString(SHA256.HashData(stream));
+        }).ToArray();
+        Assert.Equal("825F8542DB7249A9BE93EFE1E9D894B3BF3A531744F3DF31F015BDC9B0AC3173", hashes[0]);
+        Assert.NotEqual(hashes[0], hashes[1]);
+        Assert.Equal(hashes[0], hashes[2]);
+
+        var tampered = Path.Combine(Path.GetTempPath(), $"migration-choice-tampered-{Guid.NewGuid():N}.docx");
+        Editor.Apply(output, tampered, [new DocxEditOperation("setTableCellChoiceState", TableIndex: 0, RowIndex: 0, CellIndex: 0, ParagraphIndex: 1, RunIndex: 0, Text: "selected")]);
+        Assert.Contains(TemplateMigration.ValidateReadback(source, baseline, tampered, resolved.Plan).Failures, item => item.Reason == "template-migration-readback-choice-set-mismatch");
+
+        var duplicate = candidate with { ChoiceSelections = [.. candidate.ChoiceSelections!, candidate.ChoiceSelections![0]] };
+        Assert.Contains(TemplateMigration.ResolveSemanticCandidate(source, baseline, duplicate).Unresolved, item => item.Reason == "template-migration-choice-binding-invalid");
     }
 
     [Fact]
@@ -3295,6 +3336,32 @@ public class AnnotationToolsTests
             new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = item.StyleId }), new Run(new Text(item.Text))))));
         main.Document.Save();
         stylesPart.Styles.Save();
+        return path;
+    }
+
+    private static string CreateChoiceMigrationFixture(params string[] labels)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-choice-template-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var image = main.AddImagePart(ImagePartType.Png);
+        using (var stream = new MemoryStream(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="))) image.FeedData(stream);
+        Drawing Glyph(uint id)
+        {
+            var picture = new PIC.Picture(
+                new PIC.NonVisualPictureProperties(new PIC.NonVisualDrawingProperties { Id = id, Name = $"choice-{id}" }, new PIC.NonVisualPictureDrawingProperties()),
+                new PIC.BlipFill(new A.Blip { Embed = main.GetIdOfPart(image) }, new A.Stretch(new A.FillRectangle())),
+                new PIC.ShapeProperties(new A.Transform2D(new A.Offset { X = 0L, Y = 0L }, new A.Extents { Cx = 120000L, Cy = 120000L }), new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }));
+            return new Drawing(new DW.Inline(
+                new DW.Extent { Cx = 120000L, Cy = 120000L },
+                new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+                new DW.DocProperties { Id = id, Name = $"choice-{id}" },
+                new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(new A.GraphicData(picture) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })));
+        }
+        var cell = new TableCell(labels.Select((label, index) => new Paragraph(new Run(Glyph((uint)index + 1)), new Run(new Text(label)))));
+        main.Document = new Document(new Body(new Table(new TableRow(cell))));
+        main.Document.Save();
         return path;
     }
 

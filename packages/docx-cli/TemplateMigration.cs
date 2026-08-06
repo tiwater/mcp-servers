@@ -308,6 +308,7 @@ public static class TemplateMigration
         var failures = new List<TemplateMigrationPlanFailure>();
         var bodyAppends = new List<TemplateMigrationBodyAppend>();
         var bodyInsertions = new List<TemplateMigrationBodyInsertion>();
+        var choiceSelections = new List<TemplateMigrationChoiceSelection>();
         var valueProjections = new List<TemplateMigrationValueProjection>();
 
         foreach (var proposal in candidate.Mappings ?? [])
@@ -393,6 +394,24 @@ public static class TemplateMigration
             bodyInsertions.Add(new TemplateMigrationBodyInsertion(starts[0].Id, ends[0].Id, before[0].Id, after[0].Id, proposal.StylePolicy));
         }
 
+        foreach (var proposal in candidate.ChoiceSelections ?? [])
+        {
+            var members = ResolveSelector(analysis.Source.Objects, proposal.SourceMember);
+            var labels = ResolveSelector(analysis.Baseline.Objects, proposal.BaselineLabel);
+            if (members.Count != 1 || labels.Count != 1)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-choice-selector-not-unique"));
+                continue;
+            }
+            if (labels[0].Kind != "run" || string.IsNullOrWhiteSpace(members[0].Text))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-choice-binding-invalid", members[0].Id, labels[0].Id));
+                continue;
+            }
+            mappings.Remove(members[0].Id);
+            choiceSelections.Add(new TemplateMigrationChoiceSelection(members[0].Id, labels[0].Id));
+        }
+
         var projectedSources = new HashSet<string>(StringComparer.Ordinal);
         var projectionBindings = new HashSet<string>(StringComparer.Ordinal);
         var projectedSemantics = new HashSet<string>(StringComparer.Ordinal);
@@ -467,7 +486,8 @@ public static class TemplateMigration
         }
 
         var plan = new TemplateMigrationPlan(
-            bodyInsertions.Count != 0 ? "tiwater.docx.template-migration-plan/v5"
+            choiceSelections.Count != 0 ? "tiwater.docx.template-migration-plan/v6"
+                : bodyInsertions.Count != 0 ? "tiwater.docx.template-migration-plan/v5"
                 : valueProjections.Count != 0 ? "tiwater.docx.template-migration-plan/v4"
                 : bodyAppends.Count == 0 ? "tiwater.docx.template-migration-plan/v1" : "tiwater.docx.template-migration-plan/v2",
             analysis.Source.Sha256,
@@ -475,7 +495,8 @@ public static class TemplateMigration
             mappings.Values.OrderBy(mapping => mapping.SourceObjectId, StringComparer.Ordinal).ToList(),
             bodyAppends,
             ValueProjections: valueProjections,
-            BodyInsertions: bodyInsertions);
+            BodyInsertions: bodyInsertions,
+            ChoiceSelections: choiceSelections);
         var build = BuildOperations(source, baseline, plan);
         failures.AddRange(build.Failures);
         foreach (var mapping in plan.Mappings.Where(mapping => string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal)))
@@ -499,7 +520,7 @@ public static class TemplateMigration
 
     private static void ValidateSemanticCandidateJson(JsonElement root)
     {
-        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings", "bodyAppends", "valueProjections", "bodyInsertions"], StringComparer.Ordinal), "template-migration-semantic-candidate");
+        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings", "bodyAppends", "valueProjections", "bodyInsertions", "choiceSelections"], StringComparer.Ordinal), "template-migration-semantic-candidate");
         if (!root.TryGetProperty("mappings", out var mappings) || mappings.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-mappings-invalid");
         foreach (var mapping in mappings.EnumerateArray())
         {
@@ -554,6 +575,19 @@ public static class TemplateMigration
                 }
             }
         }
+        if (root.TryGetProperty("choiceSelections", out var choices))
+        {
+            if (choices.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-choice-selections-invalid");
+            foreach (var choice in choices.EnumerateArray())
+            {
+                RequireOnlyFields(choice, new HashSet<string>(["sourceMember", "baselineLabel"], StringComparer.Ordinal), "template-migration-semantic-candidate-choice-selection");
+                foreach (var side in new[] { "sourceMember", "baselineLabel" })
+                {
+                    if (!choice.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
+                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                }
+            }
+        }
     }
 
     private static void RequireOnlyFields(JsonElement element, IReadOnlySet<string> allowed, string label)
@@ -564,15 +598,19 @@ public static class TemplateMigration
 
     private static void ValidateSemanticCandidate(TemplateMigrationSemanticCandidate candidate)
     {
-        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v1" or "tiwater.docx.template-migration-semantic-candidate/v2" or "tiwater.docx.template-migration-semantic-candidate/v3")) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
+        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v1" or "tiwater.docx.template-migration-semantic-candidate/v2" or "tiwater.docx.template-migration-semantic-candidate/v3" or "tiwater.docx.template-migration-semantic-candidate/v4")) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
         if (string.Equals(candidate.Schema, "tiwater.docx.template-migration-semantic-candidate/v1", StringComparison.Ordinal)
             && (candidate.ValueProjections?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-v1-value-projection-forbidden");
         if (candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v3"
+            && candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v4"
             && (candidate.BodyInsertions?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-body-insertion-schema-invalid");
+        if (candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v4"
+            && (candidate.ChoiceSelections?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-choice-selection-schema-invalid");
         if ((candidate.Mappings is null || candidate.Mappings.Count == 0)
             && (candidate.BodyAppends is null || candidate.BodyAppends.Count == 0)
             && (candidate.ValueProjections is null || candidate.ValueProjections.Count == 0)
-            && (candidate.BodyInsertions is null || candidate.BodyInsertions.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
+            && (candidate.BodyInsertions is null || candidate.BodyInsertions.Count == 0)
+            && (candidate.ChoiceSelections is null || candidate.ChoiceSelections.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
         foreach (var mapping in candidate.Mappings ?? [])
         {
             ValidateSemanticSelector(mapping.Source, "source");
@@ -608,6 +646,12 @@ public static class TemplateMigration
             ValidateSemanticSelector(insertion.BaselineBefore, "insertion-baseline-before");
             ValidateSemanticSelector(insertion.BaselineAfter, "insertion-baseline-after");
             if (!string.Equals(insertion.StylePolicy, "target-after-context", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-body-insertion-style-policy-invalid");
+        }
+        foreach (var choice in candidate.ChoiceSelections ?? [])
+        {
+            ValidateSemanticSelector(choice.SourceMember, "choice-source-member");
+            ValidateSemanticSelector(choice.BaselineLabel, "choice-baseline-label");
+            if (choice.BaselineLabel.Kind != "run") throw new InvalidOperationException("template-migration-semantic-choice-label-kind-invalid");
         }
     }
 
@@ -715,7 +759,7 @@ public static class TemplateMigration
         var mediaCopies = new List<TemplateMigrationMediaCopy>();
         var reviewRequired = false;
 
-        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v1" or "tiwater.docx.template-migration-plan/v2" or "tiwater.docx.template-migration-plan/v3" or "tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5"))
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v1" or "tiwater.docx.template-migration-plan/v2" or "tiwater.docx.template-migration-plan/v3" or "tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6"))
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-schema-invalid", Detail: plan.Schema));
         }
@@ -727,7 +771,7 @@ public static class TemplateMigration
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-baseline-clear-schema-invalid"));
         }
-        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5") && (plan.ValueProjections?.Count ?? 0) != 0)
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6") && (plan.ValueProjections?.Count ?? 0) != 0)
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-value-projection-schema-invalid"));
         }
@@ -735,7 +779,7 @@ public static class TemplateMigration
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v4-value-projection-required"));
         }
-        if (plan.Schema is not "tiwater.docx.template-migration-plan/v5" && (plan.BodyInsertions?.Count ?? 0) != 0)
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6") && (plan.BodyInsertions?.Count ?? 0) != 0)
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-body-insertion-schema-invalid"));
         }
@@ -743,6 +787,8 @@ public static class TemplateMigration
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v5-body-insertion-required"));
         }
+        if (plan.Schema is not "tiwater.docx.template-migration-plan/v6" && (plan.ChoiceSelections?.Count ?? 0) != 0) failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-choice-selection-schema-invalid"));
+        if (string.Equals(plan.Schema, "tiwater.docx.template-migration-plan/v6", StringComparison.Ordinal) && (plan.ChoiceSelections?.Count ?? 0) == 0) failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v6-choice-selection-required"));
         if (!string.Equals(plan.SourceSha256, analysis.Source.Sha256, StringComparison.Ordinal))
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-source-hash-mismatch", Detail: plan.SourceSha256));
@@ -759,6 +805,7 @@ public static class TemplateMigration
         var clearTargets = new HashSet<string>(StringComparer.Ordinal);
         var appendedSourceIds = new HashSet<string>(StringComparer.Ordinal);
         var insertedSourceIds = new HashSet<string>(StringComparer.Ordinal);
+        var choiceSourceIds = new HashSet<string>(StringComparer.Ordinal);
         var projectedSourceIds = new HashSet<string>(StringComparer.Ordinal);
         var projectedTargetParents = new HashSet<string>(StringComparer.Ordinal);
         var projectedSemantics = new HashSet<string>(StringComparer.Ordinal);
@@ -857,6 +904,25 @@ public static class TemplateMigration
             bodyInsertions.Add(insertion);
         }
 
+        var choiceLabels = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var choice in plan.ChoiceSelections ?? [])
+        {
+            if (!sourceById.TryGetValue(choice.SourceMemberObjectId, out var member) || string.IsNullOrWhiteSpace(member.Text)
+                || !baselineById.TryGetValue(choice.BaselineLabelRunObjectId, out var label) || label.Kind != "run"
+                || !choiceSourceIds.Add(member.Id) || !choiceLabels.Add(label.Id))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-choice-binding-invalid", choice.SourceMemberObjectId, choice.BaselineLabelRunObjectId));
+                continue;
+            }
+            var operation = BuildChoiceSelectionOperation(label);
+            if (operation is null)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-choice-target-invalid", member.Id, label.Id));
+                continue;
+            }
+            operations.Add(operation);
+        }
+
         foreach (var projection in plan.ValueProjections ?? [])
         {
             if (!sourceById.TryGetValue(projection.SourceParentObjectId, out var sourceParent)
@@ -928,7 +994,7 @@ public static class TemplateMigration
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-source-object-duplicate", mapping.SourceObjectId));
                 continue;
             }
-            if (appendedSourceIds.Contains(mapping.SourceObjectId) || insertedSourceIds.Contains(mapping.SourceObjectId))
+            if (appendedSourceIds.Contains(mapping.SourceObjectId) || insertedSourceIds.Contains(mapping.SourceObjectId) || choiceSourceIds.Contains(mapping.SourceObjectId))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-body-append-source-duplicate", mapping.SourceObjectId));
                 continue;
@@ -1077,7 +1143,7 @@ public static class TemplateMigration
             var drawingCoveredByMedia = sourceObject.Kind == "drawing"
                 && sourceObject.Provenance.TryGetValue("embedRelationshipId", out var embeddedRelationshipId)
                 && copiedMediaRelationships.Contains(embeddedRelationshipId);
-            if (!mappingsBySource.ContainsKey(sourceObject.Id) && !appendedSourceIds.Contains(sourceObject.Id) && !insertedSourceIds.Contains(sourceObject.Id) && !projectedSourceIds.Contains(sourceObject.Id) && !drawingCoveredByMedia)
+            if (!mappingsBySource.ContainsKey(sourceObject.Id) && !appendedSourceIds.Contains(sourceObject.Id) && !insertedSourceIds.Contains(sourceObject.Id) && !projectedSourceIds.Contains(sourceObject.Id) && !choiceSourceIds.Contains(sourceObject.Id) && !drawingCoveredByMedia)
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-source-object-unmapped", sourceObject.Id, Detail: sourceObject.Kind));
             }
@@ -1280,6 +1346,24 @@ public static class TemplateMigration
         var outputById = outputInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var baselineOutputIds = BuildBaselineOutputIdMap(sourceInventory, baselineInventory, outputInventory, plan.BodyInsertions ?? []);
         string OutputId(string baselineId) => baselineOutputIds.GetValueOrDefault(baselineId, baselineId);
+        foreach (var choice in plan.ChoiceSelections ?? [])
+        {
+            var label = baselineInventory.Objects.SingleOrDefault(item => item.Id == choice.BaselineLabelRunObjectId);
+            var member = sourceInventory.Objects.SingleOrDefault(item => item.Id == choice.SourceMemberObjectId);
+            if (label is null || member is null || string.IsNullOrWhiteSpace(member.Text) || label.ParentId is null)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-choice-binding-invalid", choice.SourceMemberObjectId, choice.BaselineLabelRunObjectId));
+                continue;
+            }
+            var siblingRuns = baselineInventory.Objects.Where(item => item.Kind == "run" && item.ParentId == label.ParentId).ToList();
+            var labelIndex = siblingRuns.FindIndex(item => item.Id == label.Id);
+            var outputLabel = outputById.GetValueOrDefault(OutputId(label.Id));
+            if (outputLabel is null || labelIndex <= 0 || !string.Equals(outputLabel.Text, label.Text, StringComparison.Ordinal)
+                || !IndependentlyChoiceSelected(output, label.Id))
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-choice-state-mismatch", choice.SourceMemberObjectId, choice.BaselineLabelRunObjectId));
+        }
+        var selectedChoiceMediaCount = outputInventory.Objects.Count(item => item.Kind == "media" && item.Provenance.GetValueOrDefault("sha256") == "825F8542DB7249A9BE93EFE1E9D894B3BF3A531744F3DF31F015BDC9B0AC3173");
+        if (selectedChoiceMediaCount != (plan.ChoiceSelections?.Count ?? 0)) failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-choice-set-mismatch", Detail: $"expected={plan.ChoiceSelections?.Count ?? 0};actual={selectedChoiceMediaCount}"));
         foreach (var mapping in plan.Mappings ?? [])
         {
             if (!string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal) && !string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal)) continue;
@@ -1389,6 +1473,7 @@ public static class TemplateMigration
                 .ToList();
             var outputStructure = outputInventory.Objects
                 .Where(IsStructuralObject)
+                .Where(item => !(item.Kind == "media" && item.Provenance.GetValueOrDefault("sha256") == "825F8542DB7249A9BE93EFE1E9D894B3BF3A531744F3DF31F015BDC9B0AC3173"))
                 .Select(StructureFingerprint)
                 .OrderBy(value => value, StringComparer.Ordinal)
                 .ToList();
@@ -2008,6 +2093,43 @@ public static class TemplateMigration
 
     private static string NormalizeMappingText(string? text)
         => Regex.Replace(text ?? string.Empty, "\\s+", " ").Trim();
+
+    private static DocxEditOperation? BuildChoiceSelectionOperation(TemplateMigrationObject label)
+    {
+        var match = BodyTableCellRunId.Match(label.Id);
+        if (!match.Success) return null;
+        var runIndex = int.Parse(match.Groups["run"].Value);
+        if (runIndex == 0) return null;
+        return new DocxEditOperation(
+            "setTableCellChoiceState",
+            TableIndex: int.Parse(match.Groups["table"].Value),
+            RowIndex: int.Parse(match.Groups["row"].Value),
+            CellIndex: int.Parse(match.Groups["cell"].Value),
+            ParagraphIndex: int.Parse(match.Groups["paragraph"].Value),
+            RunIndex: runIndex - 1,
+            Text: "selected");
+    }
+
+    private static bool IndependentlyChoiceSelected(string output, string baselineLabelRunId)
+    {
+        var match = BodyTableCellRunId.Match(baselineLabelRunId);
+        if (!match.Success) return false;
+        using var document = WordprocessingDocument.Open(Path.GetFullPath(output), false);
+        var body = document.MainDocumentPart?.Document?.Body;
+        if (body is null) return false;
+        var table = body.Elements<Table>().ElementAtOrDefault(int.Parse(match.Groups["table"].Value));
+        var row = table?.Elements<TableRow>().ElementAtOrDefault(int.Parse(match.Groups["row"].Value));
+        var cell = row?.Elements<TableCell>().ElementAtOrDefault(int.Parse(match.Groups["cell"].Value));
+        var paragraph = cell?.Elements<Paragraph>().ElementAtOrDefault(int.Parse(match.Groups["paragraph"].Value));
+        var choiceIndex = int.Parse(match.Groups["run"].Value) - 1;
+        var run = choiceIndex >= 0 ? paragraph?.Elements<Run>().ElementAtOrDefault(choiceIndex) : null;
+        var blip = run?.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().SingleOrDefault();
+        if (blip?.Embed?.Value is null || document.MainDocumentPart is null) return false;
+        var part = document.MainDocumentPart.GetPartById(blip.Embed.Value);
+        using var stream = part.GetStream();
+        using var sha = SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(stream)) == "825F8542DB7249A9BE93EFE1E9D894B3BF3A531744F3DF31F015BDC9B0AC3173";
+    }
 
     private static DocxEditOperation? BuildCopyTextOperation(string baselineObjectId, string text)
     {

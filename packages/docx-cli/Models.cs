@@ -267,7 +267,8 @@ public sealed record TemplateMigrationPlan(
     IReadOnlyList<TemplateMigrationBodyAppend>? BodyAppends = null,
     IReadOnlyList<TemplateMigrationBaselineClear>? BaselineClears = null,
     IReadOnlyList<TemplateMigrationValueProjection>? ValueProjections = null,
-    IReadOnlyList<TemplateMigrationBodyInsertion>? BodyInsertions = null);
+    IReadOnlyList<TemplateMigrationBodyInsertion>? BodyInsertions = null,
+    IReadOnlyList<TemplateMigrationChoiceSelection>? ChoiceSelections = null);
 
 /// <summary>
 /// A semantic scalar projection between two current, hash-attested parent
@@ -280,6 +281,10 @@ public sealed record TemplateMigrationValueProjection(
     string Semantic,
     string ValueKind,
     string Extraction);
+
+public sealed record TemplateMigrationChoiceSelection(
+    string SourceMemberObjectId,
+    string BaselineLabelRunObjectId);
 
 public sealed record TemplateMigrationSemanticSelector(
     string Kind,
@@ -314,12 +319,17 @@ public sealed record TemplateMigrationSemanticCandidateValueProjection(
     string ValueKind,
     string Extraction);
 
+public sealed record TemplateMigrationSemanticCandidateChoiceSelection(
+    TemplateMigrationSemanticSelector SourceMember,
+    TemplateMigrationSemanticSelector BaselineLabel);
+
 public sealed record TemplateMigrationSemanticCandidate(
     string Schema,
     IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings,
     IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null,
     IReadOnlyList<TemplateMigrationSemanticCandidateValueProjection>? ValueProjections = null,
-    IReadOnlyList<TemplateMigrationSemanticCandidateBodyInsertion>? BodyInsertions = null);
+    IReadOnlyList<TemplateMigrationSemanticCandidateBodyInsertion>? BodyInsertions = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateChoiceSelection>? ChoiceSelections = null);
 
 public sealed record TemplateMigrationMappingDerivation(
     string Schema,

@@ -89,6 +89,7 @@ public static class Editor
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
             "replaceTableCellRunText" => ReplaceTableCellRunText(body, operation),
+            "setTableCellChoiceState" => SetTableCellChoiceState(doc, body, operation),
             "replaceHeaderTableCellText" => ReplacePartTableCellText(doc, operation, "header"),
             "replaceHeaderTableCellRunText" => ReplacePartTableCellRunText(doc, operation, "header"),
             "replaceFooterTableCellText" => ReplacePartTableCellText(doc, operation, "footer"),
@@ -699,6 +700,29 @@ public static class Editor
         }
         var location = partIndex is null ? scope : $"{scope}[{partIndex}]";
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated {location}.table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}].paragraph[{operation.ParagraphIndex}].run[{operation.RunIndex}]");
+    }
+
+    private static DocxEditAppliedOperation SetTableCellChoiceState(WordprocessingDocument document, Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null || operation.ParagraphIndex is null || operation.RunIndex is null || operation.Text != "selected")
+            return new DocxEditAppliedOperation(operation.Type, false, "table/row/cell/paragraph/run and selected state are required");
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex < 0 || operation.TableIndex >= tables.Count) return new DocxEditAppliedOperation(operation.Type, false, "table out of range");
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex < 0 || operation.RowIndex >= rows.Count) return new DocxEditAppliedOperation(operation.Type, false, "row out of range");
+        var cells = rows[operation.RowIndex.Value].Elements<TableCell>().ToList();
+        if (operation.CellIndex < 0 || operation.CellIndex >= cells.Count) return new DocxEditAppliedOperation(operation.Type, false, "cell out of range");
+        var paragraphs = cells[operation.CellIndex.Value].Elements<Paragraph>().ToList();
+        if (operation.ParagraphIndex < 0 || operation.ParagraphIndex >= paragraphs.Count) return new DocxEditAppliedOperation(operation.Type, false, "paragraph out of range");
+        var runs = paragraphs[operation.ParagraphIndex.Value].Elements<Run>().ToList();
+        if (operation.RunIndex < 0 || operation.RunIndex >= runs.Count || !runs[operation.RunIndex.Value].Descendants<Drawing>().Any()) return new DocxEditAppliedOperation(operation.Type, false, "choice glyph run invalid");
+        var run = runs[operation.RunIndex.Value];
+        var blip = run.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().SingleOrDefault();
+        if (blip?.Embed?.Value is null || document.MainDocumentPart is null) return new DocxEditAppliedOperation(operation.Type, false, "choice glyph image missing");
+        var image = document.MainDocumentPart.AddImagePart(ImagePartType.Png);
+        using (var stream = new MemoryStream(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAqUlEQVR42u1XQQ6AMAhbG///ZTx5MWPMQWBRuehhWUuhChCRVhlsxXFcLwBSpRARbKHAPiXoyRMdvTK/vwRWczMDfESCWZlrJFghe0kTas5iRvYjW7NK+nACGrj1UWNEZqvgUwQsL3vAhwQAiOVlL/iQgHaJpcjTHxlXvBt1fqoHepc+9frWAwkjpPUMMPTW1zs9caXJ7s/UiSgSfN+pOHNJ+RcTfH47PgF+MWNBTx+7qwAAAABJRU5ErkJggg=="))) image.FeedData(stream);
+        blip.Embed = document.MainDocumentPart.GetIdOfPart(image);
+        return new DocxEditAppliedOperation(operation.Type, true, "Selected target choice");
     }
 
     private static bool TryReplaceRunText(IReadOnlyList<Paragraph> paragraphs, int paragraphIndex, int runIndex, string text, out string error)

@@ -116,6 +116,16 @@ readback rebuilds the source/baseline/output inventories, translates shifted
 target object identities, and verifies inserted content/order, contextual style,
 and the relative structure of every pre-existing target body object.
 
+Semantic candidate v4 can also bind a current, non-empty source membership
+object to a unique target label run whose immediately preceding run is a
+drawing-backed choice glyph. The builder emits only a `selected` state change:
+it replaces that glyph's image relationship with the provider-owned checked
+symbol while preserving the drawing, label text, paragraph, and table shape.
+Duplicate members or labels, missing/ambiguous labels, non-drawing glyphs, and
+unknown selections fail closed. Independent readback recomputes the selected
+label set from image hashes, verifies every bound label is unchanged, and
+rejects both missing and additional selections.
+
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
 ```
