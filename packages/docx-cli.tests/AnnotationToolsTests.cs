@@ -2472,6 +2472,50 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_readback_treats_removed_wps_no_numbering_marker_as_canonical_but_detects_real_changes()
+    {
+        var source = CreateTextMigrationFixture("legacy label");
+        var baseline = CreateTextMigrationFixture("target placeholder");
+        using (var document = WordprocessingDocument.Open(baseline, true))
+        {
+            var paragraph = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single();
+            paragraph.ParagraphProperties = new ParagraphProperties(
+                new NumberingProperties(
+                    new NumberingLevelReference { Val = -1 },
+                    new NumberingId { Val = 0 }));
+            document.MainDocumentPart.Document.Save();
+        }
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "legacy label"),
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "target placeholder"),
+                "retain-target-label")]);
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-normalized-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+
+        DocxPackageNormalizer.Normalize(output, output);
+
+        var validation = TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan);
+        Assert.True(validation.Pass, string.Join("; ", validation.Failures.Select(item => item.Reason)));
+
+        var changed = Path.Combine(Path.GetTempPath(), $"migration-normalized-changed-{Guid.NewGuid():N}.docx");
+        File.Copy(output, changed);
+        using (var document = WordprocessingDocument.Open(changed, true))
+        {
+            var paragraph = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Single();
+            paragraph.ParagraphProperties ??= new ParagraphProperties();
+            paragraph.ParagraphProperties.Justification = new Justification { Val = JustificationValues.Center };
+            document.MainDocumentPart.Document.Save();
+        }
+        var changedValidation = TemplateMigration.ValidateReadback(source, baseline, changed, resolved.Plan);
+        Assert.False(changedValidation.Pass);
+        Assert.Contains(changedValidation.Failures, item => item.Reason == "template-migration-readback-baseline-content-drift");
+    }
+
+    [Fact]
     public void Edit_can_replace_header_paragraph_text()
     {
         var docPath = CreateSplitPlaceholderFixture();
