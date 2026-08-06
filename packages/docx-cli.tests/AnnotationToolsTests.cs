@@ -618,6 +618,32 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_unique_delimited_values_do_not_cross_paragraph_boundaries()
+    {
+        var source = CreateSemanticValueProjectionFixture(["Record No.: DOC-A"]);
+        var baseline = CreateMultiParagraphProjectionFixture("Record No.: OLD-A", "Version No.: 1.0", "Page: 1 / 2");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v2",
+            [],
+            ValueProjections:
+            [new TemplateMigrationSemanticCandidateValueProjection(
+                new TemplateMigrationSemanticSelector("paragraph", "body", "Record No.: DOC-A"),
+                new TemplateMigrationSemanticSelector("table-cell", "body", "Record No.: OLD-AVersion No.: 1.0Page: 1 / 2"),
+                "record-number",
+                "identifier",
+                "unique-delimited-value")]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-paragraph-boundary-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        using var document = WordprocessingDocument.Open(output, false);
+        Assert.Equal(
+            ["Record No.: DOC-A", "Version No.: 1.0", "Page: 1 / 2"],
+            document.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single().Elements<Paragraph>().Select(item => item.InnerText).ToArray());
+    }
+
+    [Fact]
     public void TemplateMigration_inserts_a_contiguous_source_range_between_unique_target_anchors_with_target_context_style()
     {
         var source = CreateStyledTextMigrationFixture(
@@ -3507,6 +3533,17 @@ public class AnnotationToolsTests
         var body = new Body(root);
         if (duplicateParagraph) body.AppendChild(ParagraphFromRuns());
         main.Document = new Document(body);
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateMultiParagraphProjectionFixture(params string[] paragraphs)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-multi-paragraph-value-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(new Table(new TableRow(new TableCell(
+            paragraphs.Select(text => new Paragraph(new Run(new Text(text)))))))));
         main.Document.Save();
         return path;
     }

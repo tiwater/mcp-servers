@@ -2402,8 +2402,9 @@ public static class TemplateMigration
         }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
-            var text = string.Concat(runs.Select(item => item.Text ?? string.Empty));
-            var spans = DelimitedValueSpans(text, valueKind, allowPlaceholder: false).Where(span => ProjectionValueKindMatches(span.Value, valueKind)).ToList();
+            var spans = ProjectionRunGroups(runs)
+                .SelectMany(group => DelimitedValueSpans(string.Concat(group.Select(item => item.Text ?? string.Empty)), valueKind, allowPlaceholder: false))
+                .Where(span => ProjectionValueKindMatches(span.Value, valueKind)).ToList();
             if (spans.Count == 0)
             {
                 failure = "template-migration-semantic-value-source-kind-mismatch";
@@ -2480,8 +2481,11 @@ public static class TemplateMigration
         }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
-            var text = string.Concat(runs.Select(item => item.Text ?? string.Empty));
-            var spans = DelimitedValueSpans(text, valueKind, allowPlaceholder: true).Where(span => ProjectionValueKindMatches(span.Value, valueKind) || IsProjectionPlaceholder(span.Value)).ToList();
+            var spans = ProjectionRunGroups(runs)
+                .SelectMany(group => DelimitedValueSpans(string.Concat(group.Select(item => item.Text ?? string.Empty)), valueKind, allowPlaceholder: true)
+                    .Where(span => ProjectionValueKindMatches(span.Value, valueKind) || IsProjectionPlaceholder(span.Value))
+                    .Select(span => (Runs: group, Span: span)))
+                .ToList();
             if (spans.Count == 0)
             {
                 failure = "template-migration-semantic-value-baseline-empty";
@@ -2492,7 +2496,7 @@ public static class TemplateMigration
                 failure = "template-migration-semantic-value-baseline-value-ambiguous";
                 return false;
             }
-            target = new ProjectionTargetSpan(runs, spans[0].Start, spans[0].End);
+            target = new ProjectionTargetSpan(spans[0].Runs, spans[0].Span.Start, spans[0].Span.End);
             return true;
         }
         var groups = string.Equals(extraction, "unique-delimited-run-group", StringComparison.Ordinal)
@@ -2646,18 +2650,21 @@ public static class TemplateMigration
         }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
-            var text = string.Concat(runs.Select(run => run.Text ?? string.Empty));
             var delimitedCandidates = new List<string>();
-            for (var delimiter = 0; delimiter < text.Length; delimiter += 1)
+            foreach (var group in runs.GroupBy(run => Regex.Replace(run.Id, ":run:[0-9]+$", string.Empty, RegexOptions.CultureInvariant), StringComparer.Ordinal))
             {
-                if (text[delimiter] is not (':' or '：')) continue;
-                var start = delimiter + 1;
-                while (start < text.Length && char.IsWhiteSpace(text[start])) start += 1;
-                var end = start;
-                while (end < text.Length && IndependentlyAllowedValueCharacter(text[end], valueKind)) end += 1;
-                if (end <= start) continue;
-                var candidate = text[start..end];
-                if (IndependentlyMatchesValueKind(candidate, valueKind)) delimitedCandidates.Add(candidate);
+                var text = string.Concat(group.Select(run => run.Text ?? string.Empty));
+                for (var delimiter = 0; delimiter < text.Length; delimiter += 1)
+                {
+                    if (text[delimiter] is not (':' or '：')) continue;
+                    var start = delimiter + 1;
+                    while (start < text.Length && char.IsWhiteSpace(text[start])) start += 1;
+                    var end = start;
+                    while (end < text.Length && IndependentlyAllowedValueCharacter(text[end], valueKind)) end += 1;
+                    if (end <= start) continue;
+                    var candidate = text[start..end];
+                    if (IndependentlyMatchesValueKind(candidate, valueKind)) delimitedCandidates.Add(candidate);
+                }
             }
             if (delimitedCandidates.Count != 1) return false;
             value = delimitedCandidates[0];
@@ -2708,38 +2715,41 @@ public static class TemplateMigration
         }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
-            var text = string.Concat(runs.Select(run => run.Text ?? string.Empty));
-            var delimitedCandidates = new List<(int Start, int End)>();
-            for (var delimiter = 0; delimiter < text.Length; delimiter += 1)
+            var delimitedCandidates = new List<(IReadOnlyList<TemplateMigrationObject> Runs, int Start, int End)>();
+            foreach (var group in runs.GroupBy(run => Regex.Replace(run.Id, ":run:[0-9]+$", string.Empty, RegexOptions.CultureInvariant), StringComparer.Ordinal).Select(group => group.ToList()))
             {
-                if (text[delimiter] is not (':' or '：')) continue;
-                var start = delimiter + 1;
-                while (start < text.Length && char.IsWhiteSpace(text[start])) start += 1;
-                var end = start;
-                if (start + 1 < text.Length && text[start] == '{' && text[start + 1] == '{')
+                var text = string.Concat(group.Select(run => run.Text ?? string.Empty));
+                for (var delimiter = 0; delimiter < text.Length; delimiter += 1)
                 {
-                    var close = text.IndexOf("}}", start + 2, StringComparison.Ordinal);
-                    end = close < 0 ? start : close + 2;
+                    if (text[delimiter] is not (':' or '：')) continue;
+                    var start = delimiter + 1;
+                    while (start < text.Length && char.IsWhiteSpace(text[start])) start += 1;
+                    var end = start;
+                    if (start + 1 < text.Length && text[start] == '{' && text[start + 1] == '{')
+                    {
+                        var close = text.IndexOf("}}", start + 2, StringComparison.Ordinal);
+                        end = close < 0 ? start : close + 2;
+                    }
+                    else if (start < text.Length && text[start] == '[')
+                    {
+                        var close = text.IndexOf(']', start + 1);
+                        end = close < 0 ? start : close + 1;
+                    }
+                    else
+                    {
+                        while (end < text.Length && IndependentlyAllowedValueCharacter(text[end], valueKind)) end += 1;
+                    }
+                    if (end <= start) continue;
+                    var candidate = text[start..end];
+                    if (IndependentlyMatchesValueKind(candidate, valueKind) || Regex.IsMatch(candidate, "^(?:\\{\\{[^{}]+\\}\\}|\\[[^\\[\\]]+\\])$", RegexOptions.CultureInvariant)) delimitedCandidates.Add((group, start, end));
                 }
-                else if (start < text.Length && text[start] == '[')
-                {
-                    var close = text.IndexOf(']', start + 1);
-                    end = close < 0 ? start : close + 1;
-                }
-                else
-                {
-                    while (end < text.Length && IndependentlyAllowedValueCharacter(text[end], valueKind)) end += 1;
-                }
-                if (end <= start) continue;
-                var candidate = text[start..end];
-                if (IndependentlyMatchesValueKind(candidate, valueKind) || Regex.IsMatch(candidate, "^(?:\\{\\{[^{}]+\\}\\}|\\[[^\\[\\]]+\\])$", RegexOptions.CultureInvariant)) delimitedCandidates.Add((start, end));
             }
             if (delimitedCandidates.Count != 1) return false;
             var delimitedSelected = delimitedCandidates[0];
             var delimitedChanges = new Dictionary<string, string>(StringComparer.Ordinal);
             var delimitedOffset = 0;
             var delimitedAffected = new List<(TemplateMigrationObject Run, int Start, int End)>();
-            foreach (var run in runs)
+            foreach (var run in delimitedSelected.Runs)
             {
                 var runText = run.Text ?? string.Empty;
                 var start = delimitedOffset;
