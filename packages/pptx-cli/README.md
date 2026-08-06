@@ -11,6 +11,8 @@ tiwater-pptx export-json <input.pptx> [output.json]
 tiwater-pptx fill-template <template.pptx> <data.json> <output.pptx>
 tiwater-pptx apply-format-edits <input.pptx> <plan.json> <output.pptx>
 tiwater-pptx apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>
+tiwater-pptx map-render-findings <inspect.json> <render-manifest.json> <findings.json> <map.json>
+tiwater-pptx validate-render-finding-map <inspect.json> <render-manifest.json> <findings.json> <map.json> <verdict.json>
 ```
 
 For local development fallback:
@@ -58,6 +60,10 @@ by slide number, shape id, and run index from `inspect --detail`.
 Supported `paragraphAlignment` values are `left`, `center`, `right`,
 `justified`, and `distributed`. Missing targets are reported in `issues`; they
 are not silently ignored.
+
+Rendered finding mapping is evidence-only: it identifies the current slide,
+layout, or master object associated with a hash-bound WPS raster finding but
+does not infer an edit. See [RENDER_FINDING_CONTRACT.md](RENDER_FINDING_CONTRACT.md).
 
 ## Template Application Plan
 
