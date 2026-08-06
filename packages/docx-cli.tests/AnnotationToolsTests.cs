@@ -544,7 +544,7 @@ public class AnnotationToolsTests
         Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(
             source,
             baseline,
-            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v3" }));
+            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v4" }));
 
         var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, SemanticValueCandidate("Source: R9", "Target: old", "token"));
         var stale = resolved.Plan with { SourceSha256 = new string('0', 64) };
@@ -564,6 +564,72 @@ public class AnnotationToolsTests
         var validation = TemplateMigration.ValidateReadback(source, baseline, tampered, resolved.Plan);
         Assert.False(validation.Pass);
         Assert.Contains(validation.Failures, item => item.Reason == "template-migration-readback-semantic-value-mismatch");
+    }
+
+    [Fact]
+    public void TemplateMigration_inserts_a_contiguous_source_range_between_unique_target_anchors_with_target_context_style()
+    {
+        var source = CreateStyledTextMigrationFixture(
+            ("stable before", "Source"),
+            ("new first", "Source"),
+            ("new second", "Source"),
+            ("stable after", "Source"));
+        var baseline = CreateStyledTextMigrationFixture(
+            ("stable before", "Before"),
+            ("stable after", "After"));
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v3",
+            [],
+            BodyInsertions:
+            [
+                new TemplateMigrationSemanticCandidateBodyInsertion(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "new first"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "new second"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "stable before"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "stable after"),
+                    "target-after-context")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal("tiwater.docx.template-migration-plan/v5", resolved.Plan.Schema);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-body-insertion-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => item.Reason) ?? []));
+        using var document = WordprocessingDocument.Open(output, false);
+        var paragraphs = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ToList();
+        Assert.Equal(["stable before", "new first", "new second", "stable after"], paragraphs.Select(item => item.InnerText).ToArray());
+        Assert.Equal(["Before", "After", "After", "After"], paragraphs.Select(item => item.ParagraphProperties?.ParagraphStyleId?.Val?.Value).ToArray());
+
+        var tampered = Path.Combine(Path.GetTempPath(), $"migration-body-insertion-tampered-{Guid.NewGuid():N}.docx");
+        Editor.Apply(output, tampered, [new DocxEditOperation("replaceParagraphText", ParagraphIndex: 1, Text: "changed")]);
+        Assert.Contains(TemplateMigration.ValidateReadback(source, baseline, tampered, resolved.Plan).Failures, item => item.Reason == "template-migration-readback-body-insertion-content-mismatch");
+        Assert.Contains(TemplateMigration.BuildOperations(source, baseline, resolved.Plan with { BodyInsertions = [] }).Failures, item => item.Reason == "template-migration-plan-v5-body-insertion-required");
+    }
+
+    [Fact]
+    public void TemplateMigration_body_insertion_fails_closed_for_ambiguous_or_non_adjacent_target_anchors()
+    {
+        var source = CreateTextMigrationFixture("before", "source addition", "after");
+        var ambiguous = CreateTextMigrationFixture("before", "after", "after");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v3",
+            [],
+            BodyInsertions:
+            [new TemplateMigrationSemanticCandidateBodyInsertion(
+                new TemplateMigrationSemanticSelector("paragraph", "body", "source addition"),
+                new TemplateMigrationSemanticSelector("paragraph", "body", "source addition"),
+                new TemplateMigrationSemanticSelector("paragraph", "body", "before"),
+                new TemplateMigrationSemanticSelector("paragraph", "body", "after"),
+                "target-after-context")]);
+        var ambiguousResult = TemplateMigration.ResolveSemanticCandidate(source, ambiguous, candidate);
+        Assert.False(ambiguousResult.Pass);
+        Assert.Contains(ambiguousResult.Unresolved, item => item.Reason == "template-migration-semantic-body-insertion-anchor-not-unique");
+
+        var nonAdjacent = CreateTextMigrationFixture("before", "target-owned", "after");
+        var nonAdjacentResult = TemplateMigration.ResolveSemanticCandidate(source, nonAdjacent, candidate);
+        Assert.False(nonAdjacentResult.Pass);
+        Assert.Contains(nonAdjacentResult.Unresolved, item => item.Reason == "template-migration-semantic-body-insertion-range-invalid");
     }
 
     [Fact]
@@ -3214,6 +3280,21 @@ public class AnnotationToolsTests
         var main = document.AddMainDocumentPart();
         main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
         main.Document.Save();
+        return path;
+    }
+
+    private static string CreateStyledTextMigrationFixture(params (string Text, string StyleId)[] paragraphs)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-styled-text-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+        stylesPart.Styles = new Styles(paragraphs.Select(item => item.StyleId).Distinct(StringComparer.Ordinal).Select(styleId =>
+            new Style(new StyleName { Val = styleId }) { Type = StyleValues.Paragraph, StyleId = styleId }));
+        main.Document = new Document(new Body(paragraphs.Select(item =>
+            new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = item.StyleId }), new Run(new Text(item.Text))))));
+        main.Document.Save();
+        stylesPart.Styles.Save();
         return path;
     }
 

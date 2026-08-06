@@ -307,6 +307,7 @@ public static class TemplateMigration
         var mappings = automatic.Plan.Mappings.ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
         var failures = new List<TemplateMigrationPlanFailure>();
         var bodyAppends = new List<TemplateMigrationBodyAppend>();
+        var bodyInsertions = new List<TemplateMigrationBodyInsertion>();
         var valueProjections = new List<TemplateMigrationValueProjection>();
 
         foreach (var proposal in candidate.Mappings ?? [])
@@ -366,6 +367,30 @@ public static class TemplateMigration
             }
             foreach (var objectId in DescendantsOf(analysis.Source.Objects, range)) mappings.Remove(objectId);
             bodyAppends.Add(new TemplateMigrationBodyAppend(starts[0].Id, ends[0].Id));
+        }
+
+        foreach (var proposal in candidate.BodyInsertions ?? [])
+        {
+            var starts = ResolveSelector(analysis.Source.Objects, proposal.SourceStart);
+            var ends = ResolveSelector(analysis.Source.Objects, proposal.SourceEnd);
+            var before = ResolveSelector(analysis.Baseline.Objects, proposal.BaselineBefore);
+            var after = ResolveSelector(analysis.Baseline.Objects, proposal.BaselineAfter);
+            if (starts.Count != 1 || ends.Count != 1 || before.Count != 1 || after.Count != 1)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-body-insertion-anchor-not-unique"));
+                continue;
+            }
+            var range = BodyRange(analysis.Source.Objects, starts[0].Id, ends[0].Id);
+            var baselineRoots = analysis.Baseline.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+            var beforeIndex = baselineRoots.FindIndex(item => item.Id == before[0].Id);
+            var afterIndex = baselineRoots.FindIndex(item => item.Id == after[0].Id);
+            if (range is null || beforeIndex < 0 || afterIndex != beforeIndex + 1)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-body-insertion-range-invalid", starts[0].Id, after[0].Id));
+                continue;
+            }
+            foreach (var objectId in DescendantsOf(analysis.Source.Objects, range)) mappings.Remove(objectId);
+            bodyInsertions.Add(new TemplateMigrationBodyInsertion(starts[0].Id, ends[0].Id, before[0].Id, after[0].Id, proposal.StylePolicy));
         }
 
         var projectedSources = new HashSet<string>(StringComparer.Ordinal);
@@ -442,13 +467,15 @@ public static class TemplateMigration
         }
 
         var plan = new TemplateMigrationPlan(
-            valueProjections.Count != 0 ? "tiwater.docx.template-migration-plan/v4"
+            bodyInsertions.Count != 0 ? "tiwater.docx.template-migration-plan/v5"
+                : valueProjections.Count != 0 ? "tiwater.docx.template-migration-plan/v4"
                 : bodyAppends.Count == 0 ? "tiwater.docx.template-migration-plan/v1" : "tiwater.docx.template-migration-plan/v2",
             analysis.Source.Sha256,
             analysis.Baseline.Sha256,
             mappings.Values.OrderBy(mapping => mapping.SourceObjectId, StringComparer.Ordinal).ToList(),
             bodyAppends,
-            ValueProjections: valueProjections);
+            ValueProjections: valueProjections,
+            BodyInsertions: bodyInsertions);
         var build = BuildOperations(source, baseline, plan);
         failures.AddRange(build.Failures);
         foreach (var mapping in plan.Mappings.Where(mapping => string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal)))
@@ -472,7 +499,7 @@ public static class TemplateMigration
 
     private static void ValidateSemanticCandidateJson(JsonElement root)
     {
-        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings", "bodyAppends", "valueProjections"], StringComparer.Ordinal), "template-migration-semantic-candidate");
+        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings", "bodyAppends", "valueProjections", "bodyInsertions"], StringComparer.Ordinal), "template-migration-semantic-candidate");
         if (!root.TryGetProperty("mappings", out var mappings) || mappings.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-mappings-invalid");
         foreach (var mapping in mappings.EnumerateArray())
         {
@@ -514,6 +541,19 @@ public static class TemplateMigration
                 }
             }
         }
+        if (root.TryGetProperty("bodyInsertions", out var insertions))
+        {
+            if (insertions.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-body-insertions-invalid");
+            foreach (var insertion in insertions.EnumerateArray())
+            {
+                RequireOnlyFields(insertion, new HashSet<string>(["sourceStart", "sourceEnd", "baselineBefore", "baselineAfter", "stylePolicy"], StringComparer.Ordinal), "template-migration-semantic-candidate-body-insertion");
+                foreach (var side in new[] { "sourceStart", "sourceEnd", "baselineBefore", "baselineAfter" })
+                {
+                    if (!insertion.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
+                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                }
+            }
+        }
     }
 
     private static void RequireOnlyFields(JsonElement element, IReadOnlySet<string> allowed, string label)
@@ -524,12 +564,15 @@ public static class TemplateMigration
 
     private static void ValidateSemanticCandidate(TemplateMigrationSemanticCandidate candidate)
     {
-        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v1" or "tiwater.docx.template-migration-semantic-candidate/v2")) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
+        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v1" or "tiwater.docx.template-migration-semantic-candidate/v2" or "tiwater.docx.template-migration-semantic-candidate/v3")) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
         if (string.Equals(candidate.Schema, "tiwater.docx.template-migration-semantic-candidate/v1", StringComparison.Ordinal)
             && (candidate.ValueProjections?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-v1-value-projection-forbidden");
+        if (candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v3"
+            && (candidate.BodyInsertions?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-body-insertion-schema-invalid");
         if ((candidate.Mappings is null || candidate.Mappings.Count == 0)
             && (candidate.BodyAppends is null || candidate.BodyAppends.Count == 0)
-            && (candidate.ValueProjections is null || candidate.ValueProjections.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
+            && (candidate.ValueProjections is null || candidate.ValueProjections.Count == 0)
+            && (candidate.BodyInsertions is null || candidate.BodyInsertions.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
         foreach (var mapping in candidate.Mappings ?? [])
         {
             ValidateSemanticSelector(mapping.Source, "source");
@@ -557,6 +600,14 @@ public static class TemplateMigration
             if (projection.ValueKind is not ("text" or "token" or "date" or "identifier" or "version")) throw new InvalidOperationException("template-migration-semantic-value-kind-invalid");
             if (projection.Extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value")) throw new InvalidOperationException("template-migration-semantic-value-extraction-invalid");
             if (string.Equals(projection.Extraction, "unique-delimited-value", StringComparison.Ordinal) && string.Equals(projection.ValueKind, "text", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-value-text-requires-parent-boundary");
+        }
+        foreach (var insertion in candidate.BodyInsertions ?? [])
+        {
+            ValidateSemanticSelector(insertion.SourceStart, "insertion-source-start");
+            ValidateSemanticSelector(insertion.SourceEnd, "insertion-source-end");
+            ValidateSemanticSelector(insertion.BaselineBefore, "insertion-baseline-before");
+            ValidateSemanticSelector(insertion.BaselineAfter, "insertion-baseline-after");
+            if (!string.Equals(insertion.StylePolicy, "target-after-context", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-body-insertion-style-policy-invalid");
         }
     }
 
@@ -664,7 +715,7 @@ public static class TemplateMigration
         var mediaCopies = new List<TemplateMigrationMediaCopy>();
         var reviewRequired = false;
 
-        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v1" or "tiwater.docx.template-migration-plan/v2" or "tiwater.docx.template-migration-plan/v3" or "tiwater.docx.template-migration-plan/v4"))
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v1" or "tiwater.docx.template-migration-plan/v2" or "tiwater.docx.template-migration-plan/v3" or "tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5"))
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-schema-invalid", Detail: plan.Schema));
         }
@@ -676,13 +727,21 @@ public static class TemplateMigration
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-baseline-clear-schema-invalid"));
         }
-        if (plan.Schema is not "tiwater.docx.template-migration-plan/v4" && (plan.ValueProjections?.Count ?? 0) != 0)
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5") && (plan.ValueProjections?.Count ?? 0) != 0)
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-value-projection-schema-invalid"));
         }
         if (string.Equals(plan.Schema, "tiwater.docx.template-migration-plan/v4", StringComparison.Ordinal) && (plan.ValueProjections?.Count ?? 0) == 0)
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v4-value-projection-required"));
+        }
+        if (plan.Schema is not "tiwater.docx.template-migration-plan/v5" && (plan.BodyInsertions?.Count ?? 0) != 0)
+        {
+            failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-body-insertion-schema-invalid"));
+        }
+        if (string.Equals(plan.Schema, "tiwater.docx.template-migration-plan/v5", StringComparison.Ordinal) && (plan.BodyInsertions?.Count ?? 0) == 0)
+        {
+            failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v5-body-insertion-required"));
         }
         if (!string.Equals(plan.SourceSha256, analysis.Source.Sha256, StringComparison.Ordinal))
         {
@@ -699,11 +758,13 @@ public static class TemplateMigration
         var copyTargets = new HashSet<string>(StringComparer.Ordinal);
         var clearTargets = new HashSet<string>(StringComparer.Ordinal);
         var appendedSourceIds = new HashSet<string>(StringComparer.Ordinal);
+        var insertedSourceIds = new HashSet<string>(StringComparer.Ordinal);
         var projectedSourceIds = new HashSet<string>(StringComparer.Ordinal);
         var projectedTargetParents = new HashSet<string>(StringComparer.Ordinal);
         var projectedSemantics = new HashSet<string>(StringComparer.Ordinal);
         var projectionBindings = new HashSet<string>(StringComparer.Ordinal);
         var bodyAppends = new List<TemplateMigrationBodyAppend>();
+        var bodyInsertions = new List<TemplateMigrationBodyInsertion>();
 
         foreach (var clear in plan.BaselineClears ?? [])
         {
@@ -769,6 +830,33 @@ public static class TemplateMigration
             bodyAppends.Add(append);
         }
 
+        var baselineBodyRoots = analysis.Baseline.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        foreach (var insertion in plan.BodyInsertions ?? [])
+        {
+            var range = BodyRange(analysis.Source.Objects, insertion.SourceStartObjectId, insertion.SourceEndObjectId);
+            var beforeIndex = baselineBodyRoots.FindIndex(item => item.Id == insertion.BaselineBeforeObjectId);
+            var afterIndex = baselineBodyRoots.FindIndex(item => item.Id == insertion.BaselineAfterObjectId);
+            if (range is null || beforeIndex < 0 || afterIndex != beforeIndex + 1 || !string.Equals(insertion.StylePolicy, "target-after-context", StringComparison.Ordinal))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-range-invalid", insertion.SourceStartObjectId, insertion.BaselineAfterObjectId));
+                continue;
+            }
+            var roots = analysis.Source.Objects.Where(item => range.Contains(item.Id)).ToList();
+            if (roots.Any(item => item.Kind != "paragraph"))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-kind-unsupported", insertion.SourceStartObjectId, insertion.BaselineAfterObjectId));
+                continue;
+            }
+            var covered = DescendantsOf(analysis.Source.Objects, range);
+            if (covered.Overlaps(insertedSourceIds) || covered.Overlaps(appendedSourceIds))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-overlap", insertion.SourceStartObjectId, insertion.BaselineAfterObjectId));
+                continue;
+            }
+            insertedSourceIds.UnionWith(covered);
+            bodyInsertions.Add(insertion);
+        }
+
         foreach (var projection in plan.ValueProjections ?? [])
         {
             if (!sourceById.TryGetValue(projection.SourceParentObjectId, out var sourceParent)
@@ -795,7 +883,7 @@ public static class TemplateMigration
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-value-identity-duplicate", sourceParent.Id, baselineParent.Id, projection.Semantic));
                 continue;
             }
-            if (appendedSourceIds.Contains(sourceParent.Id))
+            if (appendedSourceIds.Contains(sourceParent.Id) || insertedSourceIds.Contains(sourceParent.Id))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-body-append-source-duplicate", sourceParent.Id, baselineParent.Id));
                 continue;
@@ -840,7 +928,7 @@ public static class TemplateMigration
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-source-object-duplicate", mapping.SourceObjectId));
                 continue;
             }
-            if (appendedSourceIds.Contains(mapping.SourceObjectId))
+            if (appendedSourceIds.Contains(mapping.SourceObjectId) || insertedSourceIds.Contains(mapping.SourceObjectId))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-body-append-source-duplicate", mapping.SourceObjectId));
                 continue;
@@ -989,7 +1077,7 @@ public static class TemplateMigration
             var drawingCoveredByMedia = sourceObject.Kind == "drawing"
                 && sourceObject.Provenance.TryGetValue("embedRelationshipId", out var embeddedRelationshipId)
                 && copiedMediaRelationships.Contains(embeddedRelationshipId);
-            if (!mappingsBySource.ContainsKey(sourceObject.Id) && !appendedSourceIds.Contains(sourceObject.Id) && !projectedSourceIds.Contains(sourceObject.Id) && !drawingCoveredByMedia)
+            if (!mappingsBySource.ContainsKey(sourceObject.Id) && !appendedSourceIds.Contains(sourceObject.Id) && !insertedSourceIds.Contains(sourceObject.Id) && !projectedSourceIds.Contains(sourceObject.Id) && !drawingCoveredByMedia)
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-source-object-unmapped", sourceObject.Id, Detail: sourceObject.Kind));
             }
@@ -1002,17 +1090,19 @@ public static class TemplateMigration
         var previewAllowed = failures.Count == 0;
         var canonicalPreviewOperations = previewAllowed ? operations : [];
         var canonicalPreviewMediaCopies = previewAllowed ? mediaCopies : [];
+        var canonicalPreviewBodyInsertions = previewAllowed ? bodyInsertions : [];
         return new TemplateMigrationOperationBuild(
             Schema: "tiwater.docx.template-migration-operation-build/v1",
             Pass: pass,
             ReviewRequired: reviewRequired,
             SourceSha256: analysis.Source.Sha256,
             BaselineSha256: analysis.Baseline.Sha256,
-            OperationsSha256: pass ? HashCanonical(new { operations = canonicalOperations, mediaCopies = canonicalMediaCopies, bodyAppends = canonicalBodyAppends }) : null,
+            OperationsSha256: pass ? HashCanonical(new { operations = canonicalOperations, mediaCopies = canonicalMediaCopies, bodyAppends = canonicalBodyAppends, bodyInsertions }) : null,
             Operations: canonicalOperations,
             MediaCopies: canonicalMediaCopies,
             BodyAppends: canonicalBodyAppends,
-            PreviewOperationsSha256: previewAllowed ? HashCanonical(new { operations = canonicalPreviewOperations, mediaCopies = canonicalPreviewMediaCopies }) : null,
+            BodyInsertions: canonicalPreviewBodyInsertions,
+            PreviewOperationsSha256: previewAllowed ? HashCanonical(new { operations = canonicalPreviewOperations, mediaCopies = canonicalPreviewMediaCopies, bodyInsertions = canonicalPreviewBodyInsertions }) : null,
             PreviewOperations: canonicalPreviewOperations,
             PreviewMediaCopies: canonicalPreviewMediaCopies,
             Failures: failures);
@@ -1079,9 +1169,10 @@ public static class TemplateMigration
             $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.pending");
         var edit = Editor.Apply(Path.GetFullPath(baseline), candidatePath, build.Operations);
         var mediaFailures = ApplyMediaCopies(source, candidatePath, build.MediaCopies);
+        var insertionFailures = ApplyBodyInsertions(source, baseline, candidatePath, build.BodyInsertions);
         var appendFailures = ApplyBodyAppends(source, candidatePath, build.BodyAppends);
         var readback = ValidateReadback(source, baseline, candidatePath, plan);
-        var pass = edit.AppliedOperations.All(operation => operation.Applied) && mediaFailures.Count == 0 && appendFailures.Count == 0 && readback.Pass;
+        var pass = edit.AppliedOperations.All(operation => operation.Applied) && mediaFailures.Count == 0 && insertionFailures.Count == 0 && appendFailures.Count == 0 && readback.Pass;
         if (pass)
         {
             File.Move(candidatePath, outputPath, true);
@@ -1096,7 +1187,7 @@ public static class TemplateMigration
             Output: pass ? outputPath : null,
             Build: build,
             Edit: edit,
-            MediaFailures: [.. mediaFailures, .. appendFailures],
+            MediaFailures: [.. mediaFailures, .. insertionFailures, .. appendFailures],
             Readback: readback);
     }
 
@@ -1141,9 +1232,10 @@ public static class TemplateMigration
             $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.pending");
         var edit = Editor.Apply(Path.GetFullPath(baseline), candidatePath, build.PreviewOperations);
         var mediaFailures = ApplyMediaCopies(source, candidatePath, build.PreviewMediaCopies);
+        var insertionFailures = ApplyBodyInsertions(source, baseline, candidatePath, build.BodyInsertions);
         var appendFailures = ApplyBodyAppends(source, candidatePath, build.BodyAppends);
         var readback = ValidateReadback(source, baseline, candidatePath, plan);
-        var outputVerified = edit.AppliedOperations.All(operation => operation.Applied) && mediaFailures.Count == 0 && appendFailures.Count == 0 && readback.Pass;
+        var outputVerified = edit.AppliedOperations.All(operation => operation.Applied) && mediaFailures.Count == 0 && insertionFailures.Count == 0 && appendFailures.Count == 0 && readback.Pass;
         if (outputVerified)
         {
             File.Move(candidatePath, outputPath, true);
@@ -1160,7 +1252,7 @@ public static class TemplateMigration
             Output: outputVerified ? outputPath : null,
             Build: build,
             Edit: edit,
-            MediaFailures: [.. mediaFailures, .. appendFailures],
+            MediaFailures: [.. mediaFailures, .. insertionFailures, .. appendFailures],
             Readback: readback);
     }
 
@@ -1186,10 +1278,12 @@ public static class TemplateMigration
 
         var sourceById = sourceInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var outputById = outputInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var baselineOutputIds = BuildBaselineOutputIdMap(sourceInventory, baselineInventory, outputInventory, plan.BodyInsertions ?? []);
+        string OutputId(string baselineId) => baselineOutputIds.GetValueOrDefault(baselineId, baselineId);
         foreach (var mapping in plan.Mappings ?? [])
         {
             if (!string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal) && !string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal)) continue;
-            if (!sourceById.TryGetValue(mapping.SourceObjectId, out var sourceObject) || string.IsNullOrWhiteSpace(mapping.BaselineObjectId) || !outputById.TryGetValue(mapping.BaselineObjectId, out var outputObject))
+            if (!sourceById.TryGetValue(mapping.SourceObjectId, out var sourceObject) || string.IsNullOrWhiteSpace(mapping.BaselineObjectId) || !outputById.TryGetValue(OutputId(mapping.BaselineObjectId), out var outputObject))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-object-missing", mapping.SourceObjectId, mapping.BaselineObjectId));
                 continue;
@@ -1212,14 +1306,14 @@ public static class TemplateMigration
         {
             var first = projectionGroup.First();
             if (!baselineById.TryGetValue(first.BaselineParentObjectId, out var baselineParent)
-                || !outputById.TryGetValue(first.BaselineParentObjectId, out var outputParent))
+                || !outputById.TryGetValue(OutputId(first.BaselineParentObjectId), out var outputParent))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-semantic-value-mismatch", first.SourceParentObjectId, first.BaselineParentObjectId, first.Semantic));
                 continue;
             }
             var baselineRuns = baselineInventory.Objects.Where(item => item.Kind == "run" && string.Equals(item.ParentId, baselineParent.Id, StringComparison.Ordinal)).ToList();
             var outputRuns = outputInventory.Objects.Where(item => item.Kind == "run" && string.Equals(item.ParentId, outputParent.Id, StringComparison.Ordinal)).ToList();
-            var expectedRunText = baselineRuns.ToDictionary(run => run.Id, run => run.Text ?? string.Empty, StringComparer.Ordinal);
+            var expectedRunText = baselineRuns.ToDictionary(run => OutputId(run.Id), run => run.Text ?? string.Empty, StringComparer.Ordinal);
             var projectionFailed = false;
             foreach (var projection in projectionGroup)
             {
@@ -1231,14 +1325,14 @@ public static class TemplateMigration
                     projectionFailed = true;
                     continue;
                 }
-                foreach (var replacement in replacements) expectedRunText[replacement.Key] = replacement.Value;
+                foreach (var replacement in replacements) expectedRunText[OutputId(replacement.Key)] = replacement.Value;
             }
             if (!projectionFailed && (baselineRuns.Count != outputRuns.Count || outputRuns.Any(run => !expectedRunText.TryGetValue(run.Id, out var expected) || !string.Equals(run.Text ?? string.Empty, expected, StringComparison.Ordinal))))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-semantic-value-mismatch", first.SourceParentObjectId, first.BaselineParentObjectId, first.Semantic));
             }
             if (baselineRuns.Count != outputRuns.Count || baselineRuns.Where((run, index) =>
-                    !string.Equals(run.Id, outputRuns[index].Id, StringComparison.Ordinal)
+                    !string.Equals(OutputId(run.Id), outputRuns[index].Id, StringComparison.Ordinal)
                     || !string.Equals(run.Provenance.GetValueOrDefault("runPropertiesSha256"), outputRuns[index].Provenance.GetValueOrDefault("runPropertiesSha256"), StringComparison.Ordinal)
                     || !string.Equals(run.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), outputRuns[index].Provenance.GetValueOrDefault("paragraphPropertiesSha256"), StringComparison.Ordinal))
                 .Any())
@@ -1258,7 +1352,7 @@ public static class TemplateMigration
                 : [selected];
             foreach (var target in targets)
             {
-                if (!outputById.TryGetValue(target.Id, out var outputObject)
+                if (!outputById.TryGetValue(OutputId(target.Id), out var outputObject)
                     || !string.IsNullOrEmpty(outputObject.Text))
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-clear-mismatch", BaselineObjectId: target.Id));
@@ -1277,7 +1371,7 @@ public static class TemplateMigration
             foreach (var baselineRun in baselineInventory.Objects.Where(item => item.Kind == "run" && string.Equals(item.ParentId, mapping.BaselineObjectId, StringComparison.Ordinal)))
             {
                 if (copiedTargetRuns.Contains(baselineRun.Id)) continue;
-                if (!outputById.TryGetValue(baselineRun.Id, out var outputRun)
+                if (!outputById.TryGetValue(OutputId(baselineRun.Id), out var outputRun)
                     || !string.Equals(baselineRun.Text, outputRun.Text, StringComparison.Ordinal)
                     || !string.Equals(baselineRun.Provenance.GetValueOrDefault("runPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("runPropertiesSha256"), StringComparison.Ordinal))
                 {
@@ -1286,7 +1380,7 @@ public static class TemplateMigration
             }
         }
 
-        if ((plan.BodyAppends?.Count ?? 0) == 0)
+        if ((plan.BodyAppends?.Count ?? 0) == 0 && (plan.BodyInsertions?.Count ?? 0) == 0)
         {
             var baselineStructure = baselineInventory.Objects
                 .Where(IsStructuralObject)
@@ -1303,9 +1397,14 @@ public static class TemplateMigration
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-structure-drift"));
             }
         }
-        else
+        else if ((plan.BodyInsertions?.Count ?? 0) == 0)
         {
             ValidateBodyAppendReadback(sourceInventory, baselineInventory, outputInventory, plan.BodyAppends!, failures);
+        }
+        else
+        {
+            ValidateBodyInsertionReadback(sourceInventory, baselineInventory, outputInventory, plan.BodyInsertions!, failures);
+            if ((plan.BodyAppends?.Count ?? 0) != 0) failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-append-combination-unsupported"));
         }
 
         using (var baselineDocument = WordprocessingDocument.Open(Path.GetFullPath(baseline), false))
@@ -1322,6 +1421,60 @@ public static class TemplateMigration
         }
 
         return new TemplateMigrationReadback(failures.Count == 0, failures);
+    }
+
+    private static IReadOnlyList<TemplateMigrationPlanFailure> ApplyBodyInsertions(
+        string source,
+        string baseline,
+        string output,
+        IReadOnlyList<TemplateMigrationBodyInsertion> insertions)
+    {
+        if (insertions.Count == 0) return [];
+        var failures = new List<TemplateMigrationPlanFailure>();
+        using var sourceDocument = WordprocessingDocument.Open(Path.GetFullPath(source), false);
+        using var outputDocument = WordprocessingDocument.Open(Path.GetFullPath(output), true);
+        var sourceBody = sourceDocument.MainDocumentPart?.Document?.Body;
+        var outputBody = outputDocument.MainDocumentPart?.Document?.Body;
+        if (sourceBody is null || outputBody is null) return [new TemplateMigrationPlanFailure("template-migration-body-insertion-body-missing")];
+        var sourceInventory = Inventory(source);
+        var baselineInventory = Inventory(baseline);
+        var sourceRoots = sourceInventory.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var baselineRoots = baselineInventory.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var sourceElements = sourceBody.ChildElements.Where(element => element is Paragraph or Table).ToList();
+        var outputElements = outputBody.ChildElements.Where(element => element is Paragraph or Table).ToList();
+        if (sourceRoots.Count != sourceElements.Count || baselineRoots.Count != outputElements.Count) return [new TemplateMigrationPlanFailure("template-migration-body-insertion-root-order-invalid")];
+
+        foreach (var insertion in insertions.OrderByDescending(item => baselineRoots.FindIndex(root => root.Id == item.BaselineAfterObjectId)))
+        {
+            var sourceStart = sourceRoots.FindIndex(item => item.Id == insertion.SourceStartObjectId);
+            var sourceEnd = sourceRoots.FindIndex(item => item.Id == insertion.SourceEndObjectId);
+            var afterIndex = baselineRoots.FindIndex(item => item.Id == insertion.BaselineAfterObjectId);
+            if (sourceStart < 0 || sourceEnd < sourceStart || afterIndex < 0 || outputElements[afterIndex] is not Paragraph context)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-range-invalid", insertion.SourceStartObjectId, insertion.BaselineAfterObjectId));
+                continue;
+            }
+            var anchor = outputElements[afterIndex];
+            for (var index = sourceStart; index <= sourceEnd; index += 1)
+            {
+                if (sourceElements[index] is not Paragraph sourceParagraph
+                    || sourceParagraph.Descendants<Drawing>().Any()
+                    || sourceParagraph.Descendants<FootnoteReference>().Any()
+                    || sourceParagraph.Descendants<EndnoteReference>().Any()
+                    || sourceParagraph.Descendants<SdtElement>().Any()
+                    || sourceParagraph.Descendants().Any(item => item.LocalName is "ins" or "del" or "moveFrom" or "moveTo"))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-content-unsupported", sourceRoots[index].Id));
+                    continue;
+                }
+                var clone = (Paragraph)sourceParagraph.CloneNode(true);
+                clone.RemoveAllChildren<ParagraphProperties>();
+                if (context.ParagraphProperties is not null) clone.PrependChild((ParagraphProperties)context.ParagraphProperties.CloneNode(true));
+                outputBody.InsertBefore(clone, anchor);
+            }
+        }
+        outputDocument.MainDocumentPart!.Document.Save();
+        return failures;
     }
 
     private static IReadOnlyList<TemplateMigrationPlanFailure> ApplyBodyAppends(string source, string output, IReadOnlyList<TemplateMigrationBodyAppend> appends)
@@ -1372,6 +1525,107 @@ public static class TemplateMigration
         }
         outputDocument.MainDocumentPart!.Document.Save();
         return failures;
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildBaselineOutputIdMap(
+        TemplateMigrationInventory source,
+        TemplateMigrationInventory baseline,
+        TemplateMigrationInventory output,
+        IReadOnlyList<TemplateMigrationBodyInsertion> insertions)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (insertions.Count == 0) return result;
+        var sourceRoots = source.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var baselineRoots = baseline.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var outputRoots = output.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var outputIndex = 0;
+        foreach (var baselineRoot in baselineRoots)
+        {
+            foreach (var insertion in insertions.Where(item => item.BaselineAfterObjectId == baselineRoot.Id))
+            {
+                var start = sourceRoots.FindIndex(item => item.Id == insertion.SourceStartObjectId);
+                var end = sourceRoots.FindIndex(item => item.Id == insertion.SourceEndObjectId);
+                if (start >= 0 && end >= start) outputIndex += end - start + 1;
+            }
+            if (outputIndex >= outputRoots.Count) break;
+            var outputRoot = outputRoots[outputIndex++];
+            foreach (var baselineObject in baseline.Objects.Where(item => item.Id == baselineRoot.Id || item.Id.StartsWith(baselineRoot.Id + ":", StringComparison.Ordinal)))
+            {
+                result[baselineObject.Id] = outputRoot.Id + baselineObject.Id[baselineRoot.Id.Length..];
+            }
+        }
+        return result;
+    }
+
+    private static void ValidateBodyInsertionReadback(
+        TemplateMigrationInventory source,
+        TemplateMigrationInventory baseline,
+        TemplateMigrationInventory output,
+        IReadOnlyList<TemplateMigrationBodyInsertion> insertions,
+        List<TemplateMigrationPlanFailure> failures)
+    {
+        var sourceRoots = source.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var baselineRoots = baseline.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var outputRoots = output.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var insertionsByAfter = insertions.GroupBy(item => item.BaselineAfterObjectId, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var expected = new List<(TemplateMigrationObject Root, bool Inserted, string? ContextStyle)>();
+        foreach (var baselineRoot in baselineRoots)
+        {
+            if (insertionsByAfter.TryGetValue(baselineRoot.Id, out var anchored))
+            {
+                foreach (var insertion in anchored)
+                {
+                    var start = sourceRoots.FindIndex(item => item.Id == insertion.SourceStartObjectId);
+                    var end = sourceRoots.FindIndex(item => item.Id == insertion.SourceEndObjectId);
+                    if (start < 0 || end < start) { failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-body-insertion-range-missing", insertion.SourceStartObjectId, insertion.BaselineAfterObjectId)); return; }
+                    expected.AddRange(sourceRoots.Skip(start).Take(end - start + 1).Select(item => (item, true, baselineRoot.Style)));
+                }
+            }
+            expected.Add((baselineRoot, false, (string?)null));
+        }
+        if (expected.Count != outputRoots.Count)
+        {
+            failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-body-insertion-count-mismatch", Detail: $"expected={expected.Count};actual={outputRoots.Count}"));
+            return;
+        }
+        for (var index = 0; index < expected.Count; index += 1)
+        {
+            var (expectedRoot, inserted, contextStyle) = expected[index];
+            var actualRoot = outputRoots[index];
+            if (inserted)
+            {
+                if (!string.Equals(ContentTreeFingerprint(source.Objects, expectedRoot.Id), ContentTreeFingerprint(output.Objects, actualRoot.Id), StringComparison.Ordinal)
+                    || !string.Equals(actualRoot.Style, contextStyle, StringComparison.Ordinal))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-body-insertion-content-mismatch", expectedRoot.Id, actualRoot.Id));
+                }
+            }
+            else if (!string.Equals(RelativeStructureTreeFingerprint(baseline.Objects, expectedRoot.Id), RelativeStructureTreeFingerprint(output.Objects, actualRoot.Id), StringComparison.Ordinal))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-structure-drift", expectedRoot.Id, actualRoot.Id));
+            }
+        }
+    }
+
+    private static string ContentTreeFingerprint(IReadOnlyList<TemplateMigrationObject> objects, string rootId)
+    {
+        var descendants = DescendantsOf(objects, [rootId]);
+        var rows = objects.Where(item => descendants.Contains(item.Id)).Select(item => new { item.Kind, item.Text });
+        return HashCanonical(rows);
+    }
+
+    private static string RelativeStructureTreeFingerprint(IReadOnlyList<TemplateMigrationObject> objects, string rootId)
+    {
+        var descendants = DescendantsOf(objects, [rootId]);
+        var rows = objects.Where(item => descendants.Contains(item.Id)).Select(item => new
+        {
+            RelativeId = item.Id == rootId ? string.Empty : item.Id[rootId.Length..],
+            item.Kind,
+            item.Style,
+            RelativeParent = item.ParentId is null ? null : item.ParentId == rootId ? string.Empty : item.ParentId.StartsWith(rootId, StringComparison.Ordinal) ? item.ParentId[rootId.Length..] : item.ParentId,
+            item.Topology
+        });
+        return HashCanonical(rows);
     }
 
     private static void ValidateBodyAppendReadback(TemplateMigrationInventory source, TemplateMigrationInventory baseline, TemplateMigrationInventory output, IReadOnlyList<TemplateMigrationBodyAppend> appends, List<TemplateMigrationPlanFailure> failures)

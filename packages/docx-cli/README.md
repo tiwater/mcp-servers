@@ -104,6 +104,18 @@ drift outside the declared append. This is explicit source preservation when a
 target template has no compatible section; it does not infer a target location,
 style conversion, or semantic equivalence.
 
+For source-only paragraph ranges that belong between two adjacent target body
+anchors, semantic candidate v3 may declare an anchored body insertion. Both
+source range endpoints and both target anchors must resolve uniquely in the
+current hash-attested inventories, and the target anchors must be adjacent and
+ordered. The supported `target-after-context` style policy keeps the source
+paragraph/run content and order while applying the following target paragraph's
+paragraph style. Tables, drawings, revisions, content controls, ambiguous
+anchors, overlapping ranges, and non-adjacent anchors fail closed. Independent
+readback rebuilds the source/baseline/output inventories, translates shifted
+target object identities, and verifies inserted content/order, contextual style,
+and the relative structure of every pre-existing target body object.
+
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
 ```
