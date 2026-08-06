@@ -2472,6 +2472,69 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void NormalizeOpenXml_materializes_inherited_section_headers_and_footers()
+    {
+        var output = Path.Combine(Path.GetTempPath(), $"normalized-sections-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(output, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var header = main.AddNewPart<HeaderPart>();
+            header.Header = new Header(new Paragraph(new Run(new Text("shared header"))));
+            var footer = main.AddNewPart<FooterPart>();
+            footer.Footer = new Footer(new Paragraph(new Run(new Text("shared footer"))));
+            var alternateHeader = main.AddNewPart<HeaderPart>();
+            alternateHeader.Header = new Header(new Paragraph(new Run(new Text("alternate header"))));
+            main.Document = new Document(new Body(
+                new Paragraph(new ParagraphProperties(new SectionProperties(
+                    new SectionType { Val = SectionMarkValues.Continuous },
+                    new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
+                    new FooterReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(footer) })), new Run(new Text("section one"))),
+                new Paragraph(new ParagraphProperties(new SectionProperties(new SectionType { Val = SectionMarkValues.Continuous })), new Run(new Text("section two"))),
+                new Paragraph(new ParagraphProperties(new SectionProperties(
+                    new SectionType { Val = SectionMarkValues.Continuous },
+                    new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(alternateHeader) })), new Run(new Text("section three"))),
+                new SectionProperties()));
+            main.Document.Save();
+        }
+
+        DocxPackageNormalizer.Normalize(output, output);
+
+        using var normalized = WordprocessingDocument.Open(output, false);
+        var sections = normalized.MainDocumentPart!.Document!.Descendants<SectionProperties>().ToList();
+        Assert.Equal(4, sections.Count);
+        Assert.All(sections, section => Assert.NotNull(section.GetFirstChild<HeaderReference>()?.Id?.Value));
+        Assert.All(sections, section => Assert.NotNull(section.GetFirstChild<FooterReference>()?.Id?.Value));
+        Assert.Equal(
+            ["shared header", "shared header", "alternate header", "alternate header"],
+            sections.Select(section => normalized.MainDocumentPart.GetPartById(section.GetFirstChild<HeaderReference>()!.Id!.Value!) as HeaderPart)
+                .Select(part => part!.Header!.InnerText).ToArray());
+        Assert.All(sections, section => Assert.Equal("shared footer", ((FooterPart)normalized.MainDocumentPart.GetPartById(section.GetFirstChild<FooterReference>()!.Id!.Value!)).Footer!.InnerText));
+    }
+
+    [Fact]
+    public void NormalizeOpenXml_replaces_equivalent_next_page_sections_with_page_breaks()
+    {
+        var output = Path.Combine(Path.GetTempPath(), $"normalized-equivalent-sections-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(output, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            var properties = new SectionProperties(new PageSize { Width = 11906, Height = 16838 });
+            main.Document = new Document(new Body(
+                new Paragraph(new ParagraphProperties((SectionProperties)properties.CloneNode(true)), new Run(new Text("one"))),
+                new Paragraph(new ParagraphProperties((SectionProperties)properties.CloneNode(true)), new Run(new Text("two"))),
+                (SectionProperties)properties.CloneNode(true)));
+            main.Document.Save();
+        }
+
+        DocxPackageNormalizer.Normalize(output, output);
+
+        using var normalized = WordprocessingDocument.Open(output, false);
+        Assert.Single(normalized.MainDocumentPart!.Document!.Descendants<SectionProperties>());
+        Assert.Equal(2, normalized.MainDocumentPart.Document.Descendants<Break>().Count(item => item.Type?.Value == BreakValues.Page));
+        Assert.Equal(["one", "two"], normalized.MainDocumentPart.Document.Body!.Elements<Paragraph>().Select(item => item.InnerText).ToArray());
+    }
+
+    [Fact]
     public void TemplateMigration_readback_treats_removed_wps_no_numbering_marker_as_canonical_but_detects_real_changes()
     {
         var source = CreateTextMigrationFixture("legacy label");
