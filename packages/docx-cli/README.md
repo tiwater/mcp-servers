@@ -57,9 +57,14 @@ tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
 
 ### 3aa. Derive an Exact-Text Mapping Candidate
 
-Produces a plan only for content that is unique within both source and baseline
-for the same object kind. Repeated, absent, or otherwise ambiguous content is
-emitted as `review-required`; it is never matched by position.
+Produces a plan for content that is unique within both source and baseline for
+the same object kind. Repeated table-cell content is also mapped when the full
+normalized cell topology identifies exactly one source table and exactly one
+baseline table, with a one-to-one row/column correspondence. The provider uses
+its own current inventories for that proof; callers do not supply object ids or
+coordinates. Repeated content remains `review-required` when either table is
+ambiguous or the semantic topology differs. Other absent or ambiguous content
+also remains `review-required`.
 
 ```bash
 tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>

@@ -1370,6 +1370,68 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_exact_text_derivation_maps_repeated_cells_when_their_table_semantic_topology_is_reciprocally_unique()
+    {
+        var source = CreateTableMigrationFixture([["", "repeated fact", "repeated fact", "repeated fact"]]);
+        var baseline = CreateTableMigrationFixture([["", "repeated fact", "repeated fact", "repeated fact"]]);
+
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
+
+        Assert.True(derived.Pass, string.Join("; ", derived.Unresolved.Select(item => item.Reason)));
+        var repeated = derived.Plan.Mappings.Where(mapping => mapping.SourceObjectId.Contains(":cell:", StringComparison.Ordinal)).ToList();
+        Assert.Equal(3, repeated.Count);
+        Assert.All(repeated, mapping => Assert.Equal("copy-text", mapping.Disposition));
+        Assert.Equal(
+            [
+                ("body:table:0:row:0:cell:1", "body:table:0:row:0:cell:1"),
+                ("body:table:0:row:0:cell:2", "body:table:0:row:0:cell:2"),
+                ("body:table:0:row:0:cell:3", "body:table:0:row:0:cell:3")
+            ],
+            repeated.Select(mapping => (mapping.SourceObjectId, mapping.BaselineObjectId!)).ToArray());
+    }
+
+    [Fact]
+    public void TemplateMigration_reciprocal_table_topology_is_independent_of_container_index_and_handles_an_unseen_two_row_shape()
+    {
+        var source = CreateTableMigrationFixture([
+            ["heading", "same", "same"],
+            ["detail", "same", "same"]
+        ]);
+        var baseline = CreateTableMigrationFixture(
+            [["unrelated"]],
+            [
+                ["heading", "same", "same"],
+                ["detail", "same", "same"]
+            ]);
+
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
+
+        Assert.True(derived.Pass, string.Join("; ", derived.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(derived.Plan.Mappings, mapping =>
+            mapping.SourceObjectId == "body:table:0:row:1:cell:2"
+            && mapping.BaselineObjectId == "body:table:1:row:1:cell:2"
+            && mapping.Disposition == "copy-text");
+    }
+
+    [Fact]
+    public void TemplateMigration_reciprocal_table_topology_refuses_ambiguous_or_non_isomorphic_tables()
+    {
+        var source = CreateTableMigrationFixture([["", "same", "same", "same"]]);
+        var ambiguousBaseline = CreateTableMigrationFixture(
+            [["", "same", "same", "same"]],
+            [["", "same", "same", "same"]]);
+        var nonIsomorphicBaseline = CreateTableMigrationFixture([["same", "", "same", "same"]]);
+
+        var ambiguous = TemplateMigration.DeriveExactTextPlan(source, ambiguousBaseline);
+        var nonIsomorphic = TemplateMigration.DeriveExactTextPlan(source, nonIsomorphicBaseline);
+
+        Assert.False(ambiguous.Pass);
+        Assert.Contains(ambiguous.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
+        Assert.False(nonIsomorphic.Pass);
+        Assert.Contains(nonIsomorphic.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
+    }
+
+    [Fact]
     public void Inspect_includes_annotation_anchors_in_unified_report()
     {
         var docPath = CreateAnnotatedFixture();
@@ -3082,6 +3144,22 @@ public class AnnotationToolsTests
             ? new TableRow(new TableCell(new Paragraph(new Run(new Text("baseline cell")))), new TableCell(new Paragraph(new Run(new Text("unique cell")))))
             : new TableRow(new TableCell(new Paragraph(new Run(new Text("unique cell")))));
         body.Append(new Table(new TableProperties(), new TableGrid(new GridColumn { Width = "2400" }, new GridColumn { Width = "2400" }), row));
+        main.Document = new Document(body);
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateTableMigrationFixture(params IReadOnlyList<IReadOnlyList<string>>[] tables)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-reciprocal-table-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var body = new Body();
+        foreach (var rows in tables)
+        {
+            body.Append(new Table(rows.Select(row =>
+                new TableRow(row.Select(text => new TableCell(new Paragraph(new Run(new Text(text)))))))));
+        }
         main.Document = new Document(body);
         main.Document.Save();
         return path;
