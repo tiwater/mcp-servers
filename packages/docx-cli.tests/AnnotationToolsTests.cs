@@ -2025,9 +2025,11 @@ public class AnnotationToolsTests
     }
 
     [Theory]
-    [InlineData("replaceTableCellText")]
-    [InlineData("replaceTableCellRichText")]
-    public void Edit_blank_table_cell_text_overrides_inherited_paragraph_superscript(string operationType)
+    [InlineData("replaceTableCellText", "")]
+    [InlineData("replaceTableCellRichText", "")]
+    [InlineData("replaceTableCellText", " \u00A0")]
+    [InlineData("replaceTableCellRichText", "\u200B\u2060\uFEFF")]
+    public void Edit_blank_table_cell_text_overrides_inherited_paragraph_superscript(string operationType, string invisibleMarker)
     {
         var path = Path.Combine(Path.GetTempPath(), $"blank-cell-inherited-superscript-{Guid.NewGuid():N}.docx");
         using (var source = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
@@ -2043,7 +2045,10 @@ public class AnnotationToolsTests
                                 new ParagraphProperties(
                                     new ParagraphMarkRunProperties(
                                         new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman" },
-                                        new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }))))))));
+                                        new VerticalTextAlignment { Val = VerticalPositionValues.Superscript })),
+                                new Run(
+                                    new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }),
+                                    new Text(invisibleMarker) { Space = SpaceProcessingModeValues.Preserve })))))));
             main.Document.Save();
         }
         var output = Path.Combine(Path.GetTempPath(), $"blank-cell-inherited-superscript-edited-{Guid.NewGuid():N}.docx");

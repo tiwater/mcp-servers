@@ -2116,7 +2116,7 @@ public static class Editor
     private static Run? FindCellStyleTemplateRun(TableCell cell)
     {
         var paragraph = cell.Elements<Paragraph>().FirstOrDefault();
-        var run = cell.Descendants<Run>().FirstOrDefault(candidate => candidate.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)))
+        var run = cell.Descendants<Run>().FirstOrDefault(candidate => candidate.Descendants<Text>().Any(text => HasVisibleText(text.Text)))
             ?? cell.Descendants<Run>().FirstOrDefault();
         var paragraphMark = paragraph?.ParagraphProperties?.ParagraphMarkRunProperties;
         if (paragraphMark is null)
@@ -2136,7 +2136,10 @@ public static class Editor
 
     private static bool HasTextBearingRun(TableCell cell)
         => cell.Descendants<Run>()
-            .Any(candidate => candidate.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)));
+            .Any(candidate => candidate.Descendants<Text>().Any(text => HasVisibleText(text.Text)));
+
+    private static bool HasVisibleText(string? text)
+        => text?.Any(character => !char.IsWhiteSpace(character) && character is not ('\u200B' or '\u200C' or '\u200D' or '\u2060' or '\uFEFF')) == true;
 
     private static void OverlayRunProperties(RunProperties target, IEnumerable<OpenXmlElement> source)
     {
