@@ -15,6 +15,7 @@
           "type": {
             "enum": [
               "setCellValue",
+              "setCellNumberFormat",
               "setPrintArea",
               "setPageSetup",
               "setRowPageBreaks",
@@ -30,6 +31,9 @@
           "cell": { "type": ["string", "null"] },
           "value": { "type": ["string", "number", "boolean", "null"] },
           "valueType": { "type": ["string", "null"] },
+          "numberFormat": { "type": ["string", "null"], "minLength": 1, "maxLength": 255 },
+          "sourceSheet": { "type": ["string", "null"], "minLength": 1 },
+          "sourceCell": { "type": ["string", "null"], "pattern": "^[A-Za-z]{1,3}[1-9][0-9]*$" },
           "startCell": { "type": ["string", "null"] },
           "values": {
             "oneOf": [
@@ -81,7 +85,30 @@
           "repeatRowsEnd": ["repeatRowsStart"],
           "repeatColsStart": ["repeatColsEnd"],
           "repeatColsEnd": ["repeatColsStart"]
-        }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "type": { "const": "setCellNumberFormat" } }, "required": ["type"] },
+            "then": {
+              "required": ["sheet", "cell"],
+              "oneOf": [
+                {
+                  "required": ["numberFormat"],
+                  "properties": { "numberFormat": { "type": "string", "minLength": 1, "maxLength": 255 } },
+                  "not": { "anyOf": [{ "required": ["sourceSheet"] }, { "required": ["sourceCell"] }] }
+                },
+                {
+                  "required": ["sourceSheet", "sourceCell"],
+                  "properties": {
+                    "sourceSheet": { "type": "string", "minLength": 1 },
+                    "sourceCell": { "type": "string", "pattern": "^[A-Za-z]{1,3}[1-9][0-9]*$" }
+                  },
+                  "not": { "required": ["numberFormat"] }
+                }
+              ]
+            }
+          }
+        ]
       }
     }
   }

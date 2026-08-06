@@ -89,6 +89,7 @@ public static class Editor
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
             "replaceTableCellRunText" => ReplaceTableCellRunText(body, operation),
+            "setTableCellChoiceState" => SetTableCellChoiceState(doc, body, operation),
             "replaceHeaderTableCellText" => ReplacePartTableCellText(doc, operation, "header"),
             "replaceHeaderTableCellRunText" => ReplacePartTableCellRunText(doc, operation, "header"),
             "replaceFooterTableCellText" => ReplacePartTableCellText(doc, operation, "footer"),
@@ -699,6 +700,29 @@ public static class Editor
         }
         var location = partIndex is null ? scope : $"{scope}[{partIndex}]";
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated {location}.table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}].paragraph[{operation.ParagraphIndex}].run[{operation.RunIndex}]");
+    }
+
+    private static DocxEditAppliedOperation SetTableCellChoiceState(WordprocessingDocument document, Body body, DocxEditOperation operation)
+    {
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null || operation.ParagraphIndex is null || operation.RunIndex is null || operation.Text != "selected")
+            return new DocxEditAppliedOperation(operation.Type, false, "table/row/cell/paragraph/run and selected state are required");
+        var tables = body.Elements<Table>().ToList();
+        if (operation.TableIndex < 0 || operation.TableIndex >= tables.Count) return new DocxEditAppliedOperation(operation.Type, false, "table out of range");
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex < 0 || operation.RowIndex >= rows.Count) return new DocxEditAppliedOperation(operation.Type, false, "row out of range");
+        var cells = rows[operation.RowIndex.Value].Elements<TableCell>().ToList();
+        if (operation.CellIndex < 0 || operation.CellIndex >= cells.Count) return new DocxEditAppliedOperation(operation.Type, false, "cell out of range");
+        var paragraphs = cells[operation.CellIndex.Value].Elements<Paragraph>().ToList();
+        if (operation.ParagraphIndex < 0 || operation.ParagraphIndex >= paragraphs.Count) return new DocxEditAppliedOperation(operation.Type, false, "paragraph out of range");
+        var runs = paragraphs[operation.ParagraphIndex.Value].Elements<Run>().ToList();
+        if (operation.RunIndex < 0 || operation.RunIndex >= runs.Count || !runs[operation.RunIndex.Value].Descendants<Drawing>().Any()) return new DocxEditAppliedOperation(operation.Type, false, "choice glyph run invalid");
+        var run = runs[operation.RunIndex.Value];
+        var blip = run.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().SingleOrDefault();
+        if (blip?.Embed?.Value is null || document.MainDocumentPart is null) return new DocxEditAppliedOperation(operation.Type, false, "choice glyph image missing");
+        var image = document.MainDocumentPart.AddImagePart(ImagePartType.Png);
+        using (var stream = new MemoryStream(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAqUlEQVR42u1XQQ6AMAhbG///ZTx5MWPMQWBRuehhWUuhChCRVhlsxXFcLwBSpRARbKHAPiXoyRMdvTK/vwRWczMDfESCWZlrJFghe0kTas5iRvYjW7NK+nACGrj1UWNEZqvgUwQsL3vAhwQAiOVlL/iQgHaJpcjTHxlXvBt1fqoHepc+9frWAwkjpPUMMPTW1zs9caXJ7s/UiSgSfN+pOHNJ+RcTfH47PgF+MWNBTx+7qwAAAABJRU5ErkJggg=="))) image.FeedData(stream);
+        blip.Embed = document.MainDocumentPart.GetIdOfPart(image);
+        return new DocxEditAppliedOperation(operation.Type, true, "Selected target choice");
     }
 
     private static bool TryReplaceRunText(IReadOnlyList<Paragraph> paragraphs, int paragraphIndex, int runIndex, string text, out string error)
@@ -2015,12 +2039,17 @@ public static class Editor
     private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null, Run? fallbackRun = null)
     {
         var graphicParagraphs = CaptureGraphicParagraphs(cell);
+        var hasTextBearingRun = HasTextBearingRun(cell);
         var ownRun = FindCellStyleTemplateRun(cell);
         var firstRun = ownRun ?? fallbackRun;
         var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
         cell.RemoveAllChildren<Paragraph>();
         var paragraph = CreateParagraphLike(firstParagraph);
-        paragraph.AppendChild(CreateStyledRunLike(firstRun, replacementText, preserveEmphasis: ownRun is not null));
+        paragraph.AppendChild(CreateStyledRunLike(
+            firstRun,
+            replacementText,
+            preserveEmphasis: hasTextBearingRun,
+            forceBaselineVerticalAlignment: !hasTextBearingRun));
         if (!string.IsNullOrWhiteSpace(alignment))
         {
             ApplyParagraphAlignment(paragraph, alignment);
@@ -2062,6 +2091,7 @@ public static class Editor
     private static void ReplaceTableCellRichText(TableCell cell, IReadOnlyList<DocxRichTextSegment> segments, string? alignment = null, Run? fallbackRun = null)
     {
         var graphicParagraphs = CaptureGraphicParagraphs(cell);
+        var hasTextBearingRun = HasTextBearingRun(cell);
         var ownRun = FindCellStyleTemplateRun(cell);
         var firstRun = ownRun ?? fallbackRun;
         var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
@@ -2069,7 +2099,11 @@ public static class Editor
         var paragraph = CreateParagraphLike(firstParagraph);
         foreach (var segment in segments)
         {
-            paragraph.AppendChild(CreateRichRunLike(firstRun, segment, preserveEmphasis: ownRun is not null));
+            paragraph.AppendChild(CreateRichRunLike(
+                firstRun,
+                segment,
+                preserveEmphasis: hasTextBearingRun,
+                forceBaselineVerticalAlignment: !hasTextBearingRun));
         }
         if (!string.IsNullOrWhiteSpace(alignment))
         {
@@ -2082,7 +2116,7 @@ public static class Editor
     private static Run? FindCellStyleTemplateRun(TableCell cell)
     {
         var paragraph = cell.Elements<Paragraph>().FirstOrDefault();
-        var run = cell.Descendants<Run>().FirstOrDefault(candidate => candidate.Descendants<Text>().Any(text => !string.IsNullOrEmpty(text.Text)))
+        var run = cell.Descendants<Run>().FirstOrDefault(candidate => candidate.Descendants<Text>().Any(text => HasVisibleText(text.Text)))
             ?? cell.Descendants<Run>().FirstOrDefault();
         var paragraphMark = paragraph?.ParagraphProperties?.ParagraphMarkRunProperties;
         if (paragraphMark is null)
@@ -2099,6 +2133,13 @@ public static class Editor
         NormalizeRunProperties(effectiveProperties);
         return new Run(effectiveProperties);
     }
+
+    private static bool HasTextBearingRun(TableCell cell)
+        => cell.Descendants<Run>()
+            .Any(candidate => candidate.Descendants<Text>().Any(text => HasVisibleText(text.Text)));
+
+    private static bool HasVisibleText(string? text)
+        => text?.Any(character => !char.IsWhiteSpace(character) && character is not ('\u200B' or '\u200C' or '\u200D' or '\u2060' or '\uFEFF')) == true;
 
     private static void OverlayRunProperties(RunProperties target, IEnumerable<OpenXmlElement> source)
     {
@@ -2240,7 +2281,11 @@ public static class Editor
         });
     }
 
-    private static Run CreateStyledRunLike(Run? templateRun, string text, bool preserveEmphasis = true)
+    private static Run CreateStyledRunLike(
+        Run? templateRun,
+        string text,
+        bool preserveEmphasis = true,
+        bool forceBaselineVerticalAlignment = false)
     {
         var run = new Run();
         if (templateRun?.RunProperties is not null)
@@ -2250,13 +2295,28 @@ public static class Editor
             {
                 RemoveEmphasis(run.RunProperties);
             }
+            if (forceBaselineVerticalAlignment)
+            {
+                ForceBaselineVerticalAlignment(run.RunProperties);
+            }
+            NormalizeRunProperties(run.RunProperties);
+        }
+        else if (forceBaselineVerticalAlignment)
+        {
+            run.RunProperties = new RunProperties();
+            ForceBaselineVerticalAlignment(run.RunProperties);
             NormalizeRunProperties(run.RunProperties);
         }
         AppendTextWithLineBreaks(run, text);
         return run;
     }
 
-    private static Run CreateRichRunLike(Run? templateRun, DocxRichTextSegment segment, bool forceBold = false, bool preserveEmphasis = true)
+    private static Run CreateRichRunLike(
+        Run? templateRun,
+        DocxRichTextSegment segment,
+        bool forceBold = false,
+        bool preserveEmphasis = true,
+        bool forceBaselineVerticalAlignment = false)
     {
         var run = new Run();
         if (templateRun?.RunProperties is not null)
@@ -2269,6 +2329,10 @@ public static class Editor
         if (!preserveEmphasis)
         {
             RemoveEmphasis(properties);
+        }
+        if (forceBaselineVerticalAlignment)
+        {
+            ForceBaselineVerticalAlignment(properties);
         }
 
         if (forceBold || segment.Bold == true)
@@ -2323,6 +2387,12 @@ public static class Editor
         properties.RemoveAllChildren<BoldComplexScript>();
         properties.RemoveAllChildren<Italic>();
         properties.RemoveAllChildren<ItalicComplexScript>();
+    }
+
+    private static void ForceBaselineVerticalAlignment(RunProperties properties)
+    {
+        properties.RemoveAllChildren<VerticalTextAlignment>();
+        properties.AppendChild(new VerticalTextAlignment { Val = VerticalPositionValues.Baseline });
     }
 
     private static void RemoveTextFill(RunProperties properties)

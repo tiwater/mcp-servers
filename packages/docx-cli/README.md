@@ -82,6 +82,20 @@ For an explicitly selected label-only parent, `retain-target-label` records
 that target label retention without inferring semantic equivalence or accepting
 coordinates; it emits no edit and readback verifies every target run unchanged.
 
+A versioned semantic candidate may project a typed value between uniquely
+selected current paragraph or table-cell parents even when labels, run splits,
+or parent kinds differ. The candidate declares only semantic identity, value
+kind (`text`, `token`, `date`, `identifier`, or `version`), and an extraction
+contract (`after-first-delimiter`, `unique-delimited-run-group`, or
+`unique-delimited-value`), or the explicit `whole-parent` contract for a parent
+that consists only of the typed value. Unicode identifiers need no delimiter;
+date values must be real calendar dates rather than regex-shaped strings.
+Resolution binds current source/baseline hashes and
+object ids; the operation builder derives the value and affected target runs
+from those inventories. Empty, ambiguous, duplicate, or ill-typed values fail
+closed. Independent readback derives the expected value and target replacements
+again and verifies that sibling fields and target formatting remain unchanged.
+
 A semantic candidate may also declare one or more source body ranges to append.
 Each range is bounded by unique current paragraph/table selectors (a table may
 be selected by a unique descendant header). The runtime resolves those selectors
@@ -92,6 +106,42 @@ ranges, drawings/revisions/content controls, missing styles, and any structural
 drift outside the declared append. This is explicit source preservation when a
 target template has no compatible section; it does not infer a target location,
 style conversion, or semantic equivalence.
+
+For source-only paragraph ranges that belong between two adjacent target body
+anchors, semantic candidate v3 may declare an anchored body insertion. Both
+source range endpoints and both target anchors must resolve uniquely in the
+current hash-attested inventories, and the target anchors must be adjacent and
+ordered. The supported `target-after-context` style policy keeps the source
+paragraph/run content and order while applying the following target paragraph's
+paragraph style. Tables, drawings, revisions, content controls, ambiguous
+anchors, overlapping ranges, and non-adjacent anchors fail closed. Independent
+readback rebuilds the source/baseline/output inventories, translates shifted
+target object identities, and verifies inserted content/order, contextual style,
+and the relative structure of every pre-existing target body object.
+
+Semantic candidate v4 can also bind a current, non-empty source membership
+object to a unique target label run whose immediately preceding run is a
+drawing-backed choice glyph. The builder emits only a `selected` state change:
+it replaces that glyph's image relationship with the provider-owned checked
+symbol while preserving the drawing, label text, paragraph, and table shape.
+Duplicate members or labels, missing/ambiguous labels, non-drawing glyphs, and
+unknown selections fail closed. Independent readback recomputes the selected
+label set from image hashes, verifies every bound label is unchanged, and
+rejects both missing and additional selections.
+
+Semantic candidate v5 may select baseline-owned placeholder or default content
+for clearing by a unique current baseline selector. The selector is resolved to
+the hash-attested baseline inventory; callers cannot supply object ids or table
+coordinates. `cell` clears one paragraph/table cell and `row` clears every cell
+in the selected table row. Missing, ambiguous, duplicate, unsupported, or
+copy-conflicting selections fail closed. Composite clear/projection/insertion/
+choice plans use plan v7, and independent readback verifies both the declared
+empty targets and every untouched baseline run's text and formatting hashes.
+For repeated legacy container labels with no business content, an
+`out-of-scope` mapping may explicitly use `cardinality: all`; this terminates
+every current hash-bound semantic match. `all` is forbidden for copy, retain,
+projection, insertion, and choice behavior, which continue to require unique
+selectors.
 
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
@@ -200,7 +250,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 `startSectionBeforeParagraph` accepts `findText` and `orientation` (`landscape` or `portrait`); it inserts a section break before the matching direct body paragraph and applies the requested orientation to the following section.
 `replaceTableCellRichText` accepts `richText` segments with `text`, optional `color`, `underline`, `bold`, and `fontName`.
 An explicit `bold: false` writes an off override for both Latin and complex-script bold so paragraph- or style-level bold is not inherited.
-When the target cell is empty, the generated runs inherit font-related formatting from the nearest table run so blank template cells do not fall back to Office default font size; emphasis such as bold/italic is not inherited from fallback runs.
+When the target cell is empty, the generated runs inherit font-related formatting from the nearest table run so blank template cells do not fall back to Office default font size; emphasis such as bold/italic is not inherited from fallback runs. Ordinary text written into a blank cell explicitly uses baseline vertical alignment, so paragraph-mark residue cannot turn new content into superscript or subscript. Existing text-bearing cells continue to preserve their declared vertical alignment.
 `replaceTable` row cell objects may use the same `richText` segments instead of plain `text`.
 `insertTableRows` inserts `rows` before `rowIndex`; `templateRowIndex` controls which existing row supplies row/cell/run styling.
 `deleteTableRows` deletes inclusive `startRowIndex`..`endRowIndex`, preserving the surrounding table.

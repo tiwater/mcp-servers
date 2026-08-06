@@ -86,6 +86,7 @@ The structured shape of `<data.json>` expected by `fill-template` must look like
 ### 4. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType`, `bold`, `shrinkToFit`, and `wrapText`
+- `setCellNumberFormat` with required target `sheet` and existing target `cell`; provide exactly one of an explicit `numberFormat` code or a same-workbook `sourceSheet` / `sourceCell` peer whose observed number format should be copied. Only the target cell's number-format component changes; its value and all other style components are preserved.
 - `setPrintArea` with required `sheet` and A1-style `range`
 - `setPageSetup` with required `sheet` and at least one of `fitToPagesWide`, `fitToPagesTall`, `orientation` (`portrait` or `landscape`), `paperSize` (`letter`, `legal`, `a3`, or `a4`), paired `repeatRowsStart` / `repeatRowsEnd`, or paired `repeatColsStart` / `repeatColsEnd`; repeated rows and columns use one-based indices and are persisted together as the sheet-local standard Excel print-title definition
 - `setRowPageBreaks` with required `sheet` and a strictly increasing `breakBeforeRows` list; replaces the sheet's manual horizontal page breaks so every listed row begins a new printed page
@@ -130,6 +131,8 @@ Example operations file:
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "E2", "value": "10.2" },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "F2", "value": "a value that must remain visible", "shrinkToFit": true },
     { "type": "setCellValue", "sheet": "Sheet1", "cell": "G2", "value": "a long value that may use multiple lines", "wrapText": true },
+    { "type": "setCellNumberFormat", "sheet": "Sheet1", "cell": "H2", "numberFormat": "yyyy-mm-dd" },
+    { "type": "setCellNumberFormat", "sheet": "Sheet1", "cell": "I2", "sourceSheet": "Sheet1", "sourceCell": "H2" },
     { "type": "setPrintArea", "sheet": "Sheet1", "range": "A1:G12" },
     { "type": "setPageSetup", "sheet": "Sheet1", "fitToPagesWide": 1, "orientation": "landscape", "paperSize": "a3", "repeatRowsStart": 1, "repeatRowsEnd": 2, "repeatColsStart": 1, "repeatColsEnd": 2 },
     { "type": "setRowPageBreaks", "sheet": "Sheet1", "breakBeforeRows": [27, 40] },

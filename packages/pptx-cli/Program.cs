@@ -30,6 +30,8 @@ internal static class Cli
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
                 "apply-template" => RunApplyTemplateAsync(args[1..]),
+                "map-render-findings" => RunMapRenderFindingsAsync(args[1..]),
+                "validate-render-finding-map" => RunValidateRenderFindingMapAsync(args[1..]),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -84,6 +86,22 @@ internal static class Cli
         return Task.FromResult(0);
     }
 
+    private static Task<int> RunMapRenderFindingsAsync(string[] args)
+    {
+        if (args.Length != 4) throw new InvalidOperationException("map-render-findings requires <inspect.json> <render-manifest.json> <findings.json> <output.json>");
+        var result = RenderedFindingMapper.MapFiles(args[0], args[1], args[2]);
+        WriteNewJson(args[3], result); WriteJson(new { status = "ok", output = Path.GetFullPath(args[3]), findingCount = result.Findings.Count });
+        return Task.FromResult(0);
+    }
+
+    private static Task<int> RunValidateRenderFindingMapAsync(string[] args)
+    {
+        if (args.Length != 5) throw new InvalidOperationException("validate-render-finding-map requires <inspect.json> <render-manifest.json> <findings.json> <map.json> <verdict.json>");
+        var result = RenderedFindingValidator.ValidateFiles(args[0], args[1], args[2], args[3]);
+        WriteNewJson(args[4], result); WriteJson(result);
+        return Task.FromResult(result.Pass ? 0 : 1);
+    }
+
     private static Task<int> RunFillTemplateAsync(string[] args)
     {
         if (args.Length < 3)
@@ -108,6 +126,8 @@ internal static class Cli
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
         Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
         Console.WriteLine("  apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>");
+        Console.WriteLine("  map-render-findings <inspect.json> <render-manifest.json> <findings.json> <output.json>");
+        Console.WriteLine("  validate-render-finding-map <inspect.json> <render-manifest.json> <findings.json> <map.json> <verdict.json>");
     }
 
     private static Task<int> FailUnknown(string command)
@@ -120,5 +140,13 @@ internal static class Cli
     private static void WriteJson<T>(T value)
     {
         Console.WriteLine(JsonSerializer.Serialize(value, Json.Options));
+    }
+
+    private static void WriteNewJson<T>(string path, T value)
+    {
+        var fullPath = Path.GetFullPath(path); Directory.CreateDirectory(Path.GetDirectoryName(fullPath) ?? ".");
+        using var stream = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        JsonSerializer.Serialize(stream, value, Json.Options);
+        stream.WriteByte((byte)'\n');
     }
 }

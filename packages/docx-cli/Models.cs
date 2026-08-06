@@ -241,6 +241,17 @@ public sealed record TemplateMigrationBodyAppend(
     string SourceEndObjectId);
 
 /// <summary>
+/// A hash-bound contiguous source body range inserted before a target anchor.
+/// The paired before/after anchors prove the target location and ordering.
+/// </summary>
+public sealed record TemplateMigrationBodyInsertion(
+    string SourceStartObjectId,
+    string SourceEndObjectId,
+    string BaselineBeforeObjectId,
+    string BaselineAfterObjectId,
+    string StylePolicy);
+
+/// <summary>
 /// Clears baseline-owned placeholder content without supplying replacement
 /// business facts. The object id is bound to the admitted baseline inventory.
 /// </summary>
@@ -254,7 +265,26 @@ public sealed record TemplateMigrationPlan(
     string BaselineSha256,
     IReadOnlyList<TemplateMigrationMapping> Mappings,
     IReadOnlyList<TemplateMigrationBodyAppend>? BodyAppends = null,
-    IReadOnlyList<TemplateMigrationBaselineClear>? BaselineClears = null);
+    IReadOnlyList<TemplateMigrationBaselineClear>? BaselineClears = null,
+    IReadOnlyList<TemplateMigrationValueProjection>? ValueProjections = null,
+    IReadOnlyList<TemplateMigrationBodyInsertion>? BodyInsertions = null,
+    IReadOnlyList<TemplateMigrationChoiceSelection>? ChoiceSelections = null);
+
+/// <summary>
+/// A semantic scalar projection between two current, hash-attested parent
+/// objects. The caller declares only the semantic identity and value shape;
+/// the provider derives the value, target runs, and edit operations.
+/// </summary>
+public sealed record TemplateMigrationValueProjection(
+    string SourceParentObjectId,
+    string BaselineParentObjectId,
+    string Semantic,
+    string ValueKind,
+    string Extraction);
+
+public sealed record TemplateMigrationChoiceSelection(
+    string SourceMemberObjectId,
+    string BaselineLabelRunObjectId);
 
 public sealed record TemplateMigrationSemanticSelector(
     string Kind,
@@ -269,16 +299,43 @@ public sealed record TemplateMigrationSemanticSelector(
 public sealed record TemplateMigrationSemanticCandidateMapping(
     TemplateMigrationSemanticSelector Source,
     TemplateMigrationSemanticSelector? Baseline,
-    string Disposition);
+    string Disposition,
+    string? Cardinality = null);
 
 public sealed record TemplateMigrationSemanticCandidateBodyAppend(
     TemplateMigrationSemanticSelector SourceStart,
     TemplateMigrationSemanticSelector SourceEnd);
 
+public sealed record TemplateMigrationSemanticCandidateBodyInsertion(
+    TemplateMigrationSemanticSelector SourceStart,
+    TemplateMigrationSemanticSelector SourceEnd,
+    TemplateMigrationSemanticSelector BaselineBefore,
+    TemplateMigrationSemanticSelector BaselineAfter,
+    string StylePolicy);
+
+public sealed record TemplateMigrationSemanticCandidateValueProjection(
+    TemplateMigrationSemanticSelector SourceParent,
+    TemplateMigrationSemanticSelector BaselineParent,
+    string Semantic,
+    string ValueKind,
+    string Extraction);
+
+public sealed record TemplateMigrationSemanticCandidateChoiceSelection(
+    TemplateMigrationSemanticSelector SourceMember,
+    TemplateMigrationSemanticSelector BaselineLabel);
+
+public sealed record TemplateMigrationSemanticCandidateBaselineClear(
+    TemplateMigrationSemanticSelector Baseline,
+    string Mode);
+
 public sealed record TemplateMigrationSemanticCandidate(
     string Schema,
     IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings,
-    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null);
+    IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateValueProjection>? ValueProjections = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateBodyInsertion>? BodyInsertions = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateChoiceSelection>? ChoiceSelections = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateBaselineClear>? BaselineClears = null);
 
 public sealed record TemplateMigrationMappingDerivation(
     string Schema,
@@ -306,6 +363,7 @@ public sealed record TemplateMigrationOperationBuild(
     IReadOnlyList<DocxEditOperation> Operations,
     IReadOnlyList<TemplateMigrationMediaCopy> MediaCopies,
     IReadOnlyList<TemplateMigrationBodyAppend> BodyAppends,
+    IReadOnlyList<TemplateMigrationBodyInsertion> BodyInsertions,
     string? PreviewOperationsSha256,
     IReadOnlyList<DocxEditOperation> PreviewOperations,
     IReadOnlyList<TemplateMigrationMediaCopy> PreviewMediaCopies,
