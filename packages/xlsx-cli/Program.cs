@@ -103,7 +103,7 @@ internal static class Cli
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.xlsx> [--json]");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
-        Console.WriteLine("  inventory-regions <input.xlsx> [<output.json>]");
+        Console.WriteLine("  inventory-regions <input.xlsx> [<output.json>] [--schema v1|v2]");
         Console.WriteLine("  fill-template <template.xlsx> <data.json> <output.xlsx>");
         Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");
         Console.WriteLine("  validate <input.xlsx>");
