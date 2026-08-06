@@ -48,11 +48,18 @@ display value, and formula. The output is bound to the input SHA-256 and does no
 infer headers, record identities, methods, samples, or other business semantics.
 
 ```bash
-tiwater-xlsx inventory-regions <input.xlsx> [<output.json>]
+tiwater-xlsx inventory-regions <input.xlsx> [<output.json>] [--schema v1|v2]
 ```
 
-The output contract is `tiwater.xlsx.region-inventory/v1`; its JSON Schema is
-packaged as `contracts/tiwater.xlsx-region-inventory-v1.schema.json`.
+The default output contract remains `tiwater.xlsx.region-inventory/v1`; its JSON
+Schema is packaged as `contracts/tiwater.xlsx-region-inventory-v1.schema.json`.
+Callers that need typed cell-value evidence must opt in with `--schema v2`.
+`tiwater.xlsx.region-inventory/v2` preserves every v1 cell field unchanged and
+adds a required `normalizedValue` derived from the workbook's declared date
+system and effective number format. The provider reports technical spreadsheet
+facts only: it does not infer business date meaning, locale intent, headers,
+record identities, methods, or samples. The v2 schema is packaged as
+`contracts/tiwater.xlsx-region-inventory-v2.schema.json`.
 
 ### 3. Fill a Template
 

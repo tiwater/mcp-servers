@@ -93,6 +93,103 @@ public class RegionInventoryTests
     }
 
     [Fact]
+    public void Inventory_v2_preserves_serial_and_display_text_while_publishing_1900_date_evidence()
+    {
+        var path = CreateDateWorkbook(uses1904Dates: false, serial: 46078D);
+
+        var inventory = RegionInventory.InspectV2(path);
+
+        Assert.Equal("tiwater.xlsx.region-inventory/v2", inventory.Schema);
+        var cell = Assert.Single(Assert.Single(Assert.Single(inventory.Sheets).Regions).Rows).Cells.Single();
+        Assert.Equal("46078", cell.RawValue);
+        Assert.Equal("2026-02-25", cell.FormattedValue);
+        Assert.Equal("date", cell.NormalizedValue.Kind);
+        Assert.Equal("2026-02-25", cell.NormalizedValue.Iso8601);
+    }
+
+    [Fact]
+    public void Inventory_v2_uses_declared_1904_date_system_for_a_different_serial_and_path()
+    {
+        var original = CreateDateWorkbook(uses1904Dates: true, serial: 3D);
+        var relocated = Path.Combine(Path.GetTempPath(), $"relocated-region-date-{Guid.NewGuid():N}.xlsx");
+        File.Copy(original, relocated);
+
+        var left = RegionInventory.InspectV2(original);
+        var right = RegionInventory.InspectV2(relocated);
+
+        var cell = Assert.Single(Assert.Single(Assert.Single(left.Sheets).Regions).Rows).Cells.Single();
+        var v1Cell = Assert.Single(Assert.Single(Assert.Single(RegionInventory.Inspect(original).Sheets).Regions).Rows).Cells.Single();
+        Assert.Equal("3", cell.RawValue);
+        Assert.Equal(v1Cell.RawValue, cell.RawValue);
+        Assert.Equal(v1Cell.FormattedValue, cell.FormattedValue);
+        Assert.Equal("1904-01-04", cell.NormalizedValue.Iso8601);
+        Assert.Equal(left.InputSha256, right.InputSha256);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(left.Sheets),
+            System.Text.Json.JsonSerializer.Serialize(right.Sheets));
+        Assert.NotEqual(left.File, right.File);
+    }
+
+    [Fact]
+    public void Inventory_v2_and_published_evidence_share_custom_date_format_classification()
+    {
+        var path = CreateDateWorkbook(
+            uses1904Dates: false,
+            serial: 45588D,
+            numberFormatId: 164U,
+            customNumberFormat: "dd/mm/yyyy");
+
+        var regionCell = Assert.Single(Assert.Single(Assert.Single(RegionInventory.InspectV2(path).Sheets).Regions).Rows).Cells.Single();
+        using var evidenceDocument = System.Text.Json.JsonDocument.Parse(
+            System.Text.Json.JsonSerializer.Serialize(EvidenceInspector.Inspect(path), Json.Options));
+        var evidenceCell = evidenceDocument.RootElement.GetProperty("sheets")[0].GetProperty("cells")[0];
+
+        Assert.Equal("custom", evidenceCell.GetProperty("style").GetProperty("numberFormatEvidence").GetProperty("source").GetString());
+        Assert.Equal("date", evidenceCell.GetProperty("style").GetProperty("numberFormatEvidence").GetProperty("kind").GetString());
+        Assert.Equal(
+            evidenceCell.GetProperty("normalizedValue").GetProperty("kind").GetString(),
+            regionCell.NormalizedValue.Kind);
+        Assert.Equal(
+            evidenceCell.GetProperty("normalizedValue").GetProperty("iso8601").GetString(),
+            regionCell.NormalizedValue.Iso8601);
+        Assert.Equal("2024-10-23", regionCell.NormalizedValue.Iso8601);
+    }
+
+    [Fact]
+    public void Inventory_v1_shape_remains_unchanged_when_v2_is_available()
+    {
+        var path = CreateDateWorkbook(uses1904Dates: false, serial: 45292D);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(RegionInventory.Inspect(path), Json.Options);
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var cell = document.RootElement.GetProperty("sheets")[0].GetProperty("regions")[0]
+            .GetProperty("rows")[0].GetProperty("cells")[0];
+
+        Assert.Equal("tiwater.xlsx.region-inventory/v1", document.RootElement.GetProperty("schema").GetString());
+        Assert.False(cell.TryGetProperty("normalizedValue", out _));
+        Assert.Equal(
+            ["reference", "row", "column", "columnName", "rawValue", "formattedValue", "formula"],
+            cell.EnumerateObject().Select(property => property.Name).ToArray());
+    }
+
+    [Fact]
+    public void Inventory_command_requires_explicit_v2_opt_in_and_rejects_unknown_schema()
+    {
+        var path = CreateDateWorkbook(uses1904Dates: false, serial: 45292D);
+        var defaultOutput = Path.Combine(Path.GetTempPath(), $"xlsx-region-v1-{Guid.NewGuid():N}.json");
+        var v2Output = Path.Combine(Path.GetTempPath(), $"xlsx-region-v2-{Guid.NewGuid():N}.json");
+
+        Assert.Equal(0, RegionInventory.Run([path, defaultOutput]));
+        Assert.Equal(0, RegionInventory.Run([path, v2Output, "--schema", "v2"]));
+
+        using var defaultDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(defaultOutput));
+        using var v2Document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(v2Output));
+        Assert.Equal("tiwater.xlsx.region-inventory/v1", defaultDocument.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("tiwater.xlsx.region-inventory/v2", v2Document.RootElement.GetProperty("schema").GetString());
+        Assert.Throws<InvalidOperationException>(() => RegionInventory.Run([path, "--schema", "v3"]));
+    }
+
+    [Fact]
     public void Inventory_path_change_does_not_change_workbook_facts()
     {
         var original = CreateWorkbook(R(3, ("D", "stable", null)));
@@ -169,6 +266,47 @@ public class RegionInventoryTests
         worksheetPart.Worksheet = new Worksheet(sheetData);
         workbookPart.Workbook.AppendChild(new Sheets()).Append(
             new Sheet { Id = workbookPart.GetIdOfPart(worksheetPart), SheetId = 1, Name = "Observed" });
+        workbookPart.Workbook.Save();
+        worksheetPart.Worksheet.Save();
+        return path;
+    }
+
+    private static string CreateDateWorkbook(
+        bool uses1904Dates,
+        double serial,
+        uint numberFormatId = 14U,
+        string? customNumberFormat = null)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"xlsx-region-date-{Guid.NewGuid():N}.xlsx");
+        using var document = SpreadsheetDocument.Create(path, SpreadsheetDocumentType.Workbook);
+        var workbookPart = document.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook(new WorkbookProperties { Date1904 = uses1904Dates });
+        var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet = new Stylesheet(
+            new Fonts(new Font()),
+            new Fills(new Fill()),
+            new Borders(new Border()),
+            new CellStyleFormats(new CellFormat()),
+            new CellFormats(
+                new CellFormat(),
+                new CellFormat { NumberFormatId = numberFormatId, ApplyNumberFormat = true }));
+        if (customNumberFormat is not null)
+        {
+            stylesPart.Stylesheet.NumberingFormats = new NumberingFormats(
+                new NumberingFormat { NumberFormatId = numberFormatId, FormatCode = customNumberFormat });
+        }
+        stylesPart.Stylesheet.Save();
+
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        var cell = new Cell
+        {
+            CellReference = "F11",
+            StyleIndex = 1U,
+            CellValue = new CellValue(serial.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
+        worksheetPart.Worksheet = new Worksheet(new SheetData(new Row(cell) { RowIndex = 11U }));
+        workbookPart.Workbook.AppendChild(new Sheets()).Append(
+            new Sheet { Id = workbookPart.GetIdOfPart(worksheetPart), SheetId = 1U, Name = "Calendar" });
         workbookPart.Workbook.Save();
         worksheetPart.Worksheet.Save();
         return path;

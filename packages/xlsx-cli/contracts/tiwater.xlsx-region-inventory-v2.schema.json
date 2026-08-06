@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tiwater.com/xlsx/region-inventory/v2",
+  "title": "Tiwater XLSX region inventory v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "toolVersion", "file", "inputSha256", "sheets"],
+  "properties": {
+    "schema": { "const": "tiwater.xlsx.region-inventory/v2" },
+    "toolVersion": { "type": "string", "minLength": 1 },
+    "file": { "type": "string", "minLength": 1 },
+    "inputSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sheets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sheet" }
+    }
+  },
+  "$defs": {
+    "sheet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "regions"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "regions": { "type": "array", "items": { "$ref": "#/$defs/region" } }
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "range", "startRow", "endRow", "rows"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^s[1-9][0-9]*-r[1-9][0-9]*$" },
+        "range": { "type": "string", "pattern": "^[A-Z]+[1-9][0-9]*:[A-Z]+[1-9][0-9]*$" },
+        "startRow": { "type": "integer", "minimum": 1 },
+        "endRow": { "type": "integer", "minimum": 1 },
+        "rows": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/row" } }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row", "cells"],
+      "properties": {
+        "row": { "type": "integer", "minimum": 1 },
+        "cells": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/cell" } }
+      }
+    },
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "row", "column", "columnName", "rawValue", "formattedValue", "formula", "normalizedValue"],
+      "properties": {
+        "reference": { "type": "string", "pattern": "^[A-Z]+[1-9][0-9]*$" },
+        "row": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "columnName": { "type": "string", "pattern": "^[A-Z]+$" },
+        "rawValue": { "type": "string" },
+        "formattedValue": { "type": "string" },
+        "formula": { "type": ["string", "null"] },
+        "normalizedValue": { "$ref": "#/$defs/normalizedValue" }
+      }
+    },
+    "normalizedValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "iso8601"],
+          "properties": {
+            "kind": { "const": "date" },
+            "iso8601": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "iso8601"],
+          "properties": {
+            "kind": { "const": "time" },
+            "iso8601": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,7})?$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "iso8601"],
+          "properties": {
+            "kind": { "const": "datetime" },
+            "iso8601": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,7})?$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "iso8601"],
+          "properties": {
+            "kind": { "enum": ["blank", "number", "s", "inlineStr", "str", "b", "e", "d", "string", "boolean", "error", "unknown"] },
+            "iso8601": { "type": "null" }
+          }
+        }
+      ]
+    }
+  }
+}

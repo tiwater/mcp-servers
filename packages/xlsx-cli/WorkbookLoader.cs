@@ -29,26 +29,34 @@ internal static class WorkbookLoader
         string Value,
         string FormattedValue,
         string? Formula,
-        IReadOnlyList<RichTextRunReport>? RichTextRuns = null);
+        IReadOnlyList<RichTextRunReport>? RichTextRuns = null,
+        XlsxNormalizedValue? NormalizedValue = null);
 
     private sealed record SharedFormula(string Formula, int BaseRow, int BaseColumn);
 
-    public static WorkbookData Load(string path, bool resolveMergedCells = false)
+    public static WorkbookData Load(
+        string path,
+        bool resolveMergedCells = false,
+        bool includeNormalizedValues = false)
     {
         return IsLegacyXls(path)
-            ? LoadLegacyXls(path, resolveMergedCells)
-            : LoadOpenXmlWorkbook(path, resolveMergedCells);
+            ? LoadLegacyXls(path, resolveMergedCells, includeNormalizedValues)
+            : LoadOpenXmlWorkbook(path, resolveMergedCells, includeNormalizedValues);
     }
 
     public static bool IsLegacyXls(string path)
         => string.Equals(Path.GetExtension(path), ".xls", StringComparison.OrdinalIgnoreCase);
 
-    private static WorkbookData LoadOpenXmlWorkbook(string path, bool resolveMergedCells = false)
+    private static WorkbookData LoadOpenXmlWorkbook(
+        string path,
+        bool resolveMergedCells,
+        bool includeNormalizedValues)
     {
         using var spreadsheet = SpreadsheetDocument.Open(path, false);
         var workbookPart = spreadsheet.WorkbookPart ?? throw new InvalidOperationException("Workbook not found.");
         var sharedStringTable = workbookPart.SharedStringTablePart?.SharedStringTable;
         var stylesPart = workbookPart.WorkbookStylesPart;
+        var uses1904Dates = workbookPart.Workbook.WorkbookProperties?.Date1904?.Value == true;
         var sheets = new List<SheetDataModel>();
 
         foreach (var sheetPart in workbookPart.WorksheetParts)
@@ -130,7 +138,15 @@ internal static class WorkbookLoader
                             rawValue,
                             formattedValue,
                             string.IsNullOrWhiteSpace(formula) ? null : formula,
-                            richTextRuns));
+                            richTextRuns,
+                            includeNormalizedValues
+                                ? SpreadsheetValueNormalizer.FromOpenXmlCell(
+                                    cell.CellValue?.Text ?? cell.InlineString?.InnerText,
+                                    cell.DataType?.InnerText,
+                                    stylesPart,
+                                    cell.StyleIndex?.Value,
+                                    uses1904Dates)
+                                : null));
 
                         if (resolveMergedCells && rawCells is not null && formattedCells is not null)
                         {
@@ -200,7 +216,10 @@ internal static class WorkbookLoader
         return new WorkbookData(sheets);
     }
 
-    private static WorkbookData LoadLegacyXls(string path, bool resolveMergedCells = false)
+    private static WorkbookData LoadLegacyXls(
+        string path,
+        bool resolveMergedCells,
+        bool includeNormalizedValues)
     {
         using var stream = File.OpenRead(path);
         var workbook = new HSSFWorkbook(stream);
@@ -277,7 +296,8 @@ internal static class WorkbookLoader
                             rawValue,
                             formattedValue,
                             string.IsNullOrWhiteSpace(formula) ? null : formula,
-                            richTextRuns));
+                            richTextRuns,
+                            includeNormalizedValues ? LegacyNormalizedValue(cell) : null));
                         if (resolveMergedCells && rawCells is not null && formattedCells is not null)
                         {
                             rawCells[cellRef] = rawValue;
@@ -484,6 +504,23 @@ internal static class WorkbookLoader
 
     private static string GetLegacyFormattedCellValue(ICell? cell, DataFormatter formatter)
         => cell is null ? string.Empty : formatter.FormatCellValue(cell);
+
+    private static XlsxNormalizedValue LegacyNormalizedValue(ICell cell)
+    {
+        var type = cell.CellType == NpoiCellType.Formula ? cell.CachedFormulaResultType : cell.CellType;
+        if (type == NpoiCellType.Numeric && DateUtil.IsCellDateFormatted(cell))
+            return SpreadsheetValueNormalizer.FromLegacyDate(
+                cell.DateCellValue ?? throw new InvalidDataException("Legacy date cell has no date value."));
+        return new XlsxNormalizedValue(type switch
+        {
+            NpoiCellType.String => "string",
+            NpoiCellType.Numeric => "number",
+            NpoiCellType.Boolean => "boolean",
+            NpoiCellType.Error => "error",
+            NpoiCellType.Blank => "blank",
+            _ => "unknown",
+        }, null);
+    }
 
     private static IReadOnlyList<RichTextRunReport>? GetLegacyRichTextRuns(ICell? cell, HSSFWorkbook workbook)
     {
