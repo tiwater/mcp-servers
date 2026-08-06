@@ -903,6 +903,7 @@ public static class TemplateMigration
             insertedSourceIds.UnionWith(covered);
             bodyInsertions.Add(insertion);
         }
+        failures.AddRange(ValidatePlainBodyInsertionContent(source, analysis.Source, bodyInsertions));
 
         var choiceLabels = new HashSet<string>(StringComparer.Ordinal);
         foreach (var choice in plan.ChoiceSelections ?? [])
@@ -1508,6 +1509,38 @@ public static class TemplateMigration
         return new TemplateMigrationReadback(failures.Count == 0, failures);
     }
 
+    private static IReadOnlyList<TemplateMigrationPlanFailure> ValidatePlainBodyInsertionContent(
+        string source,
+        TemplateMigrationInventory inventory,
+        IReadOnlyList<TemplateMigrationBodyInsertion> insertions)
+    {
+        if (insertions.Count == 0) return [];
+        using var document = WordprocessingDocument.Open(Path.GetFullPath(source), false);
+        var body = document.MainDocumentPart?.Document?.Body;
+        if (body is null) return [new TemplateMigrationPlanFailure("template-migration-body-insertion-body-missing")];
+        var roots = inventory.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
+        var elements = body.ChildElements.Where(element => element is Paragraph or Table).ToList();
+        var failures = new List<TemplateMigrationPlanFailure>();
+        foreach (var insertion in insertions)
+        {
+            var start = roots.FindIndex(item => item.Id == insertion.SourceStartObjectId);
+            var end = roots.FindIndex(item => item.Id == insertion.SourceEndObjectId);
+            if (start < 0 || end < start) continue;
+            for (var index = start; index <= end; index += 1)
+                if (elements[index] is not Paragraph paragraph || !IsPlainInsertionParagraph(paragraph))
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-content-unsupported", roots[index].Id));
+        }
+        return failures;
+    }
+
+    private static bool IsPlainInsertionParagraph(Paragraph paragraph)
+    {
+        if (paragraph.ChildElements.Any(child => child is not ParagraphProperties and not Run)) return false;
+        foreach (var run in paragraph.Elements<Run>())
+            if (run.ChildElements.Any(child => child is not RunProperties and not Text and not TabChar and not Break and not CarriageReturn)) return false;
+        return true;
+    }
+
     private static IReadOnlyList<TemplateMigrationPlanFailure> ApplyBodyInsertions(
         string source,
         string baseline,
@@ -1542,12 +1575,7 @@ public static class TemplateMigration
             var anchor = outputElements[afterIndex];
             for (var index = sourceStart; index <= sourceEnd; index += 1)
             {
-                if (sourceElements[index] is not Paragraph sourceParagraph
-                    || sourceParagraph.Descendants<Drawing>().Any()
-                    || sourceParagraph.Descendants<FootnoteReference>().Any()
-                    || sourceParagraph.Descendants<EndnoteReference>().Any()
-                    || sourceParagraph.Descendants<SdtElement>().Any()
-                    || sourceParagraph.Descendants().Any(item => item.LocalName is "ins" or "del" or "moveFrom" or "moveTo"))
+                if (sourceElements[index] is not Paragraph sourceParagraph || !IsPlainInsertionParagraph(sourceParagraph))
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-content-unsupported", sourceRoots[index].Id));
                     continue;
@@ -1695,7 +1723,12 @@ public static class TemplateMigration
     private static string ContentTreeFingerprint(IReadOnlyList<TemplateMigrationObject> objects, string rootId)
     {
         var descendants = DescendantsOf(objects, [rootId]);
-        var rows = objects.Where(item => descendants.Contains(item.Id)).Select(item => new { item.Kind, item.Text });
+        var rows = objects.Where(item => descendants.Contains(item.Id)).Select(item => new
+        {
+            item.Kind,
+            item.Text,
+            RunPropertiesSha256 = item.Kind == "run" ? item.Provenance.GetValueOrDefault("runPropertiesSha256") : null
+        });
         return HashCanonical(rows);
     }
 

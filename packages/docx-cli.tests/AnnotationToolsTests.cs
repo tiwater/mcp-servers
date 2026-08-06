@@ -630,6 +630,11 @@ public class AnnotationToolsTests
         var nonAdjacentResult = TemplateMigration.ResolveSemanticCandidate(source, nonAdjacent, candidate);
         Assert.False(nonAdjacentResult.Pass);
         Assert.Contains(nonAdjacentResult.Unresolved, item => item.Reason == "template-migration-semantic-body-insertion-range-invalid");
+
+        var linkedSource = CreateHyperlinkTextMigrationFixture();
+        var linkedResult = TemplateMigration.ResolveSemanticCandidate(linkedSource, CreateTextMigrationFixture("before", "after"), candidate);
+        Assert.False(linkedResult.Pass);
+        Assert.Contains(linkedResult.Unresolved, item => item.Reason == "template-migration-body-insertion-content-unsupported");
     }
 
     [Fact]
@@ -3320,6 +3325,20 @@ public class AnnotationToolsTests
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
         main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateHyperlinkTextMigrationFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-hyperlink-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var relationship = main.AddHyperlinkRelationship(new Uri("https://example.invalid"), true);
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("before"))),
+            new Paragraph(new Hyperlink(new Run(new Text("source addition"))) { Id = relationship.Id }),
+            new Paragraph(new Run(new Text("after")))));
         main.Document.Save();
         return path;
     }
