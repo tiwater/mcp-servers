@@ -2512,7 +2512,7 @@ public class AnnotationToolsTests
     }
 
     [Fact]
-    public void NormalizeOpenXml_replaces_equivalent_next_page_sections_with_page_breaks()
+    public void NormalizeOpenXml_preserves_equivalent_next_page_sections_in_delivery_artifacts()
     {
         var output = Path.Combine(Path.GetTempPath(), $"normalized-equivalent-sections-{Guid.NewGuid():N}.docx");
         using (var document = WordprocessingDocument.Create(output, WordprocessingDocumentType.Document))
@@ -2529,8 +2529,8 @@ public class AnnotationToolsTests
         DocxPackageNormalizer.Normalize(output, output);
 
         using var normalized = WordprocessingDocument.Open(output, false);
-        Assert.Single(normalized.MainDocumentPart!.Document!.Descendants<SectionProperties>());
-        Assert.Equal(2, normalized.MainDocumentPart.Document.Descendants<Break>().Count(item => item.Type?.Value == BreakValues.Page));
+        Assert.Equal(3, normalized.MainDocumentPart!.Document!.Descendants<SectionProperties>().Count());
+        Assert.Empty(normalized.MainDocumentPart.Document.Descendants<Break>().Where(item => item.Type?.Value == BreakValues.Page));
         Assert.Equal(["one", "two"], normalized.MainDocumentPart.Document.Body!.Elements<Paragraph>().Select(item => item.InnerText).ToArray());
     }
 
