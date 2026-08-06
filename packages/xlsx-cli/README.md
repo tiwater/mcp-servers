@@ -93,8 +93,8 @@ Applies a batch of explicit fixed-layout workbook edits. Supported operation typ
 - `setColumnWidth` with required `sheet`, bounded A1-style `column`, and Excel-compatible `width`
 - `setRichTextCellValue` with required `sheet`, `cell`, `value`, and `bold`; writes one explicit rich-text run so value and all-run bold state are one operation
 - `setRangeValues` with required `sheet`, `startCell`, and `values`; optional `valueType`
-- `insertRows` with required `sheet`, `startRow`, and `count`
-- `copyRow` with required `sheet`, `sourceRow`, and `targetRow`; optional `translateFormulas`
+- `insertRows` with required `sheet`, `startRow`, and `count`; optional `expandAdjacentVerticalMergedRanges` extends vertical merged ranges that end immediately before the insertion point
+- `copyRow` with required `sheet`, `sourceRow`, and `targetRow`; optional `translateFormulas` and `preserveHorizontalMergedRanges`
 - `expandSectionRows` with required `sheet`, `anchorText`, `exampleRows`, and `targetRows`; optional `preserveStyle`, `preserveFormulas`, and `preserveMergedRanges`
 
 By default, edit operations use `valueType: "auto"` semantics. Numeric-looking
@@ -108,6 +108,10 @@ Formula adjustment for `insertRows` and `copyRow` is intentionally conservative.
 It supports A1-style cell references, including local references and sheet-qualified
 references. Whole-row references, 3D references, structured table references, and
 external workbook references are not guaranteed to be adjusted correctly.
+When requested, `copyRow` duplicates only horizontal merged ranges wholly contained
+in the source row. It rejects a target that intersects a different existing merge.
+Vertical category merges are expanded by `insertRows` only when
+`expandAdjacentVerticalMergedRanges` is explicitly true.
 `expandSectionRows` finds the first visible text cell exactly matching
 `anchorText`, treats the following `exampleRows` as the template section, inserts
 rows until the section reaches `targetRows`, and copies example rows cyclically

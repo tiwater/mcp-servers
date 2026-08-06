@@ -93,6 +93,8 @@ public sealed record XlsxEditOperation(
     int? SourceRow = null,
     int? TargetRow = null,
     bool? TranslateFormulas = null,
+    bool? PreserveHorizontalMergedRanges = null,
+    bool? ExpandAdjacentVerticalMergedRanges = null,
     string? AnchorText = null,
     int? ExampleRows = null,
     int? TargetRows = null,
