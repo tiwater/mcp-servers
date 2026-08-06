@@ -2155,7 +2155,7 @@ public static class TemplateMigration
             var provenance = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["runPropertiesSha256"] = HashXml(run.RunProperties),
-                ["paragraphPropertiesSha256"] = HashXml(paragraph.ParagraphProperties)
+                ["paragraphPropertiesSha256"] = HashParagraphProperties(paragraph.ParagraphProperties)
             };
             var numbering = paragraph.ParagraphProperties?.NumberingProperties;
             if (numbering is not null) provenance["numberingPropertiesSha256"] = HashXml(numbering);
@@ -2214,6 +2214,19 @@ public static class TemplateMigration
 
     private static string HashXml(IEnumerable<OpenXmlElement> elements)
         => HashText(string.Concat(elements.Select(element => element.OuterXml)));
+
+    private static string HashParagraphProperties(ParagraphProperties? properties)
+    {
+        if (properties is null) return HashText(string.Empty);
+        var canonical = (ParagraphProperties)properties.CloneNode(true);
+        var numbering = canonical.NumberingProperties;
+        if (numbering?.NumberingLevelReference?.Val?.Value == -1
+            && numbering.NumberingId?.Val?.Value == 0)
+        {
+            numbering.Remove();
+        }
+        return HashText(canonical.OuterXml);
+    }
 
     private static string HashText(string text)
     {
