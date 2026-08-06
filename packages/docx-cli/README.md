@@ -87,7 +87,10 @@ selected current paragraph or table-cell parents even when labels, run splits,
 or parent kinds differ. The candidate declares only semantic identity, value
 kind (`text`, `token`, `date`, `identifier`, or `version`), and an extraction
 contract (`after-first-delimiter`, `unique-delimited-run-group`, or
-`unique-delimited-value`). Resolution binds current source/baseline hashes and
+`unique-delimited-value`), or the explicit `whole-parent` contract for a parent
+that consists only of the typed value. Unicode identifiers need no delimiter;
+date values must be real calendar dates rather than regex-shaped strings.
+Resolution binds current source/baseline hashes and
 object ids; the operation builder derives the value and affected target runs
 from those inventories. Empty, ambiguous, duplicate, or ill-typed values fail
 closed. Independent readback derives the expected value and target replacements

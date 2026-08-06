@@ -405,6 +405,35 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_projects_declared_whole_parent_unicode_identifiers_and_rejects_invalid_calendar_dates()
+    {
+        var source = CreateSemanticValueProjectionFixture(["批次甲一二三"]);
+        var baseline = CreateSemanticValueProjectionFixture(["旧编号"]);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v2", [],
+            ValueProjections: [new TemplateMigrationSemanticCandidateValueProjection(
+                new TemplateMigrationSemanticSelector("paragraph", "body", "批次甲一二三"),
+                new TemplateMigrationSemanticSelector("paragraph", "body", "旧编号"),
+                "current-identifier", "identifier", "whole-parent")]);
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"semantic-whole-parent-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        Assert.Equal("批次甲一二三", ReadOnlyParagraphText(output));
+
+        var badDate = CreateSemanticValueProjectionFixture(["2026-02-30"]);
+        var dateCandidate = candidate with
+        {
+            ValueProjections = [candidate.ValueProjections!.Single() with
+            {
+                SourceParent = new TemplateMigrationSemanticSelector("paragraph", "body", "2026-02-30"),
+                ValueKind = "date"
+            }]
+        };
+        Assert.Contains(TemplateMigration.ResolveSemanticCandidate(badDate, baseline, dateCandidate).Unresolved, item => item.Reason == "template-migration-semantic-value-source-kind-mismatch");
+    }
+
+    [Fact]
     public void TemplateMigration_selects_one_typed_value_group_without_touching_sibling_fields()
     {
         var source = CreateMultiFieldProjectionFixture(

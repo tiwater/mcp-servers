@@ -636,7 +636,7 @@ public static class TemplateMigration
             ValidateSemanticSelector(projection.BaselineParent, "value-baseline-parent");
             if (!Regex.IsMatch(projection.Semantic ?? string.Empty, "^[a-z][a-z0-9.-]{0,63}$", RegexOptions.CultureInvariant)) throw new InvalidOperationException("template-migration-semantic-value-identity-invalid");
             if (projection.ValueKind is not ("text" or "token" or "date" or "identifier" or "version")) throw new InvalidOperationException("template-migration-semantic-value-kind-invalid");
-            if (projection.Extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value")) throw new InvalidOperationException("template-migration-semantic-value-extraction-invalid");
+            if (projection.Extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value" or "whole-parent")) throw new InvalidOperationException("template-migration-semantic-value-extraction-invalid");
             if (string.Equals(projection.Extraction, "unique-delimited-value", StringComparison.Ordinal) && string.Equals(projection.ValueKind, "text", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-value-text-requires-parent-boundary");
         }
         foreach (var insertion in candidate.BodyInsertions ?? [])
@@ -2251,7 +2251,7 @@ public static class TemplateMigration
     {
         value = null;
         failure = null;
-        if (extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value"))
+        if (extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value" or "whole-parent"))
         {
             failure = "template-migration-semantic-value-extraction-invalid";
             return false;
@@ -2261,6 +2261,14 @@ public static class TemplateMigration
         {
             failure = "template-migration-semantic-value-source-runs-missing";
             return false;
+        }
+        if (string.Equals(extraction, "whole-parent", StringComparison.Ordinal))
+        {
+            var observed = string.Concat(runs.Select(item => item.Text ?? string.Empty)).Trim();
+            if (observed.Length == 0) { failure = "template-migration-semantic-value-source-empty"; return false; }
+            if (!ProjectionValueKindMatches(observed, valueKind)) { failure = "template-migration-semantic-value-source-kind-mismatch"; return false; }
+            value = observed;
+            return true;
         }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
@@ -2320,7 +2328,7 @@ public static class TemplateMigration
     {
         target = null;
         failure = null;
-        if (extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value"))
+        if (extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value" or "whole-parent"))
         {
             failure = "template-migration-semantic-value-extraction-invalid";
             return false;
@@ -2330,6 +2338,15 @@ public static class TemplateMigration
         {
             failure = "template-migration-semantic-value-baseline-runs-missing";
             return false;
+        }
+        if (string.Equals(extraction, "whole-parent", StringComparison.Ordinal))
+        {
+            var text = string.Concat(runs.Select(item => item.Text ?? string.Empty));
+            var start = 0; while (start < text.Length && char.IsWhiteSpace(text[start])) start += 1;
+            var end = text.Length; while (end > start && char.IsWhiteSpace(text[end - 1])) end -= 1;
+            if (start == end || (!ProjectionValueKindMatches(text[start..end], valueKind) && !IsProjectionPlaceholder(text[start..end]))) { failure = "template-migration-semantic-value-baseline-empty"; return false; }
+            target = new ProjectionTargetSpan(runs, start, end);
+            return true;
         }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
@@ -2390,11 +2407,17 @@ public static class TemplateMigration
         {
             "text" => value.Length != 0,
             "token" => Regex.IsMatch(value, "^\\S+$", RegexOptions.CultureInvariant),
-            "date" => Regex.IsMatch(value, "^(?:\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|\\d{4}年\\d{1,2}月\\d{1,2}日)$", RegexOptions.CultureInvariant),
-            "identifier" => Regex.IsMatch(value, "^(?=.*[A-Za-z])(?=.*[-_/])[A-Za-z0-9._/-]+$", RegexOptions.CultureInvariant),
+            "date" => IsValidProjectionDate(value),
+            "identifier" => value.Length <= 128 && value.Any(char.IsLetter) && value.All(character => char.IsLetterOrDigit(character) || character is '.' or '_' or '/' or '-' or '－' or '—'),
             "version" => Regex.IsMatch(value, "^(?:[0-9]{2}|[0-9]+\\.[0-9]+)$", RegexOptions.CultureInvariant),
             _ => false
         };
+
+    private static bool IsValidProjectionDate(string value)
+    {
+        var formats = new[] { "yyyy-M-d", "yyyy/M/d", "yyyy.M.d", "yyyy年M月d日" };
+        return DateOnly.TryParseExact(value, formats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _);
+    }
 
     private static bool IsProjectionPlaceholder(string value)
         => Regex.IsMatch(value, "^(?:\\{\\{[^{}]+\\}\\}|\\[[^\\[\\]]+\\])$", RegexOptions.CultureInvariant);
@@ -2433,7 +2456,7 @@ public static class TemplateMigration
         => valueKind switch
         {
             "version" => char.IsAsciiDigit(character) || character == '.',
-            "identifier" => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '/' or '-',
+            "identifier" => char.IsLetterOrDigit(character) || character is '.' or '_' or '/' or '-' or '－' or '—',
             "date" => char.IsAsciiDigit(character) || character is '-' or '/' or '.' or '年' or '月' or '日',
             "token" => !char.IsWhiteSpace(character) && character is not (':' or '：'),
             _ => false
@@ -2482,8 +2505,15 @@ public static class TemplateMigration
         out string value)
     {
         value = string.Empty;
-        if (extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value")) return false;
+        if (extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value" or "whole-parent")) return false;
         var runs = objects.Where(item => item.Kind == "run" && string.Equals(item.ParentId, parentId, StringComparison.Ordinal)).ToList();
+        if (string.Equals(extraction, "whole-parent", StringComparison.Ordinal))
+        {
+            var observed = string.Concat(runs.Select(run => run.Text ?? string.Empty)).Trim();
+            if (!IndependentlyMatchesValueKind(observed, valueKind)) return false;
+            value = observed;
+            return true;
+        }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
             var text = string.Concat(runs.Select(run => run.Text ?? string.Empty));
@@ -2533,8 +2563,19 @@ public static class TemplateMigration
         out IReadOnlyDictionary<string, string> replacements)
     {
         replacements = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value")) return false;
+        if (extraction is not ("after-first-delimiter" or "unique-delimited-run-group" or "unique-delimited-value" or "whole-parent")) return false;
         var runs = objects.Where(item => item.Kind == "run" && string.Equals(item.ParentId, parentId, StringComparison.Ordinal)).ToList();
+        if (string.Equals(extraction, "whole-parent", StringComparison.Ordinal))
+        {
+            var text = string.Concat(runs.Select(run => run.Text ?? string.Empty));
+            var start = 0; while (start < text.Length && char.IsWhiteSpace(text[start])) start += 1;
+            var end = text.Length; while (end > start && char.IsWhiteSpace(text[end - 1])) end -= 1;
+            var observed = start < end ? text[start..end] : string.Empty;
+            if (!IndependentlyMatchesValueKind(observed, valueKind) && !Regex.IsMatch(observed, "^(?:\\{\\{[^{}]+\\}\\}|\\[[^\\[\\]]+\\])$", RegexOptions.CultureInvariant)) return false;
+            var target = new ProjectionTargetSpan(runs, start, end);
+            replacements = BuildProjectionRunReplacements(target, value).ToDictionary(item => item.Run.Id, item => item.Text, StringComparer.Ordinal);
+            return true;
+        }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
             var text = string.Concat(runs.Select(run => run.Text ?? string.Empty));
@@ -2639,8 +2680,8 @@ public static class TemplateMigration
         {
             "text" => value.Length != 0,
             "token" => value.Length != 0 && value.All(character => !char.IsWhiteSpace(character)),
-            "date" => Regex.IsMatch(value, "^(?:[0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2}|[0-9]{4}年[0-9]{1,2}月[0-9]{1,2}日)$", RegexOptions.CultureInvariant),
-            "identifier" => Regex.IsMatch(value, "^(?=.*[A-Za-z])(?=.*[-_/])[A-Za-z0-9._/-]+$", RegexOptions.CultureInvariant),
+            "date" => DateOnly.TryParseExact(value, new[] { "yyyy-M-d", "yyyy/M/d", "yyyy.M.d", "yyyy年M月d日" }, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _),
+            "identifier" => value.Length is > 0 and <= 128 && value.Any(char.IsLetter) && value.All(character => char.IsLetterOrDigit(character) || character is '.' or '_' or '/' or '-' or '－' or '—'),
             "version" => Regex.IsMatch(value, "^(?:[0-9]{2}|[0-9]+\\.[0-9]+)$", RegexOptions.CultureInvariant),
             _ => false
         };
@@ -2649,7 +2690,7 @@ public static class TemplateMigration
         => valueKind switch
         {
             "version" => character is >= '0' and <= '9' || character == '.',
-            "identifier" => character is >= '0' and <= '9' or >= 'A' and <= 'Z' or >= 'a' and <= 'z' || character is '.' or '_' or '/' or '-',
+            "identifier" => char.IsLetterOrDigit(character) || character is '.' or '_' or '/' or '-' or '－' or '—',
             "date" => character is >= '0' and <= '9' || character is '-' or '/' or '.' or '年' or '月' or '日',
             "token" => !char.IsWhiteSpace(character) && character is not (':' or '：'),
             _ => false
