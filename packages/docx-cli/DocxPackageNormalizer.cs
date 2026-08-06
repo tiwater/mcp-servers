@@ -131,6 +131,12 @@ public static class DocxPackageNormalizer
     }
 
     public static void Normalize(string input, string output)
+        => NormalizePackage(input, output, collapseEquivalentNextPageSections: false);
+
+    internal static void NormalizeForReadback(string input, string output)
+        => NormalizePackage(input, output, collapseEquivalentNextPageSections: true);
+
+    private static void NormalizePackage(string input, string output, bool collapseEquivalentNextPageSections)
     {
         var inputPath = Path.GetFullPath(input);
         var outputPath = Path.GetFullPath(output);
@@ -143,7 +149,7 @@ public static class DocxPackageNormalizer
         foreach (var entry in archive.Entries.Where(entry => entry.FullName.StartsWith("word/", StringComparison.Ordinal) && entry.FullName.EndsWith(".xml", StringComparison.Ordinal)).ToList())
         {
             var xml = ReadEntry(entry);
-            if (TryNormalizeXml(xml, out var normalized) && !string.Equals(xml, normalized, StringComparison.Ordinal))
+            if (TryNormalizeXml(xml, collapseEquivalentNextPageSections, out var normalized) && !string.Equals(xml, normalized, StringComparison.Ordinal))
             {
                 var name = entry.FullName;
                 entry.Delete();
@@ -155,7 +161,7 @@ public static class DocxPackageNormalizer
         }
     }
 
-    private static bool TryNormalizeXml(string xml, out string normalized)
+    private static bool TryNormalizeXml(string xml, bool collapseEquivalentNextPageSections, out string normalized)
     {
         normalized = xml;
         XDocument document;
@@ -177,7 +183,10 @@ public static class DocxPackageNormalizer
         NormalizeChildOrder(document.Root);
         NormalizeWpsNoNumbering(document.Root);
         MaterializeInheritedSectionHeadersAndFooters(document.Root);
-        CollapseEquivalentNextPageSections(document.Root);
+        if (collapseEquivalentNextPageSections)
+        {
+            CollapseEquivalentNextPageSections(document.Root);
+        }
         normalized = document.Declaration is null
             ? document.ToString(SaveOptions.DisableFormatting)
             : document.Declaration + document.ToString(SaveOptions.DisableFormatting);

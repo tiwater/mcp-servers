@@ -2052,7 +2052,7 @@ public static class TemplateMigration
         var normalizedPath = Path.Combine(Path.GetTempPath(), $"template-migration-readback-{Guid.NewGuid():N}.docx");
         try
         {
-            DocxPackageNormalizer.Normalize(path, normalizedPath);
+            DocxPackageNormalizer.NormalizeForReadback(path, normalizedPath);
             var normalized = Inventory(normalizedPath);
             return new TemplateMigrationInventory(path, HashFile(path), normalized.Objects);
         }
