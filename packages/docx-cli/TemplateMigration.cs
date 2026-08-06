@@ -1394,15 +1394,17 @@ public static class TemplateMigration
     public static TemplateMigrationReadback ValidateReadback(string source, string baseline, string output, TemplateMigrationPlan plan)
     {
         var sourceInventory = Inventory(source);
-        var baselineInventory = Inventory(baseline);
-        var outputInventory = Inventory(output);
+        var baselineAuthorityInventory = Inventory(baseline);
+        var outputAuthorityInventory = Inventory(output);
+        var baselineInventory = CanonicalReadbackInventory(baseline);
+        var outputInventory = CanonicalReadbackInventory(output);
         var failures = new List<TemplateMigrationPlanFailure>();
 
         if (!string.Equals(plan.SourceSha256, sourceInventory.Sha256, StringComparison.Ordinal))
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-source-hash-mismatch"));
         }
-        if (!string.Equals(plan.BaselineSha256, baselineInventory.Sha256, StringComparison.Ordinal))
+        if (!string.Equals(plan.BaselineSha256, baselineAuthorityInventory.Sha256, StringComparison.Ordinal))
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-hash-mismatch"));
         }
@@ -1559,8 +1561,8 @@ public static class TemplateMigration
             if ((plan.BodyAppends?.Count ?? 0) != 0) failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-append-combination-unsupported"));
         }
 
-        using (var baselineDocument = WordprocessingDocument.Open(Path.GetFullPath(baseline), false))
-        using (var outputDocument = WordprocessingDocument.Open(Path.GetFullPath(output), false))
+        using (var baselineDocument = WordprocessingDocument.Open(Path.GetFullPath(baselineAuthorityInventory.File), false))
+        using (var outputDocument = WordprocessingDocument.Open(Path.GetFullPath(outputAuthorityInventory.File), false))
         {
             var baselineErrors = CountOpenXmlErrors(baselineDocument);
             var outputErrors = CountOpenXmlErrors(outputDocument);
@@ -1591,7 +1593,8 @@ public static class TemplateMigration
             if (!outputById.TryGetValue(outputId, out var outputRun)
                 || !string.Equals(baselineRun.Text, outputRun.Text, StringComparison.Ordinal)
                 || !string.Equals(baselineRun.Provenance.GetValueOrDefault("runPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("runPropertiesSha256"), StringComparison.Ordinal)
-                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), StringComparison.Ordinal))
+                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), StringComparison.Ordinal)
+                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("runContentStructureSha256"), outputRun.Provenance.GetValueOrDefault("runContentStructureSha256"), StringComparison.Ordinal))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-content-drift", BaselineObjectId: baselineRun.Id));
             }
@@ -1624,6 +1627,13 @@ public static class TemplateMigration
                     && item.Topology.Row == selected.Topology.Row).Select(item => item.Id)
                 : [selected.Id];
             mutableIds.UnionWith(DescendantsOf(baseline.Objects, roots));
+        }
+        foreach (var choice in plan.ChoiceSelections ?? [])
+        {
+            if (!baselineById.TryGetValue(choice.BaselineLabelRunObjectId, out var label) || label.ParentId is null) continue;
+            var siblings = baseline.Objects.Where(item => item.Kind == "run" && item.ParentId == label.ParentId).ToList();
+            var labelIndex = siblings.FindIndex(item => item.Id == label.Id);
+            if (labelIndex > 0) mutableIds.Add(siblings[labelIndex - 1].Id);
         }
         return mutableIds;
     }
@@ -2036,6 +2046,22 @@ public static class TemplateMigration
         return new TemplateMigrationInventory(path, HashFile(path), objects);
     }
 
+    private static TemplateMigrationInventory CanonicalReadbackInventory(string input)
+    {
+        var path = Path.GetFullPath(input);
+        var normalizedPath = Path.Combine(Path.GetTempPath(), $"template-migration-readback-{Guid.NewGuid():N}.docx");
+        try
+        {
+            DocxPackageNormalizer.Normalize(path, normalizedPath);
+            var normalized = Inventory(normalizedPath);
+            return new TemplateMigrationInventory(path, HashFile(path), normalized.Objects);
+        }
+        finally
+        {
+            if (File.Exists(normalizedPath)) File.Delete(normalizedPath);
+        }
+    }
+
     private static void AddBodyObjects(List<TemplateMigrationObject> objects, Body body)
     {
         var paragraphIndex = 0;
@@ -2155,7 +2181,8 @@ public static class TemplateMigration
             var provenance = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["runPropertiesSha256"] = HashXml(run.RunProperties),
-                ["paragraphPropertiesSha256"] = HashParagraphProperties(paragraph.ParagraphProperties)
+                ["paragraphPropertiesSha256"] = HashParagraphProperties(paragraph.ParagraphProperties),
+                ["runContentStructureSha256"] = HashRunContentStructure(run)
             };
             var numbering = paragraph.ParagraphProperties?.NumberingProperties;
             if (numbering is not null) provenance["numberingPropertiesSha256"] = HashXml(numbering);
@@ -2225,6 +2252,14 @@ public static class TemplateMigration
         {
             numbering.Remove();
         }
+        return HashText(canonical.OuterXml);
+    }
+
+    private static string HashRunContentStructure(Run run)
+    {
+        var canonical = (Run)run.CloneNode(true);
+        canonical.RunProperties?.Remove();
+        foreach (var text in canonical.Descendants<Text>()) text.Text = string.Empty;
         return HashText(canonical.OuterXml);
     }
 
@@ -2856,7 +2891,14 @@ public static class TemplateMigration
     }
 
     private static string StructureFingerprint(TemplateMigrationObject item)
-        => string.Join("|", item.Id, item.Kind, item.Scope, item.ParentId ?? string.Empty, item.Style ?? string.Empty);
+        => string.Join("|",
+            item.Id,
+            item.Kind,
+            item.Scope,
+            item.ParentId ?? string.Empty,
+            item.Style ?? string.Empty,
+            item.Kind == "section" ? item.Provenance.GetValueOrDefault("sectionPropertiesSha256") : string.Empty,
+            item.Kind == "section" ? item.Provenance.GetValueOrDefault("headerFooterReferencesSha256") : string.Empty);
 
     private static string HashFile(string path)
     {

@@ -2579,6 +2579,67 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_readback_canonicalizes_equivalent_section_breaks_but_rejects_real_section_header_and_break_changes()
+    {
+        var source = CreateTextMigrationFixture("legacy label");
+        var baseline = CreateEquivalentSectionMigrationFixture("target placeholder");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v1",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "legacy label"),
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "target placeholder"),
+                "retain-target-label")]);
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-equivalent-sections-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+
+        DocxPackageNormalizer.Normalize(output, output);
+
+        var validation = TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan);
+        Assert.True(validation.Pass, string.Join("; ", validation.Failures.Select(item => item.Reason)));
+
+        var changedSection = Path.Combine(Path.GetTempPath(), $"migration-changed-section-{Guid.NewGuid():N}.docx");
+        File.Copy(output, changedSection);
+        using (var document = WordprocessingDocument.Open(changedSection, true))
+        {
+            var section = document.MainDocumentPart!.Document!.Body!.Elements<SectionProperties>().Single();
+            section.GetFirstChild<PageSize>()!.Width = 12000;
+            document.MainDocumentPart.Document.Save();
+        }
+        var changedSectionValidation = TemplateMigration.ValidateReadback(source, baseline, changedSection, resolved.Plan);
+        Assert.False(changedSectionValidation.Pass);
+        Assert.Contains(changedSectionValidation.Failures, item => item.Reason == "template-migration-readback-baseline-structure-drift");
+
+        var changedHeader = Path.Combine(Path.GetTempPath(), $"migration-changed-header-{Guid.NewGuid():N}.docx");
+        File.Copy(output, changedHeader);
+        using (var document = WordprocessingDocument.Open(changedHeader, true))
+        {
+            var main = document.MainDocumentPart!;
+            var alternate = main.AddNewPart<HeaderPart>();
+            alternate.Header = new Header(new Paragraph(new Run(new Text("different header"))));
+            var section = main.Document!.Body!.Elements<SectionProperties>().Single();
+            section.GetFirstChild<HeaderReference>()!.Id = main.GetIdOfPart(alternate);
+            main.Document.Save();
+        }
+        var changedHeaderValidation = TemplateMigration.ValidateReadback(source, baseline, changedHeader, resolved.Plan);
+        Assert.False(changedHeaderValidation.Pass);
+        Assert.Contains(changedHeaderValidation.Failures, item => item.Reason == "template-migration-readback-baseline-structure-drift");
+
+        var changedBreak = Path.Combine(Path.GetTempPath(), $"migration-changed-break-{Guid.NewGuid():N}.docx");
+        File.Copy(output, changedBreak);
+        using (var document = WordprocessingDocument.Open(changedBreak, true))
+        {
+            var pageBreak = document.MainDocumentPart!.Document!.Body!.Descendants<Break>().Single(item => item.Type?.Value == BreakValues.Page);
+            pageBreak.Type = BreakValues.Column;
+            document.MainDocumentPart.Document.Save();
+        }
+        var changedBreakValidation = TemplateMigration.ValidateReadback(source, baseline, changedBreak, resolved.Plan);
+        Assert.False(changedBreakValidation.Pass);
+        Assert.Contains(changedBreakValidation.Failures, item => item.Reason == "template-migration-readback-baseline-content-drift");
+    }
+
+    [Fact]
     public void Edit_can_replace_header_paragraph_text()
     {
         var docPath = CreateSplitPlaceholderFixture();
@@ -3555,6 +3616,24 @@ public class AnnotationToolsTests
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
         main.Document = new Document(new Body(text.Select(value => new Paragraph(new Run(new Text(value))))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateEquivalentSectionMigrationFixture(string text)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-equivalent-section-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        header.Header = new Header(new Paragraph(new Run(new Text("shared header"))));
+        var section = new SectionProperties(
+            new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
+            new PageSize { Width = 11906, Height = 16838 },
+            new PageMargin { Top = 1418, Right = 1134, Bottom = 1418, Left = 1797 });
+        main.Document = new Document(new Body(
+            new Paragraph(new ParagraphProperties((SectionProperties)section.CloneNode(true)), new Run(new Text(text))),
+            (SectionProperties)section.CloneNode(true)));
         main.Document.Save();
         return path;
     }
