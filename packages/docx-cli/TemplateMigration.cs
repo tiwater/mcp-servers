@@ -115,9 +115,10 @@ public static class TemplateMigration
 
     /// <summary>
     /// A conservative generic mapping strategy for arbitrary layouts. It maps
-    /// only a content-bearing source object whose normalized text occurs once
-    /// in its source kind and once in the same baseline kind. Everything else
-    /// is review-required; it never resolves a duplicate by position.
+    /// content that is unique within both inventories. Repeated table-cell
+    /// content is mapped only when the complete normalized cell topology makes
+    /// the source and baseline tables a reciprocally unique semantic pair;
+    /// caller-supplied positions are never accepted.
     /// </summary>
     public static TemplateMigrationMappingDerivation DeriveExactTextPlan(string source, string baseline)
     {
@@ -126,6 +127,7 @@ public static class TemplateMigration
         var baselineContent = analysis.Baseline.Objects.Where(IsContentBearing).ToList();
         var sourceCounts = sourceContent.GroupBy(MappingKey).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
         var baselineByKey = baselineContent.GroupBy(MappingKey).ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var reciprocalTableTargets = DeriveReciprocalTableCellTargets(analysis);
         var mappings = new List<TemplateMigrationMapping>();
         var unresolved = new List<TemplateMigrationPlanFailure>();
 
@@ -137,6 +139,13 @@ public static class TemplateMigration
             if (sourceCount == 1 && candidates is { Count: 1 })
             {
                 mappings.Add(new TemplateMigrationMapping(sourceObject.Id, candidates[0].Id, "copy-text"));
+                continue;
+            }
+            if (candidates is { Count: > 0 }
+                && reciprocalTableTargets.TryGetValue(sourceObject.Id, out var reciprocalTarget)
+                && candidates.Any(candidate => string.Equals(candidate.Id, reciprocalTarget, StringComparison.Ordinal)))
+            {
+                mappings.Add(new TemplateMigrationMapping(sourceObject.Id, reciprocalTarget, "copy-text"));
                 continue;
             }
 
@@ -164,6 +173,61 @@ public static class TemplateMigration
             Plan: plan,
             Unresolved: unresolved);
     }
+
+    private static IReadOnlyDictionary<string, string> DeriveReciprocalTableCellTargets(TemplateMigrationAnalysis analysis)
+    {
+        var sourceTables = BuildSemanticTableTopologies(analysis.Source.Objects);
+        var baselineTables = BuildSemanticTableTopologies(analysis.Baseline.Objects);
+        var sourceBySignature = sourceTables.GroupBy(table => table.Signature, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var baselineBySignature = baselineTables.GroupBy(table => table.Signature, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var targets = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var (signature, sourceMatches) in sourceBySignature)
+        {
+            if (sourceMatches.Count != 1
+                || !baselineBySignature.TryGetValue(signature, out var baselineMatches)
+                || baselineMatches.Count != 1) continue;
+            var sourceTable = sourceMatches[0];
+            var baselineTable = baselineMatches[0];
+            foreach (var (topology, sourceCell) in sourceTable.Cells)
+            {
+                if (baselineTable.Cells.TryGetValue(topology, out var baselineCell))
+                {
+                    targets[sourceCell.Id] = baselineCell.Id;
+                }
+            }
+        }
+        return targets;
+    }
+
+    private static IReadOnlyList<SemanticTableTopology> BuildSemanticTableTopologies(IReadOnlyList<TemplateMigrationObject> objects)
+    {
+        var tables = new List<SemanticTableTopology>();
+        foreach (var group in objects.Where(item => item.Kind == "table-cell" && item.Topology is not null)
+            .GroupBy(item => item.Topology!.ContainerObjectId, StringComparer.Ordinal))
+        {
+            var cells = group.OrderBy(item => item.Topology!.Row).ThenBy(item => item.Topology!.Column).ToList();
+            var positions = cells.Select(item => (item.Topology!.Row, item.Topology!.Column)).ToList();
+            if (positions.Distinct().Count() != positions.Count) continue;
+            var scopes = cells.Select(item => item.Scope).Distinct(StringComparer.Ordinal).ToList();
+            if (scopes.Count != 1) continue;
+            var signature = scopes[0] + "\u001E" + string.Join("\u001E", cells.Select(item =>
+            {
+                var text = NormalizeMappingText(item.Text);
+                return $"{item.Topology!.Row}:{item.Topology.Column}:{text.Length}:{text}";
+            }));
+            tables.Add(new SemanticTableTopology(
+                signature,
+                cells.ToDictionary(item => (item.Topology!.Row, item.Topology.Column), item => item)));
+        }
+        return tables;
+    }
+
+    private sealed record SemanticTableTopology(
+        string Signature,
+        IReadOnlyDictionary<(int Row, int Column), TemplateMigrationObject> Cells);
 
     public static int RunDeriveAnchorGapPlan(string[] args)
     {
