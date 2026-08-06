@@ -323,13 +323,18 @@ public sealed record TemplateMigrationSemanticCandidateChoiceSelection(
     TemplateMigrationSemanticSelector SourceMember,
     TemplateMigrationSemanticSelector BaselineLabel);
 
+public sealed record TemplateMigrationSemanticCandidateBaselineClear(
+    TemplateMigrationSemanticSelector Baseline,
+    string Mode);
+
 public sealed record TemplateMigrationSemanticCandidate(
     string Schema,
     IReadOnlyList<TemplateMigrationSemanticCandidateMapping> Mappings,
     IReadOnlyList<TemplateMigrationSemanticCandidateBodyAppend>? BodyAppends = null,
     IReadOnlyList<TemplateMigrationSemanticCandidateValueProjection>? ValueProjections = null,
     IReadOnlyList<TemplateMigrationSemanticCandidateBodyInsertion>? BodyInsertions = null,
-    IReadOnlyList<TemplateMigrationSemanticCandidateChoiceSelection>? ChoiceSelections = null);
+    IReadOnlyList<TemplateMigrationSemanticCandidateChoiceSelection>? ChoiceSelections = null,
+    IReadOnlyList<TemplateMigrationSemanticCandidateBaselineClear>? BaselineClears = null);
 
 public sealed record TemplateMigrationMappingDerivation(
     string Schema,

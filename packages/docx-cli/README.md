@@ -129,6 +129,15 @@ unknown selections fail closed. Independent readback recomputes the selected
 label set from image hashes, verifies every bound label is unchanged, and
 rejects both missing and additional selections.
 
+Semantic candidate v5 may select baseline-owned placeholder or default content
+for clearing by a unique current baseline selector. The selector is resolved to
+the hash-attested baseline inventory; callers cannot supply object ids or table
+coordinates. `cell` clears one paragraph/table cell and `row` clears every cell
+in the selected table row. Missing, ambiguous, duplicate, unsupported, or
+copy-conflicting selections fail closed. Composite clear/projection/insertion/
+choice plans use plan v7, and independent readback verifies both the declared
+empty targets and every untouched baseline run's text and formatting hashes.
+
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
 ```

@@ -573,7 +573,7 @@ public class AnnotationToolsTests
         Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(
             source,
             baseline,
-            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v5" }));
+            SemanticValueCandidate("Source: R9", "Target: old", "token") with { Schema = "tiwater.docx.template-migration-semantic-candidate/v6" }));
 
         var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, SemanticValueCandidate("Source: R9", "Target: old", "token"));
         var stale = resolved.Plan with { SourceSha256 = new string('0', 64) };
@@ -1085,6 +1085,42 @@ public class AnnotationToolsTests
             BaselineClears: [new TemplateMigrationBaselineClear("body:table:0:row:0:cell:0", "cell")]);
         Assert.Contains(TemplateMigration.BuildOperations(conflictSource, baseline, conflict).Failures,
             failure => failure.Reason == "template-migration-baseline-clear-copy-conflict");
+    }
+
+    [Fact]
+    public void TemplateMigration_resolves_baseline_clear_from_a_unique_semantic_selector()
+    {
+        var source = CreateTextMigrationFixture("legacy container label");
+        var baseline = CreateBaselineClearFixture("{{approval}}", "target owned");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", "body", "legacy container label"),
+                null,
+                "out-of-scope")],
+            BaselineClears:
+            [new TemplateMigrationSemanticCandidateBaselineClear(
+                new TemplateMigrationSemanticSelector("table-cell", "body", "{{approval}}"),
+                "cell")]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal("tiwater.docx.template-migration-plan/v3", resolved.Plan.Schema);
+        Assert.Equal("body:table:0:row:0:cell:0", Assert.Single(resolved.Plan.BaselineClears!).BaselineObjectId);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-semantic-clear-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+
+        var ambiguous = TemplateMigration.ResolveSemanticCandidate(
+            source,
+            CreateBaselineClearFixture("duplicate", "duplicate"),
+            candidate with
+            {
+                BaselineClears = [new TemplateMigrationSemanticCandidateBaselineClear(
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "duplicate"),
+                    "cell")]
+            });
+        Assert.False(ambiguous.Pass);
+        Assert.Contains(ambiguous.Unresolved, item => item.Reason == "template-migration-semantic-baseline-clear-ambiguous");
     }
 
     [Fact]

@@ -310,6 +310,7 @@ public static class TemplateMigration
         var bodyInsertions = new List<TemplateMigrationBodyInsertion>();
         var choiceSelections = new List<TemplateMigrationChoiceSelection>();
         var valueProjections = new List<TemplateMigrationValueProjection>();
+        var baselineClears = new List<TemplateMigrationBaselineClear>();
 
         foreach (var proposal in candidate.Mappings ?? [])
         {
@@ -412,6 +413,25 @@ public static class TemplateMigration
             choiceSelections.Add(new TemplateMigrationChoiceSelection(members[0].Id, labels[0].Id));
         }
 
+        var clearedBaselineIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var proposal in candidate.BaselineClears ?? [])
+        {
+            var matches = ResolveSelector(analysis.Baseline.Objects, proposal.Baseline);
+            if (matches.Count != 1)
+            {
+                failures.Add(new TemplateMigrationPlanFailure(matches.Count == 0
+                    ? "template-migration-semantic-baseline-clear-missing"
+                    : "template-migration-semantic-baseline-clear-ambiguous"));
+                continue;
+            }
+            if (!clearedBaselineIds.Add(matches[0].Id))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-baseline-clear-duplicate", BaselineObjectId: matches[0].Id));
+                continue;
+            }
+            baselineClears.Add(new TemplateMigrationBaselineClear(matches[0].Id, proposal.Mode));
+        }
+
         var projectedSources = new HashSet<string>(StringComparer.Ordinal);
         var projectionBindings = new HashSet<string>(StringComparer.Ordinal);
         var projectedSemantics = new HashSet<string>(StringComparer.Ordinal);
@@ -485,8 +505,12 @@ public static class TemplateMigration
             }
         }
 
+        var combinedClearPlan = baselineClears.Count != 0
+            && (choiceSelections.Count != 0 || bodyInsertions.Count != 0 || valueProjections.Count != 0 || bodyAppends.Count != 0);
         var plan = new TemplateMigrationPlan(
-            choiceSelections.Count != 0 ? "tiwater.docx.template-migration-plan/v6"
+            combinedClearPlan ? "tiwater.docx.template-migration-plan/v7"
+                : baselineClears.Count != 0 ? "tiwater.docx.template-migration-plan/v3"
+                : choiceSelections.Count != 0 ? "tiwater.docx.template-migration-plan/v6"
                 : bodyInsertions.Count != 0 ? "tiwater.docx.template-migration-plan/v5"
                 : valueProjections.Count != 0 ? "tiwater.docx.template-migration-plan/v4"
                 : bodyAppends.Count == 0 ? "tiwater.docx.template-migration-plan/v1" : "tiwater.docx.template-migration-plan/v2",
@@ -494,6 +518,7 @@ public static class TemplateMigration
             analysis.Baseline.Sha256,
             mappings.Values.OrderBy(mapping => mapping.SourceObjectId, StringComparer.Ordinal).ToList(),
             bodyAppends,
+            BaselineClears: baselineClears,
             ValueProjections: valueProjections,
             BodyInsertions: bodyInsertions,
             ChoiceSelections: choiceSelections);
@@ -520,7 +545,7 @@ public static class TemplateMigration
 
     private static void ValidateSemanticCandidateJson(JsonElement root)
     {
-        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings", "bodyAppends", "valueProjections", "bodyInsertions", "choiceSelections"], StringComparer.Ordinal), "template-migration-semantic-candidate");
+        RequireOnlyFields(root, new HashSet<string>(["schema", "mappings", "bodyAppends", "valueProjections", "bodyInsertions", "choiceSelections", "baselineClears"], StringComparer.Ordinal), "template-migration-semantic-candidate");
         if (!root.TryGetProperty("mappings", out var mappings) || mappings.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-mappings-invalid");
         foreach (var mapping in mappings.EnumerateArray())
         {
@@ -588,6 +613,16 @@ public static class TemplateMigration
                 }
             }
         }
+        if (root.TryGetProperty("baselineClears", out var clears))
+        {
+            if (clears.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-clears-invalid");
+            foreach (var clear in clears.EnumerateArray())
+            {
+                RequireOnlyFields(clear, new HashSet<string>(["baseline", "mode"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline-clear");
+                if (!clear.TryGetProperty("baseline", out var selector)) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-clear-selector-missing");
+                RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline-clear-selector");
+            }
+        }
     }
 
     private static void RequireOnlyFields(JsonElement element, IReadOnlySet<string> allowed, string label)
@@ -598,19 +633,23 @@ public static class TemplateMigration
 
     private static void ValidateSemanticCandidate(TemplateMigrationSemanticCandidate candidate)
     {
-        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v1" or "tiwater.docx.template-migration-semantic-candidate/v2" or "tiwater.docx.template-migration-semantic-candidate/v3" or "tiwater.docx.template-migration-semantic-candidate/v4")) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
+        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v1" or "tiwater.docx.template-migration-semantic-candidate/v2" or "tiwater.docx.template-migration-semantic-candidate/v3" or "tiwater.docx.template-migration-semantic-candidate/v4" or "tiwater.docx.template-migration-semantic-candidate/v5")) throw new InvalidOperationException("template-migration-semantic-candidate-schema-invalid");
         if (string.Equals(candidate.Schema, "tiwater.docx.template-migration-semantic-candidate/v1", StringComparison.Ordinal)
             && (candidate.ValueProjections?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-v1-value-projection-forbidden");
         if (candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v3"
             && candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v4"
+            && candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v5"
             && (candidate.BodyInsertions?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-body-insertion-schema-invalid");
-        if (candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v4"
+        if (candidate.Schema is not ("tiwater.docx.template-migration-semantic-candidate/v4" or "tiwater.docx.template-migration-semantic-candidate/v5")
             && (candidate.ChoiceSelections?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-choice-selection-schema-invalid");
+        if (candidate.Schema is not "tiwater.docx.template-migration-semantic-candidate/v5"
+            && (candidate.BaselineClears?.Count ?? 0) != 0) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-clear-schema-invalid");
         if ((candidate.Mappings is null || candidate.Mappings.Count == 0)
             && (candidate.BodyAppends is null || candidate.BodyAppends.Count == 0)
             && (candidate.ValueProjections is null || candidate.ValueProjections.Count == 0)
             && (candidate.BodyInsertions is null || candidate.BodyInsertions.Count == 0)
-            && (candidate.ChoiceSelections is null || candidate.ChoiceSelections.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
+            && (candidate.ChoiceSelections is null || candidate.ChoiceSelections.Count == 0)
+            && (candidate.BaselineClears is null || candidate.BaselineClears.Count == 0)) throw new InvalidOperationException("template-migration-semantic-candidate-content-required");
         foreach (var mapping in candidate.Mappings ?? [])
         {
             ValidateSemanticSelector(mapping.Source, "source");
@@ -629,6 +668,11 @@ public static class TemplateMigration
         {
             ValidateSemanticSelector(append.SourceStart, "source-start");
             ValidateSemanticSelector(append.SourceEnd, "source-end");
+        }
+        foreach (var clear in candidate.BaselineClears ?? [])
+        {
+            ValidateSemanticSelector(clear.Baseline, "baseline-clear");
+            if (clear.Mode is not ("cell" or "row")) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-clear-mode-invalid");
         }
         foreach (var projection in candidate.ValueProjections ?? [])
         {
@@ -759,7 +803,7 @@ public static class TemplateMigration
         var mediaCopies = new List<TemplateMigrationMediaCopy>();
         var reviewRequired = false;
 
-        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v1" or "tiwater.docx.template-migration-plan/v2" or "tiwater.docx.template-migration-plan/v3" or "tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6"))
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v1" or "tiwater.docx.template-migration-plan/v2" or "tiwater.docx.template-migration-plan/v3" or "tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6" or "tiwater.docx.template-migration-plan/v7"))
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-schema-invalid", Detail: plan.Schema));
         }
@@ -767,11 +811,11 @@ public static class TemplateMigration
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v1-body-append-forbidden"));
         }
-        if (plan.Schema is not "tiwater.docx.template-migration-plan/v3" && (plan.BaselineClears?.Count ?? 0) != 0)
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v3" or "tiwater.docx.template-migration-plan/v7") && (plan.BaselineClears?.Count ?? 0) != 0)
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-baseline-clear-schema-invalid"));
         }
-        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6") && (plan.ValueProjections?.Count ?? 0) != 0)
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v4" or "tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6" or "tiwater.docx.template-migration-plan/v7") && (plan.ValueProjections?.Count ?? 0) != 0)
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-value-projection-schema-invalid"));
         }
@@ -779,7 +823,7 @@ public static class TemplateMigration
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v4-value-projection-required"));
         }
-        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6") && (plan.BodyInsertions?.Count ?? 0) != 0)
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v5" or "tiwater.docx.template-migration-plan/v6" or "tiwater.docx.template-migration-plan/v7") && (plan.BodyInsertions?.Count ?? 0) != 0)
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-body-insertion-schema-invalid"));
         }
@@ -787,7 +831,7 @@ public static class TemplateMigration
         {
             failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v5-body-insertion-required"));
         }
-        if (plan.Schema is not "tiwater.docx.template-migration-plan/v6" && (plan.ChoiceSelections?.Count ?? 0) != 0) failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-choice-selection-schema-invalid"));
+        if (plan.Schema is not ("tiwater.docx.template-migration-plan/v6" or "tiwater.docx.template-migration-plan/v7") && (plan.ChoiceSelections?.Count ?? 0) != 0) failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-choice-selection-schema-invalid"));
         if (string.Equals(plan.Schema, "tiwater.docx.template-migration-plan/v6", StringComparison.Ordinal) && (plan.ChoiceSelections?.Count ?? 0) == 0) failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-v6-choice-selection-required"));
         if (!string.Equals(plan.SourceSha256, analysis.Source.Sha256, StringComparison.Ordinal))
         {
