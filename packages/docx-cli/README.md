@@ -137,6 +137,11 @@ in the selected table row. Missing, ambiguous, duplicate, unsupported, or
 copy-conflicting selections fail closed. Composite clear/projection/insertion/
 choice plans use plan v7, and independent readback verifies both the declared
 empty targets and every untouched baseline run's text and formatting hashes.
+For repeated legacy container labels with no business content, an
+`out-of-scope` mapping may explicitly use `cardinality: all`; this terminates
+every current hash-bound semantic match. `all` is forbidden for copy, retain,
+projection, insertion, and choice behavior, which continue to require unique
+selectors.
 
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>

@@ -315,9 +315,26 @@ public static class TemplateMigration
         foreach (var proposal in candidate.Mappings ?? [])
         {
             var sourceMatches = ResolveSelector(analysis.Source.Objects, proposal.Source);
-            if (sourceMatches.Count != 1)
+            var allTerminalMatches = string.Equals(proposal.Cardinality, "all", StringComparison.Ordinal)
+                && string.Equals(proposal.Disposition, "out-of-scope", StringComparison.Ordinal);
+            if (sourceMatches.Count == 0 || (!allTerminalMatches && sourceMatches.Count != 1))
             {
                 failures.Add(new TemplateMigrationPlanFailure(sourceMatches.Count == 0 ? "template-migration-semantic-source-missing" : "template-migration-semantic-source-ambiguous", Detail: proposal.Source.Kind));
+                continue;
+            }
+            if (allTerminalMatches)
+            {
+                foreach (var matchedObject in sourceMatches)
+                {
+                    var allPending = mappings.TryGetValue(matchedObject.Id, out var allExisting)
+                        && string.Equals(allExisting.Disposition, "review-required", StringComparison.Ordinal);
+                    if (!allPending)
+                    {
+                        failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", matchedObject.Id));
+                        continue;
+                    }
+                    mappings[matchedObject.Id] = new TemplateMigrationMapping(matchedObject.Id, null, "out-of-scope", "semantic-candidate-out-of-scope-all");
+                }
                 continue;
             }
             var sourceObject = sourceMatches[0];
@@ -549,7 +566,7 @@ public static class TemplateMigration
         if (!root.TryGetProperty("mappings", out var mappings) || mappings.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-semantic-candidate-mappings-invalid");
         foreach (var mapping in mappings.EnumerateArray())
         {
-            RequireOnlyFields(mapping, new HashSet<string>(["source", "baseline", "disposition"], StringComparer.Ordinal), "template-migration-semantic-candidate-mapping");
+            RequireOnlyFields(mapping, new HashSet<string>(["source", "baseline", "disposition", "cardinality"], StringComparer.Ordinal), "template-migration-semantic-candidate-mapping");
             if (!mapping.TryGetProperty("source", out var source)) throw new InvalidOperationException("template-migration-semantic-candidate-source-missing");
             RequireOnlyFields(source, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText"], StringComparer.Ordinal), "template-migration-semantic-candidate-source");
             var outOfScope = mapping.TryGetProperty("disposition", out var disposition)
@@ -654,6 +671,9 @@ public static class TemplateMigration
         {
             ValidateSemanticSelector(mapping.Source, "source");
             if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label" or "out-of-scope")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
+            if (mapping.Cardinality is not (null or "one" or "all")) throw new InvalidOperationException("template-migration-semantic-candidate-cardinality-invalid");
+            if (string.Equals(mapping.Cardinality, "all", StringComparison.Ordinal)
+                && !string.Equals(mapping.Disposition, "out-of-scope", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-candidate-cardinality-all-terminal-only");
             if (string.Equals(mapping.Disposition, "out-of-scope", StringComparison.Ordinal))
             {
                 if (mapping.Baseline is not null) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");

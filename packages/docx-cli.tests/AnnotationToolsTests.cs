@@ -316,6 +316,28 @@ public class AnnotationToolsTests
         Assert.False(rejected.Pass);
         Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-semantic-source-ambiguous");
 
+        var terminalAll = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "legacy factual content"),
+                null,
+                "out-of-scope",
+                "all")]);
+        var terminalAllResolved = TemplateMigration.ResolveSemanticCandidate(duplicateSource, baseline, terminalAll);
+        Assert.True(terminalAllResolved.Pass, string.Join("; ", terminalAllResolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal(2, terminalAllResolved.Plan.Mappings.Count(item => item.Disposition == "out-of-scope"));
+        Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(
+            duplicateSource,
+            baseline,
+            terminalAll with
+            {
+                Mappings = [terminalAll.Mappings.Single() with
+                {
+                    Baseline = new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "target format placeholder"),
+                    Disposition = "copy-text"
+                }]
+            }));
+
         var contextualSource = CreateTextMigrationFixture("before source", "repeated label", "after source", "repeated label");
         var contextualBaseline = CreateTextMigrationFixture("before target", "target slot one", "after target", "target slot two");
         var contextualCandidate = new TemplateMigrationSemanticCandidate(
