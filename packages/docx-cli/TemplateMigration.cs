@@ -1555,7 +1555,7 @@ public static class TemplateMigration
         }
         else
         {
-            ValidateBodyInsertionReadback(sourceInventory, baselineInventory, outputInventory, plan.BodyInsertions!, failures);
+            ValidateBodyInsertionReadback(sourceInventory, baselineInventory, outputInventory, plan, baselineOutputIds, failures);
             if ((plan.BodyAppends?.Count ?? 0) != 0) failures.Add(new TemplateMigrationPlanFailure("template-migration-body-insertion-append-combination-unsupported"));
         }
 
@@ -1582,10 +1582,26 @@ public static class TemplateMigration
         IReadOnlyDictionary<string, string> baselineOutputIds,
         List<TemplateMigrationPlanFailure> failures)
     {
-        var baselineById = baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var outputById = output.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
-        var mutableIds = new HashSet<string>(StringComparer.Ordinal);
+        var mutableIds = BuildMutableBaselineIds(baseline, plan);
 
+        foreach (var baselineRun in baseline.Objects.Where(item => item.Kind == "run" && !mutableIds.Contains(item.Id)))
+        {
+            var outputId = baselineOutputIds.GetValueOrDefault(baselineRun.Id, baselineRun.Id);
+            if (!outputById.TryGetValue(outputId, out var outputRun)
+                || !string.Equals(baselineRun.Text, outputRun.Text, StringComparison.Ordinal)
+                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("runPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("runPropertiesSha256"), StringComparison.Ordinal)
+                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), StringComparison.Ordinal))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-content-drift", BaselineObjectId: baselineRun.Id));
+            }
+        }
+    }
+
+    private static HashSet<string> BuildMutableBaselineIds(TemplateMigrationInventory baseline, TemplateMigrationPlan plan)
+    {
+        var baselineById = baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var mutableIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var mapping in (plan.Mappings ?? []).Where(item =>
                      string.Equals(item.Disposition, "copy-text", StringComparison.Ordinal)
                      && !string.IsNullOrWhiteSpace(item.BaselineObjectId)))
@@ -1609,18 +1625,7 @@ public static class TemplateMigration
                 : [selected.Id];
             mutableIds.UnionWith(DescendantsOf(baseline.Objects, roots));
         }
-
-        foreach (var baselineRun in baseline.Objects.Where(item => item.Kind == "run" && !mutableIds.Contains(item.Id)))
-        {
-            var outputId = baselineOutputIds.GetValueOrDefault(baselineRun.Id, baselineRun.Id);
-            if (!outputById.TryGetValue(outputId, out var outputRun)
-                || !string.Equals(baselineRun.Text, outputRun.Text, StringComparison.Ordinal)
-                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("runPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("runPropertiesSha256"), StringComparison.Ordinal)
-                || !string.Equals(baselineRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), outputRun.Provenance.GetValueOrDefault("paragraphPropertiesSha256"), StringComparison.Ordinal))
-            {
-                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-content-drift", BaselineObjectId: baselineRun.Id));
-            }
-        }
+        return mutableIds;
     }
 
     private static IReadOnlyList<TemplateMigrationPlanFailure> ValidatePlainBodyInsertionContent(
@@ -1788,9 +1793,13 @@ public static class TemplateMigration
         TemplateMigrationInventory source,
         TemplateMigrationInventory baseline,
         TemplateMigrationInventory output,
-        IReadOnlyList<TemplateMigrationBodyInsertion> insertions,
+        TemplateMigrationPlan plan,
+        IReadOnlyDictionary<string, string> baselineOutputIds,
         List<TemplateMigrationPlanFailure> failures)
     {
+        var insertions = plan.BodyInsertions ?? [];
+        var mutableBaselineIds = BuildMutableBaselineIds(baseline, plan);
+        var mutableOutputIds = mutableBaselineIds.Select(id => baselineOutputIds.GetValueOrDefault(id, id)).ToHashSet(StringComparer.Ordinal);
         var sourceRoots = source.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
         var baselineRoots = baseline.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
         var outputRoots = output.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
@@ -1827,7 +1836,10 @@ public static class TemplateMigration
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-body-insertion-content-mismatch", expectedRoot.Id, actualRoot.Id));
                 }
             }
-            else if (!string.Equals(RelativeStructureTreeFingerprint(baseline.Objects, expectedRoot.Id), RelativeStructureTreeFingerprint(output.Objects, actualRoot.Id), StringComparison.Ordinal))
+            else if (!string.Equals(
+                         RelativeStructureTreeFingerprint(baseline.Objects, expectedRoot.Id, mutableBaselineIds),
+                         RelativeStructureTreeFingerprint(output.Objects, actualRoot.Id, mutableOutputIds),
+                         StringComparison.Ordinal))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-structure-drift", expectedRoot.Id, actualRoot.Id));
             }
@@ -1846,10 +1858,10 @@ public static class TemplateMigration
         return HashCanonical(rows);
     }
 
-    private static string RelativeStructureTreeFingerprint(IReadOnlyList<TemplateMigrationObject> objects, string rootId)
+    private static string RelativeStructureTreeFingerprint(IReadOnlyList<TemplateMigrationObject> objects, string rootId, IReadOnlySet<string> excludedIds)
     {
         var descendants = DescendantsOf(objects, [rootId]);
-        var rows = objects.Where(item => descendants.Contains(item.Id)).Select(item => new
+        var rows = objects.Where(item => descendants.Contains(item.Id) && !excludedIds.Contains(item.Id)).Select(item => new
         {
             RelativeId = item.Id == rootId ? string.Empty
                 : item.Id.StartsWith(rootId + ":", StringComparison.Ordinal) ? item.Id[rootId.Length..]
