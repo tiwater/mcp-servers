@@ -6,7 +6,7 @@
 | --- | --- |
 | capability | `tiwater.pptx-render-finding-map/v1` |
 | owner | `tiwater-pptx` owns mapping a hash-bound WPS raster finding to current PPTX slide/layout/master objects. WPS/`tiwater-convert` owns the raster. |
-| primary input | Current `inspect --detail` readback, a complete native-render manifest whose artifact/page hashes bind current PPTX bytes and PNGs, plus raster findings carrying page, raster hash, pixel region, kind, and optional observed text. |
+| primary input | Current `inspect --detail` readback carrying the SHA-256 of the inspected PPTX bytes, a complete native-render manifest whose artifact/page hashes bind those same PPTX bytes and PNGs, plus raster findings carrying page, raster hash, pixel region, kind, and optional observed text. |
 | machine output | A closed finding map with every intersecting current object, `unique`/`ambiguous`/`unmapped` status, stable object locator and explicit no-operation disposition; an independently recomputed verdict. |
 | non-goals | Detecting business meaning, inventing raster findings, OCR, moving an object to an inferred aesthetic target, slide-wide scaling, changing master/layout choice, or treating a unique object binding as permission to edit it. |
 
@@ -14,6 +14,9 @@ The producer maps EMU bounds to the exact raster dimensions and considers the
 active slide, layout and master independently. Optional observed text filters
 only current object text; it cannot create a target. The independent validator
 recomputes candidates without calling the producer decision function.
+The producer and validator both require the inspect report, render manifest,
+and finding request to name the same lowercase SHA-256, and re-hash the current
+PPTX path recorded by inspect before accepting any object identity.
 
 Object identity is not edit authority. Occlusion, text overflow, picture
 clipping, master/layout objects, multiple candidates and unmapped pixels all

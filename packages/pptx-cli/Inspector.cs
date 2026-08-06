@@ -87,6 +87,7 @@ public static class Inspector
 
         return new PresentationDetailReport(
             File: path,
+            ArtifactSha256: HashFile(path),
             SlideCount: slides.Count,
             SlideSize: new SlideSizeInfo(slideSize?.Cx ?? 0L, slideSize?.Cy ?? 0L),
             Masters: masters,
@@ -94,6 +95,7 @@ public static class Inspector
     }
 
     private static string HashText(string value) => Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+    private static string HashFile(string path) { using var stream = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant(); }
     private static string HashPart(OpenXmlPart part) { using var stream = part.GetStream(); return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant(); }
 
     internal static List<string> ExtractTexts(OpenXmlPartRootElement? root)

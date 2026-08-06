@@ -47,6 +47,7 @@ public sealed record FillResult(
 
 public sealed record PresentationDetailReport(
     string File,
+    string ArtifactSha256,
     int SlideCount,
     SlideSizeInfo SlideSize,
     IReadOnlyList<MasterDetail> Masters,

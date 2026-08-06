@@ -32,7 +32,8 @@ Placeholders are matched as exact inline tokens like `{{title}}`.
 master/layout/theme paths, placeholder roles, native z-order, media path/hash
 bindings, shape transforms, paragraph alignment, and direct run formatting. Font size is
 reported in points. Shape coordinates remain in EMU so callers can compare
-native PPTX positions without lossy conversion.
+native PPTX positions without lossy conversion. The detail report includes
+`artifactSha256`, computed directly from the inspected PPTX bytes.
 
 ## Format Edit Plan
 

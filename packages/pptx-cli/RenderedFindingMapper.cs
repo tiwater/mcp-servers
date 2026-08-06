@@ -99,7 +99,14 @@ public static class RenderedFindingMapper
     private static void ValidateAuthority(PresentationDetailReport inspection, RenderFindingManifest manifest, RenderFindingRequest request)
     {
         if (request.Schema != "tiwater.pptx-render-findings/v1") throw new InvalidOperationException("render-finding-request-schema-invalid");
-        if (!Sha(request.ArtifactSha256) || manifest.Artifact.Sha256 != request.ArtifactSha256) throw new InvalidOperationException("render-finding-artifact-binding-invalid");
+        if (!Sha(request.ArtifactSha256)
+            || !Sha(manifest.Artifact.Sha256)
+            || !Sha(inspection.ArtifactSha256)
+            || manifest.Artifact.Sha256 != request.ArtifactSha256
+            || inspection.ArtifactSha256 != request.ArtifactSha256
+            || !File.Exists(inspection.File)
+            || FileSha256(inspection.File) != inspection.ArtifactSha256)
+            throw new InvalidOperationException("render-finding-artifact-binding-invalid");
         if (inspection.SlideCount < 1 || inspection.SlideSize.Cx <= 0 || inspection.SlideSize.Cy <= 0 || manifest.Pages.Count != inspection.SlideCount) throw new InvalidOperationException("render-finding-page-union-invalid");
         if (!manifest.Pages.Select(page => page.PageNumber).SequenceEqual(Enumerable.Range(1, inspection.SlideCount))) throw new InvalidOperationException("render-finding-page-sequence-invalid");
         foreach (var page in manifest.Pages)
@@ -126,7 +133,7 @@ public static class RenderedFindingMapper
         return (width, height);
     }
 
-    private static bool Sha(string value) => value.Length == 64 && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+    private static bool Sha(string? value) => value is { Length: 64 } && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
     internal static string FileSha256(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
     private static T Read<T>(string path) => JsonSerializer.Deserialize<T>(File.ReadAllText(path), Json.Options) ?? throw new InvalidOperationException($"render-finding-json-invalid:{Path.GetFileName(path)}");
 }

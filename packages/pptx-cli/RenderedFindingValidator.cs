@@ -1,9 +1,15 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 
 namespace Dockit.Pptx;
 
 public static class RenderedFindingValidator
 {
+    private static readonly HashSet<string> SupportedKinds = new(StringComparer.Ordinal)
+    {
+        "edge-clipping", "occlusion", "text-overflow", "low-readability"
+    };
+
     public static RenderFindingMapVerdict Validate(
         PresentationDetailReport inspection,
         RenderFindingManifest manifest,
@@ -29,14 +35,36 @@ public static class RenderedFindingValidator
 
     private static RenderFindingMap ReferenceMap(PresentationDetailReport inspection, RenderFindingManifest manifest, RenderFindingRequest request)
     {
-        if (request.Schema != "tiwater.pptx-render-findings/v1" || manifest.Artifact.Sha256 != request.ArtifactSha256 || manifest.Pages.Count != inspection.SlideCount) throw new InvalidOperationException("render-finding-reference-authority-invalid");
+        if (request.Schema != "tiwater.pptx-render-findings/v1"
+            || !ValidSha(request.ArtifactSha256)
+            || !ValidSha(manifest.Artifact.Sha256)
+            || !ValidSha(inspection.ArtifactSha256)
+            || manifest.Artifact.Sha256 != request.ArtifactSha256
+            || inspection.ArtifactSha256 != request.ArtifactSha256
+            || !File.Exists(inspection.File)
+            || FileHash(inspection.File) != inspection.ArtifactSha256
+            || inspection.SlideCount < 1
+            || inspection.SlideSize.Cx <= 0
+            || inspection.SlideSize.Cy <= 0
+            || manifest.Pages.Count != inspection.SlideCount
+            || !manifest.Pages.Select(page => page.PageNumber).SequenceEqual(Enumerable.Range(1, inspection.SlideCount)))
+            throw new InvalidOperationException("render-finding-reference-authority-invalid");
+        foreach (var page in manifest.Pages)
+        {
+            if (!File.Exists(page.Path) || !ValidSha(page.Sha256) || FileHash(page.Path) != page.Sha256)
+                throw new InvalidOperationException($"render-finding-raster-binding-invalid:{page.PageNumber}");
+            PngDimensions(page.Path);
+        }
         var bindings = new List<RenderFindingBinding>(); var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var finding in request.Findings)
         {
-            if (!seen.Add(finding.Id)) throw new InvalidOperationException($"render-finding-id-duplicate:{finding.Id}");
+            if (string.IsNullOrWhiteSpace(finding.Id)
+                || !seen.Add(finding.Id)
+                || !SupportedKinds.Contains(finding.Kind))
+                throw new InvalidOperationException($"render-finding-invalid:{finding.Id}");
             var page = manifest.Pages.SingleOrDefault(item => item.PageNumber == finding.PageNumber) ?? throw new InvalidOperationException($"render-finding-page-missing:{finding.Id}");
-            if (page.Sha256 != finding.RasterSha256 || RenderedFindingMapper.FileSha256(page.Path) != page.Sha256) throw new InvalidOperationException($"render-finding-raster-binding-invalid:{finding.Id}");
-            var pixels = RenderedFindingMapper.ReadPngDimensions(page.Path);
+            if (!ValidSha(finding.RasterSha256) || page.Sha256 != finding.RasterSha256 || FileHash(page.Path) != page.Sha256) throw new InvalidOperationException($"render-finding-raster-binding-invalid:{finding.Id}");
+            var pixels = PngDimensions(page.Path);
             if (finding.Region.X < 0 || finding.Region.Y < 0 || finding.Region.Width <= 0 || finding.Region.Height <= 0 || finding.Region.X + finding.Region.Width > pixels.Width || finding.Region.Y + finding.Region.Height > pixels.Height) throw new InvalidOperationException($"render-finding-region-invalid:{finding.Id}");
             var slide = inspection.Slides.Single(item => item.SlideNumber == finding.PageNumber);
             var master = inspection.Masters.Single(item => item.Path == slide.MasterPath);
@@ -82,6 +110,25 @@ public static class RenderedFindingValidator
         var needle = string.Concat(observed.Where(value => !char.IsWhiteSpace(value))).ToUpperInvariant();
         var source = string.Concat(candidate.Where(value => !char.IsWhiteSpace(value))).ToUpperInvariant();
         return needle.Length >= 2 && source.Contains(needle, StringComparison.Ordinal);
+    }
+
+    private static bool ValidSha(string? value)
+        => value is { Length: 64 } && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static string FileHash(string path)
+        => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+
+    private static (int Width, int Height) PngDimensions(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        if (bytes.Length < 24
+            || !bytes.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })
+            || !bytes.AsSpan(12, 4).SequenceEqual("IHDR"u8))
+            throw new InvalidOperationException("render-finding-png-invalid");
+        var width = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(16, 4));
+        var height = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(20, 4));
+        if (width <= 0 || height <= 0) throw new InvalidOperationException("render-finding-png-dimensions-invalid");
+        return (width, height);
     }
 
     private static T Read<T>(string path) => JsonSerializer.Deserialize<T>(File.ReadAllText(path), Json.Options) ?? throw new InvalidOperationException($"render-finding-json-invalid:{Path.GetFileName(path)}");

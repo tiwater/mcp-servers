@@ -75,6 +75,36 @@ public class RenderedFindingTests
         Assert.Throws<InvalidOperationException>(() => RenderedFindingMapper.Map(fixture.Inspection, fixture.Manifest, rebound));
     }
 
+    [Fact]
+    public void Rejects_cross_document_inspection_splicing_and_stale_inspected_bytes()
+    {
+        var first = Fixture([Shape(2, "shape", "First", new(1000, 1000, 2000, 1000))]);
+        var second = Fixture([Shape(7, "shape", "Second", new(1000, 1000, 2000, 1000))]);
+        var secondRequest = Request(second, new("second", 1, second.Manifest.Pages[0].Sha256, "text-overflow", new(100, 100, 200, 100), "Second"));
+
+        Assert.Throws<InvalidOperationException>(() => RenderedFindingMapper.Map(first.Inspection, second.Manifest, secondRequest));
+
+        var firstRequest = Request(first, new("first", 1, first.Manifest.Pages[0].Sha256, "text-overflow", new(100, 100, 200, 100), "First"));
+        var current = RenderedFindingMapper.Map(first.Inspection, first.Manifest, firstRequest);
+        File.AppendAllText(first.Inspection.File, "-changed-after-inspect");
+
+        Assert.Throws<InvalidOperationException>(() => RenderedFindingMapper.Map(first.Inspection, first.Manifest, firstRequest));
+        Assert.False(RenderedFindingValidator.Validate(first.Inspection, first.Manifest, firstRequest, current).Pass);
+    }
+
+    [Fact]
+    public void Independent_validator_rejects_requests_outside_producer_contract()
+    {
+        var fixture = Fixture([Shape(2, "shape", "Bound", new(1000, 1000, 2000, 1000))]);
+        var validRequest = Request(fixture, new("bound", 1, fixture.Manifest.Pages[0].Sha256, "text-overflow", new(100, 100, 200, 100), "Bound"));
+        var valid = RenderedFindingMapper.Map(fixture.Inspection, fixture.Manifest, validRequest);
+        var unsupported = validRequest with { Findings = [validRequest.Findings[0] with { Kind = "unknown-kind" }] };
+        var blankId = validRequest with { Findings = [validRequest.Findings[0] with { Id = " " }] };
+
+        Assert.False(RenderedFindingValidator.Validate(fixture.Inspection, fixture.Manifest, unsupported, valid).Pass);
+        Assert.False(RenderedFindingValidator.Validate(fixture.Inspection, fixture.Manifest, blankId, valid).Pass);
+    }
+
     private static (PresentationDetailReport Inspection, RenderFindingManifest Manifest) Fixture(
         IReadOnlyList<ShapeDetail> slideShapes,
         IReadOnlyList<ShapeDetail>? layoutShapes = null,
@@ -83,11 +113,14 @@ public class RenderedFindingTests
         var png = Path.Combine(Path.GetTempPath(), $"render-finding-{Guid.NewGuid():N}.png");
         var bytes = new byte[24]; new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }.CopyTo(bytes, 0); "IHDR"u8.CopyTo(bytes.AsSpan(12, 4));
         System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(16, 4), 1000); System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(20, 4), 500); File.WriteAllBytes(png, bytes);
-        var hash = Convert.ToHexStringLower(SHA256.HashData(bytes)); var artifact = new string('a', 64);
+        var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
         var layout = new LayoutDetail("ppt/slideLayouts/slideLayout1.xml", "", null, new string('b', 64), layoutShapes ?? []);
         var master = new MasterDetail("ppt/slideMasters/slideMaster1.xml", "", new string('c', 64), null, null, masterShapes ?? [], [layout]);
         var slide = new SlideDetailReport(1, "ppt/slides/slide1.xml", master.Path, layout.Path, slideShapes);
-        return (new PresentationDetailReport("current.pptx", 1, new SlideSizeInfo(10000, 5000), [master], [slide]), new RenderFindingManifest(new RenderFindingArtifact(artifact), [new RenderFindingPage(1, png, hash)]));
+        var pptx = Path.Combine(Path.GetTempPath(), $"render-finding-{Guid.NewGuid():N}.pptx");
+        File.WriteAllText(pptx, $"synthetic-current-presentation-{Guid.NewGuid():N}");
+        var artifact = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(pptx)));
+        return (new PresentationDetailReport(pptx, artifact, 1, new SlideSizeInfo(10000, 5000), [master], [slide]), new RenderFindingManifest(new RenderFindingArtifact(artifact), [new RenderFindingPage(1, png, hash)]));
     }
 
     private static RenderFindingRequest Request((PresentationDetailReport Inspection, RenderFindingManifest Manifest) fixture, RenderFindingCandidate finding) => new("tiwater.pptx-render-findings/v1", fixture.Manifest.Artifact.Sha256, [finding]);
