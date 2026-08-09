@@ -55,6 +55,18 @@ internal static class WpsRpcSession
         string input,
         string output,
         string isolatedWorkingDirectory)
+        => CreateProcessStartInfo(
+            dbusRunSession, xvfb, python, helperPath, input, output, null, isolatedWorkingDirectory);
+
+    internal static ProcessStartInfo CreateProcessStartInfo(
+        string dbusRunSession,
+        string xvfb,
+        string python,
+        string helperPath,
+        string input,
+        string output,
+        string? completionMarker,
+        string isolatedWorkingDirectory)
     {
         var workingDirectory = Path.GetFullPath(isolatedWorkingDirectory);
         var cacheDirectory = Path.Combine(workingDirectory, "cache");
@@ -76,11 +88,13 @@ internal static class WpsRpcSession
         };
         startInfo.Environment["XDG_CACHE_HOME"] = cacheDirectory;
         startInfo.Environment["XDG_RUNTIME_DIR"] = runtimeDirectory;
-        foreach (var argument in new[]
+        var arguments = new List<string>
         {
             "--", xvfb, "-a", python, helperPath,
             Path.GetFullPath(input), Path.GetFullPath(output),
-        })
+        };
+        if (!string.IsNullOrWhiteSpace(completionMarker)) arguments.Add(Path.GetFullPath(completionMarker));
+        foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
@@ -105,6 +119,36 @@ internal static class WpsRpcSession
     {
         var output = CollectProcessOutput(stdout, stderr, wait);
         return string.Join(" ", new[] { output.Stdout, output.Stderr }.Where(value => value.Length > 0));
+    }
+
+    internal static bool WaitForCompletedOutputOrExit(
+        Process process,
+        string completionMarker,
+        Func<bool> outputIsValid,
+        TimeSpan timeout,
+        string timeoutMessage,
+        TimeSpan? gracefulExit = null)
+    {
+        var started = Stopwatch.StartNew();
+        var grace = gracefulExit ?? TimeSpan.FromSeconds(2);
+        while (started.Elapsed < timeout)
+        {
+            if (process.WaitForExit(100)) return false;
+            if (!File.Exists(completionMarker)) continue;
+            if (!outputIsValid())
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                throw new InvalidOperationException("WPS RPC reported completion without a valid output file.");
+            }
+            if (!process.WaitForExit(grace))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                process.WaitForExit(TimeSpan.FromSeconds(5));
+            }
+            return true;
+        }
+        try { process.Kill(entireProcessTree: true); } catch { }
+        throw new TimeoutException(timeoutMessage);
     }
 
     private static string? FindOnPath(string command)

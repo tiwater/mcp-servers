@@ -32,21 +32,20 @@ public static class EtPdfConverter
         try
         {
             using var lease = AcquireRuntimeLease();
+            var completionMarker = Path.Combine(temporaryRoot, "spreadsheet-output-complete");
             var startInfo = WpsRpcSession.CreateProcessStartInfo(
-                dbusRunSession, xvfb, python, helperPath, input, output, temporaryRoot);
+                dbusRunSession, xvfb, python, helperPath, input, output, completionMarker, temporaryRoot);
             using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Failed to start ET RPC conversion.");
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                throw new TimeoutException("ET RPC PDF conversion timed out after 180 seconds.");
-            }
+            var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
+                process, completionMarker, () => IsPdf(output), TimeSpan.FromMinutes(3),
+                "ET RPC PDF conversion timed out after 180 seconds.");
 
             var details = WpsRpcSession.CollectDiagnosticOutput(
                 stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
-            if (process.ExitCode != 0 || !IsPdf(output))
+            if ((!completedOutput && process.ExitCode != 0) || !IsPdf(output))
             {
                 throw new InvalidOperationException("ET RPC failed to convert workbook to PDF."
                     + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
@@ -96,6 +95,7 @@ from pywpsrpc.common import S_OK, QtApp
 
 input_path = os.path.realpath(sys.argv[1])
 output_path = os.path.realpath(sys.argv[2])
+completion_marker = os.path.realpath(sys.argv[3])
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
 q_app = QtApp(sys.argv)
@@ -125,6 +125,10 @@ try:
             OpenAfterPublish=False)
         if hr != S_OK:
             raise SystemExit(f"Workbook.ExportAsFixedFormat PDF failed: {hex(hr & 0xffffffff)}")
+        with open(completion_marker, "x", encoding="utf-8") as marker:
+            marker.write("complete\n")
+            marker.flush()
+            os.fsync(marker.fileno())
     finally:
         book.Close(False)
 finally:

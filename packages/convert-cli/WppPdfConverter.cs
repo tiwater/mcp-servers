@@ -61,20 +61,19 @@ public static class WppPdfConverter
 
     private static void RunWpsHelper(string dbusRunSession, string xvfb, string python, string helperPath, string input, string output, string temporaryRoot)
     {
-        var startInfo = CreateProcessStartInfo(dbusRunSession, xvfb, python, helperPath, input, output, temporaryRoot);
+        var completionMarker = Path.Combine(temporaryRoot, "presentation-output-complete");
+        var startInfo = CreateProcessStartInfo(dbusRunSession, xvfb, python, helperPath, input, output, completionMarker, temporaryRoot);
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start WPP RPC conversion.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
-        {
-            try { process.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException("WPP RPC PDF conversion timed out after 180 seconds.");
-        }
+        var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
+            process, completionMarker, () => IsPdf(output), TimeSpan.FromMinutes(3),
+            "WPP RPC PDF conversion timed out after 180 seconds.");
 
         var details = WpsRpcSession.CollectDiagnosticOutput(
             stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
-        if (process.ExitCode != 0 || !IsPdf(output))
+        if ((!completedOutput && process.ExitCode != 0) || !IsPdf(output))
         {
             throw new InvalidOperationException("WPP RPC failed to convert presentation to PDF."
                 + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
@@ -88,6 +87,7 @@ public static class WppPdfConverter
         string helperPath,
         string input,
         string output,
+        string completionMarker,
         string isolatedWorkingDirectory)
     {
         var workingDirectory = Path.GetFullPath(isolatedWorkingDirectory);
@@ -107,7 +107,7 @@ public static class WppPdfConverter
         };
         startInfo.Environment["XDG_CACHE_HOME"] = cacheDirectory;
         startInfo.Environment["XDG_RUNTIME_DIR"] = runtimeDirectory;
-        foreach (var argument in new[] { "--", xvfb, "-a", python, helperPath, Path.GetFullPath(input), Path.GetFullPath(output) }) startInfo.ArgumentList.Add(argument);
+        foreach (var argument in new[] { "--", xvfb, "-a", python, helperPath, Path.GetFullPath(input), Path.GetFullPath(output), Path.GetFullPath(completionMarker) }) startInfo.ArgumentList.Add(argument);
         return startInfo;
     }
 
@@ -153,6 +153,7 @@ from pywpsrpc.common import S_OK, QtApp
 
 input_path = os.path.realpath(sys.argv[1])
 output_path = os.path.realpath(sys.argv[2])
+completion_marker = os.path.realpath(sys.argv[3])
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
 q_app = QtApp(sys.argv)
@@ -175,6 +176,10 @@ try:
         hr = presentation.SaveAs(output_path, wppapi.ppSaveAsPDF)
         if hr != S_OK:
             raise SystemExit(f"Presentation.SaveAs PDF failed: {hex(hr & 0xffffffff)}")
+        with open(completion_marker, "x", encoding="utf-8") as marker:
+            marker.write("complete\n")
+            marker.flush()
+            os.fsync(marker.fileno())
     finally:
         presentation.Close()
 finally:

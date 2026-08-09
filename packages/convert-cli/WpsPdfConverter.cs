@@ -68,19 +68,18 @@ public static class WpsPdfConverter
 
     private static void RunWpsHelper(string xvfb, string dbusRunSession, string python, string helperPath, string input, string output, string tempRoot)
     {
+        var completionMarker = Path.Combine(tempRoot, "writer-output-complete");
         var startInfo = CreateProcessStartInfo(xvfb, tempRoot);
-        foreach (var arg in CreateHelperArguments(dbusRunSession, python, helperPath, input, output)) startInfo.ArgumentList.Add(arg);
+        foreach (var arg in CreateHelperArguments(dbusRunSession, python, helperPath, input, output, completionMarker)) startInfo.ArgumentList.Add(arg);
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start WPS RPC conversion.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
-        {
-            try { process.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException("WPS RPC PDF conversion timed out after 180 seconds.");
-        }
+        var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
+            process, completionMarker, () => IsPdf(output), TimeSpan.FromMinutes(3),
+            "WPS RPC PDF conversion timed out after 180 seconds.");
         var details = WpsRpcSession.CollectDiagnosticOutput(
             stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
-        if (process.ExitCode != 0 || !IsPdf(output))
+        if ((!completedOutput && process.ExitCode != 0) || !IsPdf(output))
         {
             throw new InvalidOperationException($"WPS RPC failed to convert {input} to PDF." + (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
         }
@@ -111,7 +110,7 @@ public static class WpsPdfConverter
         return startInfo;
     }
 
-    internal static string[] CreateHelperArguments(string dbusRunSession, string python, string helperPath, string input, string output)
+    internal static string[] CreateHelperArguments(string dbusRunSession, string python, string helperPath, string input, string output, string completionMarker)
         => new[]
         {
             "-a",
@@ -121,6 +120,7 @@ public static class WpsPdfConverter
             helperPath,
             Path.GetFullPath(input),
             Path.GetFullPath(output),
+            Path.GetFullPath(completionMarker),
         };
 
     public static bool IsTransientStartupFailure(string message)
@@ -167,6 +167,7 @@ from pywpsrpc.common import S_OK, QtApp
 
 input_path = os.path.realpath(sys.argv[1])
 output_path = os.path.realpath(sys.argv[2])
+completion_marker = os.path.realpath(sys.argv[3])
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
 q_app = QtApp(sys.argv)
@@ -190,6 +191,10 @@ try:
         hr = document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatPDF)
         if hr != S_OK:
             raise SystemExit(f"Document.SaveAs2 PDF failed: {hex(hr & 0xffffffff)}")
+        with open(completion_marker, "x", encoding="utf-8") as marker:
+            marker.write("complete\n")
+            marker.flush()
+            os.fsync(marker.fileno())
     finally:
         document.Close(False)
 finally:
