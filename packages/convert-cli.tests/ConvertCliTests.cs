@@ -155,6 +155,41 @@ public class ConvertCliTests
     }
 
     [Fact]
+    public void Wps_rpc_completion_marker_ends_a_lingering_office_process_after_valid_output()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var directory = Path.Combine(Path.GetTempPath(), $"wps-completion-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var output = Path.Combine(directory, "output.pdf");
+        var marker = Path.Combine(directory, "output-complete");
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "/bin/sh",
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in new[]
+        {
+            "-c", "printf '%s' '%PDF-current-output' > \"$1\"; printf '%s' complete > \"$2\"; sleep 30", "sh", output, marker,
+        }) startInfo.ArgumentList.Add(argument);
+        using var process = Process.Start(startInfo)!;
+        var started = Stopwatch.StartNew();
+
+        var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
+            process,
+            marker,
+            () => File.Exists(output) && new FileInfo(output).Length > 4,
+            TimeSpan.FromSeconds(10),
+            "synthetic helper timeout",
+            TimeSpan.FromMilliseconds(20));
+
+        Assert.True(completedOutput);
+        Assert.True(process.HasExited);
+        Assert.InRange(started.ElapsedMilliseconds, 0, 3000);
+    }
+
+    [Fact]
     public void Lima_recalculation_transport_invokes_the_versioned_remote_command()
     {
         var start = LimaWpsPdfConverter.CreateSpreadsheetConversionStartInfo("/usr/bin/limactl", "wps", "/shared/input.xlsx", "/shared/output.xlsx", "recalculate-xlsx");
@@ -367,7 +402,8 @@ public class ConvertCliTests
             "/tmp/wpsrpc-python",
             "/tmp/writer_to_pdf_wps.py",
             "/tmp/input.docx",
-            "/tmp/output.pdf");
+            "/tmp/output.pdf",
+            "/tmp/output-complete");
 
         Assert.Equal(new[]
         {
@@ -378,6 +414,7 @@ public class ConvertCliTests
             "/tmp/writer_to_pdf_wps.py",
             "/tmp/input.docx",
             "/tmp/output.pdf",
+            "/tmp/output-complete",
         }, arguments);
     }
 
@@ -390,6 +427,11 @@ public class ConvertCliTests
 
         Assert.NotNull(helperScript);
         Assert.Contains("document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatPDF)", helperScript);
+        Assert.Contains("with open(completion_marker, \"x\"", helperScript);
+        Assert.True(helperScript.IndexOf("document.SaveAs2", StringComparison.Ordinal)
+            < helperScript.IndexOf("with open(completion_marker", StringComparison.Ordinal));
+        Assert.True(helperScript.IndexOf("with open(completion_marker", StringComparison.Ordinal)
+            < helperScript.IndexOf("document.Close(False)", StringComparison.Ordinal));
         Assert.DoesNotContain("ExportAsFixedFormat", helperScript);
     }
 
