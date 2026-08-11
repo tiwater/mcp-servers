@@ -2463,6 +2463,65 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_preserves_unseen_table_cell_line_boundaries()
+    {
+        static string Create(string first, string second)
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"migration-multiline-cell-{Guid.NewGuid():N}.docx");
+            using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new Table(
+                new TableProperties(),
+                new TableGrid(new GridColumn { Width = "2400" }),
+                new TableRow(new TableCell(
+                    new Paragraph(new Run(new Text(first))),
+                    new Paragraph(new Run(new Text(second))))))));
+            main.Document.Save();
+            return path;
+        }
+
+        var source = Create("源语言甲", "Source language beta");
+        var baseline = Create("源语言甲", "Source language beta");
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
+        Assert.True(derived.Pass, string.Join("; ", derived.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-multiline-cell-output-{Guid.NewGuid():N}.docx");
+
+        var applied = TemplateMigration.Apply(source, baseline, derived.Plan, output);
+
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => item.Reason) ?? []));
+        var cell = Assert.Single(Assert.Single(Inspector.InspectTables(output).Tables).Rows[0].Cells);
+        Assert.Equal("源语言甲\nSource language beta", cell.Text);
+    }
+
+    [Fact]
+    public void Edit_plain_cell_text_does_not_materialize_paragraph_bold_over_an_existing_run_style()
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"plain-cell-style-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new Table(
+                new TableProperties(),
+                new TableGrid(new GridColumn { Width = "2400" }),
+                new TableRow(new TableCell(new Paragraph(
+                    new ParagraphProperties(new ParagraphMarkRunProperties(new Bold())),
+                    new Run(new RunProperties(new RunStyle { Val = "NonBoldCellText" }), new Text("old"))))))));
+            main.Document.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"plain-cell-style-output-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(source, output, [new DocxEditOperation(
+            "replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 0, Text: "new")]);
+
+        Assert.True(Assert.Single(result.AppliedOperations).Applied);
+        using var edited = WordprocessingDocument.Open(output, false);
+        var properties = edited.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single()
+            .Descendants<Run>().Single().RunProperties!;
+        Assert.Equal("NonBoldCellText", properties.GetFirstChild<RunStyle>()!.Val!.Value);
+        Assert.Null(properties.GetFirstChild<Bold>());
+    }
+
+    [Fact]
     public void Edit_can_set_table_cell_font_size_and_row_height()
     {
         var docPath = CreateTwoCellTableFixture();

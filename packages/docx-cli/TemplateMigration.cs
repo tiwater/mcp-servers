@@ -952,6 +952,7 @@ public static class TemplateMigration
         }
 
         var sourceById = analysis.Source.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var sourceCellText = TableCellCopyText(source);
         var baselineById = analysis.Baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var mappingsBySource = new Dictionary<string, TemplateMigrationMapping>(StringComparer.Ordinal);
         var copyTargets = new HashSet<string>(StringComparer.Ordinal);
@@ -1187,7 +1188,9 @@ public static class TemplateMigration
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-copy-conflict", mapping.SourceObjectId, mapping.BaselineObjectId));
                     continue;
                 }
-                var operation = BuildCopyTextOperation(mapping.BaselineObjectId, sourceObject.Text ?? string.Empty);
+                var operation = BuildCopyTextOperation(
+                    mapping.BaselineObjectId,
+                    sourceCellText.GetValueOrDefault(sourceObject.Id) ?? sourceObject.Text ?? string.Empty);
                 if (operation is null)
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-operation-unsupported", mapping.SourceObjectId, mapping.BaselineObjectId));
@@ -2499,6 +2502,33 @@ public static class TemplateMigration
             return new DocxEditOperation("replaceFooterTableCellText", FooterIndex: int.Parse(footerTableCell.Groups["footer"].Value), TableIndex: int.Parse(footerTableCell.Groups["table"].Value), RowIndex: int.Parse(footerTableCell.Groups["row"].Value), CellIndex: int.Parse(footerTableCell.Groups["cell"].Value), Text: text);
         }
         return null;
+    }
+
+    private static IReadOnlyDictionary<string, string> TableCellCopyText(string source)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        using var document = WordprocessingDocument.Open(source, false);
+        var main = document.MainDocumentPart ?? throw new InvalidOperationException("template-migration-main-document-part-missing");
+
+        static void AddCells(IDictionary<string, string> target, IEnumerable<Table> tables, string prefix)
+        {
+            foreach (var (table, tableIndex) in tables.Select((item, index) => (item, index)))
+            foreach (var (row, rowIndex) in table.Elements<TableRow>().Select((item, index) => (item, index)))
+            foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((item, index) => (item, index)))
+            {
+                target[$"{prefix}:table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}"] = string.Join("\n",
+                    cell.Elements<Paragraph>().Select(Inspector.GetParagraphText)).Trim();
+            }
+        }
+
+        AddCells(values, main.Document!.Body!.Elements<Table>(), "body");
+        foreach (var (part, index) in main.HeaderParts.Where(part => part.Header is not null)
+                     .OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal).Select((part, index) => (part, index)))
+            AddCells(values, part.Header!.Elements<Table>(), $"header:{index}");
+        foreach (var (part, index) in main.FooterParts.Where(part => part.Footer is not null)
+                     .OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal).Select((part, index) => (part, index)))
+            AddCells(values, part.Footer!.Elements<Table>(), $"footer:{index}");
+        return values;
     }
 
     private sealed record ProjectionTargetSpan(
