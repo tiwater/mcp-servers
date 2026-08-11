@@ -2038,24 +2038,71 @@ public static class Editor
 
     private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null, Run? fallbackRun = null)
     {
-        var graphicParagraphs = CaptureGraphicParagraphs(cell);
-        var hasTextBearingRun = HasTextBearingRun(cell);
-        var ownRun = FindCellStyleTemplateRun(cell);
-        var firstRun = ownRun ?? fallbackRun;
-        var firstParagraph = cell.Elements<Paragraph>().FirstOrDefault();
-        cell.RemoveAllChildren<Paragraph>();
-        var paragraph = CreateParagraphLike(firstParagraph);
-        paragraph.AppendChild(CreateStyledRunLike(
-            firstRun,
-            replacementText,
-            preserveEmphasis: hasTextBearingRun,
-            forceBaselineVerticalAlignment: !hasTextBearingRun));
-        if (!string.IsNullOrWhiteSpace(alignment))
+        var lines = replacementText.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        var paragraphs = cell.Elements<Paragraph>().ToList();
+        if (paragraphs.Count == 0)
         {
-            ApplyParagraphAlignment(paragraph, alignment);
+            var paragraph = new Paragraph();
+            paragraph.AppendChild(CreateStyledRunLike(fallbackRun, string.Empty));
+            cell.Append(paragraph);
+            paragraphs.Add(paragraph);
         }
-        cell.Append(paragraph);
-        foreach (var graphic in graphicParagraphs) cell.Append(graphic);
+
+        var visibleSlots = paragraphs
+            .Where(paragraph => !string.IsNullOrWhiteSpace(Inspector.GetParagraphText(paragraph)))
+            .ToList();
+        if (visibleSlots.Count == 0)
+        {
+            visibleSlots.Add(paragraphs.FirstOrDefault(paragraph => !paragraph.Descendants<Drawing>().Any()) ?? paragraphs[0]);
+        }
+
+        for (var index = 0; index < visibleSlots.Count; index += 1)
+        {
+            ReplaceVisibleParagraphText(visibleSlots[index], index < lines.Length ? lines[index] : string.Empty, fallbackRun);
+            if (!string.IsNullOrWhiteSpace(alignment)) ApplyParagraphAlignment(visibleSlots[index], alignment);
+        }
+
+        var insertionPoint = visibleSlots[^1];
+        for (var index = visibleSlots.Count; index < lines.Length; index += 1)
+        {
+            var paragraph = (Paragraph)visibleSlots[^1].CloneNode(true);
+            ReplaceVisibleParagraphText(paragraph, lines[index], fallbackRun);
+            if (!string.IsNullOrWhiteSpace(alignment)) ApplyParagraphAlignment(paragraph, alignment);
+            cell.InsertAfter(paragraph, insertionPoint);
+            insertionPoint = paragraph;
+        }
+    }
+
+    private static void ReplaceVisibleParagraphText(Paragraph paragraph, string text, Run? fallbackRun)
+    {
+        var visibleRuns = paragraph.Descendants<Run>()
+            .Where(run => run.Descendants<Text>().Any(value => !string.IsNullOrWhiteSpace(value.Text)))
+            .ToList();
+        var targetRun = visibleRuns.FirstOrDefault()
+            ?? paragraph.Descendants<Run>().FirstOrDefault(run =>
+                run.Descendants<Text>().Any()
+                && !(run.RunProperties?.GetFirstChild<Underline>() is not null
+                    && string.IsNullOrWhiteSpace(string.Concat(run.Descendants<Text>().Select(value => value.Text)))));
+        if (targetRun is null)
+        {
+            targetRun = CreateStyledRunLike(fallbackRun, string.Empty);
+            paragraph.AppendChild(targetRun);
+        }
+        if (!visibleRuns.Contains(targetRun)) visibleRuns.Add(targetRun);
+
+        foreach (var run in visibleRuns)
+        foreach (var value in run.Descendants<Text>())
+            value.Text = string.Empty;
+
+        var firstText = targetRun.Descendants<Text>().FirstOrDefault();
+        if (firstText is null)
+        {
+            targetRun.AppendChild(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+        }
+        else
+        {
+            firstText.Text = text;
+        }
     }
 
     private static DocxEditAppliedOperation ReplaceTableCellRichText(Body body, DocxEditOperation operation)

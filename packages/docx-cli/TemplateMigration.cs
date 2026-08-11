@@ -1534,6 +1534,9 @@ public static class TemplateMigration
         var outputById = outputInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var sourceVisibleCellText = ReadbackTableCellVisibleText(source);
         var outputVisibleCellText = ReadbackTableCellVisibleText(output);
+        var sourceCellParagraphs = ReadbackTableCellParagraphs(source);
+        var baselineCellParagraphs = ReadbackTableCellParagraphs(baseline);
+        var outputCellParagraphs = ReadbackTableCellParagraphs(output);
         var baselineOutputIds = BuildBaselineOutputIdMap(sourceInventory, baselineInventory, outputInventory, plan.BodyInsertions ?? []);
         string OutputId(string baselineId) => baselineOutputIds.GetValueOrDefault(baselineId, baselineId);
         foreach (var choice in plan.ChoiceSelections ?? [])
@@ -1571,6 +1574,16 @@ public static class TemplateMigration
             if (string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal) && !string.Equals(expectedText, actualText, StringComparison.Ordinal))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-content-mismatch", mapping.SourceObjectId, mapping.BaselineObjectId));
+            }
+            if (string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal)
+                && sourceObject.Kind == "table-cell"
+                && outputObject.Kind == "table-cell"
+                && (!sourceCellParagraphs.TryGetValue(sourceObject.Id, out var sourceParagraphs)
+                    || !baselineCellParagraphs.TryGetValue(mapping.BaselineObjectId!, out var baselineParagraphs)
+                    || !outputCellParagraphs.TryGetValue(OutputId(mapping.BaselineObjectId!), out var outputParagraphs)
+                    || !TableCellParagraphProjectionMatches(sourceParagraphs, baselineParagraphs, outputParagraphs)))
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-table-cell-style-scaffold-drift", mapping.SourceObjectId, mapping.BaselineObjectId));
             }
             if (string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal)
                 && (!sourceObject.Provenance.TryGetValue("sha256", out var sourceHash)
@@ -1636,6 +1649,13 @@ public static class TemplateMigration
                     || !string.IsNullOrEmpty(outputObject.Text))
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-baseline-clear-mismatch", BaselineObjectId: target.Id));
+                }
+                if (target.Kind == "table-cell"
+                    && (!baselineCellParagraphs.TryGetValue(target.Id, out var baselineParagraphs)
+                        || !outputCellParagraphs.TryGetValue(OutputId(target.Id), out var outputParagraphs)
+                        || !TableCellParagraphProjectionMatches([new TableCellParagraphLine(string.Empty, string.Empty)], baselineParagraphs, outputParagraphs)))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-table-cell-style-scaffold-drift", BaselineObjectId: target.Id));
                 }
             }
         }
@@ -2621,6 +2641,93 @@ public static class TemplateMigration
                      .OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal).Select((part, index) => (part, index)))
             Observe(values, part.Footer!.Elements<Table>(), $"footer:{index}");
         return values;
+    }
+
+    private sealed record TableCellParagraphLine(string Text, string ScaffoldSha256, string ShellSha256 = "", bool HasRuns = true);
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<TableCellParagraphLine>> ReadbackTableCellParagraphs(string file)
+    {
+        var values = new Dictionary<string, IReadOnlyList<TableCellParagraphLine>>(StringComparer.Ordinal);
+        using var document = WordprocessingDocument.Open(file, false);
+        var main = document.MainDocumentPart ?? throw new InvalidOperationException("template-migration-readback-main-document-part-missing");
+
+        static string ScaffoldHash(Paragraph paragraph)
+        {
+            var clone = (Paragraph)paragraph.CloneNode(true);
+            var protectedBlankText = clone.Descendants<Run>()
+                .Where(run => run.RunProperties?.GetFirstChild<Underline>() is not null)
+                .Select(run => string.Concat(run.Descendants<Text>().Select(value => value.Text)))
+                .Where(string.IsNullOrWhiteSpace)
+                .ToList();
+            foreach (var value in clone.Descendants<Text>().ToList()) value.Remove();
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                clone.OuterXml + "\u001E" + string.Join("\u001F", protectedBlankText))));
+        }
+
+        static string ShellHash(Paragraph paragraph)
+        {
+            var clone = (Paragraph)paragraph.CloneNode(true);
+            clone.RemoveAllChildren<Run>();
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(clone.OuterXml)));
+        }
+
+        static void Observe(IDictionary<string, IReadOnlyList<TableCellParagraphLine>> target, IEnumerable<Table> tables, string prefix)
+        {
+            foreach (var (table, tableIndex) in tables.Select((item, index) => (item, index)))
+            foreach (var (row, rowIndex) in table.Elements<TableRow>().Select((item, index) => (item, index)))
+            foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((item, index) => (item, index)))
+            {
+                target[$"{prefix}:table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}"] = cell.Elements<Paragraph>()
+                    .Select(paragraph => new TableCellParagraphLine(
+                        Inspector.GetParagraphText(paragraph),
+                        ScaffoldHash(paragraph),
+                        ShellHash(paragraph),
+                        paragraph.Descendants<Run>().Any()))
+                    .ToList();
+            }
+        }
+
+        Observe(values, main.Document!.Body!.Elements<Table>(), "body");
+        foreach (var (part, index) in main.HeaderParts.Where(part => part.Header is not null)
+                     .OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal).Select((part, index) => (part, index)))
+            Observe(values, part.Header!.Elements<Table>(), $"header:{index}");
+        foreach (var (part, index) in main.FooterParts.Where(part => part.Footer is not null)
+                     .OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal).Select((part, index) => (part, index)))
+            Observe(values, part.Footer!.Elements<Table>(), $"footer:{index}");
+        return values;
+    }
+
+    private static bool TableCellParagraphProjectionMatches(
+        IReadOnlyList<TableCellParagraphLine> source,
+        IReadOnlyList<TableCellParagraphLine> baseline,
+        IReadOnlyList<TableCellParagraphLine> output)
+    {
+        if (baseline.Count == 0 || output.Count == 0) return baseline.Count == output.Count;
+        var sourceText = string.Join("\n", source.Select(item => item.Text)).Trim();
+        var sourceLines = sourceText.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        var slots = baseline.Select((item, index) => (item, index))
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.item.Text))
+            .Select(pair => pair.index)
+            .ToList();
+        if (slots.Count == 0) slots.Add(0);
+
+        var slotOrder = slots.Select((value, index) => (value, index)).ToDictionary(pair => pair.value, pair => pair.index);
+        var expected = new List<TableCellParagraphLine>();
+        for (var baselineIndex = 0; baselineIndex < baseline.Count; baselineIndex += 1)
+        {
+            var item = baseline[baselineIndex];
+            expected.Add(slotOrder.TryGetValue(baselineIndex, out var slotSourceIndex)
+                ? item with { Text = slotSourceIndex < sourceLines.Length ? sourceLines[slotSourceIndex] : string.Empty }
+                : item);
+            if (baselineIndex != slots[^1]) continue;
+            for (var extraSourceIndex = slots.Count; extraSourceIndex < sourceLines.Length; extraSourceIndex += 1)
+                expected.Add(item with { Text = sourceLines[extraSourceIndex] });
+        }
+
+        return expected.Count == output.Count && expected.Zip(output).All(pair =>
+            string.Equals(pair.First.Text.Trim(), pair.Second.Text.Trim(), StringComparison.Ordinal)
+            && string.Equals(pair.First.ShellSha256, pair.Second.ShellSha256, StringComparison.Ordinal)
+            && (!pair.First.HasRuns || string.Equals(pair.First.ScaffoldSha256, pair.Second.ScaffoldSha256, StringComparison.Ordinal)));
     }
 
     private sealed record ProjectionTargetSpan(

@@ -408,7 +408,8 @@ public class AnnotationToolsTests
         var mapping = Assert.Single(resolved.Plan.Mappings, item => item.Reason == "semantic-candidate-resolved");
         Assert.Equal("header:0:table:0:row:0:cell:0", mapping.BaselineObjectId);
         var output = Path.Combine(Path.GetTempPath(), $"migration-empty-target-{Guid.NewGuid():N}.docx");
-        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => item.Reason) ?? []));
         using (var document = WordprocessingDocument.Open(output, false))
         {
             Assert.Equal("source heading", document.MainDocumentPart!.HeaderParts.Single().Header!.Descendants<TableCell>().First().InnerText);
@@ -2486,8 +2487,8 @@ public class AnnotationToolsTests
         Assert.All(result.AppliedOperations, operation => Assert.True(operation.Applied, operation.Detail));
         var cells = Assert.Single(Inspector.InspectTables(output).Tables).Rows[0].Cells;
         Assert.Equal("plain first\nplain second", cells[0].Text);
-        Assert.Equal("plain first\nplain second", Assert.Single(cells[0].Paragraphs).Text);
-        Assert.Equal("plain first\nplain second", Assert.Single(cells[0].Paragraphs[0].Runs).Text);
+        Assert.Equal(["plain first", "plain second"], cells[0].Paragraphs.Select(paragraph => paragraph.Text).ToArray());
+        Assert.All(cells[0].Paragraphs, paragraph => Assert.Single(paragraph.Runs));
         Assert.Equal("rich first\nrich second", cells[1].Text);
         Assert.Equal("rich first\nrich second", Assert.Single(cells[1].Paragraphs).Text);
         Assert.Equal("rich first\nrich second", Assert.Single(cells[1].Paragraphs[0].Runs).Text);
@@ -2533,6 +2534,118 @@ public class AnnotationToolsTests
         var rejected = TemplateMigration.ValidateReadback(source, baseline, flattened, derived.Plan);
         Assert.False(rejected.Pass);
         Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-readback-content-mismatch");
+    }
+
+    [Fact]
+    public void TemplateMigration_preserves_target_cell_slots_styles_scaffold_and_pagination_structure()
+    {
+        static string CreateSource(params string[] lines)
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"migration-source-lines-{Guid.NewGuid():N}.docx");
+            using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(
+                new Table(new TableProperties(), new TableGrid(new GridColumn { Width = "2400" }),
+                    new TableRow(new TableCell(lines.Select(line => new Paragraph(new Run(new Text(line))))))),
+                new SectionProperties(new PageSize { Width = 16838, Height = 11906, Orient = PageOrientationValues.Landscape })));
+            main.Document.Save();
+            return path;
+        }
+
+        static string CreateBaseline()
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"migration-target-slots-{Guid.NewGuid():N}.docx");
+            using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+            var main = document.AddMainDocumentPart();
+            var scaffold = new Text("          ") { Space = SpaceProcessingModeValues.Preserve };
+            main.Document = new Document(new Body(
+                new Table(new TableProperties(), new TableGrid(new GridColumn { Width = "2400" }),
+                    new TableRow(
+                        new TableRowProperties(new CantSplit()),
+                        new TableCell(
+                            new TableCellProperties(new TableCellWidth { Width = "2400", Type = TableWidthUnitValues.Dxa }),
+                            new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "ChineseSlot" }), new Run(new RunProperties(new Bold()), new Text("target zh"))),
+                            new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "EnglishSlot" }), new Run(new RunProperties(new Italic()), new Text("target en"))),
+                            new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "SpareSlot" }), new Run(new RunProperties(new Color { Val = "445566" }), new Text("target spare"))),
+                            new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "FillLine" }), new Run(new RunProperties(new Underline { Val = UnderlineValues.Single }), scaffold))))),
+                new SectionProperties(new PageSize { Width = 16838, Height = 11906, Orient = PageOrientationValues.Landscape })));
+            main.Document.Save();
+            return path;
+        }
+
+        var source = CreateSource("当前中文", "Current English", "Unseen fourth line", "尾行 delta");
+        var baseline = CreateBaseline();
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("table-cell", "body", "当前中文Current EnglishUnseen fourth line尾行 delta"),
+                new TemplateMigrationSemanticSelector("table-cell", "body", "target zhtarget entarget spare"),
+                "copy-text")]);
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-target-slots-output-{Guid.NewGuid():N}.docx");
+
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => item.Reason) ?? []));
+        using (var baselineDocument = WordprocessingDocument.Open(baseline, false))
+        using (var outputDocument = WordprocessingDocument.Open(output, false))
+        {
+            var baselineBody = baselineDocument.MainDocumentPart!.Document!.Body!;
+            var outputBody = outputDocument.MainDocumentPart!.Document!.Body!;
+            var baselineRow = baselineBody.Descendants<TableRow>().Single();
+            var outputRow = outputBody.Descendants<TableRow>().Single();
+            var baselineCell = baselineRow.Elements<TableCell>().Single();
+            var outputCell = outputRow.Elements<TableCell>().Single();
+            var paragraphs = outputCell.Elements<Paragraph>().ToList();
+            Assert.Equal(["当前中文", "Current English", "Unseen fourth line", "尾行 delta", "          "], paragraphs.Select(GetParagraphText).ToArray());
+            Assert.Equal(["ChineseSlot", "EnglishSlot", "SpareSlot", "SpareSlot", "FillLine"], paragraphs.Select(item => item.ParagraphProperties!.ParagraphStyleId!.Val!.Value).ToArray());
+            Assert.NotNull(paragraphs[0].Descendants<Bold>().SingleOrDefault());
+            Assert.NotNull(paragraphs[1].Descendants<Italic>().SingleOrDefault());
+            Assert.NotNull(paragraphs[4].Descendants<Underline>().SingleOrDefault());
+            Assert.Equal(baselineRow.TableRowProperties!.OuterXml, outputRow.TableRowProperties!.OuterXml);
+            Assert.Equal(baselineCell.TableCellProperties!.OuterXml, outputCell.TableCellProperties!.OuterXml);
+            Assert.Equal(baselineBody.Elements<SectionProperties>().Single().OuterXml, outputBody.Elements<SectionProperties>().Single().OuterXml);
+        }
+
+        var collapsed = Path.Combine(Path.GetTempPath(), $"migration-target-slots-collapsed-{Guid.NewGuid():N}.docx");
+        File.Copy(output, collapsed);
+        using (var document = WordprocessingDocument.Open(collapsed, true))
+        {
+            var cell = document.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single();
+            cell.Elements<Paragraph>().Last().Descendants<Underline>().Single().Remove();
+            document.MainDocumentPart.Document.Save();
+        }
+        var rejected = TemplateMigration.ValidateReadback(source, baseline, collapsed, resolved.Plan);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-readback-table-cell-style-scaffold-drift");
+    }
+
+    [Fact]
+    public void Edit_preserves_unused_target_cell_slots_when_source_has_fewer_lines()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"cell-fewer-lines-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new Table(new TableRow(new TableCell(
+                new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "One" }), new Run(new RunProperties(new Bold()), new Text("one"))),
+                new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Two" }), new Run(new RunProperties(new Italic()), new Text("two"))),
+                new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Three" }), new Run(new Text("three"))))))));
+            main.Document.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"cell-fewer-lines-output-{Guid.NewGuid():N}.docx");
+
+        var edit = Editor.Apply(path, output, [new DocxEditOperation("replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 0, Text: "first\nsecond")]);
+
+        Assert.True(Assert.Single(edit.AppliedOperations).Applied);
+        using var result = WordprocessingDocument.Open(output, false);
+        var paragraphs = result.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single().Elements<Paragraph>().ToList();
+        Assert.Equal(["first", "second", ""], paragraphs.Select(GetParagraphText).ToArray());
+        Assert.Equal(["One", "Two", "Three"], paragraphs.Select(item => item.ParagraphProperties!.ParagraphStyleId!.Val!.Value).ToArray());
+        Assert.NotNull(paragraphs[0].Descendants<Bold>().SingleOrDefault());
+        Assert.NotNull(paragraphs[1].Descendants<Italic>().SingleOrDefault());
     }
 
     [Fact]
