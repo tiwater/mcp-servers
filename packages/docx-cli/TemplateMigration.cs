@@ -1532,6 +1532,8 @@ public static class TemplateMigration
 
         var sourceById = sourceInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var outputById = outputInventory.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var sourceVisibleCellText = ReadbackTableCellVisibleText(source);
+        var outputVisibleCellText = ReadbackTableCellVisibleText(output);
         var baselineOutputIds = BuildBaselineOutputIdMap(sourceInventory, baselineInventory, outputInventory, plan.BodyInsertions ?? []);
         string OutputId(string baselineId) => baselineOutputIds.GetValueOrDefault(baselineId, baselineId);
         foreach (var choice in plan.ChoiceSelections ?? [])
@@ -1560,7 +1562,13 @@ public static class TemplateMigration
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-object-missing", mapping.SourceObjectId, mapping.BaselineObjectId));
                 continue;
             }
-            if (string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal) && !string.Equals(sourceObject.Text, outputObject.Text, StringComparison.Ordinal))
+            var expectedText = sourceObject.Kind == "table-cell"
+                ? sourceVisibleCellText.GetValueOrDefault(sourceObject.Id)
+                : sourceObject.Text;
+            var actualText = outputObject.Kind == "table-cell"
+                ? outputVisibleCellText.GetValueOrDefault(OutputId(mapping.BaselineObjectId!))
+                : outputObject.Text;
+            if (string.Equals(mapping.Disposition, "copy-text", StringComparison.Ordinal) && !string.Equals(expectedText, actualText, StringComparison.Ordinal))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-readback-content-mismatch", mapping.SourceObjectId, mapping.BaselineObjectId));
             }
@@ -2585,6 +2593,33 @@ public static class TemplateMigration
         foreach (var (part, index) in main.FooterParts.Where(part => part.Footer is not null)
                      .OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal).Select((part, index) => (part, index)))
             AddCells(values, part.Footer!.Elements<Table>(), $"footer:{index}");
+        return values;
+    }
+
+    private static IReadOnlyDictionary<string, string> ReadbackTableCellVisibleText(string file)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        using var document = WordprocessingDocument.Open(file, false);
+        var main = document.MainDocumentPart ?? throw new InvalidOperationException("template-migration-readback-main-document-part-missing");
+
+        static void Observe(IDictionary<string, string> target, IEnumerable<Table> tables, string prefix)
+        {
+            foreach (var (table, tableIndex) in tables.Select((item, index) => (item, index)))
+            foreach (var (row, rowIndex) in table.Elements<TableRow>().Select((item, index) => (item, index)))
+            foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((item, index) => (item, index)))
+            {
+                var visibleParagraphs = cell.Elements<Paragraph>().Select(paragraph => Inspector.GetParagraphText(paragraph));
+                target[$"{prefix}:table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}"] = string.Join("\n", visibleParagraphs).Trim();
+            }
+        }
+
+        Observe(values, main.Document!.Body!.Elements<Table>(), "body");
+        foreach (var (part, index) in main.HeaderParts.Where(part => part.Header is not null)
+                     .OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal).Select((part, index) => (part, index)))
+            Observe(values, part.Header!.Elements<Table>(), $"header:{index}");
+        foreach (var (part, index) in main.FooterParts.Where(part => part.Footer is not null)
+                     .OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal).Select((part, index) => (part, index)))
+            Observe(values, part.Footer!.Elements<Table>(), $"footer:{index}");
         return values;
     }
 

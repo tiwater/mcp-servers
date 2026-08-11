@@ -52,7 +52,8 @@ structural/content/style differences. Table-cell objects include canonical
 mapping or modify either document.
 When a mapped table cell contains multiple source paragraphs, the deterministic
 copy operation retains their visible boundaries as line breaks instead of
-joining them.
+joining them. Independent readback observes the source and output paragraphs
+again and rejects flattened or otherwise changed visible line structure.
 
 ```bash
 tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
