@@ -2496,7 +2496,7 @@ public class AnnotationToolsTests
     [Fact]
     public void TemplateMigration_preserves_unseen_table_cell_line_boundaries()
     {
-        static string Create(string first, string second)
+        static string Create(params string[] lines)
         {
             var path = Path.Combine(Path.GetTempPath(), $"migration-multiline-cell-{Guid.NewGuid():N}.docx");
             using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
@@ -2504,15 +2504,13 @@ public class AnnotationToolsTests
             main.Document = new Document(new Body(new Table(
                 new TableProperties(),
                 new TableGrid(new GridColumn { Width = "2400" }),
-                new TableRow(new TableCell(
-                    new Paragraph(new Run(new Text(first))),
-                    new Paragraph(new Run(new Text(second))))))));
+                new TableRow(new TableCell(lines.Select(line => new Paragraph(new Run(new Text(line)))))))));
             main.Document.Save();
             return path;
         }
 
-        var source = Create("源语言甲", "Source language beta");
-        var baseline = Create("源语言甲", "Source language beta");
+        var source = Create("源语言甲", "Source language beta", "第三段 gamma");
+        var baseline = Create("源语言甲", "Source language beta", "第三段 gamma");
         var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
         Assert.True(derived.Pass, string.Join("; ", derived.Unresolved.Select(item => item.Reason)));
         var output = Path.Combine(Path.GetTempPath(), $"migration-multiline-cell-output-{Guid.NewGuid():N}.docx");
@@ -2521,7 +2519,20 @@ public class AnnotationToolsTests
 
         Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => item.Reason) ?? []));
         var cell = Assert.Single(Assert.Single(Inspector.InspectTables(output).Tables).Rows[0].Cells);
-        Assert.Equal("源语言甲\nSource language beta", cell.Text);
+        Assert.Equal("源语言甲\nSource language beta\n第三段 gamma", cell.Text);
+
+        var flattened = Path.Combine(Path.GetTempPath(), $"migration-multiline-cell-flattened-{Guid.NewGuid():N}.docx");
+        var mutation = Editor.Apply(output, flattened, [new DocxEditOperation(
+            "replaceTableCellText",
+            TableIndex: 0,
+            RowIndex: 0,
+            CellIndex: 0,
+            Text: "源语言甲Source language beta第三段 gamma")]);
+        Assert.True(Assert.Single(mutation.AppliedOperations).Applied);
+
+        var rejected = TemplateMigration.ValidateReadback(source, baseline, flattened, derived.Plan);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-readback-content-mismatch");
     }
 
     [Fact]
