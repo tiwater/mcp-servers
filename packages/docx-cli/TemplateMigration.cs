@@ -156,8 +156,47 @@ public static class TemplateMigration
             unresolved.Add(new TemplateMigrationPlanFailure(reason, sourceObject.Id, Detail: $"sourceMatches={sourceCount};baselineMatches={candidates?.Count ?? 0}"));
         }
 
+        var sourceMedia = analysis.Source.Objects.Where(item => item.Kind == "media").OrderBy(item => item.Id, StringComparer.Ordinal).ToList();
+        var baselineMedia = analysis.Baseline.Objects.Where(item => item.Kind == "media").ToList();
+        var sourceMediaByHash = sourceMedia
+            .Where(item => item.Provenance.ContainsKey("sha256"))
+            .GroupBy(item => item.Provenance["sha256"], StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        var baselineMediaByHash = baselineMedia
+            .Where(item => item.Provenance.ContainsKey("sha256"))
+            .GroupBy(item => item.Provenance["sha256"], StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        foreach (var sourceObject in sourceMedia)
+        {
+            sourceObject.Provenance.TryGetValue("sha256", out var contentHash);
+            var sourceMatches = contentHash is not null && sourceMediaByHash.TryGetValue(contentHash, out var sourceHashMatches)
+                ? sourceHashMatches.Count
+                : 0;
+            var baselineMatches = contentHash is not null && baselineMediaByHash.TryGetValue(contentHash, out var baselineHashMatches)
+                ? baselineHashMatches
+                : null;
+            if (sourceMatches == 1 && baselineMatches is { Count: 1 })
+            {
+                mappings.Add(new TemplateMigrationMapping(sourceObject.Id, baselineMatches[0].Id, "copy-media"));
+                continue;
+            }
+
+            var reason = baselineMatches is null || baselineMatches.Count == 0
+                ? "template-migration-media-hash-target-missing"
+                : "template-migration-media-hash-ambiguous";
+            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "review-required", reason));
+            unresolved.Add(new TemplateMigrationPlanFailure(reason, sourceObject.Id, Detail: $"sourceMatches={sourceMatches};baselineMatches={baselineMatches?.Count ?? 0}"));
+        }
+
+        var coveredDrawingRelationships = DeriveCoveredDrawingRelationships(analysis, mappings);
+
         foreach (var sourceObject in analysis.Source.Objects.Where(RequiresTerminalMigrationDisposition).OrderBy(item => item.Id, StringComparer.Ordinal))
         {
+            var handledMediaObject = sourceObject.Kind == "media";
+            var coveredDrawing = sourceObject.Kind == "drawing"
+                && MediaRelationshipKey(sourceObject, "embedRelationshipId") is { } relationshipKey
+                && coveredDrawingRelationships.Contains(relationshipKey);
+            if (handledMediaObject || coveredDrawing) continue;
             mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "review-required", "template-migration-automatic-strategy-unsupported"));
             unresolved.Add(new TemplateMigrationPlanFailure("template-migration-automatic-strategy-unsupported", sourceObject.Id, Detail: sourceObject.Kind));
         }
@@ -572,15 +611,10 @@ public static class TemplateMigration
                 proposal.Extraction));
         }
 
-        var copiedMediaRelationships = mappings.Values
-            .Where(mapping => string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal))
-            .Select(mapping => analysis.Source.Objects.Single(item => item.Id == mapping.SourceObjectId))
-            .Select(item => item.Provenance.TryGetValue("relationshipId", out var relationshipId) ? relationshipId : null)
-            .Where(relationshipId => !string.IsNullOrWhiteSpace(relationshipId))
-            .ToHashSet(StringComparer.Ordinal);
+        var copiedMediaRelationships = DeriveCoveredDrawingRelationships(analysis, mappings.Values);
         foreach (var drawing in analysis.Source.Objects.Where(item => item.Kind == "drawing"))
         {
-            if (drawing.Provenance.TryGetValue("embedRelationshipId", out var relationshipId) && copiedMediaRelationships.Contains(relationshipId))
+            if (MediaRelationshipKey(drawing, "embedRelationshipId") is { } relationshipKey && copiedMediaRelationships.Contains(relationshipKey))
             {
                 mappings.Remove(drawing.Id);
             }
@@ -1289,17 +1323,12 @@ public static class TemplateMigration
             }
         }
 
-        var copiedMediaRelationships = mappingsBySource.Values
-            .Where(mapping => string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal))
-            .Select(mapping => sourceById[mapping.SourceObjectId])
-            .Select(item => item.Provenance.TryGetValue("relationshipId", out var relationshipId) ? relationshipId : null)
-            .Where(relationshipId => !string.IsNullOrWhiteSpace(relationshipId))
-            .ToHashSet(StringComparer.Ordinal);
+        var copiedMediaRelationships = DeriveCoveredDrawingRelationships(analysis, mappingsBySource.Values);
         foreach (var sourceObject in sourceById.Values.Where(IsMigrationRequired))
         {
             var drawingCoveredByMedia = sourceObject.Kind == "drawing"
-                && sourceObject.Provenance.TryGetValue("embedRelationshipId", out var embeddedRelationshipId)
-                && copiedMediaRelationships.Contains(embeddedRelationshipId);
+                && MediaRelationshipKey(sourceObject, "embedRelationshipId") is { } relationshipKey
+                && copiedMediaRelationships.Contains(relationshipKey);
             if (!mappingsBySource.ContainsKey(sourceObject.Id) && !appendedSourceIds.Contains(sourceObject.Id) && !insertedSourceIds.Contains(sourceObject.Id) && !projectedSourceIds.Contains(sourceObject.Id) && !choiceSourceIds.Contains(sourceObject.Id) && !drawingCoveredByMedia)
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-source-object-unmapped", sourceObject.Id, Detail: sourceObject.Kind));
@@ -2368,6 +2397,34 @@ public static class TemplateMigration
 
     private static bool IsContentBearing(TemplateMigrationObject item)
         => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text);
+
+    private static string? MediaRelationshipKey(TemplateMigrationObject item, string provenanceKey)
+        => item.Provenance.TryGetValue(provenanceKey, out var relationshipId) && !string.IsNullOrWhiteSpace(relationshipId)
+            ? $"{item.Scope}\u001F{relationshipId}"
+            : null;
+
+    private static IReadOnlySet<string> DeriveCoveredDrawingRelationships(
+        TemplateMigrationAnalysis analysis,
+        IEnumerable<TemplateMigrationMapping> mappings)
+    {
+        var sourceById = analysis.Source.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var baselineById = analysis.Baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        return mappings
+            .Where(mapping => string.Equals(mapping.Disposition, "copy-media", StringComparison.Ordinal)
+                && mapping.BaselineObjectId is not null
+                && sourceById.TryGetValue(mapping.SourceObjectId, out var sourceMedia)
+                && sourceMedia.Kind == "media"
+                && baselineById.TryGetValue(mapping.BaselineObjectId, out var baselineMedia)
+                && baselineMedia.Kind == "media")
+            .Select(mapping => (
+                Source: MediaRelationshipKey(sourceById[mapping.SourceObjectId], "relationshipId"),
+                Baseline: MediaRelationshipKey(baselineById[mapping.BaselineObjectId!], "relationshipId")))
+            .Where(pair => pair.Source is not null && pair.Baseline is not null)
+            .Where(pair => analysis.Source.Objects.Count(item => item.Kind == "drawing" && MediaRelationshipKey(item, "embedRelationshipId") == pair.Source) == 1)
+            .Where(pair => analysis.Baseline.Objects.Count(item => item.Kind == "drawing" && MediaRelationshipKey(item, "embedRelationshipId") == pair.Baseline) == 1)
+            .Select(pair => pair.Source!)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 
     private static bool RequiresTerminalMigrationDisposition(TemplateMigrationObject item)
         => item.Kind is "revision" or "drawing" or "media" or "footnotes" or "endnotes" or "comments" or "content-control";

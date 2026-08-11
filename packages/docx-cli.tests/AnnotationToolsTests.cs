@@ -225,7 +225,8 @@ public class AnnotationToolsTests
         var derived = TemplateMigration.DeriveExactTextPlan(source, source);
         Assert.False(derived.Pass);
         Assert.Contains(derived.Unresolved, item => item.SourceObjectId == revision.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
-        Assert.Contains(derived.Unresolved, item => item.SourceObjectId == media.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
+        Assert.DoesNotContain(derived.Unresolved, item => item.SourceObjectId == media.Id);
+        Assert.Contains(derived.Plan.Mappings, item => item.SourceObjectId == media.Id && item.BaselineObjectId == media.Id && item.Disposition == "copy-media");
     }
 
     [Fact]
@@ -279,6 +280,36 @@ public class AnnotationToolsTests
         Assert.Empty(applied.MediaFailures);
         var outputMedia = Assert.Single(TemplateMigration.Analyze(output, output).Source.Objects, item => item.Id == baselineMedia.Id);
         Assert.Equal(sourceMedia.Provenance["sha256"], outputMedia.Provenance["sha256"]);
+    }
+
+    [Fact]
+    public void TemplateMigration_exact_derivation_covers_unseen_multiple_drawings_by_reciprocally_unique_media_content()
+    {
+        var source = CreateMultiMediaMigrationFixture([[1, 2, 3], [4, 5, 6]]);
+        var baseline = CreateMultiMediaMigrationFixture([[4, 5, 6], [1, 2, 3]]);
+
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
+
+        Assert.True(derived.Pass, string.Join("; ", derived.Unresolved.Select(item => $"{item.Reason}:{item.SourceObjectId}")));
+        Assert.Equal(2, derived.Plan.Mappings.Count(item => item.Disposition == "copy-media"));
+        Assert.DoesNotContain(derived.Unresolved, item => item.SourceObjectId.Contains(":drawing:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TemplateMigration_exact_derivation_keeps_duplicate_media_hashes_unresolved()
+    {
+        var uniqueSource = CreateMultiMediaMigrationFixture([[1, 2, 3]]);
+        var duplicateBaseline = CreateMultiMediaMigrationFixture([[1, 2, 3], [1, 2, 3]]);
+        var duplicateSource = CreateMultiMediaMigrationFixture([[4, 5, 6], [4, 5, 6]]);
+        var uniqueBaseline = CreateMultiMediaMigrationFixture([[4, 5, 6]]);
+
+        var duplicateTargets = TemplateMigration.DeriveExactTextPlan(uniqueSource, duplicateBaseline);
+        var duplicateSources = TemplateMigration.DeriveExactTextPlan(duplicateSource, uniqueBaseline);
+
+        Assert.False(duplicateTargets.Pass);
+        Assert.Contains(duplicateTargets.Unresolved, item => item.Reason == "template-migration-media-hash-ambiguous");
+        Assert.False(duplicateSources.Pass);
+        Assert.Equal(2, duplicateSources.Unresolved.Count(item => item.Reason == "template-migration-media-hash-ambiguous"));
     }
 
     [Fact]
@@ -3907,6 +3938,42 @@ public class AnnotationToolsTests
                             new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }))
                     ) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })));
         main.Document = new Document(new Body(new Paragraph(new Run(new Text(text)), new Run(drawing))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateMultiMediaMigrationFixture(IReadOnlyList<byte[]> media)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-multi-media-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var paragraph = new Paragraph(new Run(new Text("shared content")));
+        uint drawingId = 1;
+        foreach (var bytes in media)
+        {
+            var image = main.AddImagePart(ImagePartType.Png);
+            using (var stream = new MemoryStream(bytes)) image.FeedData(stream);
+            var drawing = new Drawing(
+                new DW.Inline(
+                    new DW.Extent { Cx = 990000L, Cy = 990000L },
+                    new DW.DocProperties { Id = drawingId, Name = $"migration-image-{drawingId}" },
+                    new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                    new A.Graphic(new A.GraphicData(
+                        new PIC.Picture(
+                            new PIC.NonVisualPictureProperties(
+                                new PIC.NonVisualDrawingProperties { Id = drawingId, Name = $"migration-image-{drawingId}" },
+                                new PIC.NonVisualPictureDrawingProperties()),
+                            new PIC.BlipFill(
+                                new A.Blip { Embed = main.GetIdOfPart(image) },
+                                new A.Stretch(new A.FillRectangle())),
+                            new PIC.ShapeProperties(
+                                new A.Transform2D(new A.Offset { X = 0L, Y = 0L }, new A.Extents { Cx = 990000L, Cy = 990000L }),
+                                new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }))
+                        ) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })));
+            paragraph.AppendChild(new Run(drawing));
+            drawingId++;
+        }
+        main.Document = new Document(new Body(paragraph));
         main.Document.Save();
         return path;
     }

@@ -65,9 +65,12 @@ the same object kind. Repeated table-cell content is also mapped when the full
 normalized cell topology identifies exactly one source table and exactly one
 baseline table, with a one-to-one row/column correspondence. The provider uses
 its own current inventories for that proof; callers do not supply object ids or
-coordinates. Repeated content remains `review-required` when either table is
-ambiguous or the semantic topology differs. Other absent or ambiguous content
-also remains `review-required`.
+coordinates. Media content is mapped when its content hash is unique in both
+inventories; drawings that reference mapped media are covered by that mapping.
+Missing or repeated media hashes remain `review-required`. Repeated content
+remains `review-required` when either table is ambiguous or the semantic
+topology differs. Other absent or ambiguous content also remains
+`review-required`.
 
 ```bash
 tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
