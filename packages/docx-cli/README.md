@@ -50,6 +50,9 @@ Exports hash-attested source and baseline object inventories plus unresolved
 structural/content/style differences. Table-cell objects include canonical
 `Topology` (`ContainerObjectId`, `Row`, `Column`). It does not infer a business
 mapping or modify either document.
+When a mapped table cell contains multiple source paragraphs, the deterministic
+copy operation retains their visible boundaries as line breaks instead of
+joining them.
 
 ```bash
 tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]

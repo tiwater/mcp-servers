@@ -2118,18 +2118,18 @@ public static class Editor
         var paragraph = cell.Elements<Paragraph>().FirstOrDefault();
         var run = cell.Descendants<Run>().FirstOrDefault(candidate => candidate.Descendants<Text>().Any(text => HasVisibleText(text.Text)))
             ?? cell.Descendants<Run>().FirstOrDefault();
+        if (run is not null)
+        {
+            return run;
+        }
         var paragraphMark = paragraph?.ParagraphProperties?.ParagraphMarkRunProperties;
         if (paragraphMark is null)
         {
-            return run;
+            return null;
         }
 
         var effectiveProperties = new RunProperties();
         OverlayRunProperties(effectiveProperties, paragraphMark.ChildElements);
-        if (run?.RunProperties is not null)
-        {
-            OverlayRunProperties(effectiveProperties, run.RunProperties.ChildElements);
-        }
         NormalizeRunProperties(effectiveProperties);
         return new Run(effectiveProperties);
     }
