@@ -666,13 +666,13 @@ public static class TemplateMigration
         {
             RequireOnlyFields(mapping, new HashSet<string>(["source", "baseline", "disposition", "cardinality"], StringComparer.Ordinal), "template-migration-semantic-candidate-mapping");
             if (!mapping.TryGetProperty("source", out var source)) throw new InvalidOperationException("template-migration-semantic-candidate-source-missing");
-            RequireOnlyFields(source, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), "template-migration-semantic-candidate-source");
+            RequireOnlyFields(source, SemanticSelectorFields(), "template-migration-semantic-candidate-source");
             var outOfScope = mapping.TryGetProperty("disposition", out var disposition)
                 && string.Equals(disposition.GetString(), "out-of-scope", StringComparison.Ordinal);
             if (mapping.TryGetProperty("baseline", out var baseline))
             {
                 if (outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");
-                RequireOnlyFields(baseline, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline");
+                RequireOnlyFields(baseline, SemanticSelectorFields(), "template-migration-semantic-candidate-baseline");
             }
             else if (!outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-missing");
         }
@@ -685,7 +685,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceStart", "sourceEnd" })
                 {
                     if (!append.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, SemanticSelectorFields(), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -698,7 +698,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceParent", "baselineParent" })
                 {
                     if (!projection.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, SemanticSelectorFields(), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -711,7 +711,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceStart", "sourceEnd", "baselineBefore", "baselineAfter" })
                 {
                     if (!insertion.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, SemanticSelectorFields(), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -724,7 +724,7 @@ public static class TemplateMigration
                 foreach (var side in new[] { "sourceMember", "baselineLabel" })
                 {
                     if (!choice.TryGetProperty(side, out var selector)) throw new InvalidOperationException($"template-migration-semantic-candidate-{side}-missing");
-                    RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), $"template-migration-semantic-candidate-{side}");
+                    RequireOnlyFields(selector, SemanticSelectorFields(), $"template-migration-semantic-candidate-{side}");
                 }
             }
         }
@@ -735,10 +735,15 @@ public static class TemplateMigration
             {
                 RequireOnlyFields(clear, new HashSet<string>(["baseline", "mode"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline-clear");
                 if (!clear.TryGetProperty("baseline", out var selector)) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-clear-selector-missing");
-                RequireOnlyFields(selector, new HashSet<string>(["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState"], StringComparer.Ordinal), "template-migration-semantic-candidate-baseline-clear-selector");
+                RequireOnlyFields(selector, SemanticSelectorFields(), "template-migration-semantic-candidate-baseline-clear-selector");
             }
         }
     }
+
+    private static IReadOnlySet<string> SemanticSelectorFields()
+        => new HashSet<string>(
+            ["kind", "scope", "text", "sha256", "parentText", "previousText", "nextText", "descendantText", "textState", "sameRowText", "sameColumnText"],
+            StringComparer.Ordinal);
 
     private static void RequireOnlyFields(JsonElement element, IReadOnlySet<string> allowed, string label)
     {
@@ -828,6 +833,15 @@ public static class TemplateMigration
         var sha = !string.IsNullOrWhiteSpace(selector.Sha256);
         var descendant = !string.IsNullOrWhiteSpace(selector.DescendantText);
         var textState = !string.IsNullOrWhiteSpace(selector.TextState);
+        if (selector.SameRowText is not null && string.IsNullOrWhiteSpace(selector.SameRowText))
+            throw new InvalidOperationException($"template-migration-semantic-{side}-same-row-text-invalid");
+        if (selector.SameColumnText is not null && string.IsNullOrWhiteSpace(selector.SameColumnText))
+            throw new InvalidOperationException($"template-migration-semantic-{side}-same-column-text-invalid");
+        var tableContext = !string.IsNullOrWhiteSpace(selector.SameRowText) || !string.IsNullOrWhiteSpace(selector.SameColumnText);
+        if (tableContext && !string.Equals(selector.Kind, "table-cell", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"template-migration-semantic-{side}-table-context-kind-invalid");
+        }
         if (textState && !string.Equals(schema, "tiwater.docx.template-migration-semantic-candidate/v6", StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"template-migration-semantic-{side}-text-state-schema-invalid");
@@ -857,6 +871,8 @@ public static class TemplateMigration
         var normalizedPreviousText = selector.PreviousText is null ? null : NormalizeMappingText(selector.PreviousText);
         var normalizedNextText = selector.NextText is null ? null : NormalizeMappingText(selector.NextText);
         var normalizedDescendantText = selector.DescendantText is null ? null : NormalizeMappingText(selector.DescendantText);
+        var normalizedSameRowText = selector.SameRowText is null ? null : NormalizeMappingText(selector.SameRowText);
+        var normalizedSameColumnText = selector.SameColumnText is null ? null : NormalizeMappingText(selector.SameColumnText);
         var emptyText = string.Equals(selector.TextState, "empty", StringComparison.Ordinal);
         var byId = objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var siblings = objects.Where(item => string.Equals(item.Kind, selector.Kind, StringComparison.Ordinal)
@@ -869,7 +885,9 @@ public static class TemplateMigration
                 && (normalizedDescendantText is null || HasDescendantText(objects, item, normalizedDescendantText))
                 && (normalizedParentText is null || (item.ParentId is not null && byId.TryGetValue(item.ParentId, out var parent) && string.Equals(NormalizeMappingText(parent.Text), normalizedParentText, StringComparison.Ordinal)))
                 && ContextTextMatches(siblings, item, -1, normalizedPreviousText)
-                && ContextTextMatches(siblings, item, 1, normalizedNextText))
+                && ContextTextMatches(siblings, item, 1, normalizedNextText)
+                && TableContextTextMatches(objects, item, normalizedSameRowText, sameRow: true)
+                && TableContextTextMatches(objects, item, normalizedSameColumnText, sameRow: false))
             .OrderBy(item => item.Id, StringComparer.Ordinal)
             .ToList();
     }
@@ -895,6 +913,23 @@ public static class TemplateMigration
         var neighbor = index + offset;
         return neighbor >= 0 && neighbor < siblings.Count
             && string.Equals(NormalizeMappingText(siblings[neighbor].Text), expected, StringComparison.Ordinal);
+    }
+
+    private static bool TableContextTextMatches(
+        IReadOnlyList<TemplateMigrationObject> objects,
+        TemplateMigrationObject item,
+        string? expected,
+        bool sameRow)
+    {
+        if (expected is null) return true;
+        if (item.Topology is null) return false;
+        return objects.Any(candidate =>
+            !string.Equals(candidate.Id, item.Id, StringComparison.Ordinal)
+            && string.Equals(candidate.Kind, "table-cell", StringComparison.Ordinal)
+            && candidate.Topology is not null
+            && string.Equals(candidate.Topology.ContainerObjectId, item.Topology.ContainerObjectId, StringComparison.Ordinal)
+            && (sameRow ? candidate.Topology.Row == item.Topology.Row : candidate.Topology.Column == item.Topology.Column)
+            && string.Equals(NormalizeMappingText(candidate.Text), expected, StringComparison.Ordinal));
     }
 
     private static IReadOnlyList<string>? BodyRange(IReadOnlyList<TemplateMigrationObject> objects, string startId, string endId)
@@ -986,7 +1021,7 @@ public static class TemplateMigration
         }
 
         var sourceById = analysis.Source.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
-        var sourceCellText = TableCellCopyText(source);
+        var sourceCellParagraphs = TableCellCopyParagraphs(source);
         var baselineById = analysis.Baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var mappingsBySource = new Dictionary<string, TemplateMigrationMapping>(StringComparer.Ordinal);
         var copyTargets = new HashSet<string>(StringComparer.Ordinal);
@@ -1222,9 +1257,11 @@ public static class TemplateMigration
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-copy-conflict", mapping.SourceObjectId, mapping.BaselineObjectId));
                     continue;
                 }
+                var paragraphTexts = sourceCellParagraphs.GetValueOrDefault(sourceObject.Id);
                 var operation = BuildCopyTextOperation(
                     mapping.BaselineObjectId,
-                    sourceCellText.GetValueOrDefault(sourceObject.Id) ?? sourceObject.Text ?? string.Empty);
+                    paragraphTexts is null ? sourceObject.Text ?? string.Empty : string.Join("\n", paragraphTexts),
+                    paragraphTexts);
                 if (operation is null)
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-operation-unsupported", mapping.SourceObjectId, mapping.BaselineObjectId));
@@ -2519,7 +2556,10 @@ public static class TemplateMigration
         return Convert.ToHexString(sha.ComputeHash(stream)) == "825F8542DB7249A9BE93EFE1E9D894B3BF3A531744F3DF31F015BDC9B0AC3173";
     }
 
-    private static DocxEditOperation? BuildCopyTextOperation(string baselineObjectId, string text)
+    private static DocxEditOperation? BuildCopyTextOperation(
+        string baselineObjectId,
+        string text,
+        IReadOnlyList<string>? paragraphTexts = null)
     {
         var bodyParagraphRun = BodyParagraphRunId.Match(baselineObjectId);
         if (bodyParagraphRun.Success)
@@ -2574,35 +2614,37 @@ public static class TemplateMigration
                 TableIndex: int.Parse(bodyTableCell.Groups["table"].Value),
                 RowIndex: int.Parse(bodyTableCell.Groups["row"].Value),
                 CellIndex: int.Parse(bodyTableCell.Groups["cell"].Value),
-                Text: text);
+                Text: text,
+                ParagraphTexts: paragraphTexts);
         }
         var headerTableCell = HeaderTableCellId.Match(baselineObjectId);
         if (headerTableCell.Success)
         {
-            return new DocxEditOperation("replaceHeaderTableCellText", HeaderIndex: int.Parse(headerTableCell.Groups["header"].Value), TableIndex: int.Parse(headerTableCell.Groups["table"].Value), RowIndex: int.Parse(headerTableCell.Groups["row"].Value), CellIndex: int.Parse(headerTableCell.Groups["cell"].Value), Text: text);
+            return new DocxEditOperation("replaceHeaderTableCellText", HeaderIndex: int.Parse(headerTableCell.Groups["header"].Value), TableIndex: int.Parse(headerTableCell.Groups["table"].Value), RowIndex: int.Parse(headerTableCell.Groups["row"].Value), CellIndex: int.Parse(headerTableCell.Groups["cell"].Value), Text: text, ParagraphTexts: paragraphTexts);
         }
         var footerTableCell = FooterTableCellId.Match(baselineObjectId);
         if (footerTableCell.Success)
         {
-            return new DocxEditOperation("replaceFooterTableCellText", FooterIndex: int.Parse(footerTableCell.Groups["footer"].Value), TableIndex: int.Parse(footerTableCell.Groups["table"].Value), RowIndex: int.Parse(footerTableCell.Groups["row"].Value), CellIndex: int.Parse(footerTableCell.Groups["cell"].Value), Text: text);
+            return new DocxEditOperation("replaceFooterTableCellText", FooterIndex: int.Parse(footerTableCell.Groups["footer"].Value), TableIndex: int.Parse(footerTableCell.Groups["table"].Value), RowIndex: int.Parse(footerTableCell.Groups["row"].Value), CellIndex: int.Parse(footerTableCell.Groups["cell"].Value), Text: text, ParagraphTexts: paragraphTexts);
         }
         return null;
     }
 
-    private static IReadOnlyDictionary<string, string> TableCellCopyText(string source)
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> TableCellCopyParagraphs(string source)
     {
-        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        var values = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         using var document = WordprocessingDocument.Open(source, false);
         var main = document.MainDocumentPart ?? throw new InvalidOperationException("template-migration-main-document-part-missing");
 
-        static void AddCells(IDictionary<string, string> target, IEnumerable<Table> tables, string prefix)
+        static void AddCells(IDictionary<string, IReadOnlyList<string>> target, IEnumerable<Table> tables, string prefix)
         {
             foreach (var (table, tableIndex) in tables.Select((item, index) => (item, index)))
             foreach (var (row, rowIndex) in table.Elements<TableRow>().Select((item, index) => (item, index)))
             foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((item, index) => (item, index)))
             {
-                target[$"{prefix}:table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}"] = string.Join("\n",
-                    cell.Elements<Paragraph>().Select(Inspector.GetParagraphText)).Trim();
+                target[$"{prefix}:table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}"] = cell.Elements<Paragraph>()
+                    .Select(Inspector.GetParagraphText)
+                    .ToList();
             }
         }
 
@@ -2628,7 +2670,9 @@ public static class TemplateMigration
             foreach (var (row, rowIndex) in table.Elements<TableRow>().Select((item, index) => (item, index)))
             foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((item, index) => (item, index)))
             {
-                var visibleParagraphs = cell.Elements<Paragraph>().Select(paragraph => Inspector.GetParagraphText(paragraph));
+                var visibleParagraphs = cell.Elements<Paragraph>()
+                    .Select(Inspector.GetParagraphText)
+                    .Where(text => !string.IsNullOrWhiteSpace(text));
                 target[$"{prefix}:table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}"] = string.Join("\n", visibleParagraphs).Trim();
             }
         }
@@ -2643,7 +2687,12 @@ public static class TemplateMigration
         return values;
     }
 
-    private sealed record TableCellParagraphLine(string Text, string ScaffoldSha256, string ShellSha256 = "", bool HasRuns = true);
+    private sealed record TableCellParagraphLine(
+        string Text,
+        string ScaffoldSha256,
+        string ShellSha256 = "",
+        bool HasRuns = true,
+        bool HasDrawing = false);
 
     private static IReadOnlyDictionary<string, IReadOnlyList<TableCellParagraphLine>> ReadbackTableCellParagraphs(string file)
     {
@@ -2660,6 +2709,7 @@ public static class TemplateMigration
                 .Where(string.IsNullOrWhiteSpace)
                 .ToList();
             foreach (var value in clone.Descendants<Text>().ToList()) value.Remove();
+            foreach (var lineBreak in clone.Descendants<Break>().ToList()) lineBreak.Remove();
             return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                 clone.OuterXml + "\u001E" + string.Join("\u001F", protectedBlankText))));
         }
@@ -2682,7 +2732,8 @@ public static class TemplateMigration
                         Inspector.GetParagraphText(paragraph),
                         ScaffoldHash(paragraph),
                         ShellHash(paragraph),
-                        paragraph.Descendants<Run>().Any()))
+                        paragraph.Descendants<Run>().Any(),
+                        paragraph.Descendants<Drawing>().Any()))
                     .ToList();
             }
         }
@@ -2703,29 +2754,112 @@ public static class TemplateMigration
         IReadOnlyList<TableCellParagraphLine> output)
     {
         if (baseline.Count == 0 || output.Count == 0) return baseline.Count == output.Count;
-        var sourceText = string.Join("\n", source.Select(item => item.Text)).Trim();
-        var sourceLines = sourceText.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
-        var slots = baseline.Select((item, index) => (item, index))
-            .Where(pair => !string.IsNullOrWhiteSpace(pair.item.Text))
-            .Select(pair => pair.index)
-            .ToList();
-        if (slots.Count == 0) slots.Add(0);
+        static bool Visible(string value) => !string.IsNullOrWhiteSpace(value);
+        static string Comparable(string value) => Visible(value) ? value : string.Empty;
+        var scores = new int[source.Count + 1, baseline.Count + 1];
+        for (var sourceIndex = source.Count - 1; sourceIndex >= 0; sourceIndex -= 1)
+        for (var targetIndex = baseline.Count - 1; targetIndex >= 0; targetIndex -= 1)
+        {
+            var skipSource = scores[sourceIndex + 1, targetIndex];
+            var skipTarget = scores[sourceIndex, targetIndex + 1];
+            var match = Visible(source[sourceIndex].Text) == Visible(baseline[targetIndex].Text)
+                ? (Visible(source[sourceIndex].Text) ? 3 : 2) + scores[sourceIndex + 1, targetIndex + 1]
+                : int.MinValue;
+            scores[sourceIndex, targetIndex] = Math.Max(match, Math.Max(skipSource, skipTarget));
+        }
 
-        var slotOrder = slots.Select((value, index) => (value, index)).ToDictionary(pair => pair.value, pair => pair.index);
+        var sourceToTarget = Enumerable.Repeat<int?>(null, source.Count).ToArray();
+        var sourceCursor = 0;
+        var targetCursor = 0;
+        while (sourceCursor < source.Count && targetCursor < baseline.Count)
+        {
+            var weight = Visible(source[sourceCursor].Text) ? 3 : 2;
+            if (Visible(source[sourceCursor].Text) == Visible(baseline[targetCursor].Text)
+                && scores[sourceCursor, targetCursor] == weight + scores[sourceCursor + 1, targetCursor + 1])
+            {
+                sourceToTarget[sourceCursor] = targetCursor;
+                sourceCursor += 1;
+                targetCursor += 1;
+            }
+            else if (scores[sourceCursor + 1, targetCursor] >= scores[sourceCursor, targetCursor + 1])
+            {
+                sourceCursor += 1;
+            }
+            else
+            {
+                targetCursor += 1;
+            }
+        }
+        if (!baseline.Any(item => Visible(item.Text)) && source.Any(item => Visible(item.Text)))
+        {
+            var promotedSource = source.ToList().FindIndex(item => Visible(item.Text));
+            var promotedTarget = baseline.ToList().FindIndex(item => !item.HasDrawing);
+            if (promotedTarget < 0) promotedTarget = 0;
+            for (var index = 0; index < sourceToTarget.Length; index += 1)
+                if (sourceToTarget[index] == promotedTarget) sourceToTarget[index] = null;
+            sourceToTarget[promotedSource] = promotedTarget;
+        }
+
+        var targetToSource = sourceToTarget
+            .Select((target, index) => (target, index))
+            .Where(pair => pair.target is not null)
+            .ToDictionary(pair => pair.target!.Value, pair => pair.index);
+        var insertions = new Dictionary<int, List<int>>();
+        var insertionsAfter = new Dictionary<int, List<int>>();
+        var trailingInsertions = new List<int>();
+        for (var index = 0; index < source.Count; index += 1)
+        {
+            if (sourceToTarget[index] is not null) continue;
+            var nextTarget = sourceToTarget.Skip(index + 1).FirstOrDefault(candidate => candidate is not null);
+            if (nextTarget is null)
+            {
+                var previousTarget = sourceToTarget.Take(index).LastOrDefault(candidate => candidate is not null);
+                if (previousTarget is null)
+                {
+                    trailingInsertions.Add(index);
+                }
+                else
+                {
+                    if (!insertionsAfter.TryGetValue(previousTarget.Value, out var after))
+                    {
+                        after = [];
+                        insertionsAfter[previousTarget.Value] = after;
+                    }
+                    after.Add(index);
+                }
+                continue;
+            }
+            if (!insertions.TryGetValue(nextTarget.Value, out var before))
+            {
+                before = [];
+                insertions[nextTarget.Value] = before;
+            }
+            before.Add(index);
+        }
+
+        TableCellParagraphLine TemplateFor(string text)
+            => baseline.LastOrDefault(item => Visible(item.Text) == Visible(text) && !item.HasDrawing)
+                ?? baseline.LastOrDefault(item => !item.HasDrawing)
+                ?? baseline[^1];
         var expected = new List<TableCellParagraphLine>();
         for (var baselineIndex = 0; baselineIndex < baseline.Count; baselineIndex += 1)
         {
-            var item = baseline[baselineIndex];
-            expected.Add(slotOrder.TryGetValue(baselineIndex, out var slotSourceIndex)
-                ? item with { Text = slotSourceIndex < sourceLines.Length ? sourceLines[slotSourceIndex] : string.Empty }
-                : item);
-            if (baselineIndex != slots[^1]) continue;
-            for (var extraSourceIndex = slots.Count; extraSourceIndex < sourceLines.Length; extraSourceIndex += 1)
-                expected.Add(item with { Text = sourceLines[extraSourceIndex] });
+            if (insertions.TryGetValue(baselineIndex, out var before))
+                foreach (var sourceIndex in before)
+                    expected.Add(TemplateFor(source[sourceIndex].Text) with { Text = source[sourceIndex].Text });
+            var baselineItem = baseline[baselineIndex];
+            expected.Add(targetToSource.TryGetValue(baselineIndex, out var mappedSource)
+                ? baselineItem with { Text = source[mappedSource].Text }
+                : Visible(baselineItem.Text) ? baselineItem with { Text = string.Empty } : baselineItem);
+            if (insertionsAfter.TryGetValue(baselineIndex, out var after))
+                foreach (var sourceIndex in after)
+                    expected.Add(TemplateFor(source[sourceIndex].Text) with { Text = source[sourceIndex].Text });
         }
+        foreach (var sourceIndex in trailingInsertions)
+            expected.Add(TemplateFor(source[sourceIndex].Text) with { Text = source[sourceIndex].Text });
 
         return expected.Count == output.Count && expected.Zip(output).All(pair =>
-            string.Equals(pair.First.Text.Trim(), pair.Second.Text.Trim(), StringComparison.Ordinal)
+            string.Equals(Comparable(pair.First.Text), Comparable(pair.Second.Text), StringComparison.Ordinal)
             && string.Equals(pair.First.ShellSha256, pair.Second.ShellSha256, StringComparison.Ordinal)
             && (!pair.First.HasRuns || string.Equals(pair.First.ScaffoldSha256, pair.Second.ScaffoldSha256, StringComparison.Ordinal)));
     }

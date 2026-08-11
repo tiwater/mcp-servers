@@ -2623,6 +2623,152 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_preserves_explicit_empty_paragraphs_without_consuming_visible_target_slots()
+    {
+        static Paragraph TextParagraph(string text)
+        {
+            var run = new Run();
+            var lines = text.Split('\n');
+            foreach (var (line, index) in lines.Select((line, index) => (line, index)))
+            {
+                if (index != 0) run.AppendChild(new Break());
+                run.AppendChild(new Text(line));
+            }
+            return new Paragraph(run);
+        }
+
+        static string CreateSource()
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"migration-explicit-empty-source-{Guid.NewGuid():N}.docx");
+            using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new Table(new TableRow(new TableCell(
+                TextParagraph("first\ncontinued"),
+                TextParagraph(string.Empty),
+                TextParagraph("second"))))));
+            main.Document.Save();
+            return path;
+        }
+
+        static string CreateBaseline()
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"migration-explicit-empty-baseline-{Guid.NewGuid():N}.docx");
+            using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new Table(new TableRow(new TableCell(
+                TextParagraph("old first"),
+                TextParagraph("old second"),
+                new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "FillLine" }),
+                    new Run(new RunProperties(new Underline { Val = UnderlineValues.Single }), new Text("        ") { Space = SpaceProcessingModeValues.Preserve })))))));
+            main.Document.Save();
+            return path;
+        }
+
+        var source = CreateSource();
+        var identityBaseline = CreateSource();
+        var identityPlan = TemplateMigration.DeriveExactTextPlan(source, identityBaseline);
+        Assert.True(identityPlan.Pass, string.Join("; ", identityPlan.Unresolved.Select(item => item.Reason)));
+        var identityOutput = Path.Combine(Path.GetTempPath(), $"migration-explicit-empty-identity-{Guid.NewGuid():N}.docx");
+        var identityApplied = TemplateMigration.Apply(source, identityBaseline, identityPlan.Plan, identityOutput);
+        Assert.True(identityApplied.Pass, string.Join("; ", identityApplied.Readback?.Failures.Select(item => item.Reason) ?? []));
+        using (var before = WordprocessingDocument.Open(identityBaseline, false))
+        using (var after = WordprocessingDocument.Open(identityOutput, false))
+            Assert.Equal(
+                before.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single().OuterXml,
+                after.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single().OuterXml);
+
+        var baseline = CreateBaseline();
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("table-cell", "body", Text: "firstcontinuedsecond"),
+                new TemplateMigrationSemanticSelector("table-cell", "body", Text: "old firstold second"),
+                "copy-text")]);
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var output = Path.Combine(Path.GetTempPath(), $"migration-explicit-empty-output-{Guid.NewGuid():N}.docx");
+
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback?.Failures.Select(item => item.Reason) ?? []));
+        using var result = WordprocessingDocument.Open(output, false);
+        var paragraphs = result.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single().Elements<Paragraph>().ToList();
+        Assert.Equal(["firstcontinued", "        ", "second", "        "], paragraphs.Select(GetParagraphText).ToArray());
+        Assert.NotNull(paragraphs[1].Descendants<Underline>().SingleOrDefault());
+        Assert.NotNull(paragraphs[3].Descendants<Underline>().SingleOrDefault());
+        Assert.Single(paragraphs[0].Descendants<Break>());
+
+        var flattened = Path.Combine(Path.GetTempPath(), $"migration-explicit-empty-flattened-{Guid.NewGuid():N}.docx");
+        File.Copy(output, flattened);
+        using (var mutation = WordprocessingDocument.Open(flattened, true))
+        {
+            mutation.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single().Elements<Paragraph>().ElementAt(1).Remove();
+            mutation.MainDocumentPart.Document.Save();
+        }
+        var rejected = TemplateMigration.ValidateReadback(source, baseline, flattened, resolved.Plan);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Failures, item => item.Reason == "template-migration-readback-table-cell-style-scaffold-drift");
+    }
+
+    [Fact]
+    public void TemplateMigration_table_cell_context_resolves_by_current_same_row_and_column_text_only_when_unique()
+    {
+        static string Create(params (string Row, string Value, string Column)[] tables)
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"migration-table-context-{Guid.NewGuid():N}.docx");
+            using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(tables.Select(item => new Table(
+                new TableRow(
+                    new TableCell(new Paragraph(new Run(new Text(item.Row)))),
+                    new TableCell(new Paragraph(new Run(new Text(item.Value))))),
+                new TableRow(
+                    new TableCell(new Paragraph(new Run(new Text("context")))),
+                    new TableCell(new Paragraph(new Run(new Text(item.Column)))))))));
+            main.Document.Save();
+            return path;
+        }
+
+        var source = Create(("source alpha", "01", "column alpha"), ("source beta", "01", "column beta"));
+        var baseline = Create(("source alpha", "slot", "column alpha"), ("source beta", "slot", "column beta"));
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("table-cell", "body", Text: "01", SameRowText: "source beta", SameColumnText: "column beta"),
+                new TemplateMigrationSemanticSelector("table-cell", "body", Text: "slot", SameRowText: "source beta", SameColumnText: "column beta"),
+                "copy-text")]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+
+        Assert.Contains(resolved.Plan.Mappings, mapping => mapping.SourceObjectId == "body:table:1:row:0:cell:1"
+            && mapping.BaselineObjectId == "body:table:1:row:0:cell:1");
+        var candidatePath = Path.Combine(Path.GetTempPath(), $"migration-table-context-{Guid.NewGuid():N}.json");
+        File.WriteAllText(candidatePath, """
+        {
+          "schema": "tiwater.docx.template-migration-semantic-candidate/v5",
+          "mappings": [{
+            "source": {"kind":"table-cell","scope":"body","text":"01","sameRowText":"source beta","sameColumnText":"column beta"},
+            "baseline": {"kind":"table-cell","scope":"body","text":"slot","sameRowText":"source beta","sameColumnText":"column beta"},
+            "disposition": "copy-text"
+          }]
+        }
+        """);
+        Assert.Equal(1, TemplateMigration.RunResolveSemanticCandidate([source, baseline, candidatePath]));
+
+        var ambiguous = Create(("source beta", "01", "column beta"), ("source beta", "01", "column beta"));
+        var rejected = TemplateMigration.ResolveSemanticCandidate(ambiguous, baseline, candidate);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-semantic-source-ambiguous");
+        Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate with
+        {
+            Mappings = [candidate.Mappings.Single() with
+            {
+                Source = new TemplateMigrationSemanticSelector("paragraph", "body", Text: "01", SameRowText: "source beta")
+            }]
+        }));
+    }
+
+    [Fact]
     public void Edit_preserves_unused_target_cell_slots_when_source_has_fewer_lines()
     {
         var path = Path.Combine(Path.GetTempPath(), $"cell-fewer-lines-{Guid.NewGuid():N}.docx");

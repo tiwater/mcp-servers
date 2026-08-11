@@ -295,7 +295,9 @@ public sealed record TemplateMigrationSemanticSelector(
     string? PreviousText = null,
     string? NextText = null,
     string? DescendantText = null,
-    string? TextState = null);
+    string? TextState = null,
+    string? SameRowText = null,
+    string? SameColumnText = null);
 
 public sealed record TemplateMigrationSemanticCandidateMapping(
     TemplateMigrationSemanticSelector Source,
@@ -457,7 +459,8 @@ public sealed record DocxEditOperation(
     bool? CantSplit = null,
     bool? KeepNext = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null,
-    DocxFontPolicy? FontPolicy = null);
+    DocxFontPolicy? FontPolicy = null,
+    IReadOnlyList<string>? ParagraphTexts = null);
 
 public sealed record DocxFontRule(string EastAsia, string Latin, string Size);
 

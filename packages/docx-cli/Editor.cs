@@ -664,7 +664,7 @@ public static class Editor
         }
 
         var fallbackRun = FindNearestTableRun(rows, operation.RowIndex.Value, operation.CellIndex.Value);
-        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text, operation.Alignment, fallbackRun);
+        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text, operation.Alignment, fallbackRun, operation.ParagraphTexts);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated {partKind}[{partIndex}].table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}]");
     }
 
@@ -804,7 +804,7 @@ public static class Editor
         }
 
         var fallbackRun = FindNearestTableRun(rows, operation.RowIndex.Value, operation.CellIndex.Value);
-        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text, operation.Alignment, fallbackRun);
+        ReplaceTableCellText(cells[operation.CellIndex.Value], operation.Text, operation.Alignment, fallbackRun, operation.ParagraphTexts);
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}]");
     }
 
@@ -2036,9 +2036,15 @@ public static class Editor
         }
     }
 
-    private static void ReplaceTableCellText(TableCell cell, string replacementText, string? alignment = null, Run? fallbackRun = null)
+    private static void ReplaceTableCellText(
+        TableCell cell,
+        string replacementText,
+        string? alignment = null,
+        Run? fallbackRun = null,
+        IReadOnlyList<string>? paragraphTexts = null)
     {
-        var lines = replacementText.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        var lines = paragraphTexts?.ToArray()
+            ?? replacementText.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
         var paragraphs = cell.Elements<Paragraph>().ToList();
         if (paragraphs.Count == 0)
         {
@@ -2048,33 +2054,117 @@ public static class Editor
             paragraphs.Add(paragraph);
         }
 
-        var visibleSlots = paragraphs
-            .Where(paragraph => !string.IsNullOrWhiteSpace(Inspector.GetParagraphText(paragraph)))
-            .ToList();
-        if (visibleSlots.Count == 0)
+        static bool Visible(string value) => !string.IsNullOrWhiteSpace(value);
+        static string Comparable(string value) => Visible(value) ? value : string.Empty;
+        var targetTexts = paragraphs.Select(Inspector.GetParagraphText).ToList();
+        if (lines.Length == targetTexts.Count
+            && lines.Select(Comparable).SequenceEqual(targetTexts.Select(Comparable), StringComparer.Ordinal))
         {
-            visibleSlots.Add(paragraphs.FirstOrDefault(paragraph => !paragraph.Descendants<Drawing>().Any()) ?? paragraphs[0]);
+            if (!string.IsNullOrWhiteSpace(alignment))
+                foreach (var paragraph in paragraphs) ApplyParagraphAlignment(paragraph, alignment);
+            return;
         }
 
-        for (var index = 0; index < visibleSlots.Count; index += 1)
+        var scores = new int[lines.Length + 1, paragraphs.Count + 1];
+        for (var sourceIndex = lines.Length - 1; sourceIndex >= 0; sourceIndex -= 1)
+        for (var targetIndex = paragraphs.Count - 1; targetIndex >= 0; targetIndex -= 1)
         {
-            ReplaceVisibleParagraphText(visibleSlots[index], index < lines.Length ? lines[index] : string.Empty, fallbackRun);
-            if (!string.IsNullOrWhiteSpace(alignment)) ApplyParagraphAlignment(visibleSlots[index], alignment);
+            var skipSource = scores[sourceIndex + 1, targetIndex];
+            var skipTarget = scores[sourceIndex, targetIndex + 1];
+            var match = Visible(lines[sourceIndex]) == Visible(targetTexts[targetIndex])
+                ? (Visible(lines[sourceIndex]) ? 3 : 2) + scores[sourceIndex + 1, targetIndex + 1]
+                : int.MinValue;
+            scores[sourceIndex, targetIndex] = Math.Max(match, Math.Max(skipSource, skipTarget));
         }
 
-        var insertionPoint = visibleSlots[^1];
-        for (var index = visibleSlots.Count; index < lines.Length; index += 1)
+        var sourceToTarget = Enumerable.Repeat<int?>(null, lines.Length).ToArray();
+        var sourceCursor = 0;
+        var targetCursor = 0;
+        while (sourceCursor < lines.Length && targetCursor < paragraphs.Count)
         {
-            var paragraph = (Paragraph)visibleSlots[^1].CloneNode(true);
-            ReplaceVisibleParagraphText(paragraph, lines[index], fallbackRun);
+            var weight = Visible(lines[sourceCursor]) ? 3 : 2;
+            if (Visible(lines[sourceCursor]) == Visible(targetTexts[targetCursor])
+                && scores[sourceCursor, targetCursor] == weight + scores[sourceCursor + 1, targetCursor + 1])
+            {
+                sourceToTarget[sourceCursor] = targetCursor;
+                sourceCursor += 1;
+                targetCursor += 1;
+            }
+            else if (scores[sourceCursor + 1, targetCursor] >= scores[sourceCursor, targetCursor + 1])
+            {
+                sourceCursor += 1;
+            }
+            else
+            {
+                targetCursor += 1;
+            }
+        }
+        if (!targetTexts.Any(Visible) && lines.Any(Visible))
+        {
+            var promotedSource = Array.FindIndex(lines, Visible);
+            var promotedTarget = paragraphs.FindIndex(paragraph => !paragraph.Descendants<Drawing>().Any());
+            if (promotedTarget < 0) promotedTarget = 0;
+            for (var index = 0; index < sourceToTarget.Length; index += 1)
+                if (sourceToTarget[index] == promotedTarget) sourceToTarget[index] = null;
+            sourceToTarget[promotedSource] = promotedTarget;
+        }
+
+        var mappedTargets = sourceToTarget.Where(index => index is not null).Select(index => index!.Value).ToHashSet();
+        foreach (var (line, sourceIndex) in lines.Select((line, index) => (line, index)))
+        {
+            if (sourceToTarget[sourceIndex] is not { } mappedTarget) continue;
+            ReplaceVisibleParagraphText(
+                paragraphs[mappedTarget],
+                line,
+                fallbackRun,
+                promoteBlank: paragraphTexts is null && Visible(line) && !Visible(targetTexts[mappedTarget]));
+            if (!string.IsNullOrWhiteSpace(alignment)) ApplyParagraphAlignment(paragraphs[mappedTarget], alignment);
+        }
+        foreach (var (paragraph, targetIndex) in paragraphs.Select((paragraph, index) => (paragraph, index)))
+        {
+            if (mappedTargets.Contains(targetIndex) || !Visible(targetTexts[targetIndex])) continue;
+            ReplaceVisibleParagraphText(paragraph, string.Empty, fallbackRun);
             if (!string.IsNullOrWhiteSpace(alignment)) ApplyParagraphAlignment(paragraph, alignment);
-            cell.InsertAfter(paragraph, insertionPoint);
-            insertionPoint = paragraph;
+        }
+
+        OpenXmlElement? lastInserted = null;
+        for (var index = 0; index < lines.Length; index += 1)
+        {
+            if (sourceToTarget[index] is not null)
+            {
+                lastInserted = paragraphs[sourceToTarget[index]!.Value];
+                continue;
+            }
+            var wantVisible = Visible(lines[index]);
+            var template = paragraphs.LastOrDefault(paragraph => Visible(Inspector.GetParagraphText(paragraph)) == wantVisible)
+                ?? paragraphs[^1];
+            var inserted = (Paragraph)template.CloneNode(true);
+            ReplaceVisibleParagraphText(inserted, lines[index], fallbackRun);
+            if (!string.IsNullOrWhiteSpace(alignment)) ApplyParagraphAlignment(inserted, alignment);
+            var nextTarget = sourceToTarget.Skip(index + 1).FirstOrDefault(candidate => candidate is not null);
+            if (nextTarget is not null)
+                cell.InsertBefore(inserted, paragraphs[nextTarget.Value]);
+            else if (lastInserted is not null)
+                cell.InsertAfter(inserted, lastInserted);
+            else
+                cell.Append(inserted);
+            lastInserted = inserted;
         }
     }
 
-    private static void ReplaceVisibleParagraphText(Paragraph paragraph, string text, Run? fallbackRun)
+    private static void ReplaceVisibleParagraphText(Paragraph paragraph, string text, Run? fallbackRun, bool promoteBlank = false)
     {
+        if (string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(Inspector.GetParagraphText(paragraph))) return;
+        if (promoteBlank)
+        {
+            foreach (var run in paragraph.Elements<Run>().Where(run => !run.Descendants<Drawing>().Any()).ToList()) run.Remove();
+            paragraph.AppendChild(CreateStyledRunLike(
+                fallbackRun,
+                text,
+                preserveEmphasis: false,
+                forceBaselineVerticalAlignment: true));
+            return;
+        }
         var visibleRuns = paragraph.Descendants<Run>()
             .Where(run => run.Descendants<Text>().Any(value => !string.IsNullOrWhiteSpace(value.Text)))
             .ToList();
@@ -2091,18 +2181,11 @@ public static class Editor
         if (!visibleRuns.Contains(targetRun)) visibleRuns.Add(targetRun);
 
         foreach (var run in visibleRuns)
-        foreach (var value in run.Descendants<Text>())
-            value.Text = string.Empty;
-
-        var firstText = targetRun.Descendants<Text>().FirstOrDefault();
-        if (firstText is null)
         {
-            targetRun.AppendChild(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+            foreach (var value in run.Descendants<Text>().ToList()) value.Remove();
+            foreach (var lineBreak in run.Descendants<Break>().ToList()) lineBreak.Remove();
         }
-        else
-        {
-            firstText.Text = text;
-        }
+        AppendTextWithLineBreaks(targetRun, text);
     }
 
     private static DocxEditAppliedOperation ReplaceTableCellRichText(Body body, DocxEditOperation operation)
