@@ -30,7 +30,7 @@ public class AnnotationToolsTests
         try
         {
             Console.SetOut(output);
-            Assert.Equal(0, await Cli.RunAsync([command, "--help"]));
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync([command, "--help"]));
         }
         finally
         {
@@ -1373,6 +1373,36 @@ public class AnnotationToolsTests
         var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
         Assert.False(resolved.Pass);
         Assert.Contains(resolved.Unresolved, item => item.Reason == "template-migration-semantic-append-end-ambiguous");
+    }
+
+    [Fact]
+    public void TemplateMigration_operation_build_rejects_unsupported_body_append_content_before_apply()
+    {
+        var source = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: false);
+        using (var document = WordprocessingDocument.Open(source, true))
+        {
+            var revisionHeading = document.MainDocumentPart!.Document!.Body!
+                .Elements<Paragraph>().Single(item => item.InnerText == "Revision history");
+            revisionHeading.AppendChild(new SdtRun(new SdtContentRun(new Run(new Text("current controlled fact")))));
+            document.MainDocumentPart.Document.Save();
+        }
+        var baseline = CreateBodyAppendFixture(includeDuplicateRevisionTable: false, baseline: true);
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var sourceRoots = analysis.Source.Objects
+            .Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table")
+            .ToList();
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v2",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            [],
+            [new TemplateMigrationBodyAppend(sourceRoots.First().Id, sourceRoots.Last().Id)]);
+
+        var build = TemplateMigration.BuildOperations(source, baseline, plan);
+
+        Assert.False(build.Pass);
+        Assert.Empty(build.BodyAppends);
+        Assert.Contains(build.Failures, item => item.Reason == "template-migration-body-append-unsupported-content");
     }
 
     [Fact]

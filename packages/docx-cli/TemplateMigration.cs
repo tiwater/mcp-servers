@@ -1148,6 +1148,7 @@ coordinates are rejected. See the packaged README for all existing branches.
             appendedSourceIds.UnionWith(covered);
             bodyAppends.Add(append);
         }
+        failures.AddRange(ValidateBodyAppendContent(source, analysis.Source, bodyAppends));
 
         var baselineBodyRoots = analysis.Baseline.Objects.Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table").ToList();
         foreach (var insertion in plan.BodyInsertions ?? [])
@@ -2008,6 +2009,48 @@ coordinates are rejected. See the packaged README for all existing branches.
             }
         }
         outputDocument.MainDocumentPart!.Document.Save();
+        return failures;
+    }
+
+    private static IReadOnlyList<TemplateMigrationPlanFailure> ValidateBodyAppendContent(
+        string source,
+        TemplateMigrationInventory sourceInventory,
+        IReadOnlyList<TemplateMigrationBodyAppend> appends)
+    {
+        if (appends.Count == 0) return [];
+        var failures = new List<TemplateMigrationPlanFailure>();
+        using var sourceDocument = WordprocessingDocument.Open(Path.GetFullPath(source), false);
+        var sourceBody = sourceDocument.MainDocumentPart?.Document?.Body;
+        if (sourceBody is null) return [new TemplateMigrationPlanFailure("template-migration-body-append-body-missing")];
+        var sourceRoots = sourceInventory.Objects
+            .Where(item => item.Scope == "body" && item.ParentId is null && item.Kind is "paragraph" or "table")
+            .ToList();
+        var elements = sourceBody.ChildElements.Where(element => element is Paragraph or Table).ToList();
+        if (sourceRoots.Count != elements.Count)
+        {
+            return [new TemplateMigrationPlanFailure("template-migration-body-append-source-order-invalid")];
+        }
+
+        foreach (var append in appends)
+        {
+            var start = sourceRoots.FindIndex(item => item.Id == append.SourceStartObjectId);
+            var end = sourceRoots.FindIndex(item => item.Id == append.SourceEndObjectId);
+            if (start < 0 || end < start)
+            {
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-body-append-range-invalid", append.SourceStartObjectId, append.SourceEndObjectId));
+                continue;
+            }
+            for (var index = start; index <= end; index += 1)
+            {
+                var element = elements[index];
+                if (element.Descendants<Drawing>().Any() || element.Descendants<FootnoteReference>().Any() || element.Descendants<EndnoteReference>().Any()
+                    || element.Descendants<SdtElement>().Any() || element.Descendants().Any(item => item.LocalName is "ins" or "del" or "moveFrom" or "moveTo")
+                    || (element is Paragraph paragraph && paragraph.ParagraphProperties?.GetFirstChild<SectionProperties>() is not null))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-body-append-unsupported-content", sourceRoots[index].Id));
+                }
+            }
+        }
         return failures;
     }
 
