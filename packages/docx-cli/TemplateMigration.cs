@@ -79,7 +79,7 @@ public static class TemplateMigration
                 Kind: kind,
                 SourceObjectId: sourceObject.Id,
                 BaselineObjectId: baselineObject?.Id,
-                Disposition: "requires-declared-mapping",
+                Disposition: "requires-semantic-candidate",
                 Evidence: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["sourceSha256"] = sourceInventory.Sha256,
