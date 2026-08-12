@@ -1070,6 +1070,7 @@ coordinates are rejected. See the packaged README for all existing branches.
 
         var sourceById = analysis.Source.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var sourceCellParagraphs = TableCellCopyParagraphs(source);
+        var baselineCellParagraphs = TableCellCopyParagraphs(baseline);
         var baselineById = analysis.Baseline.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
         var mappingsBySource = new Dictionary<string, TemplateMigrationMapping>(StringComparer.Ordinal);
         var copyTargets = new HashSet<string>(StringComparer.Ordinal);
@@ -1306,6 +1307,13 @@ coordinates are rejected. See the packaged README for all existing branches.
                     continue;
                 }
                 var paragraphTexts = sourceCellParagraphs.GetValueOrDefault(sourceObject.Id);
+                if (paragraphTexts is not null
+                    && HeaderTableCellId.IsMatch(mapping.BaselineObjectId)
+                    && baselineCellParagraphs.TryGetValue(mapping.BaselineObjectId, out var baselineParagraphTexts)
+                    && VisibleParagraphSequencesEquivalent(paragraphTexts, baselineParagraphTexts))
+                {
+                    continue;
+                }
                 var operation = BuildCopyTextOperation(
                     mapping.BaselineObjectId,
                     paragraphTexts is null ? sourceObject.Text ?? string.Empty : string.Join("\n", paragraphTexts),
@@ -2676,6 +2684,16 @@ coordinates are rejected. See the packaged README for all existing branches.
             return new DocxEditOperation("replaceFooterTableCellText", FooterIndex: int.Parse(footerTableCell.Groups["footer"].Value), TableIndex: int.Parse(footerTableCell.Groups["table"].Value), RowIndex: int.Parse(footerTableCell.Groups["row"].Value), CellIndex: int.Parse(footerTableCell.Groups["cell"].Value), Text: text, ParagraphTexts: paragraphTexts);
         }
         return null;
+    }
+
+    private static bool VisibleParagraphSequencesEquivalent(
+        IReadOnlyList<string> source,
+        IReadOnlyList<string> baseline)
+    {
+        static IEnumerable<string> Visible(IReadOnlyList<string> paragraphs)
+            => paragraphs.Where(text => !string.IsNullOrWhiteSpace(text));
+
+        return Visible(source).SequenceEqual(Visible(baseline), StringComparer.Ordinal);
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> TableCellCopyParagraphs(string source)
