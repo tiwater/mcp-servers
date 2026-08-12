@@ -16,6 +16,29 @@ namespace Dockit.Docx.Tests;
 
 public class AnnotationToolsTests
 {
+    [Theory]
+    [InlineData("analyze-template-migration", "<source.docx> <baseline.docx> [--json]")]
+    [InlineData("derive-template-migration-exact-text-plan", "<source.docx> <baseline.docx>")]
+    [InlineData("derive-template-migration-anchor-gap-plan", "<source.docx> <baseline.docx>")]
+    [InlineData("build-template-migration-operations", "<source.docx> <baseline.docx> <plan.json>")]
+    [InlineData("apply-template-migration", "<source.docx> <baseline.docx> <plan.json> <output.docx>")]
+    [InlineData("validate-template-migration-output", "<source.docx> <baseline.docx> <plan.json> <output.docx>")]
+    public async Task TemplateMigration_commands_publish_consistent_help_without_running_the_capability(string command, string signature)
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Cli.RunAsync([command, "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+        Assert.Contains($"tiwater-docx {command} {signature}", output.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Edit_command_exits_nonzero_when_any_operation_is_not_applied()
     {

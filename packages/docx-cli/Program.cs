@@ -18,6 +18,11 @@ internal static class Cli
             return Task.FromResult(1);
         }
 
+        if (args.Length == 2 && args[1] is "--help" or "-h" && PrintCommandUsage(args[0]))
+        {
+            return Task.FromResult(0);
+        }
+
         try
         {
             return args[0] switch
@@ -149,6 +154,23 @@ internal static class Cli
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
         Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
         Console.WriteLine("  validate-font-policy <input.docx> <policy.json>");
+    }
+
+    private static bool PrintCommandUsage(string command)
+    {
+        var usage = command switch
+        {
+            "analyze-template-migration" => "analyze-template-migration <source.docx> <baseline.docx> [--json]",
+            "derive-template-migration-exact-text-plan" => "derive-template-migration-exact-text-plan <source.docx> <baseline.docx>",
+            "derive-template-migration-anchor-gap-plan" => "derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>",
+            "build-template-migration-operations" => "build-template-migration-operations <source.docx> <baseline.docx> <plan.json>",
+            "apply-template-migration" => "apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>",
+            "validate-template-migration-output" => "validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>",
+            _ => null,
+        };
+        if (usage is null) return false;
+        Console.WriteLine($"Usage:\n  tiwater-docx {usage}");
+        return true;
     }
 
     private static Task<int> FailUnknown(string command)
