@@ -387,6 +387,54 @@ public static class TemplateMigration
 
     public static int RunResolveSemanticCandidate(string[] args)
     {
+        if (args.Length == 1 && args[0] is "--help" or "-h")
+        {
+            Console.WriteLine("""
+Usage:
+  tiwater-docx resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>
+
+candidate.json uses the published camel-case candidate shape. For v5:
+  required: schema, mappings (the array may be empty when another branch supplies content)
+  optional: bodyAppends, valueProjections, bodyInsertions, choiceSelections, baselineClears
+  selector: kind plus exactly one of text, sha256, or descendantText; optional scope,
+            parentText, previousText, nextText, sameRowText, sameColumnText
+  mapping: source, disposition, and baseline unless disposition is out-of-scope;
+           optional cardinality is one, or all only for out-of-scope
+
+Minimal v5 example (values are observations from the current source/baseline):
+{
+  "schema": "tiwater.docx.template-migration-semantic-candidate/v5",
+  "mappings": [
+    {
+      "source": {"kind":"paragraph","scope":"body","text":"<source text>"},
+      "baseline": {"kind":"paragraph","scope":"body","text":"<baseline text>"},
+      "disposition": "copy-text"
+    },
+    {
+      "source": {"kind":"paragraph","scope":"header","text":"<excluded source text>"},
+      "disposition": "out-of-scope"
+    }
+  ],
+  "choiceSelections": [
+    {
+      "sourceMember": {"kind":"table-cell","scope":"body","text":"<selected member>"},
+      "baselineLabel": {"kind":"run","scope":"body","text":"<target label>"}
+    }
+  ],
+  "baselineClears": [
+    {
+      "baseline": {"kind":"table-cell","scope":"body","text":"<baseline placeholder>"},
+      "mode": "cell"
+    }
+  ]
+}
+
+Allowed mapping dispositions: copy-text, copy-media, retain-target,
+retain-target-label, out-of-scope. Unknown fields, object ids, indexes, and
+coordinates are rejected. See the packaged README for all existing branches.
+""");
+            return 0;
+        }
         if (args.Length < 3)
         {
             throw new InvalidOperationException("resolve-template-migration-semantic-candidate requires <source.docx> <baseline.docx> <candidate.json>");

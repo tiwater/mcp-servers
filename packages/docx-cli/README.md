@@ -165,6 +165,107 @@ every current hash-bound semantic match. `all` is forbidden for copy, retain,
 projection, insertion, and choice behavior, which continue to require unique
 selectors.
 
+#### Resolve a semantic candidate
+
+```bash
+tiwater-docx resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>
+```
+
+The candidate is a closed JSON object. Version 5 requires `schema` and a
+`mappings` array (which may be empty when another branch supplies content).
+Its optional top-level branches are `bodyAppends`, `valueProjections`,
+`bodyInsertions`, `choiceSelections`, and `baselineClears`.
+
+Every selector requires `kind` and exactly one primary predicate: `text`,
+`sha256`, or `descendantText`. It may further narrow the match with `scope`,
+`parentText`, `previousText`, `nextText`, `sameRowText`, or
+`sameColumnText`. Row/column context applies only to `table-cell`. Version 6
+also permits `textState: "empty"` instead of the three v5 primary predicates,
+with explicit scope and parent/previous/next context. Selectors never accept
+object ids, indexes, or coordinates.
+
+A mapping requires `source` and `disposition`. It also requires `baseline`
+unless the disposition is `out-of-scope`. Existing dispositions are
+`copy-text`, `copy-media`, `retain-target`, `retain-target-label`, and
+`out-of-scope`. Optional `cardinality` is `one`, or `all` only for an
+`out-of-scope` mapping. Choice entries require `sourceMember` and a
+`baselineLabel` selector whose kind is `run`. Baseline clears require
+`baseline` and mode `cell` or `row`.
+
+This complete but minimal v5 example shows independent existing branches.
+Placeholder strings stand for unique observations from the current source or
+baseline; they are not fixed document values:
+
+```json
+{
+  "schema": "tiwater.docx.template-migration-semantic-candidate/v5",
+  "mappings": [
+    {
+      "source": {
+        "kind": "paragraph",
+        "scope": "body",
+        "text": "<current source text>",
+        "previousText": "<current source context>"
+      },
+      "baseline": {
+        "kind": "paragraph",
+        "scope": "body",
+        "text": "<current baseline text>",
+        "previousText": "<current baseline context>"
+      },
+      "disposition": "copy-text"
+    },
+    {
+      "source": {
+        "kind": "paragraph",
+        "scope": "header",
+        "text": "<current excluded source text>"
+      },
+      "disposition": "out-of-scope"
+    }
+  ],
+  "choiceSelections": [
+    {
+      "sourceMember": {
+        "kind": "table-cell",
+        "scope": "body",
+        "text": "<current selected member>"
+      },
+      "baselineLabel": {
+        "kind": "run",
+        "scope": "body",
+        "text": "<current baseline choice label>"
+      }
+    }
+  ],
+  "baselineClears": [
+    {
+      "baseline": {
+        "kind": "table-cell",
+        "scope": "body",
+        "text": "<current baseline placeholder>"
+      },
+      "mode": "cell"
+    }
+  ]
+}
+```
+
+Other existing branches use these fields:
+
+- `bodyAppends`: `sourceStart`, `sourceEnd`.
+- `bodyInsertions`: `sourceStart`, `sourceEnd`, `baselineBefore`,
+  `baselineAfter`, and `stylePolicy: "target-after-context"`.
+- `valueProjections`: `sourceParent`, `baselineParent`, `semantic`, `valueKind`,
+  and `extraction`. Existing value kinds are `text`, `token`, `date`,
+  `identifier`, and `version`; existing extraction modes are
+  `after-first-delimiter`, `unique-delimited-run-group`,
+  `unique-delimited-value`, and `whole-parent`.
+
+Unknown fields and invalid branch combinations fail closed. A non-zero resolve
+exit still writes its typed unresolved result to stdout; only a passing result
+with no unresolved mappings may proceed to operation building.
+
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
 ```

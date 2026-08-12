@@ -137,7 +137,7 @@ internal static class Cli
         Console.WriteLine("  analyze-template-migration <source.docx> <baseline.docx> [--json]");
         Console.WriteLine("  derive-template-migration-exact-text-plan <source.docx> <baseline.docx>");
         Console.WriteLine("  derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>");
-        Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>");
+        Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (append --help for candidate shape)");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
         Console.WriteLine("  apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>");
         Console.WriteLine("  validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>");
