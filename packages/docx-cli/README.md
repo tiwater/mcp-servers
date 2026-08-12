@@ -77,6 +77,11 @@ topology differs. Other absent or ambiguous content also remains
 tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
 ```
 
+This is a candidate producer: `Pass` means the typed candidate was derived
+successfully. `Complete` is true only when `Unresolved` is empty. An incomplete
+candidate is valid current evidence for semantic resolution, not an upstream
+failure and not an executable migration plan.
+
 ### 3ab. Derive an Anchor-Gap Mapping Candidate
 
 Produces a deterministic candidate for unmatched current objects when their
@@ -87,6 +92,9 @@ missing, reversed, or non-unique gap unresolved for a semantic candidate.
 ```bash
 tiwater-docx derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>
 ```
+
+This command uses the same candidate status contract: unresolved gaps make
+`Complete` false while the successfully derived candidate remains `Pass` true.
 
 ### 3b. Build Cross-Template Operations
 

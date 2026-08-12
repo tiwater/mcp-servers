@@ -110,7 +110,7 @@ public static class TemplateMigration
         }
         var result = DeriveExactTextPlan(args[0], args[1]);
         Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
-        return result.Pass ? 0 : 1;
+        return 0;
     }
 
     /// <summary>
@@ -208,9 +208,10 @@ public static class TemplateMigration
             Mappings: mappings);
         return new TemplateMigrationMappingDerivation(
             Schema: "tiwater.docx.template-migration-exact-text-plan/v1",
-            Pass: unresolved.Count == 0,
+            Pass: true,
             Plan: plan,
-            Unresolved: unresolved);
+            Unresolved: unresolved,
+            Complete: unresolved.Count == 0);
     }
 
     private static IReadOnlyDictionary<string, string> DeriveReciprocalTableCellTargets(TemplateMigrationAnalysis analysis)
@@ -276,7 +277,7 @@ public static class TemplateMigration
         }
         var result = DeriveAnchorGapPlan(args[0], args[1]);
         Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
-        return result.Pass ? 0 : 1;
+        return 0;
     }
 
     /// <summary>
@@ -314,9 +315,10 @@ public static class TemplateMigration
         }
         return new TemplateMigrationMappingDerivation(
             "tiwater.docx.template-migration-anchor-gap-plan/v1",
-            build.Pass && unresolved.Count == 0,
+            true,
             plan,
-            unresolved);
+            unresolved,
+            Complete: build.Pass && unresolved.Count == 0);
     }
 
     private static IReadOnlyList<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)> FindEqualAnchorGapCandidates(
@@ -695,7 +697,8 @@ coordinates are rejected. See the packaged README for all existing branches.
             "tiwater.docx.template-migration-semantic-resolution/v1",
             build.Pass && failures.Count == 0,
             plan,
-            failures);
+            failures,
+            Complete: build.Pass && failures.Count == 0);
     }
 
     private static TemplateMigrationSemanticCandidate ReadSemanticCandidate(string file)
