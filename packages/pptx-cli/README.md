@@ -69,9 +69,19 @@ does not infer an edit. See [RENDER_FINDING_CONTRACT.md](RENDER_FINDING_CONTRACT
 ## Template Application Plan
 
 `apply-template` imports one inspected template master and assigns every current
-slide to an explicitly selected inspected template layout. It preserves current
-slide shapes and content, removes superseded masters after complete assignment,
-and copies the approved template slide size.
+slide to an explicitly selected inspected template layout. Before reassignment,
+it freezes the effective geometry and text formatting inherited by current-slide
+placeholders so that the target master cannot reinterpret existing content. It
+then removes superseded masters after complete assignment and copies the approved
+template slide size.
+
+`systemPlaceholderPolicy` defaults to `preserve`. Setting it to
+`target-template` removes source date/footer/header/slide-number placeholders so
+that those system elements come only from the selected target master/layout. A
+slide may explicitly materialize visible, inspected source-layout shapes through
+`sourceLayoutShapeIdsToPreserve`; every imported shape is reported with both its
+source and output identity. The operation never guesses which layout content is
+business content.
 
 Optional content fitting is scoped, never slide-wide. When `contentBounds` is
 present, `contentShapeIds` must explicitly identify the current-slide shapes to
@@ -81,12 +91,14 @@ mutated.
 ```json
 {
   "targetMasterPath": "ppt/slideMasters/slideMaster1.xml",
+  "systemPlaceholderPolicy": "target-template",
   "slides": [
     {
       "slideNumber": 1,
       "targetLayoutPath": "ppt/slideLayouts/slideLayout1.xml",
       "contentBounds": { "x": 608400, "y": 1490400, "cx": 10969200, "cy": 4759200 },
-      "contentShapeIds": [2, 3]
+      "contentShapeIds": [2, 3],
+      "sourceLayoutShapeIdsToPreserve": []
     }
   ]
 }
