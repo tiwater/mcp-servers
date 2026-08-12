@@ -1,3 +1,4 @@
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using System.Text.Json;
@@ -16,9 +17,13 @@ public static class TemplateApplicator
 
     public static TemplateApplicationResult Apply(string inputPath, string templatePath, TemplateApplicationPlan plan, string outputPath)
     {
+        var sourceEvidence = Inspector.InspectDetail(inputPath);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
         File.Copy(inputPath, outputPath, true);
         var issues = new List<TemplateApplicationIssue>();
+        var materializedLayoutShapes = new List<MaterializedLayoutShape>();
+        var removedSystemPlaceholders = new List<RemovedSystemPlaceholder>();
+        var frozenPlaceholderCount = 0;
         var changed = 0;
         using var template = PresentationDocument.Open(templatePath, false);
         using var output = PresentationDocument.Open(outputPath, true);
@@ -26,7 +31,9 @@ public static class TemplateApplicator
         var outputPart = output.PresentationPart ?? throw new InvalidOperationException("Output presentation part not found.");
         var previousMasters = outputPart.SlideMasterParts.ToList();
         var targetMaster = templatePart.SlideMasterParts.SingleOrDefault(part => PartPath(part) == plan.TargetMasterPath);
-        if (targetMaster is null) return new TemplateApplicationResult(inputPath, templatePath, outputPath, 0, [new(null, "target master not found")]);
+        if (targetMaster is null) return new TemplateApplicationResult(inputPath, templatePath, outputPath, 0, [new(null, "target master not found")], [], 0, []);
+        if (plan.SystemPlaceholderPolicy is not ("preserve" or "target-template"))
+            return new TemplateApplicationResult(inputPath, templatePath, outputPath, 0, [new(null, "system placeholder policy is invalid")], [], 0, []);
 
         var importedMaster = outputPart.AddPart(targetMaster);
         var masterRelationshipId = outputPart.GetIdOfPart(importedMaster);
@@ -53,10 +60,33 @@ public static class TemplateApplicator
                 issues.Add(new(assignment.SlideNumber, "content bounds are required when content shape ids are specified"));
                 continue;
             }
+            var sourceLayout = slide.SlideLayoutPart;
+            var preserveIds = assignment.SourceLayoutShapeIdsToPreserve ?? [];
+            if (preserveIds.Count != preserveIds.Distinct().Count())
+            {
+                issues.Add(new(assignment.SlideNumber, "source layout shape ids contain duplicates"));
+                continue;
+            }
+            var sourceLayoutElements = VisualChildren(sourceLayout?.SlideLayout?.CommonSlideData?.ShapeTree)
+                .Select(element => (Element: element, ShapeId: ShapeIdFor(element)))
+                .Where(item => item.ShapeId is not null)
+                .ToDictionary(item => item.ShapeId!.Value, item => item.Element);
+            var missingPreserveIds = preserveIds.Where(id => !sourceLayoutElements.ContainsKey(id)).Order().ToList();
+            if (missingPreserveIds.Count > 0)
+            {
+                issues.Add(new(assignment.SlideNumber, $"source layout shapes not found: {string.Join(",", missingPreserveIds)}"));
+                continue;
+            }
             if (assignment.ContentBounds is { } contentBounds)
             {
                 try { FitSlideContent(slide, contentBounds, assignment.ContentShapeIds!); }
                 catch (InvalidOperationException error) { issues.Add(new(assignment.SlideNumber, error.Message)); continue; }
+            }
+            frozenPlaceholderCount += FreezeSlidePlaceholders(slide, sourceEvidence.Slides[assignment.SlideNumber - 1], assignment.SlideNumber, plan.SystemPlaceholderPolicy, removedSystemPlaceholders);
+            foreach (var sourceShapeId in preserveIds)
+            {
+                var outputShapeId = MaterializeLayoutShape(slide, sourceLayout!, sourceLayoutElements[sourceShapeId]);
+                materializedLayoutShapes.Add(new(assignment.SlideNumber, PartPath(sourceLayout!), sourceShapeId, outputShapeId));
             }
             if (slide.SlideLayoutPart is { } oldLayout) slide.DeletePart(oldLayout);
             slide.AddPart(importedLayout);
@@ -74,7 +104,196 @@ public static class TemplateApplicator
                 outputPart.Presentation.SlideSize = (SlideSize)targetSize.CloneNode(true);
         }
         outputPart.Presentation.Save();
-        return new TemplateApplicationResult(inputPath, templatePath, outputPath, changed, issues);
+        return new TemplateApplicationResult(inputPath, templatePath, outputPath, changed, issues, materializedLayoutShapes, frozenPlaceholderCount, removedSystemPlaceholders);
+    }
+
+    private static int FreezeSlidePlaceholders(SlidePart slidePart, SlideDetailReport sourceEvidence, int slideNumber, string systemPlaceholderPolicy, List<RemovedSystemPlaceholder> removed)
+    {
+        var slideShapes = VisualChildren(slidePart.Slide?.CommonSlideData?.ShapeTree).OfType<Shape>().GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
+        var layoutShapes = VisualChildren(slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree).OfType<Shape>().GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
+        var masterShapes = VisualChildren(slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree).OfType<Shape>().GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
+        var changed = 0;
+        foreach (var shape in slideShapes)
+        {
+            var placeholder = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape;
+            if (placeholder is not null && systemPlaceholderPolicy == "target-template" && IsSystemPlaceholder(placeholder))
+            {
+                removed.Add(new(slideNumber, ShapeIdFor(shape) ?? throw new InvalidOperationException("system placeholder has no shape identity"), PlaceholderToken(placeholder)));
+                shape.Remove();
+                continue;
+            }
+            Shape? inherited = null;
+            if (placeholder is not null) inherited = FindPlaceholder(layoutShapes, placeholder) ?? FindPlaceholder(masterShapes, placeholder);
+            if (placeholder is not null && shape.ShapeProperties?.Transform2D is null && inherited?.ShapeProperties?.Transform2D is { } transform)
+            {
+                shape.ShapeProperties ??= new ShapeProperties();
+                shape.ShapeProperties.Transform2D = (A.Transform2D)transform.CloneNode(true);
+            }
+            MaterializeTextStyle(slidePart, shape, inherited, sourceEvidence.Shapes.Single(item => item.ShapeId == ShapeIdFor(shape)));
+            if (placeholder is not null) changed++;
+        }
+        slidePart.Slide?.Save();
+        return changed;
+    }
+
+    private static void MaterializeTextStyle(SlidePart slidePart, Shape shape, Shape? layoutShape, ShapeDetail evidence)
+    {
+        var textBody = shape.TextBody;
+        if (textBody is null) return;
+        var placeholder = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape;
+        var masterStyle = MasterTextStyle(slidePart, placeholder);
+        var layoutListStyle = layoutShape?.TextBody?.ListStyle;
+        var slideListStyle = textBody.ListStyle;
+        var paragraphs = textBody.Elements<A.Paragraph>().ToList();
+        for (var paragraphIndex = 0; paragraphIndex < paragraphs.Count; paragraphIndex++)
+        {
+            var paragraph = paragraphs[paragraphIndex];
+            var level = paragraph.ParagraphProperties?.Level?.Value ?? 0;
+            var merged = new A.ParagraphProperties();
+            MergeProperties(merged, LevelProperties(masterStyle, level));
+            MergeProperties(merged, LevelProperties(layoutListStyle, level));
+            MergeProperties(merged, LevelProperties(slideListStyle, level));
+            MergeProperties(merged, paragraph.ParagraphProperties);
+            if (!merged.ChildElements.Any(IsBulletProperty)) merged.AddChild(new A.NoBullet(), true);
+            paragraph.ParagraphProperties = merged;
+        }
+
+        var runs = paragraphs.SelectMany(paragraph => paragraph.Elements<A.Run>()).ToList();
+        foreach (var detail in evidence.Runs)
+        {
+            if (detail.RunIndex < 0 || detail.RunIndex >= runs.Count) throw new InvalidOperationException($"source run evidence is inconsistent:shape={evidence.ShapeId}:run={detail.RunIndex}:count={runs.Count}");
+            var properties = runs[detail.RunIndex].RunProperties ??= new A.RunProperties();
+            if (!string.IsNullOrWhiteSpace(detail.FontFamily))
+            {
+                ReplaceChild(properties, new A.LatinFont { Typeface = detail.FontFamily });
+                ReplaceChild(properties, new A.EastAsianFont { Typeface = detail.FontFamily });
+                ReplaceChild(properties, new A.ComplexScriptFont { Typeface = detail.FontFamily });
+            }
+            if (detail.FontSize is { } fontSize) properties.FontSize = checked((int)Math.Round(fontSize * 100d, MidpointRounding.AwayFromZero));
+            if (detail.Bold is { } bold) properties.Bold = bold;
+            if (!string.IsNullOrWhiteSpace(detail.Color))
+                ReplaceChild(properties, new A.SolidFill(new A.RgbColorModelHex { Val = detail.Color }));
+        }
+    }
+
+    private static OpenXmlElement? MasterTextStyle(SlidePart slidePart, PlaceholderShape? placeholder)
+    {
+        var styles = slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.TextStyles;
+        var type = placeholder?.Type?.Value;
+        if (type == PlaceholderValues.Title || type == PlaceholderValues.CenteredTitle) return styles?.TitleStyle;
+        if (type == PlaceholderValues.Body || type == PlaceholderValues.SubTitle) return styles?.BodyStyle;
+        return styles?.OtherStyle;
+    }
+
+    private static OpenXmlElement? LevelProperties(OpenXmlElement? owner, int level)
+        => owner?.ChildElements.FirstOrDefault(element => element.LocalName == $"lvl{level + 1}pPr")
+            ?? owner?.ChildElements.FirstOrDefault(element => element.LocalName == "defPPr");
+
+    private static void MergeProperties(OpenXmlCompositeElement target, OpenXmlElement? source)
+    {
+        if (source is null) return;
+        foreach (var attribute in source.GetAttributes()) target.SetAttribute(attribute);
+        foreach (var child in source.ChildElements)
+        {
+            foreach (var existing in target.ChildElements.Where(item => item.LocalName == child.LocalName).ToList()) existing.Remove();
+            target.AddChild(child.CloneNode(true), true);
+        }
+    }
+
+    private static bool IsBulletProperty(DocumentFormat.OpenXml.OpenXmlElement element)
+        => element.LocalName is "buNone" or "buChar" or "buAutoNum" or "buBlip";
+
+    private static void ReplaceChild(OpenXmlCompositeElement owner, DocumentFormat.OpenXml.OpenXmlElement child)
+    {
+        foreach (var existing in owner.ChildElements.Where(item => item.GetType() == child.GetType()).ToList()) existing.Remove();
+        owner.AddChild(child, true);
+    }
+
+    private static bool IsSystemPlaceholder(PlaceholderShape placeholder)
+    {
+        var value = placeholder.Type?.Value;
+        return value == PlaceholderValues.DateAndTime || value == PlaceholderValues.Footer
+            || value == PlaceholderValues.SlideNumber || value == PlaceholderValues.Header;
+    }
+
+    private static string PlaceholderToken(PlaceholderShape placeholder)
+    {
+        var value = placeholder.Type?.Value;
+        if (value == PlaceholderValues.DateAndTime) return "dt";
+        if (value == PlaceholderValues.Footer) return "ftr";
+        if (value == PlaceholderValues.SlideNumber) return "sldNum";
+        if (value == PlaceholderValues.Header) return "hdr";
+        return placeholder.Type?.InnerText ?? "object";
+    }
+
+    private static Shape? FindPlaceholder(IEnumerable<Shape> shapes, PlaceholderShape requested)
+    {
+        var requestedType = requested.Type?.Value;
+        var requestedIndex = requested.Index?.Value;
+        return shapes.FirstOrDefault(shape =>
+        {
+            var candidate = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape;
+            if (candidate is null || candidate.Type?.Value != requestedType) return false;
+            return requestedIndex is null || candidate.Index?.Value == requestedIndex;
+        });
+    }
+
+    private static uint MaterializeLayoutShape(SlidePart slidePart, SlideLayoutPart sourceLayout, DocumentFormat.OpenXml.OpenXmlElement sourceElement)
+    {
+        var clone = sourceElement.CloneNode(true);
+        RewriteRelationships(sourceLayout, slidePart, clone);
+        var usedIds = VisualChildren(slidePart.Slide?.CommonSlideData?.ShapeTree).Select(ShapeIdFor).OfType<uint>().ToHashSet();
+        var outputShapeId = usedIds.DefaultIfEmpty(1U).Max() + 1U;
+        SetShapeId(clone, outputShapeId);
+        slidePart.Slide?.CommonSlideData?.ShapeTree?.Append(clone);
+        slidePart.Slide?.Save();
+        return outputShapeId;
+    }
+
+    private static void RewriteRelationships(OpenXmlPart sourcePart, OpenXmlPart targetPart, DocumentFormat.OpenXml.OpenXmlElement clone)
+    {
+        var relationshipAttributes = SelfAndDescendants(clone)
+            .SelectMany(element => element.GetAttributes().Select(attribute => (Element: element, Attribute: attribute)))
+            .Where(item => item.Attribute.NamespaceUri == "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                && !string.IsNullOrWhiteSpace(item.Attribute.Value))
+            .ToList();
+        var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var maybeRelationshipId in relationshipAttributes.Select(item => item.Attribute.Value).Distinct(StringComparer.Ordinal))
+        {
+            var relationshipId = maybeRelationshipId!;
+            string replacement;
+            var related = sourcePart.Parts.SingleOrDefault(item => item.RelationshipId == relationshipId);
+            if (related.OpenXmlPart is not null)
+            {
+                targetPart.AddPart(related.OpenXmlPart);
+                replacement = targetPart.GetIdOfPart(related.OpenXmlPart);
+            }
+            else
+            {
+                var external = sourcePart.ExternalRelationships.SingleOrDefault(item => item.Id == relationshipId)
+                    ?? throw new InvalidOperationException($"layout shape relationship not found: {relationshipId}");
+                replacement = targetPart.AddExternalRelationship(external.RelationshipType, external.Uri).Id;
+            }
+            replacements[relationshipId] = replacement;
+        }
+        foreach (var item in relationshipAttributes)
+        {
+            var replacement = replacements[item.Attribute.Value!];
+            item.Element.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute(item.Attribute.Prefix, item.Attribute.LocalName, item.Attribute.NamespaceUri, replacement));
+        }
+    }
+
+    private static void SetShapeId(DocumentFormat.OpenXml.OpenXmlElement element, uint shapeId)
+    {
+        var properties = element switch
+        {
+            Shape shape => shape.NonVisualShapeProperties?.NonVisualDrawingProperties,
+            Picture picture => picture.NonVisualPictureProperties?.NonVisualDrawingProperties,
+            GraphicFrame frame => frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties,
+            GroupShape group => group.NonVisualGroupShapeProperties?.NonVisualDrawingProperties,
+            _ => null,
+        } ?? throw new InvalidOperationException("layout element has no shape identity");
+        properties.Id = shapeId;
     }
 
     private static string PartPath(OpenXmlPart part) => part.Uri.OriginalString.TrimStart('/');

@@ -6,6 +6,11 @@
   "required": ["targetMasterPath", "slides"],
   "properties": {
     "targetMasterPath": { "type": "string", "minLength": 1 },
+    "systemPlaceholderPolicy": {
+      "type": "string",
+      "enum": ["preserve", "target-template"],
+      "default": "preserve"
+    },
     "slides": {
       "type": "array",
       "items": {
@@ -36,6 +41,16 @@
               { "type": "null" },
               {
                 "type": "array",
+                "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            ]
+          },
+          "sourceLayoutShapeIdsToPreserve": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "array",
+                "uniqueItems": true,
                 "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
               }
             ]

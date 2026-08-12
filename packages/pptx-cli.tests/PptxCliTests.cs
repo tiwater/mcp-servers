@@ -253,6 +253,125 @@ public class PptxCliTests
     }
 
     [Fact]
+    public void ApplyTemplate_freezes_placeholder_geometry_and_materializes_only_declared_layout_content()
+    {
+        var source = CreateFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            var master = presentation.PresentationPart!.SlideMasterParts.Single();
+            var layout = master.SlideLayoutParts.Single();
+            layout.SlideLayout.CommonSlideData!.ShapeTree!.Append(
+                new P.Shape(
+                    new P.NonVisualShapeProperties(
+                        new P.NonVisualDrawingProperties { Id = 8U, Name = "Inherited title" },
+                        new P.NonVisualShapeDrawingProperties(),
+                        new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Title })),
+                    new P.ShapeProperties(new A.Transform2D(
+                        new A.Offset { X = 123400L, Y = 234500L },
+                        new A.Extents { Cx = 3456000L, Cy = 456700L })),
+                    new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph())));
+            layout.SlideLayout.CommonSlideData.ShapeTree.Append(CreateTextShape(9U, "Current visible layout content", 900000L, 1000000L, 3000000L, 400000L));
+            layout.SlideLayout.Save();
+            master.SlideMaster.TextStyles = new P.TextStyles(
+                new P.TitleStyle(new A.Level1ParagraphProperties(
+                    new A.NoBullet(),
+                    new A.DefaultRunProperties(
+                        new A.SolidFill(new A.RgbColorModelHex { Val = "112233" }),
+                        new A.LatinFont { Typeface = "Source Title" },
+                        new A.EastAsianFont { Typeface = "Source Title" }) { FontSize = 2400, Bold = false })),
+                new P.BodyStyle(),
+                new P.OtherStyle());
+            master.SlideMaster.Save();
+
+            foreach (var slide in presentation.PresentationPart.SlideParts)
+            {
+                slide.Slide.CommonSlideData!.ShapeTree!.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 3U, Name = "Slide title" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Title })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Current title"))))));
+                slide.Slide.CommonSlideData.ShapeTree.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 4U, Name = "Source footer" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Footer })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Old footer"))))));
+                slide.Slide.Save();
+            }
+        }
+        var template = CreateFixture();
+        using (var target = PresentationDocument.Open(template, true))
+        {
+            var master = target.PresentationPart!.SlideMasterParts.Single();
+            master.SlideMaster.TextStyles = new P.TextStyles(
+                new P.TitleStyle(new A.Level1ParagraphProperties(
+                    new A.CharacterBullet { Char = "•" },
+                    new A.DefaultRunProperties { FontSize = 4000, Bold = true })),
+                new P.BodyStyle(),
+                new P.OtherStyle());
+            master.SlideMaster.Save();
+        }
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+            [
+                new SlideLayoutAssignment(1, targetLayout, SourceLayoutShapeIdsToPreserve: [9U]),
+                new SlideLayoutAssignment(2, targetLayout, SourceLayoutShapeIdsToPreserve: [9U]),
+            ], "target-template"), output);
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(2, result.FrozenPlaceholderCount);
+        Assert.Equal(2, result.MaterializedLayoutShapes?.Count);
+        Assert.Equal(2, result.RemovedSystemPlaceholders?.Count);
+        Assert.All(result.RemovedSystemPlaceholders!, entry => Assert.Equal("ftr", entry.PlaceholderType));
+        Assert.All(result.MaterializedLayoutShapes!, entry => Assert.True(entry.OutputShapeId >= 2U));
+        var outputEvidence = Inspector.InspectDetail(output);
+        Assert.All(outputEvidence.Slides, slide =>
+        {
+            var title = slide.Shapes.Single(shape => shape.Text == "Current title");
+            Assert.Equal("title", title.PlaceholderType);
+            Assert.Equal(new TransformInfo(123400L, 234500L, 3456000L, 456700L), title.Transform);
+            var titleRun = Assert.Single(title.Runs);
+            Assert.Equal("Source Title", titleRun.FontFamily);
+            Assert.Equal(24d, titleRun.FontSize);
+            Assert.Equal("112233", titleRun.Color);
+            Assert.False(titleRun.Bold);
+            Assert.Single(slide.Shapes, shape => shape.Text == "Current visible layout content");
+            Assert.DoesNotContain(slide.Shapes, shape => shape.Text == "Old footer");
+        });
+        using (var rendered = PresentationDocument.Open(output, false))
+            Assert.All(rendered.PresentationPart!.SlideParts, slide => Assert.Contains(slide.Slide.Descendants<A.NoBullet>(), _ => true));
+    }
+
+    [Fact]
+    public void ApplyTemplate_rejects_unknown_or_duplicate_source_layout_shape_ids()
+    {
+        var source = CreateFixture();
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+            [
+                new SlideLayoutAssignment(1, targetLayout, SourceLayoutShapeIdsToPreserve: [999U]),
+                new SlideLayoutAssignment(2, targetLayout, SourceLayoutShapeIdsToPreserve: [1U, 1U]),
+            ]), output);
+
+        Assert.Equal(0, result.ChangedSlideCount);
+        Assert.Equal(["source layout shapes not found: 999", "source layout shape ids contain duplicates"], result.Issues.Select(issue => issue.Message));
+    }
+
+    [Fact]
     public void InspectDetail_includes_top_level_group_geometry_and_descendant_text()
     {
         var source = CreateFixture();

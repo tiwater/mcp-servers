@@ -176,14 +176,16 @@ public sealed record FormatEditIssue(
 
 public sealed record TemplateApplicationPlan(
     string TargetMasterPath,
-    IReadOnlyList<SlideLayoutAssignment> Slides
+    IReadOnlyList<SlideLayoutAssignment> Slides,
+    string SystemPlaceholderPolicy = "preserve"
 );
 
 public sealed record SlideLayoutAssignment(
     int SlideNumber,
     string TargetLayoutPath,
     TransformInfo? ContentBounds = null,
-    IReadOnlyList<uint>? ContentShapeIds = null
+    IReadOnlyList<uint>? ContentShapeIds = null,
+    IReadOnlyList<uint>? SourceLayoutShapeIdsToPreserve = null
 );
 
 public sealed record TemplateApplicationResult(
@@ -191,10 +193,26 @@ public sealed record TemplateApplicationResult(
     string Template,
     string Output,
     int ChangedSlideCount,
-    IReadOnlyList<TemplateApplicationIssue> Issues
+    IReadOnlyList<TemplateApplicationIssue> Issues,
+    IReadOnlyList<MaterializedLayoutShape>? MaterializedLayoutShapes = null,
+    int FrozenPlaceholderCount = 0,
+    IReadOnlyList<RemovedSystemPlaceholder>? RemovedSystemPlaceholders = null
 );
 
 public sealed record TemplateApplicationIssue(int? SlideNumber, string Message);
+
+public sealed record MaterializedLayoutShape(
+    int SlideNumber,
+    string SourceLayoutPath,
+    uint SourceShapeId,
+    uint OutputShapeId
+);
+
+public sealed record RemovedSystemPlaceholder(
+    int SlideNumber,
+    uint ShapeId,
+    string PlaceholderType
+);
 
 internal static class Json
 {

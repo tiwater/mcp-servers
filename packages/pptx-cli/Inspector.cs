@@ -158,13 +158,16 @@ public static class Inspector
             if (child is Shape shape)
             {
                 var app = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties;
+                var placeholder = app?.PlaceholderShape;
+                var layoutTextStyle = LayoutTextStyle(slideContext, placeholder);
+                var masterTextStyle = MasterTextStyle(slideContext, placeholder);
                 var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
                 if (!seen.Add(("shape", shapeId))) continue;
                 shapes.Add(new ShapeDetail(shapeId,
                     shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "shape", zOrder++,
                     GetAttributeValue(app?.PlaceholderShape, "type"), null, null,
-                    string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody),
-                    ExtractRuns(shape.TextBody, MasterTextStyle(slideContext, app?.PlaceholderShape), slideContext?.SlideLayoutPart?.SlideMasterPart?.ThemePart,
+                    string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody, layoutTextStyle, masterTextStyle),
+                    ExtractRuns(shape.TextBody, layoutTextStyle, masterTextStyle, slideContext?.SlideLayoutPart?.SlideMasterPart?.ThemePart,
                         slideContext?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.ColorMap)));
             }
             else if (child is Picture picture)
@@ -260,22 +263,37 @@ public static class Inspector
             Cy: transform.Extents?.Cy ?? 0L);
     }
 
-    private static List<ParagraphDetail> ExtractParagraphs(OpenXmlElement? textBody)
+    private static List<ParagraphDetail> ExtractParagraphs(OpenXmlElement? textBody, OpenXmlElement? layoutTextStyle = null, OpenXmlElement? masterTextStyle = null)
     {
         if (textBody is null)
         {
             return [];
         }
 
-        return textBody.Elements<A.Paragraph>()
-            .Select((paragraph, index) => new ParagraphDetail(
-                ParagraphIndex: index,
-                Text: string.Concat(paragraph.Descendants<A.Text>().Select(text => text.Text)),
-                Alignment: ToAlignment(paragraph.ParagraphProperties?.Alignment?.Value)))
-            .ToList();
+        var listStyle = textBody.GetFirstChild<A.ListStyle>();
+        return textBody.Elements<A.Paragraph>().Select((paragraph, index) =>
+        {
+            var level = int.TryParse(GetAttributeValue(paragraph.ParagraphProperties, "lvl"), out var parsed) ? parsed : 0;
+            var alignment = Resolve(new[]
+            {
+                new FormatCandidate(paragraph.ParagraphProperties, "paragraph-direct"),
+                new FormatCandidate(LevelProperties(listStyle, level), $"shape-list-level-{level + 1}"),
+                new FormatCandidate(LevelProperties(layoutTextStyle, level), $"layout-list-level-{level + 1}"),
+                new FormatCandidate(LevelProperties(masterTextStyle, level), $"master-text-style-level-{level + 1}"),
+            }, value => value is null ? null : ToAlignment(GetAttributeValue(value, "algn") switch
+            {
+                "ctr" => A.TextAlignmentTypeValues.Center,
+                "r" => A.TextAlignmentTypeValues.Right,
+                "just" => A.TextAlignmentTypeValues.Justified,
+                "dist" => A.TextAlignmentTypeValues.Distributed,
+                "l" => A.TextAlignmentTypeValues.Left,
+                _ => null,
+            })).Value;
+            return new ParagraphDetail(index, string.Concat(paragraph.Descendants<A.Text>().Select(text => text.Text)), alignment);
+        }).ToList();
     }
 
-    private static List<TextRunDetail> ExtractRuns(OpenXmlElement? textBody, OpenXmlElement? masterTextStyle = null, ThemePart? themePart = null, OpenXmlElement? colorMap = null)
+    private static List<TextRunDetail> ExtractRuns(OpenXmlElement? textBody, OpenXmlElement? layoutTextStyle = null, OpenXmlElement? masterTextStyle = null, ThemePart? themePart = null, OpenXmlElement? colorMap = null)
     {
         if (textBody is null)
         {
@@ -303,6 +321,10 @@ public static class Inspector
             var masterDefaultRunProperties = masterTextStyle?.ChildElements
                 .FirstOrDefault(value => string.Equals(value.LocalName, "defPPr", StringComparison.Ordinal))
                 ?.GetFirstChild<A.DefaultRunProperties>();
+            var layoutLevelDefaultRunProperties = LevelProperties(layoutTextStyle, paragraphLevel)?.GetFirstChild<A.DefaultRunProperties>();
+            var layoutDefaultRunProperties = layoutTextStyle?.ChildElements
+                .FirstOrDefault(value => string.Equals(value.LocalName, "defPPr", StringComparison.Ordinal))
+                ?.GetFirstChild<A.DefaultRunProperties>();
             foreach (var run in paragraph.Elements<A.Run>())
             {
                 var properties = run.RunProperties;
@@ -312,6 +334,8 @@ public static class Inspector
                     new FormatCandidate(paragraphDefaultRunProperties, "paragraph-default"),
                     new FormatCandidate(levelDefaultRunProperties, $"shape-list-level-{paragraphLevel + 1}"),
                     new FormatCandidate(bodyDefaultRunProperties, "shape-list-default"),
+                    new FormatCandidate(layoutLevelDefaultRunProperties, $"layout-list-level-{paragraphLevel + 1}"),
+                    new FormatCandidate(layoutDefaultRunProperties, "layout-list-default"),
                     new FormatCandidate(masterLevelDefaultRunProperties, $"master-text-style-level-{paragraphLevel + 1}"),
                     new FormatCandidate(masterDefaultRunProperties, "master-text-style-default")
                 };
@@ -353,6 +377,26 @@ public static class Inspector
         if (type is "body" or "subTitle") return styles.BodyStyle;
         return styles.OtherStyle;
     }
+
+    private static OpenXmlElement? LayoutTextStyle(SlidePart? slidePart, PlaceholderShape? placeholder)
+    {
+        if (placeholder is null) return null;
+        var type = GetAttributeValue(placeholder, "type");
+        var index = GetAttributeValue(placeholder, "idx");
+        var shape = slidePart?.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree?
+            .Elements<Shape>()
+            .FirstOrDefault(candidate =>
+            {
+                var current = candidate.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape;
+                if (current is null || GetAttributeValue(current, "type") != type) return false;
+                return string.IsNullOrWhiteSpace(index) || GetAttributeValue(current, "idx") == index;
+            });
+        return shape?.TextBody?.ListStyle;
+    }
+
+    private static OpenXmlElement? LevelProperties(OpenXmlElement? owner, int level)
+        => owner?.ChildElements.FirstOrDefault(element => element.LocalName == $"lvl{level + 1}pPr")
+            ?? owner?.ChildElements.FirstOrDefault(element => element.LocalName == "defPPr");
 
     private sealed record FormatCandidate(OpenXmlElement? Properties, string Source);
     private sealed record ResolvedFormat<T>(T? Value, string? Source);
