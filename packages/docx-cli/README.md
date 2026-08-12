@@ -79,7 +79,7 @@ tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.d
 
 ### 3b. Build Cross-Template Operations
 
-Compiles a hash-bound, caller-declared object mapping into deterministic edit
+Compiles a hash-bound, validated semantic mapping into deterministic edit
 operations. It rejects missing/duplicate source content, duplicate targets,
 hash drift, type mismatches, unsupported targets, and review-required
 mappings. It does not infer any source-to-target mapping. A mapping can target

@@ -59,7 +59,7 @@ public class AnnotationToolsTests
         Assert.Contains(analysis.Source.Objects, item => item.Id == "body:table:0:row:0:cell:1" && item.Kind == "table-cell");
         Assert.Contains(analysis.Findings, item => item.SourceObjectId == "body:paragraph:0" && item.Kind == "object-content-differs");
         Assert.Contains(analysis.Findings, item => item.SourceObjectId == "body:table:0:row:0:cell:1" && item.Kind == "object-content-differs");
-        Assert.All(analysis.Findings, item => Assert.Equal("requires-declared-mapping", item.Disposition));
+        Assert.All(analysis.Findings, item => Assert.Equal("requires-semantic-candidate", item.Disposition));
     }
 
     [Fact]
