@@ -77,6 +77,17 @@ topology differs. Other absent or ambiguous content also remains
 tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
 ```
 
+### 3ab. Derive an Anchor-Gap Mapping Candidate
+
+Produces a deterministic candidate for unmatched current objects when their
+nearest mapped objects before and after them identify the same unique gap in
+the selected baseline. It preserves current object order and leaves any
+missing, reversed, or non-unique gap unresolved for a semantic candidate.
+
+```bash
+tiwater-docx derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>
+```
+
 ### 3b. Build Cross-Template Operations
 
 Compiles a hash-bound, validated semantic mapping into deterministic edit
