@@ -1383,6 +1383,56 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_preserves_equivalent_header_cell_topology_but_writes_real_text_changes()
+    {
+        var source = CreateMultiParagraphHeaderCellFixture(["中文标题", "English heading"], sourceFormatting: true);
+        var equivalentBaseline = CreateMultiParagraphHeaderCellFixture(["中文标题", "English heading"], sourceFormatting: false);
+        var changedBaseline = CreateMultiParagraphHeaderCellFixture(["中文标题", "English headinG"], sourceFormatting: false);
+
+        static TemplateMigrationPlan Plan(string sourcePath, string baselinePath)
+        {
+            var analysis = TemplateMigration.Analyze(sourcePath, baselinePath);
+            var mappings = analysis.Source.Objects
+                .Where(item => (item.Kind == "paragraph" || item.Kind == "table-cell") && !string.IsNullOrWhiteSpace(item.Text))
+                .Select(item => new TemplateMigrationMapping(item.Id, item.Id, "copy-text"))
+                .ToList();
+            return new TemplateMigrationPlan(
+                "tiwater.docx.template-migration-plan/v1",
+                analysis.Source.Sha256,
+                analysis.Baseline.Sha256,
+                mappings);
+        }
+
+        var equivalentPlan = Plan(source, equivalentBaseline);
+        var equivalentBuild = TemplateMigration.BuildOperations(source, equivalentBaseline, equivalentPlan);
+        Assert.True(equivalentBuild.Pass, string.Join("; ", equivalentBuild.Failures.Select(item => item.Reason)));
+        Assert.DoesNotContain(equivalentBuild.Operations, item => item.Type == "replaceHeaderTableCellText");
+
+        var equivalentOutput = Path.Combine(Path.GetTempPath(), $"migration-equivalent-header-{Guid.NewGuid():N}.docx");
+        var equivalentApply = TemplateMigration.Apply(source, equivalentBaseline, equivalentPlan, equivalentOutput);
+        Assert.True(equivalentApply.Pass, string.Join("; ", equivalentApply.Readback!.Failures.Select(item => item.Reason)));
+        using (var baselineDocument = WordprocessingDocument.Open(equivalentBaseline, false))
+        using (var outputDocument = WordprocessingDocument.Open(equivalentOutput, false))
+        {
+            var baselineHeader = baselineDocument.MainDocumentPart!.HeaderParts.Single();
+            var outputHeader = outputDocument.MainDocumentPart!.HeaderParts.Single();
+            Assert.Equal(baselineHeader.Header!.OuterXml, outputHeader.Header!.OuterXml);
+            Assert.Equal(
+                baselineHeader.Parts.Select(part => (part.RelationshipId, part.OpenXmlPart.Uri)).OrderBy(part => part.RelationshipId),
+                outputHeader.Parts.Select(part => (part.RelationshipId, part.OpenXmlPart.Uri)).OrderBy(part => part.RelationshipId));
+        }
+
+        var changedPlan = Plan(source, changedBaseline);
+        var changedBuild = TemplateMigration.BuildOperations(source, changedBaseline, changedPlan);
+        Assert.True(changedBuild.Pass, string.Join("; ", changedBuild.Failures.Select(item => item.Reason)));
+        Assert.Contains(changedBuild.Operations, item => item.Type == "replaceHeaderTableCellText");
+
+        var incorrectlySkipped = TemplateMigration.ValidateReadback(source, changedBaseline, changedBaseline, changedPlan);
+        Assert.False(incorrectlySkipped.Pass);
+        Assert.Contains(incorrectlySkipped.Failures, item => item.Reason == "template-migration-readback-content-mismatch");
+    }
+
+    [Fact]
     public void TemplateMigration_exact_text_derivation_maps_only_unique_same_kind_content()
     {
         var source = CreateExactTextMappingFixture(includeDuplicateBaselineText: false, baseline: false);
@@ -3457,6 +3507,34 @@ public class AnnotationToolsTests
         main.Document.Save();
         header.Header.Save();
         footer.Footer.Save();
+        return path;
+    }
+
+    private static string CreateMultiParagraphHeaderCellFixture(IReadOnlyList<string> lines, bool sourceFormatting)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"header-cell-paragraphs-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        var cell = new TableCell();
+        foreach (var (line, index) in lines.Select((line, index) => (line, index)))
+        {
+            var runProperties = sourceFormatting
+                ? new RunProperties(index % 2 == 0 ? new Bold() : new Italic())
+                : new RunProperties(new RunFonts { Ascii = "Arial", HighAnsi = "Arial" });
+            cell.Append(new Paragraph(
+                new ParagraphProperties(new SpacingBetweenLines { After = sourceFormatting ? "120" : "0" }),
+                new Run(runProperties, new Text(line))));
+        }
+        header.Header = new Header(new Table(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "3600" }),
+            new TableRow(cell)));
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("body"))),
+            new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));
+        main.Document.Save();
+        header.Header.Save();
         return path;
     }
 
