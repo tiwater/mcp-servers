@@ -210,8 +210,7 @@ public static class TemplateMigration
             Schema: "tiwater.docx.template-migration-exact-text-plan/v1",
             Pass: true,
             Plan: plan,
-            Unresolved: unresolved,
-            Complete: unresolved.Count == 0);
+            Unresolved: unresolved);
     }
 
     private static IReadOnlyDictionary<string, string> DeriveReciprocalTableCellTargets(TemplateMigrationAnalysis analysis)
@@ -317,8 +316,7 @@ public static class TemplateMigration
             "tiwater.docx.template-migration-anchor-gap-plan/v1",
             true,
             plan,
-            unresolved,
-            Complete: build.Pass && unresolved.Count == 0);
+            unresolved);
     }
 
     private static IReadOnlyList<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)> FindEqualAnchorGapCandidates(
@@ -697,8 +695,7 @@ coordinates are rejected. See the packaged README for all existing branches.
             "tiwater.docx.template-migration-semantic-resolution/v1",
             build.Pass && failures.Count == 0,
             plan,
-            failures,
-            Complete: build.Pass && failures.Count == 0);
+            failures);
     }
 
     private static TemplateMigrationSemanticCandidate ReadSemanticCandidate(string file)

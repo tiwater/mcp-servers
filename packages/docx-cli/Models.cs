@@ -344,8 +344,7 @@ public sealed record TemplateMigrationMappingDerivation(
     string Schema,
     bool Pass,
     TemplateMigrationPlan Plan,
-    IReadOnlyList<TemplateMigrationPlanFailure> Unresolved,
-    bool Complete = true);
+    IReadOnlyList<TemplateMigrationPlanFailure> Unresolved);
 
 public sealed record TemplateMigrationPlanFailure(
     string Reason,
