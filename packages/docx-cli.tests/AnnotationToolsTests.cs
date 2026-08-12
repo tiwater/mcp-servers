@@ -247,7 +247,6 @@ public class AnnotationToolsTests
 
         var derived = TemplateMigration.DeriveExactTextPlan(source, source);
         Assert.True(derived.Pass);
-        Assert.False(derived.Complete);
         Assert.Contains(derived.Unresolved, item => item.SourceObjectId == revision.Id && item.Reason == "template-migration-automatic-strategy-unsupported");
         Assert.DoesNotContain(derived.Unresolved, item => item.SourceObjectId == media.Id);
         Assert.Contains(derived.Plan.Mappings, item => item.SourceObjectId == media.Id && item.BaselineObjectId == media.Id && item.Disposition == "copy-media");
@@ -331,10 +330,8 @@ public class AnnotationToolsTests
         var duplicateSources = TemplateMigration.DeriveExactTextPlan(duplicateSource, uniqueBaseline);
 
         Assert.True(duplicateTargets.Pass);
-        Assert.False(duplicateTargets.Complete);
         Assert.Contains(duplicateTargets.Unresolved, item => item.Reason == "template-migration-media-hash-ambiguous");
         Assert.True(duplicateSources.Pass);
-        Assert.False(duplicateSources.Complete);
         Assert.Equal(2, duplicateSources.Unresolved.Count(item => item.Reason == "template-migration-media-hash-ambiguous"));
     }
 
@@ -995,14 +992,12 @@ public class AnnotationToolsTests
         var paired = TemplateMigration.DeriveAnchorGapPlan(source, baseline);
 
         Assert.True(paired.Pass);
-        Assert.False(paired.Complete);
         Assert.Contains(paired.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
         Assert.Contains(paired.Unresolved, item => item.Reason == "template-migration-anchor-gap-candidate-review-required" && item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1");
 
         var unequalSource = CreateTextMigrationFixture("anchor start", "legacy heading one", "legacy heading two", "anchor end");
         var unequal = TemplateMigration.DeriveAnchorGapPlan(unequalSource, baseline);
         Assert.True(unequal.Pass);
-        Assert.False(unequal.Complete);
         Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
         Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:2" && item.Disposition == "review-required");
     }
@@ -1033,7 +1028,6 @@ public class AnnotationToolsTests
         foreach (var document in new[] { exact, gap })
         {
             Assert.True(document.RootElement.GetProperty("Pass").GetBoolean());
-            Assert.False(document.RootElement.GetProperty("Complete").GetBoolean());
             Assert.NotEmpty(document.RootElement.GetProperty("Unresolved").EnumerateArray());
         }
     }
@@ -1530,7 +1524,7 @@ public class AnnotationToolsTests
         var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
 
         Assert.True(derived.Pass, string.Join("; ", derived.Unresolved.Select(item => item.Reason)));
-        Assert.True(derived.Complete);
+        Assert.Empty(derived.Unresolved);
         Assert.All(derived.Plan.Mappings, mapping => Assert.Equal("copy-text", mapping.Disposition));
         Assert.Contains(derived.Plan.Mappings, mapping => mapping.SourceObjectId == "body:paragraph:0" && mapping.BaselineObjectId == "body:paragraph:1");
         Assert.Contains(derived.Plan.Mappings, mapping => mapping.SourceObjectId == "body:table:0:row:0:cell:0" && mapping.BaselineObjectId == "body:table:0:row:0:cell:1");
@@ -1538,7 +1532,6 @@ public class AnnotationToolsTests
         var duplicateBaseline = CreateExactTextMappingFixture(includeDuplicateBaselineText: true, baseline: true);
         var rejected = TemplateMigration.DeriveExactTextPlan(source, duplicateBaseline);
         Assert.True(rejected.Pass);
-        Assert.False(rejected.Complete);
         Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
     }
 
@@ -1599,10 +1592,8 @@ public class AnnotationToolsTests
         var nonIsomorphic = TemplateMigration.DeriveExactTextPlan(source, nonIsomorphicBaseline);
 
         Assert.True(ambiguous.Pass);
-        Assert.False(ambiguous.Complete);
         Assert.Contains(ambiguous.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
         Assert.True(nonIsomorphic.Pass);
-        Assert.False(nonIsomorphic.Complete);
         Assert.Contains(nonIsomorphic.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
     }
 
