@@ -1041,7 +1041,14 @@ public class AnnotationToolsTests
     {
         var source = CreateTextMigrationFixture("shared verified content", "source content pending review");
         var baseline = CreateTextMigrationFixture("shared verified content", "target-owned format label");
-        var plan = TemplateMigration.DeriveExactTextPlan(source, baseline).Plan;
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline).Plan;
+        var plan = derived with
+        {
+            Mappings = derived.Mappings.Select(mapping =>
+                string.Equals(mapping.Disposition, "unresolved", StringComparison.Ordinal)
+                    ? mapping with { Disposition = "review-required", Reason = "semantic-review-required" }
+                    : mapping).ToList()
+        };
         var output = Path.Combine(Path.GetTempPath(), $"migration-review-preview-{Guid.NewGuid():N}.docx");
 
         var preview = TemplateMigration.Preview(source, baseline, plan, output);
@@ -1058,7 +1065,7 @@ public class AnnotationToolsTests
     }
 
     [Fact]
-    public void TemplateMigration_unresolved_candidate_is_not_a_terminal_review_disposition_and_requires_a_reason()
+    public void TemplateMigration_unresolved_candidate_requires_semantic_resolution_before_operation_build()
     {
         var source = CreateTextMigrationFixture("unseen source wording");
         var baseline = CreateTextMigrationFixture("different target wording");
@@ -1068,14 +1075,26 @@ public class AnnotationToolsTests
         Assert.Equal("unresolved", unresolved.Disposition);
         Assert.DoesNotContain(derived.Plan.Mappings, item => item.Disposition == "review-required");
 
+        var build = TemplateMigration.BuildOperations(source, baseline, derived.Plan);
+
+        Assert.False(build.Pass);
+        Assert.False(build.ReviewRequired);
+        Assert.Empty(build.Operations);
+        Assert.Empty(build.PreviewOperations);
+        Assert.Contains(build.Failures, item =>
+            item.Reason == "template-migration-semantic-resolution-required"
+            && item.SourceObjectId == unresolved.SourceObjectId
+            && item.Detail == unresolved.Reason);
+
         var invalid = derived.Plan with
         {
             Mappings = [unresolved with { Reason = null }]
         };
-        var build = TemplateMigration.BuildOperations(source, baseline, invalid);
+        var invalidBuild = TemplateMigration.BuildOperations(source, baseline, invalid);
 
-        Assert.False(build.Pass);
-        Assert.Contains(build.Failures, item => item.Reason == "template-migration-unresolved-reason-required");
+        Assert.False(invalidBuild.Pass);
+        Assert.False(invalidBuild.ReviewRequired);
+        Assert.Contains(invalidBuild.Failures, item => item.Reason == "template-migration-unresolved-reason-required");
     }
 
     [Fact]

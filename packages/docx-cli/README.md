@@ -81,7 +81,9 @@ tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.d
 This is a candidate producer: `Pass` means the typed candidate was derived
 successfully. A non-empty `Unresolved` list is valid current evidence for
 semantic resolution, not an upstream failure and not an executable migration
-plan.
+plan. Passing that incomplete plan to the operation builder fails with
+`template-migration-semantic-resolution-required`; it does not create a
+customer-review terminal.
 
 ### 3ab. Derive an Anchor-Gap Mapping Candidate
 
@@ -101,8 +103,9 @@ in `Unresolved` while the successfully derived candidate remains `Pass` true.
 
 Compiles a hash-bound, validated semantic mapping into deterministic edit
 operations. It rejects missing/duplicate source content, duplicate targets,
-hash drift, type mismatches, unsupported targets, and review-required
-mappings. It does not infer any source-to-target mapping. A mapping can target
+hash drift, type mismatches, unsupported targets, and unresolved mappings.
+Only an explicitly resolved `review-required` disposition has review meaning.
+The builder does not infer any source-to-target mapping. A mapping can target
 an attested `run` as well as a paragraph or table cell; run operations preserve
 the target template's surrounding labels and formatting while replacing only
 the mapped run's text. Object ids are accepted only from the current
