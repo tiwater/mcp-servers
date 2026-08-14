@@ -68,10 +68,11 @@ baseline table, with a one-to-one row/column correspondence. The provider uses
 its own current inventories for that proof; callers do not supply object ids or
 coordinates. Media content is mapped when its content hash is unique in both
 inventories; drawings that reference mapped media are covered by that mapping.
-Missing or repeated media hashes remain `review-required`. Repeated content
-remains `review-required` when either table is ambiguous or the semantic
-topology differs. Other absent or ambiguous content also remains
-`review-required`.
+Missing or repeated media hashes remain in `Unresolved`. Repeated content
+remains in `Unresolved` when either table is ambiguous or the semantic
+topology differs. Other absent or ambiguous content also remains there. The
+candidate `Plan` marks these objects as `unresolved`; it never represents them
+as the terminal `review-required` disposition.
 
 ```bash
 tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
