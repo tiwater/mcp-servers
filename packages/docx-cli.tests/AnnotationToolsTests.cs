@@ -36,7 +36,33 @@ public class AnnotationToolsTests
         {
             Console.SetOut(original);
         }
-        Assert.Contains($"tiwater-docx {command} {signature}", output.ToString(), StringComparison.Ordinal);
+        var help = output.ToString();
+        Assert.Contains($"tiwater-docx {command} {signature}", help, StringComparison.Ordinal);
+        Assert.Contains("Purpose:", help, StringComparison.Ordinal);
+        Assert.Contains("Consumes:", help, StringComparison.Ordinal);
+        Assert.Contains("Produces:", help, StringComparison.Ordinal);
+        Assert.Contains("Use when:", help, StringComparison.Ordinal);
+        Assert.Contains("Do not use for:", help, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TemplateMigration_build_help_routes_unresolved_plans_to_semantic_resolution()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["build-template-migration-operations", "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var help = output.ToString();
+        Assert.Contains("resolve-template-migration-semantic-candidate has returned Pass=true", help, StringComparison.Ordinal);
+        Assert.Contains("exact-text or anchor-gap plan that still has Unresolved items", help, StringComparison.Ordinal);
     }
 
     [Fact]
