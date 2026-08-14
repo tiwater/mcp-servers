@@ -152,7 +152,7 @@ public static class TemplateMigration
             var reason = candidates is null || candidates.Count == 0
                 ? "template-migration-exact-text-target-missing"
                 : "template-migration-exact-text-ambiguous";
-            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "review-required", reason));
+            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "unresolved", reason));
             unresolved.Add(new TemplateMigrationPlanFailure(reason, sourceObject.Id, Detail: $"sourceMatches={sourceCount};baselineMatches={candidates?.Count ?? 0}"));
         }
 
@@ -184,7 +184,7 @@ public static class TemplateMigration
             var reason = baselineMatches is null || baselineMatches.Count == 0
                 ? "template-migration-media-hash-target-missing"
                 : "template-migration-media-hash-ambiguous";
-            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "review-required", reason));
+            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "unresolved", reason));
             unresolved.Add(new TemplateMigrationPlanFailure(reason, sourceObject.Id, Detail: $"sourceMatches={sourceMatches};baselineMatches={baselineMatches?.Count ?? 0}"));
         }
 
@@ -197,7 +197,7 @@ public static class TemplateMigration
                 && MediaRelationshipKey(sourceObject, "embedRelationshipId") is { } relationshipKey
                 && coveredDrawingRelationships.Contains(relationshipKey);
             if (handledMediaObject || coveredDrawing) continue;
-            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "review-required", "template-migration-automatic-strategy-unsupported"));
+            mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "unresolved", "template-migration-automatic-strategy-unsupported"));
             unresolved.Add(new TemplateMigrationPlanFailure("template-migration-automatic-strategy-unsupported", sourceObject.Id, Detail: sourceObject.Kind));
         }
 
@@ -280,7 +280,7 @@ public static class TemplateMigration
     }
 
     /// <summary>
-    /// Derives review-required semantic candidates only when two consecutive
+    /// Derives semantic candidates only when two consecutive
     /// exact-text anchors enclose equally sized paragraph gaps in the same
     /// document scope. It never turns structural adjacency into an operation.
     /// </summary>
@@ -289,12 +289,16 @@ public static class TemplateMigration
         var analysis = Analyze(source, baseline);
         var exact = DeriveExactTextPlan(source, baseline);
         var mappings = exact.Plan.Mappings.ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
+        var pendingSourceIds = exact.Unresolved
+            .Where(item => !string.IsNullOrWhiteSpace(item.SourceObjectId))
+            .Select(item => item.SourceObjectId!)
+            .ToHashSet(StringComparer.Ordinal);
         var candidates = new List<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)>();
         foreach (var scope in analysis.Source.Objects.Where(item => item.Kind == "paragraph" && IsContentBearing(item)).Select(item => item.Scope).Distinct(StringComparer.Ordinal))
         {
             var sourceParagraphs = analysis.Source.Objects.Where(item => item.Kind == "paragraph" && item.Scope == scope && IsContentBearing(item)).ToList();
             var baselineParagraphs = analysis.Baseline.Objects.Where(item => item.Kind == "paragraph" && item.Scope == scope && IsContentBearing(item)).ToList();
-            candidates.AddRange(FindEqualAnchorGapCandidates(sourceParagraphs, baselineParagraphs, mappings));
+            candidates.AddRange(FindEqualAnchorGapCandidates(sourceParagraphs, baselineParagraphs, mappings, pendingSourceIds));
         }
 
         var plan = new TemplateMigrationPlan(
@@ -302,12 +306,7 @@ public static class TemplateMigration
             analysis.Source.Sha256,
             analysis.Baseline.Sha256,
             mappings.Values.OrderBy(mapping => mapping.SourceObjectId, StringComparer.Ordinal).ToList());
-        var build = BuildOperations(source, baseline, plan);
-        var unresolved = new List<TemplateMigrationPlanFailure>(build.Failures);
-        foreach (var mapping in plan.Mappings.Where(mapping => string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal)))
-        {
-            unresolved.Add(new TemplateMigrationPlanFailure(mapping.Reason ?? "template-migration-review-required", mapping.SourceObjectId, mapping.BaselineObjectId));
-        }
+        var unresolved = new List<TemplateMigrationPlanFailure>(exact.Unresolved);
         foreach (var candidate in candidates)
         {
             unresolved.Add(new TemplateMigrationPlanFailure("template-migration-anchor-gap-candidate-review-required", candidate.Source.Id, candidate.Baseline.Id));
@@ -322,7 +321,8 @@ public static class TemplateMigration
     private static IReadOnlyList<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)> FindEqualAnchorGapCandidates(
         IReadOnlyList<TemplateMigrationObject> source,
         IReadOnlyList<TemplateMigrationObject> baseline,
-        IDictionary<string, TemplateMigrationMapping> mappings)
+        IDictionary<string, TemplateMigrationMapping> mappings,
+        IReadOnlySet<string> pendingSourceIds)
     {
         var candidates = new List<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)>();
         var baselineIndexes = baseline.Select((item, index) => (item.Id, index)).ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
@@ -347,7 +347,7 @@ public static class TemplateMigration
                 .Select(mapping => mapping.BaselineObjectId!)
                 .ToHashSet(StringComparer.Ordinal);
             var sourceGap = source.Skip(previous.SourceIndex + 1).Take(next.SourceIndex - previous.SourceIndex - 1)
-                .Where(item => mappings.TryGetValue(item.Id, out var mapping) && string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal))
+                .Where(item => pendingSourceIds.Contains(item.Id))
                 .ToList();
             var baselineGap = baseline.Skip(previous.BaselineIndex + 1).Take(next.BaselineIndex - previous.BaselineIndex - 1)
                 .Where(item => !claimedBaselineIds.Contains(item.Id))
@@ -455,7 +455,13 @@ coordinates are rejected. See the packaged README for all existing branches.
         ValidateSemanticCandidate(candidate);
         var analysis = Analyze(source, baseline);
         var automatic = DeriveExactTextPlan(source, baseline);
-        var mappings = automatic.Plan.Mappings.ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
+        var mappings = automatic.Plan.Mappings
+            .Where(mapping => !string.Equals(mapping.Disposition, "unresolved", StringComparison.Ordinal))
+            .ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
+        var pending = automatic.Unresolved
+            .Where(item => !string.IsNullOrWhiteSpace(item.SourceObjectId))
+            .GroupBy(item => item.SourceObjectId!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         var failures = new List<TemplateMigrationPlanFailure>();
         var bodyAppends = new List<TemplateMigrationBodyAppend>();
         var bodyInsertions = new List<TemplateMigrationBodyInsertion>();
@@ -477,22 +483,20 @@ coordinates are rejected. See the packaged README for all existing branches.
             {
                 foreach (var matchedObject in sourceMatches)
                 {
-                    var allPending = mappings.TryGetValue(matchedObject.Id, out var allExisting)
-                        && string.Equals(allExisting.Disposition, "review-required", StringComparison.Ordinal);
-                    if (!allPending)
+                    if (!pending.ContainsKey(matchedObject.Id))
                     {
                         failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", matchedObject.Id));
                         continue;
                     }
                     mappings[matchedObject.Id] = new TemplateMigrationMapping(matchedObject.Id, null, "out-of-scope", "semantic-candidate-out-of-scope-all");
+                    pending.Remove(matchedObject.Id);
                 }
                 continue;
             }
             var sourceObject = sourceMatches[0];
-            var pending = mappings.TryGetValue(sourceObject.Id, out var existing)
-                && string.Equals(existing.Disposition, "review-required", StringComparison.Ordinal);
+            var sourcePending = pending.ContainsKey(sourceObject.Id);
             var newRunMapping = sourceObject.Kind == "run" && !mappings.ContainsKey(sourceObject.Id);
-            if (!pending && !newRunMapping)
+            if (!sourcePending && !newRunMapping)
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id));
                 continue;
@@ -500,6 +504,7 @@ coordinates are rejected. See the packaged README for all existing branches.
             if (string.Equals(proposal.Disposition, "out-of-scope", StringComparison.Ordinal))
             {
                 mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, null, proposal.Disposition, "semantic-candidate-out-of-scope");
+                pending.Remove(sourceObject.Id);
                 continue;
             }
             var baselineMatches = ResolveSelector(analysis.Baseline.Objects, proposal.Baseline!);
@@ -516,6 +521,7 @@ coordinates are rejected. See the packaged README for all existing branches.
                 _ => "semantic-candidate-resolved"
             };
             mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, baselineObject.Id, proposal.Disposition, reason);
+            pending.Remove(sourceObject.Id);
         }
 
         foreach (var proposal in candidate.BodyAppends ?? [])
@@ -535,7 +541,11 @@ coordinates are rejected. See the packaged README for all existing branches.
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-append-range-invalid", starts[0].Id, ends[0].Id));
                 continue;
             }
-            foreach (var objectId in DescendantsOf(analysis.Source.Objects, range)) mappings.Remove(objectId);
+            foreach (var objectId in DescendantsOf(analysis.Source.Objects, range))
+            {
+                mappings.Remove(objectId);
+                pending.Remove(objectId);
+            }
             bodyAppends.Add(new TemplateMigrationBodyAppend(starts[0].Id, ends[0].Id));
         }
 
@@ -559,7 +569,11 @@ coordinates are rejected. See the packaged README for all existing branches.
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-body-insertion-range-invalid", starts[0].Id, after[0].Id));
                 continue;
             }
-            foreach (var objectId in DescendantsOf(analysis.Source.Objects, range)) mappings.Remove(objectId);
+            foreach (var objectId in DescendantsOf(analysis.Source.Objects, range))
+            {
+                mappings.Remove(objectId);
+                pending.Remove(objectId);
+            }
             bodyInsertions.Add(new TemplateMigrationBodyInsertion(starts[0].Id, ends[0].Id, before[0].Id, after[0].Id, proposal.StylePolicy));
         }
 
@@ -578,6 +592,7 @@ coordinates are rejected. See the packaged README for all existing branches.
                 continue;
             }
             mappings.Remove(members[0].Id);
+            pending.Remove(members[0].Id);
             choiceSelections.Add(new TemplateMigrationChoiceSelection(members[0].Id, labels[0].Id));
         }
 
@@ -651,6 +666,7 @@ coordinates are rejected. See the packaged README for all existing branches.
                 continue;
             }
             mappings.Remove(sourceParent.Id);
+            pending.Remove(sourceParent.Id);
             valueProjections.Add(new TemplateMigrationValueProjection(
                 sourceParent.Id,
                 baselineParent.Id,
@@ -665,6 +681,7 @@ coordinates are rejected. See the packaged README for all existing branches.
             if (MediaRelationshipKey(drawing, "embedRelationshipId") is { } relationshipKey && copiedMediaRelationships.Contains(relationshipKey))
             {
                 mappings.Remove(drawing.Id);
+                pending.Remove(drawing.Id);
             }
         }
 
@@ -685,15 +702,15 @@ coordinates are rejected. See the packaged README for all existing branches.
             ValueProjections: valueProjections,
             BodyInsertions: bodyInsertions,
             ChoiceSelections: choiceSelections);
-        var build = BuildOperations(source, baseline, plan);
-        failures.AddRange(build.Failures);
-        foreach (var mapping in plan.Mappings.Where(mapping => string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal)))
+        failures.AddRange(pending.Values);
+        if (failures.Count == 0)
         {
-            failures.Add(new TemplateMigrationPlanFailure(mapping.Reason ?? "template-migration-review-required", mapping.SourceObjectId, mapping.BaselineObjectId));
+            var build = BuildOperations(source, baseline, plan);
+            failures.AddRange(build.Failures);
         }
         return new TemplateMigrationMappingDerivation(
             "tiwater.docx.template-migration-semantic-resolution/v1",
-            build.Pass && failures.Count == 0,
+            failures.Count == 0,
             plan,
             failures);
     }
@@ -1387,7 +1404,16 @@ coordinates are rejected. See the packaged README for all existing branches.
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-duplicate", mapping.SourceObjectId, mapping.BaselineObjectId));
                 }
             }
-            else if (string.Equals(disposition, "review-required", StringComparison.Ordinal) || string.Equals(disposition, "out-of-scope", StringComparison.Ordinal))
+            else if (string.Equals(disposition, "unresolved", StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(mapping.Reason))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-unresolved-reason-required", mapping.SourceObjectId));
+                }
+                reviewRequired = true;
+            }
+            else if (string.Equals(disposition, "review-required", StringComparison.Ordinal)
+                || string.Equals(disposition, "out-of-scope", StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(mapping.Reason))
                 {
@@ -1552,8 +1578,9 @@ coordinates are rejected. See the packaged README for all existing branches.
 
     /// <summary>
     /// Produces a review-only candidate from verified subset operations. A
-    /// review-required plan is never reported as pass and this method is not a
-    /// substitute for Apply or a platform delivery decision.
+    /// plan with unresolved or review-required mappings is never reported as
+    /// pass, and this method is not a substitute for Apply or a platform
+    /// delivery decision.
     /// </summary>
     public static TemplateMigrationPreviewResult Preview(string source, string baseline, TemplateMigrationPlan plan, string output)
     {

@@ -259,7 +259,7 @@ public class AnnotationToolsTests
         var annotatedAnalysis = TemplateMigration.Analyze(annotated, annotated);
         var annotatedPlan = TemplateMigration.DeriveExactTextPlan(annotated, annotated);
         Assert.Contains("comments", annotatedAnalysis.UnsupportedObjectKinds);
-        Assert.Contains(annotatedPlan.Plan.Mappings, item => item.SourceObjectId == "mainDocument:comments" && item.Disposition == "review-required");
+        Assert.Contains(annotatedPlan.Plan.Mappings, item => item.SourceObjectId == "mainDocument:comments" && item.Disposition == "unresolved");
 
         var controlled = Path.Combine(Path.GetTempPath(), $"migration-content-control-{Guid.NewGuid():N}.docx");
         using (var document = WordprocessingDocument.Create(controlled, WordprocessingDocumentType.Document))
@@ -273,7 +273,7 @@ public class AnnotationToolsTests
         var controlledAnalysis = TemplateMigration.Analyze(controlled, controlled);
         var controlledPlan = TemplateMigration.DeriveExactTextPlan(controlled, controlled);
         Assert.Contains("content-control", controlledAnalysis.UnsupportedObjectKinds);
-        Assert.Contains(controlledPlan.Plan.Mappings, item => item.Disposition == "review-required" && item.Reason == "template-migration-automatic-strategy-unsupported");
+        Assert.Contains(controlledPlan.Plan.Mappings, item => item.Disposition == "unresolved" && item.Reason == "template-migration-automatic-strategy-unsupported");
     }
 
     [Fact]
@@ -992,14 +992,14 @@ public class AnnotationToolsTests
         var paired = TemplateMigration.DeriveAnchorGapPlan(source, baseline);
 
         Assert.True(paired.Pass);
-        Assert.Contains(paired.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
+        Assert.Contains(paired.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "unresolved");
         Assert.Contains(paired.Unresolved, item => item.Reason == "template-migration-anchor-gap-candidate-review-required" && item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1");
 
         var unequalSource = CreateTextMigrationFixture("anchor start", "legacy heading one", "legacy heading two", "anchor end");
         var unequal = TemplateMigration.DeriveAnchorGapPlan(unequalSource, baseline);
         Assert.True(unequal.Pass);
-        Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
-        Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:2" && item.Disposition == "review-required");
+        Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "unresolved");
+        Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:2" && item.Disposition == "unresolved");
     }
 
     [Fact]
@@ -1029,6 +1029,10 @@ public class AnnotationToolsTests
         {
             Assert.True(document.RootElement.GetProperty("Pass").GetBoolean());
             Assert.NotEmpty(document.RootElement.GetProperty("Unresolved").EnumerateArray());
+            Assert.Contains(document.RootElement.GetProperty("Plan").GetProperty("Mappings").EnumerateArray(),
+                mapping => mapping.GetProperty("Disposition").GetString() == "unresolved");
+            Assert.DoesNotContain(document.RootElement.GetProperty("Plan").GetProperty("Mappings").EnumerateArray(),
+                mapping => mapping.GetProperty("Disposition").GetString() == "review-required");
         }
     }
 
@@ -1051,6 +1055,27 @@ public class AnnotationToolsTests
         var paragraphs = document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ToList();
         Assert.Equal("shared verified content", GetParagraphText(paragraphs[0]));
         Assert.Equal("target-owned format label", GetParagraphText(paragraphs[1]));
+    }
+
+    [Fact]
+    public void TemplateMigration_unresolved_candidate_is_not_a_terminal_review_disposition_and_requires_a_reason()
+    {
+        var source = CreateTextMigrationFixture("unseen source wording");
+        var baseline = CreateTextMigrationFixture("different target wording");
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
+        var unresolved = Assert.Single(derived.Plan.Mappings);
+
+        Assert.Equal("unresolved", unresolved.Disposition);
+        Assert.DoesNotContain(derived.Plan.Mappings, item => item.Disposition == "review-required");
+
+        var invalid = derived.Plan with
+        {
+            Mappings = [unresolved with { Reason = null }]
+        };
+        var build = TemplateMigration.BuildOperations(source, baseline, invalid);
+
+        Assert.False(build.Pass);
+        Assert.Contains(build.Failures, item => item.Reason == "template-migration-unresolved-reason-required");
     }
 
     [Fact]
