@@ -158,18 +158,66 @@ public static class Cli
 
     private static bool PrintCommandUsage(string command)
     {
-        var usage = command switch
+        var help = command switch
         {
-            "analyze-template-migration" => "analyze-template-migration <source.docx> <baseline.docx> [--json]",
-            "derive-template-migration-exact-text-plan" => "derive-template-migration-exact-text-plan <source.docx> <baseline.docx>",
-            "derive-template-migration-anchor-gap-plan" => "derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>",
-            "build-template-migration-operations" => "build-template-migration-operations <source.docx> <baseline.docx> <plan.json>",
-            "apply-template-migration" => "apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>",
-            "validate-template-migration-output" => "validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>",
+            "analyze-template-migration" => """
+                Purpose: Observe the current source and selected baseline as immutable migration object inventories.
+                Consumes: One current source DOCX and one selected baseline DOCX.
+                Produces: A hash-bound analysis with source objects, baseline objects, and unresolved findings; use --json for machine output.
+                Use when: Starting a template migration before selecting any semantic mapping.
+                Do not use for: Selecting mappings, building operations, editing a document, or validating output.
+                Usage:
+                  tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
+                """,
+            "derive-template-migration-exact-text-plan" => """
+                Purpose: Derive the conservative automatic portion of a template-migration plan from unique current text and topology.
+                Consumes: One current source DOCX and the same selected baseline DOCX used for analysis.
+                Produces: A hash-bound plan plus an Unresolved list; Unresolved requires semantic resolution before operation building.
+                Use when: The source and baseline have been observed and automatic exact matches are needed.
+                Do not use for: Treating Unresolved as review-required, inventing target mappings, editing, or output validation.
+                Usage:
+                  tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
+                """,
+            "derive-template-migration-anchor-gap-plan" => """
+                Purpose: Add conservative paragraph candidates found between reciprocal exact-text anchors.
+                Consumes: One current source DOCX and the same selected baseline DOCX used by the exact-text plan.
+                Produces: A hash-bound plan whose remaining candidates stay unresolved until semantic resolution.
+                Use when: Exact matching leaves paragraph gaps that may have a unique current semantic target.
+                Do not use for: Approving a candidate, building operations, editing, or output validation.
+                Usage:
+                  tiwater-docx derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>
+                """,
+            "build-template-migration-operations" => """
+                Purpose: Deterministically build DOCX operations from one fully resolved, hash-bound migration plan.
+                Consumes: The current source DOCX, selected baseline DOCX, and a plan returned by semantic resolution.
+                Produces: An operation build receipt; any unresolved mapping is rejected with template-migration-semantic-resolution-required.
+                Use when: resolve-template-migration-semantic-candidate has returned Pass=true and no Unresolved items.
+                Do not use for: Consuming an exact-text or anchor-gap plan that still has Unresolved items, selecting mappings, or editing.
+                Usage:
+                  tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
+                """,
+            "apply-template-migration" => """
+                Purpose: Apply one fully resolved migration plan to the selected baseline.
+                Consumes: The current source DOCX, selected baseline DOCX, passing resolved plan, and output path.
+                Produces: An output DOCX and an apply receipt.
+                Use when: Operation building has passed for the same source, baseline, and plan.
+                Do not use for: Selecting mappings, resolving candidates, or validating the produced document.
+                Usage:
+                  tiwater-docx apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>
+                """,
+            "validate-template-migration-output" => """
+                Purpose: Independently validate a migrated DOCX against the current source, selected baseline, and approved plan.
+                Consumes: The current source DOCX, selected baseline DOCX, passing resolved plan, and produced output DOCX.
+                Produces: A fresh readback verdict for content, structure, style, and migration coverage.
+                Use when: Apply has completed and the output exists at a stable path.
+                Do not use for: Building operations, editing, or accepting an unresolved plan.
+                Usage:
+                  tiwater-docx validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>
+                """,
             _ => null,
         };
-        if (usage is null) return false;
-        Console.WriteLine($"Usage:\n  tiwater-docx {usage}");
+        if (help is null) return false;
+        Console.WriteLine(help);
         return true;
     }
 
