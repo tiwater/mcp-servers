@@ -72,6 +72,11 @@ tiwater-pdf ocr scan-1.pdf scan-2.pdf scan-3.pdf \
   --json
 ```
 
+LLM OCR writes concise page-completion lines to stderr; batch mode also writes
+one input-completion line whenever a PDF finishes. JSON stdout remains a
+single machine-readable result or manifest, so callers can persist it while
+keeping long-running OCR observable.
+
 JSON OCR output preserves each model-returned markdown table and also exposes
 deterministic `table_rows` evidence. Every row has a stable
 `page-<n>-table-<n>-row-<n>` id, page/table/row coordinates, header flag, and
