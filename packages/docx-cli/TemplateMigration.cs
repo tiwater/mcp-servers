@@ -1410,7 +1410,13 @@ coordinates are rejected. See the packaged README for all existing branches.
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-unresolved-reason-required", mapping.SourceObjectId));
                 }
-                reviewRequired = true;
+                else
+                {
+                    failures.Add(new TemplateMigrationPlanFailure(
+                        "template-migration-semantic-resolution-required",
+                        mapping.SourceObjectId,
+                        Detail: mapping.Reason));
+                }
             }
             else if (string.Equals(disposition, "review-required", StringComparison.Ordinal)
                 || string.Equals(disposition, "out-of-scope", StringComparison.Ordinal))
