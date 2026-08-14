@@ -1021,6 +1021,7 @@ def llm_ocr(
     max_tokens: int = 4096,
     enable_thinking: str | bool | None = "auto",
     max_page_parallel: int = 12,
+    page_progress_func=None,
 ) -> dict:
     """Extract page text from scanned PDFs using an OpenAI-compatible vision model."""
     resolved_api_key, resolved_base_url = _resolve_llm_config(api_key, base_url)
@@ -1098,8 +1099,14 @@ def llm_ocr(
         page_result["request_attempts"] = sum(orientation_attempts)
         return page_result
 
+    report_page_progress = page_progress_func or _emit_ocr_page_progress
+    pages = []
     with ThreadPoolExecutor(max_workers=min(max_page_parallel, len(selected_page_indexes) or 1)) as executor:
-        pages = list(executor.map(ocr_page, selected_page_indexes))
+        futures = [executor.submit(ocr_page, page_index) for page_index in selected_page_indexes]
+        for completed, future in enumerate(as_completed(futures), start=1):
+            page = future.result()
+            pages.append(page)
+            report_page_progress(completed, len(futures), page)
     pages.sort(key=lambda page: page["page"])
 
     table_logical_rows = _extract_table_logical_rows(pages)
@@ -1183,6 +1190,25 @@ def _write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _emit_ocr_batch_progress(completed: int, total: int, item: dict) -> None:
+    """Keep long batch OCR observable without mixing progress into JSON stdout."""
+    print(
+        f"[tiwater-pdf-ocr] completed={completed}/{total} "
+        f"status={item['status']} duration_ms={item['duration_ms']}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _emit_ocr_page_progress(completed: int, total: int, page: dict) -> None:
+    """Expose completed page work while keeping OCR result JSON on stdout."""
+    print(
+        f"[tiwater-pdf-ocr-page] completed={completed}/{total} page={page['page']}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _run_ocr_batch(
     inputs: list[Path],
     *,
@@ -1193,6 +1219,7 @@ def _run_ocr_batch(
     model: str,
     provider: str,
     enable_thinking: bool | None,
+    progress_func=None,
 ) -> dict:
     """Run OCR for multiple PDFs with bounded concurrency and per-file evidence."""
     if not inputs:
@@ -1247,13 +1274,18 @@ def _run_ocr_batch(
         return item
 
     files = [None] * len(jobs)
+    report_progress = progress_func or _emit_ocr_batch_progress
+    completed = 0
     with ThreadPoolExecutor(max_workers=min(max_parallel, len(jobs))) as executor:
         future_to_index = {
             executor.submit(run_one, job): job["index"] - 1
             for job in jobs
         }
         for future in as_completed(future_to_index):
-            files[future_to_index[future]] = future.result()
+            item = future.result()
+            files[future_to_index[future]] = item
+            completed += 1
+            report_progress(completed, len(jobs), item)
 
     manifest = {
         "file_count": len(files),
