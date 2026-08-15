@@ -229,6 +229,10 @@ unless the disposition is `out-of-scope`. Existing dispositions are
 `baselineLabel` selector whose kind is `run`. Baseline clears require
 `baseline` and mode `cell` or `row`.
 
+Candidate source selectors address only items reported in `Unresolved` by the
+current automatic plan. `Plan.Mappings` are already complete and must not be
+repeated. Baseline-only cleanup may select current `UnclaimedBaseline` items.
+
 This complete but minimal v5 example shows independent existing branches.
 Placeholder strings stand for unique observations from the current source or
 baseline; they are not fixed document values:

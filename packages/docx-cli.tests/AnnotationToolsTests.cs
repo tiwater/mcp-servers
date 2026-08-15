@@ -148,6 +148,8 @@ public class AnnotationToolsTests
             Assert.Contains(branch, help, StringComparison.Ordinal);
         }
         Assert.Contains("the operation builder consumes Plan", help, StringComparison.Ordinal);
+        Assert.Contains("Plan.Mappings are already complete and must not be", help, StringComparison.Ordinal);
+        Assert.Contains("UnclaimedBaseline", help, StringComparison.Ordinal);
         Assert.DoesNotContain("See the packaged README", help, StringComparison.Ordinal);
     }
 

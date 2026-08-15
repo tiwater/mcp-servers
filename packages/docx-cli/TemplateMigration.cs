@@ -464,6 +464,9 @@ Existing branch shapes:
                      parentText, previousText, or nextText
 
 Every value above is selected from the current source/baseline inventories.
+Candidate source selectors address only items reported in Unresolved by the
+current automatic plan. Plan.Mappings are already complete and must not be
+repeated. Baseline-only cleanup may select current UnclaimedBaseline items.
 Unknown fields, object ids, indexes, and coordinates are rejected.
 
 Minimal v5 example (values are observations from the current source/baseline):
