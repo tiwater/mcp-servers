@@ -40,9 +40,9 @@ content. Text content is a human-readable projection of the same result, not a
 second contract.
 
 The Agent-facing server does not expose target search, incremental draft,
-record, revise, replay, plan construction, apply, or legacy candidate commands.
-Those may remain command-line compatibility or diagnostic operations, but the
-Agent does not assemble them.
+record, revise, replay, plan construction, apply, legacy candidate commands, or
+low-level mutation payloads such as style-id maps. Those may remain command-line
+compatibility or diagnostic operations, but the Agent does not assemble them.
 
 ## Decision boundary
 
