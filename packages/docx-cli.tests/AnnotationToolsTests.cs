@@ -44,6 +44,8 @@ public class AnnotationToolsTests
     [Theory]
     [InlineData("analyze-template-migration", "<source.docx> <baseline.docx> [--json]")]
     [InlineData("derive-template-migration-exact-text-plan", "<source.docx> <baseline.docx>")]
+    [InlineData("list-template-migration-choices", "<source.docx> <baseline.docx>")]
+    [InlineData("resolve-template-migration-choices", "<source.docx> <baseline.docx> <choices.json>")]
     [InlineData("list-template-migration-options", "<source.docx> <baseline.docx>")]
     [InlineData("build-template-migration-operations", "<source.docx> <baseline.docx> <plan.json>")]
     [InlineData("apply-template-migration", "<source.docx> <baseline.docx> <plan.json> <output.docx>")]
@@ -89,7 +91,8 @@ public class AnnotationToolsTests
         }
 
         var help = output.ToString();
-        Assert.Contains("resolve-template-migration-semantic-candidate has returned Pass=true", help, StringComparison.Ordinal);
+        Assert.Contains("resolve-template-migration-choices", help, StringComparison.Ordinal);
+        Assert.Contains("compatible selector resolver", help, StringComparison.Ordinal);
         Assert.Contains("exact-text or anchor-gap plan that still has Unresolved items", help, StringComparison.Ordinal);
     }
 
@@ -127,7 +130,7 @@ public class AnnotationToolsTests
         }
 
         Assert.Contains("Unresolved[].BaselineOptions", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("new semantic-resolution callers use list-template-migration-options", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("new semantic-resolution callers use list-template-migration-choices", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -146,6 +149,7 @@ public class AnnotationToolsTests
         }
 
         var usage = output.ToString();
+        Assert.Contains("list-template-migration-choices", usage, StringComparison.Ordinal);
         Assert.Contains("list-template-migration-options", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("find-template-migration-candidates", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("analyze-template-migration", usage, StringComparison.Ordinal);
@@ -170,9 +174,10 @@ public class AnnotationToolsTests
         }
 
         var usage = output.ToString();
-        Assert.Contains("list unresolved sources and possible targets first", usage, StringComparison.Ordinal);
-        Assert.Contains("when an artifact supplies the next command's inputs", usage, StringComparison.Ordinal);
+        Assert.Contains("start with current-document choices", usage, StringComparison.Ordinal);
+        Assert.Contains("read each next command's --help", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("each selected command", usage, StringComparison.Ordinal);
+        Assert.Contains("list-template-migration-choices", usage, StringComparison.Ordinal);
         Assert.Contains("list-template-migration-options", usage, StringComparison.Ordinal);
     }
 
@@ -195,6 +200,8 @@ public class AnnotationToolsTests
         var root = document.RootElement;
         Assert.Equal("tiwater.provider-tool-list/v1", root.GetProperty("schema").GetString());
         var commands = root.GetProperty("commands").EnumerateArray().Select(value => value.GetString()).ToArray();
+        Assert.Equal("list-template-migration-choices", commands[0]);
+        Assert.Equal("resolve-template-migration-choices", commands[1]);
         Assert.Contains("list-template-migration-options", commands);
         Assert.Contains("resolve-template-migration-semantic-candidate", commands);
         Assert.Contains("validate-template-migration-output", commands);
@@ -242,7 +249,7 @@ public class AnnotationToolsTests
         Assert.Contains("does not produce a migration plan", help, StringComparison.Ordinal);
         Assert.Contains("Each distinguishable required source appears once", help, StringComparison.Ordinal);
         Assert.Contains("Count > 1 group with RequiredCardinality=all", help, StringComparison.Ordinal);
-        Assert.Contains("The Agent uses current scenario authority", help, StringComparison.Ordinal);
+        Assert.Contains("Use current scenario authority", help, StringComparison.Ordinal);
         Assert.Contains("for every RequiredDecision", help, StringComparison.Ordinal);
         Assert.DoesNotContain("SuggestedTargets", help, StringComparison.Ordinal);
         Assert.Contains("RequiredDecisions[]: Source, Count, RequiredCardinality", help, StringComparison.Ordinal);
@@ -251,7 +258,31 @@ public class AnnotationToolsTests
         Assert.DoesNotContain("Do not use for: Ignoring a RequiredDecision", help, StringComparison.Ordinal);
         Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
         Assert.Contains("performs its conservative exact comparison internally", help, StringComparison.Ordinal);
-        Assert.Contains("does not generate candidate mappings", help, StringComparison.Ordinal);
+        Assert.Contains("selector-level migration discovery artifact for compatible callers", help, StringComparison.Ordinal);
+        Assert.Contains("New callers start with list-template-migration-choices", help, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TemplateMigration_choice_help_keeps_technical_identity_inside_the_provider()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["list-template-migration-choices", "--help"]));
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["resolve-template-migration-choices", "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var help = output.ToString();
+        Assert.Contains("opaque source and target choice ids", help, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does not expose selectors", help, StringComparison.Ordinal);
+        Assert.Contains("Do not use for: Supplying selectors, object ids, coordinates, document values, or operation payloads", help, StringComparison.Ordinal);
+        Assert.Contains("unknown, stale, duplicate, or incompatible choices fail", help, StringComparison.Ordinal);
     }
 
     [Fact]
