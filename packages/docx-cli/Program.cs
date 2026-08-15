@@ -184,7 +184,7 @@ public static class Cli
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("Template migration: record one current-document decision at a time; read each next command's --help before using it.");
         Console.WriteLine("  start-template-migration-decisions <source.docx> <baseline.docx> <draft.json>");
-        Console.WriteLine("  find-template-migration-targets <source.docx> <baseline.docx> <source-choice-id|-> <branch> [query|-] [offset] [limit]");
+        Console.WriteLine("  find-template-migration-targets <source.docx> <baseline.docx> <draft.json> <branch> [query|-] [offset] [limit]");
         Console.WriteLine("  record-template-migration-decision <source.docx> <baseline.docx> <draft.json> <branch> <branch arguments>");
         Console.WriteLine("  resolve-template-migration-decisions <source.docx> <baseline.docx> <draft.json>");
         Console.WriteLine("  list-template-migration-choices <source.docx> <baseline.docx>  (compatibility)");
@@ -265,31 +265,32 @@ public static class Cli
                 """,
             "find-template-migration-targets" => """
                 Purpose: Page or filter the complete structurally eligible target choices for one current source and decision branch.
-                Consumes: The same current source and baseline, one returned source choice id (or - for baseline-clear), a branch, and optional literal query, offset, and limit.
+                Consumes: The same current source and baseline, the provider-owned draft, a branch, and optional literal query, offset, and limit.
                 Produces: One bounded target page; ordering is stable and no target is ranked by presumed business meaning.
                 Use when: The next business decision needs a target without loading the full baseline inventory into Agent context.
                 Do not use for: Choosing a target, hiding targets outside a page, inferring scenario semantics, or editing a document.
                 Usage:
-                  tiwater-docx find-template-migration-targets <source.docx> <baseline.docx> <source-choice-id|-> <copy-text|copy-media|retain-target|retain-target-label|choice-selection|baseline-clear> [query|-] [offset] [limit]
+                  tiwater-docx find-template-migration-targets <source.docx> <baseline.docx> <draft.json> <copy-text|copy-media|retain-target|retain-target-label|choice-selection|baseline-clear> [query|-] [offset] [limit]
                 """,
             "record-template-migration-decision" => """
                 Purpose: Validate and atomically record exactly one business decision in the provider-owned draft.
-                Consumes: The same current source and baseline, the draft path, and one mapping, choice-selection, or baseline-clear decision using current opaque choice ids.
+                Consumes: The same current source and baseline, the draft path, and one mapping, choice-selection, or baseline-clear decision. The draft supplies the current source identity.
                 Produces: The updated draft plus progress containing counts and the next unresolved source choice.
                 Use when: The current scenario and document observations determine one source disposition or one baseline cleanup.
                 Do not use for: Authoring draft JSON, supplying selectors or coordinates, guessing a business decision, or editing a document.
                 Usage:
-                  tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> mapping <source-choice-id> <disposition> <target-choice-id|-> [cardinality|-]
-                  tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> choice-selection <source-choice-id> <target-choice-id>
+                  tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> mapping <disposition> <target-choice-id|-> [cardinality|-]
+                  tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> choice-selection <target-choice-id>
                   tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> baseline-clear <target-choice-id> <cell|row>
                 Mapping dispositions: copy-text, copy-media, retain-target, retain-target-label, out-of-scope, review-required. The last two use - as the target.
+                Recording an explicit previously returned source choice replaces that source's earlier decision atomically for compatibility with a typed validation correction.
                 """,
             "resolve-template-migration-decisions" => """
                 Purpose: Re-read both current documents and expand the complete provider-owned decision draft into a validated migration plan.
                 Consumes: The same current source DOCX, selected baseline DOCX, and provider-owned draft.
-                Produces: A hash-bound migration resolution and plan; stale, missing, duplicate, or incompatible decisions fail without mutation.
+                Produces: A hash-bound passing migration plan, or a closed local-review receipt accepted directly by preview-template-migration; stale, missing, duplicate, or incompatible decisions fail without mutation.
                 Use when: Progress reports no remaining source choices and any required baseline cleanup has been recorded.
-                Do not use for: Supplying selectors, object ids, coordinates, values, operation payloads, or bypassing unresolved choices.
+                Do not use for: Supplying selectors, object ids, coordinates, values, operation payloads, bypassing unresolved choices, or calling close-template-migration-reviews on its result.
                 Usage:
                   tiwater-docx resolve-template-migration-decisions <source.docx> <baseline.docx> <draft.json>
                 """,
