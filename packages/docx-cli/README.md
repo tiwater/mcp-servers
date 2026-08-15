@@ -89,6 +89,12 @@ plan. Passing that incomplete plan to the operation builder fails with
 `template-migration-semantic-resolution-required`; it does not create a
 customer-review terminal.
 
+`template-migration-exact-text-match-missing` means only that this mechanical
+comparison found no identical text in the selected baseline.
+`template-migration-exact-text-match-non-unique` means only that identical text
+did not identify one reciprocal pair. Neither reason decides whether a semantic
+target exists or whether its business meaning is ambiguous.
+
 Each unresolved entry repeats the compact current source observation and any
 exact baseline options. The same receipt also lists unclaimed non-empty
 baseline paragraphs and table cells plus their uniquely selectable child runs.

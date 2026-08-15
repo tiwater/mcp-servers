@@ -150,8 +150,8 @@ public static class TemplateMigration
             }
 
             var reason = candidates is null || candidates.Count == 0
-                ? "template-migration-exact-text-target-missing"
-                : "template-migration-exact-text-ambiguous";
+                ? "template-migration-exact-text-match-missing"
+                : "template-migration-exact-text-match-non-unique";
             mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "unresolved", reason));
             unresolved.Add(new TemplateMigrationPlanFailure(
                 reason,

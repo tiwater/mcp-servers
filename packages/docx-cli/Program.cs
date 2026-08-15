@@ -191,7 +191,7 @@ public static class Cli
             "derive-template-migration-exact-text-plan" => """
                 Purpose: Derive the conservative automatic portion of a template-migration plan from unique current text and topology.
                 Consumes: One current source DOCX and the same selected baseline DOCX used for analysis.
-                Produces: A hash-bound plan; Unresolved[].Source and Unresolved[].BaselineOptions carry current observations, and UnclaimedBaseline lists unclaimed baseline content and selectable child runs.
+                Produces: A hash-bound plan; Unresolved[].Source and Unresolved[].BaselineOptions carry current observations, and UnclaimedBaseline lists unclaimed baseline content and selectable child runs. Exact-text match missing or non-unique describes only this mechanical comparison; it does not mean that a semantic target is absent or ambiguous.
                 Use when: The source and baseline have been observed and automatic exact matches are needed.
                 Do not use for: Treating Unresolved as review-required, inventing target mappings, editing, or output validation.
                 Usage:
