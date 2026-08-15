@@ -189,7 +189,7 @@ public static class Cli
             "derive-template-migration-exact-text-plan" => """
                 Purpose: Derive the conservative automatic portion of a template-migration plan from unique current text and topology.
                 Consumes: One current source DOCX and the same selected baseline DOCX used for analysis.
-                Produces: A hash-bound plan plus an Unresolved list; Unresolved requires semantic resolution before operation building.
+                Produces: A hash-bound plan; Unresolved[].Source and Unresolved[].BaselineOptions carry current observations, and UnclaimedBaseline lists unclaimed baseline content and selectable child runs.
                 Use when: The source and baseline have been observed and automatic exact matches are needed.
                 Do not use for: Treating Unresolved as review-required, inventing target mappings, editing, or output validation.
                 Usage:
@@ -198,7 +198,7 @@ public static class Cli
             "derive-template-migration-anchor-gap-plan" => """
                 Purpose: Add conservative paragraph candidates found between reciprocal exact-text anchors.
                 Consumes: One current source DOCX and the same selected baseline DOCX used by the exact-text plan.
-                Produces: A hash-bound plan whose remaining candidates stay unresolved until semantic resolution.
+                Produces: A hash-bound plan; Unresolved[].Source and Unresolved[].Baseline carry the current anchor-gap observations, and UnclaimedBaseline remains available for semantic resolution.
                 Use when: Exact matching leaves paragraph gaps that may have a unique current semantic target.
                 Do not use for: Approving a candidate, building operations, editing, or output validation.
                 Usage:

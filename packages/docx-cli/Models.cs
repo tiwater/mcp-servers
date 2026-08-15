@@ -345,13 +345,23 @@ public sealed record TemplateMigrationMappingDerivation(
     string Schema,
     bool Pass,
     TemplateMigrationPlan Plan,
-    IReadOnlyList<TemplateMigrationPlanFailure> Unresolved);
+    IReadOnlyList<TemplateMigrationPlanFailure> Unresolved,
+    IReadOnlyList<TemplateMigrationSemanticObservation>? UnclaimedBaseline = null);
+
+public sealed record TemplateMigrationSemanticObservation(
+    string Kind,
+    string Scope,
+    string? Text,
+    TemplateMigrationSemanticSelector? Selector);
 
 public sealed record TemplateMigrationPlanFailure(
     string Reason,
     string? SourceObjectId = null,
     string? BaselineObjectId = null,
-    string? Detail = null);
+    string? Detail = null,
+    TemplateMigrationSemanticObservation? Source = null,
+    TemplateMigrationSemanticObservation? Baseline = null,
+    IReadOnlyList<TemplateMigrationSemanticObservation>? BaselineOptions = null);
 
 public sealed record TemplateMigrationMediaCopy(
     string SourceObjectId,

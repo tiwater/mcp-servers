@@ -107,6 +107,26 @@ public class AnnotationToolsTests
         Assert.Contains("candidate-ready unique semantic selectors", output.ToString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("derive-template-migration-exact-text-plan", "Unresolved[].BaselineOptions")]
+    [InlineData("derive-template-migration-anchor-gap-plan", "Unresolved[].Baseline")]
+    public async Task TemplateMigration_plan_help_describes_its_semantic_decision_observations(string command, string expected)
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync([command, "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        Assert.Contains(expected, output.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task TemplateMigration_resolver_help_exposes_every_existing_candidate_branch()
     {
@@ -250,6 +270,66 @@ public class AnnotationToolsTests
         var legacy = JsonSerializer.Deserialize<TemplateMigrationObject>(legacyJson, Json.Options);
         Assert.NotNull(legacy);
         Assert.Null(legacy!.Selector);
+    }
+
+    [Fact]
+    public void TemplateMigration_plan_exposes_compact_current_observations_for_pending_semantic_decisions()
+    {
+        var source = CreateTextMigrationFixture(
+            "North block",
+            "Repeated requirement",
+            "South block",
+            "Repeated requirement",
+            "Source-only instruction");
+        var baseline = CreateTextMigrationFixture(
+            "North block",
+            "Repeated requirement",
+            "South block",
+            "Repeated requirement",
+            "Unused target placeholder");
+
+        var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
+        var repeated = derived.Unresolved
+            .Where(item => item.Reason == "template-migration-exact-text-ambiguous")
+            .ToList();
+        var missing = Assert.Single(derived.Unresolved, item => item.Source?.Text == "Source-only instruction");
+
+        Assert.Equal(2, repeated.Count);
+        Assert.All(repeated, item =>
+        {
+            Assert.Equal("Repeated requirement", item.Source?.Text);
+            Assert.NotNull(item.Source?.Selector);
+            Assert.Equal(2, item.BaselineOptions?.Count);
+            Assert.All(item.BaselineOptions!, option => Assert.NotNull(option.Selector));
+        });
+        Assert.NotNull(missing.Source?.Selector);
+        Assert.Empty(missing.BaselineOptions!);
+        Assert.Contains(derived.UnclaimedBaseline!, item => item.Text == "Unused target placeholder" && item.Selector is not null);
+
+        var tableSource = CreateTableMigrationFixture([["Source selection"]]);
+        var tableBaseline = CreateTableMigrationFixture([["Target choice"]]);
+        var tableDerived = TemplateMigration.DeriveExactTextPlan(tableSource, tableBaseline);
+        Assert.Contains(tableDerived.UnclaimedBaseline!, item =>
+            item.Kind == "table-cell" && item.Text == "Target choice" && item.Selector is not null);
+        Assert.Contains(tableDerived.UnclaimedBaseline!, item =>
+            item.Kind == "run" && item.Text == "Target choice" && item.Selector is not null);
+
+        var serialized = JsonSerializer.Serialize(new
+        {
+            repeated[0].Source,
+            repeated[0].BaselineOptions,
+            derived.UnclaimedBaseline
+        }, Json.Options);
+        Assert.DoesNotContain("ObjectId", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("Topology", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("paragraph:", serialized, StringComparison.Ordinal);
+
+        var legacyJson = """
+            {"Schema":"tiwater.docx.template-migration-exact-text-plan/v1","Pass":true,"Plan":{"Schema":"tiwater.docx.template-migration-plan/v1","SourceSha256":"A","BaselineSha256":"B","Mappings":[]},"Unresolved":[]}
+            """;
+        var legacy = JsonSerializer.Deserialize<TemplateMigrationMappingDerivation>(legacyJson, Json.Options);
+        Assert.NotNull(legacy);
+        Assert.Null(legacy!.UnclaimedBaseline);
     }
 
     [Fact]
@@ -1160,7 +1240,13 @@ public class AnnotationToolsTests
 
         Assert.True(paired.Pass);
         Assert.Contains(paired.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "unresolved");
-        Assert.Contains(paired.Unresolved, item => item.Reason == "template-migration-anchor-gap-candidate-review-required" && item.SourceObjectId == "body:paragraph:1" && item.BaselineObjectId == "body:paragraph:1");
+        var pending = Assert.Single(paired.Unresolved, item => item.Reason == "template-migration-anchor-gap-candidate-review-required");
+        Assert.Equal("body:paragraph:1", pending.SourceObjectId);
+        Assert.Equal("body:paragraph:1", pending.BaselineObjectId);
+        Assert.Equal("legacy heading", pending.Source?.Text);
+        Assert.Equal("target heading", pending.Baseline?.Text);
+        Assert.NotNull(pending.Source?.Selector);
+        Assert.NotNull(pending.Baseline?.Selector);
 
         var unequalSource = CreateTextMigrationFixture("anchor start", "legacy heading one", "legacy heading two", "anchor end");
         var unequal = TemplateMigration.DeriveAnchorGapPlan(unequalSource, baseline);
