@@ -854,6 +854,143 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_choice_contract_resolves_business_choices_without_selector_transcription()
+    {
+        var source = CreateTextMigrationFixture("Unseen source wording: α / beta");
+        var baseline = CreateTextMigrationFixture("New target wording — gamma");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var sourceChoice = Assert.Single(catalog.Sources, item => item.Text == "Unseen source wording: α / beta");
+        var targetChoice = Assert.Single(catalog.Targets, item => item.Kind == "paragraph" && item.Text == "New target wording — gamma");
+
+        var resolved = TemplateMigration.ResolveChoices(source, baseline, new TemplateMigrationChoiceCandidate(
+            "tiwater.docx.template-migration-choice-candidate/v1",
+            [new TemplateMigrationChoiceMapping(sourceChoice.Id, targetChoice.Id, "copy-text")]));
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(resolved.Plan.Mappings, item => item.Disposition == "copy-text"
+            && item.SourceObjectId == "body:paragraph:0"
+            && item.BaselineObjectId == "body:paragraph:0");
+        var output = Path.Combine(Path.GetTempPath(), $"migration-choice-contract-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        Assert.True(TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan).Pass);
+
+        var copiedSource = Path.Combine(Path.GetTempPath(), $"migration-choice-source-copy-{Guid.NewGuid():N}.docx");
+        var copiedBaseline = Path.Combine(Path.GetTempPath(), $"migration-choice-baseline-copy-{Guid.NewGuid():N}.docx");
+        File.Copy(source, copiedSource);
+        File.Copy(baseline, copiedBaseline);
+        var copiedCatalog = TemplateMigration.ListChoices(copiedSource, copiedBaseline);
+        Assert.Equal(catalog.Sources.Select(item => item.Id), copiedCatalog.Sources.Select(item => item.Id));
+        Assert.Equal(catalog.Targets.Select(item => item.Id), copiedCatalog.Targets.Select(item => item.Id));
+
+        var changedBaseline = CreateTextMigrationFixture("Changed target");
+        var stale = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveChoices(
+            source,
+            changedBaseline,
+            new TemplateMigrationChoiceCandidate(
+                "tiwater.docx.template-migration-choice-candidate/v1",
+                [new TemplateMigrationChoiceMapping(sourceChoice.Id, targetChoice.Id, "copy-text")])));
+        Assert.Equal("template-migration-choice-target-unknown-or-stale", stale.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_choice_contract_supports_declared_choice_and_clear_branches_and_rejects_bad_identity()
+    {
+        var source = CreateTextMigrationFixture("North team", "Research unit", "obsolete section");
+        var baseline = CreateChoiceMigrationFixture("North team", "South team", "Research unit");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var northSource = Assert.Single(catalog.Sources, item => item.Text == "North team");
+        var researchSource = Assert.Single(catalog.Sources, item => item.Text == "Research unit");
+        var obsoleteSource = Assert.Single(catalog.Sources, item => item.Text == "obsolete section");
+        var northTarget = Assert.Single(catalog.Targets, item => item.Kind == "run" && item.Text == "North team");
+        var researchTarget = Assert.Single(catalog.Targets, item => item.Kind == "run" && item.Text == "Research unit");
+
+        var resolved = TemplateMigration.ResolveChoices(source, baseline, new TemplateMigrationChoiceCandidate(
+            "tiwater.docx.template-migration-choice-candidate/v1",
+            [new TemplateMigrationChoiceMapping(obsoleteSource.Id, null, "out-of-scope")],
+            ChoiceSelections:
+            [
+                new TemplateMigrationChoiceSelectionCandidate(northSource.Id, northTarget.Id),
+                new TemplateMigrationChoiceSelectionCandidate(researchSource.Id, researchTarget.Id)
+            ]));
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal(2, resolved.Plan.ChoiceSelections?.Count);
+
+        var clearSource = CreateTextMigrationFixture("obsolete container");
+        var clearBaseline = CreateBaselineClearFixture("{{approval}}", "target owned");
+        var clearCatalog = TemplateMigration.ListChoices(clearSource, clearBaseline);
+        var clearResolved = TemplateMigration.ResolveChoices(clearSource, clearBaseline, new TemplateMigrationChoiceCandidate(
+            "tiwater.docx.template-migration-choice-candidate/v1",
+            [new TemplateMigrationChoiceMapping(clearCatalog.Sources.Single().Id, null, "out-of-scope")],
+            BaselineClears:
+            [new TemplateMigrationChoiceClear(
+                Assert.Single(clearCatalog.Targets, item => item.Kind == "table-cell" && item.Text == "{{approval}}").Id,
+                "cell")]));
+        Assert.True(clearResolved.Pass, string.Join("; ", clearResolved.Unresolved.Select(item => item.Reason)));
+        Assert.Single(clearResolved.Plan.BaselineClears!);
+
+        var duplicate = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveChoices(
+            source,
+            baseline,
+            new TemplateMigrationChoiceCandidate(
+                "tiwater.docx.template-migration-choice-candidate/v1",
+                [new TemplateMigrationChoiceMapping(northSource.Id, null, "out-of-scope")],
+                ChoiceSelections: [new TemplateMigrationChoiceSelectionCandidate(northSource.Id, northTarget.Id)])));
+        Assert.Equal("template-migration-choice-source-duplicate", duplicate.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_choice_contract_rejects_unknown_candidate_fields()
+    {
+        var source = CreateTextMigrationFixture("source fact");
+        var baseline = CreateTextMigrationFixture("target slot");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var file = Path.Combine(Path.GetTempPath(), $"migration-choice-invalid-{Guid.NewGuid():N}.json");
+        File.WriteAllText(file, $$"""
+        {
+          "schema": "tiwater.docx.template-migration-choice-candidate/v1",
+          "mappings": [{
+            "sourceChoiceId": "{{catalog.Sources.Single().Id}}",
+            "targetChoiceId": "{{catalog.Targets.First(item => item.Kind == "paragraph").Id}}",
+            "disposition": "copy-text",
+            "sourceSelector": {"kind":"paragraph"}
+          }]
+        }
+        """);
+
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RunResolveChoices([source, baseline, file]));
+        Assert.Equal("template-migration-choice-candidate-mapping-unknown-field:sourceSelector", error.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_choice_catalog_exposes_every_decision_required_by_the_resolver()
+    {
+        var source = CreateTextMigrationFixture("shared before", "source gap", "shared after", "remaining source");
+        var baseline = CreateTextMigrationFixture("shared before", "target gap", "shared after", "remaining target");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+
+        Assert.Equal(["source gap", "remaining source"], catalog.Sources.Select(item => item.Text).ToArray());
+        var gapSource = Assert.Single(catalog.Sources, item => item.Text == "source gap");
+        var remainingSource = Assert.Single(catalog.Sources, item => item.Text == "remaining source");
+        var gapTarget = Assert.Single(catalog.Targets, item => item.Kind == "paragraph" && item.Text == "target gap");
+        var remainingTarget = Assert.Single(catalog.Targets, item => item.Kind == "paragraph" && item.Text == "remaining target");
+        var resolved = TemplateMigration.ResolveChoices(source, baseline, new TemplateMigrationChoiceCandidate(
+            "tiwater.docx.template-migration-choice-candidate/v1",
+            [
+                new TemplateMigrationChoiceMapping(gapSource.Id, gapTarget.Id, "copy-text"),
+                new TemplateMigrationChoiceMapping(remainingSource.Id, remainingTarget.Id, "copy-text")
+            ]));
+
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1"
+            && item.BaselineObjectId == "body:paragraph:1"
+            && item.Reason == "semantic-candidate-resolved");
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:3"
+            && item.BaselineObjectId == "body:paragraph:3"
+            && item.Reason == "semantic-candidate-resolved");
+    }
+
+    [Fact]
     public void TemplateMigration_v6_resolves_one_context_bound_empty_baseline_target_and_validates_output_independently()
     {
         var source = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: "source heading");

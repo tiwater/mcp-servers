@@ -374,6 +374,44 @@ public sealed record TemplateMigrationCandidateDiscovery(
     IReadOnlyList<TemplateMigrationRequiredDecision> RequiredDecisions,
     IReadOnlyList<TemplateMigrationSemanticObservation> AvailableTargets);
 
+public sealed record TemplateMigrationChoice(
+    string Id,
+    string Kind,
+    string Scope,
+    string? Text,
+    int Count = 1,
+    string? RequiredCardinality = null,
+    TemplateMigrationSemanticContext? Context = null,
+    IReadOnlyList<string>? AllowedFor = null);
+
+public sealed record TemplateMigrationChoiceCatalog(
+    string Schema,
+    bool Pass,
+    string SourceSha256,
+    string BaselineSha256,
+    IReadOnlyList<TemplateMigrationChoice> Sources,
+    IReadOnlyList<TemplateMigrationChoice> Targets);
+
+public sealed record TemplateMigrationChoiceMapping(
+    string SourceChoiceId,
+    string? TargetChoiceId,
+    string Disposition,
+    string? Cardinality = null);
+
+public sealed record TemplateMigrationChoiceSelectionCandidate(
+    string SourceChoiceId,
+    string TargetChoiceId);
+
+public sealed record TemplateMigrationChoiceClear(
+    string TargetChoiceId,
+    string Mode);
+
+public sealed record TemplateMigrationChoiceCandidate(
+    string Schema,
+    IReadOnlyList<TemplateMigrationChoiceMapping> Mappings,
+    IReadOnlyList<TemplateMigrationChoiceSelectionCandidate>? ChoiceSelections = null,
+    IReadOnlyList<TemplateMigrationChoiceClear>? BaselineClears = null);
+
 public sealed record TemplateMigrationPlanFailure(
     string Reason,
     string? SourceObjectId = null,
