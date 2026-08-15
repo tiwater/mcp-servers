@@ -64,8 +64,7 @@ tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
 ```
 
 New semantic-resolution callers start with
-`find-template-migration-candidates`; this diagnostic command is not listed by
-top-level discovery.
+`list-template-migration-options`.
 
 ### 3aa. Legacy Exact-Text Diagnostic
 
@@ -88,7 +87,7 @@ tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.d
 
 It is not listed by new tool discovery and must not be passed to the operation
 builder. New semantic-resolution callers start with
-`find-template-migration-candidates`, whose resolver recomputes the automatic
+`list-template-migration-options`, whose resolver recomputes the automatic
 portion from the same current documents.
 
 This is a candidate producer: `Pass` means the typed candidate was derived
@@ -112,14 +111,14 @@ itself sufficient for semantic selection;
 the full technical analysis remains an audit artifact rather than an Agent
 join surface.
 
-### 3ab. Find Template-Migration Candidates
+### 3ab. List Template-Migration Options
 
 Lists every unmatched current object as one required semantic decision together
 with the selected baseline's contextual target inventory. The provider does not
 recommend or choose a target or terminal.
 
 ```bash
-tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
+tiwater-docx list-template-migration-options <source.docx> <baseline.docx>
 ```
 
 The result is an observation receipt, not a migration plan.
@@ -140,6 +139,9 @@ that content. The Agent chooses current business dispositions for the complete
 collection and submits them to
 `resolve-template-migration-semantic-candidate`; that resolver independently
 reopens both documents.
+
+`find-template-migration-candidates` remains a compatibility alias for existing
+callers. New callers use the purpose-named command above.
 
 ### 3b. Build Cross-Template Operations
 

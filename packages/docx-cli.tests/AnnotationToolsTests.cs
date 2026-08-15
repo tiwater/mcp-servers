@@ -44,7 +44,7 @@ public class AnnotationToolsTests
     [Theory]
     [InlineData("analyze-template-migration", "<source.docx> <baseline.docx> [--json]")]
     [InlineData("derive-template-migration-exact-text-plan", "<source.docx> <baseline.docx>")]
-    [InlineData("find-template-migration-candidates", "<source.docx> <baseline.docx>")]
+    [InlineData("list-template-migration-options", "<source.docx> <baseline.docx>")]
     [InlineData("build-template-migration-operations", "<source.docx> <baseline.docx> <plan.json>")]
     [InlineData("apply-template-migration", "<source.docx> <baseline.docx> <plan.json> <output.docx>")]
     [InlineData("validate-template-migration-output", "<source.docx> <baseline.docx> <plan.json> <output.docx>")]
@@ -127,7 +127,7 @@ public class AnnotationToolsTests
         }
 
         Assert.Contains("Unresolved[].BaselineOptions", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("new semantic-resolution callers use find-template-migration-candidates", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("new semantic-resolution callers use list-template-migration-options", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -146,7 +146,8 @@ public class AnnotationToolsTests
         }
 
         var usage = output.ToString();
-        Assert.Contains("find-template-migration-candidates", usage, StringComparison.Ordinal);
+        Assert.Contains("list-template-migration-options", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("find-template-migration-candidates", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("analyze-template-migration", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("derive-template-migration-exact-text-plan", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("derive-template-migration-anchor-gap-plan", usage, StringComparison.Ordinal);
@@ -169,9 +170,9 @@ public class AnnotationToolsTests
         }
 
         var usage = output.ToString();
-        Assert.Contains("start with candidate discovery", usage, StringComparison.Ordinal);
+        Assert.Contains("list unresolved sources and possible targets first", usage, StringComparison.Ordinal);
         Assert.Contains("run each selected command with --help before consuming its output", usage, StringComparison.Ordinal);
-        Assert.Contains("find-template-migration-candidates", usage, StringComparison.Ordinal);
+        Assert.Contains("list-template-migration-options", usage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -182,7 +183,7 @@ public class AnnotationToolsTests
         try
         {
             Console.SetOut(output);
-            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["find-template-migration-candidates", "--help"]));
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["list-template-migration-options", "--help"]));
         }
         finally
         {
@@ -202,6 +203,27 @@ public class AnnotationToolsTests
         Assert.DoesNotContain("Do not use for: Ignoring a RequiredDecision", help, StringComparison.Ordinal);
         Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
         Assert.Contains("performs its conservative exact comparison internally", help, StringComparison.Ordinal);
+        Assert.Contains("does not generate candidate mappings", help, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Legacy_candidate_discovery_name_remains_a_documented_compatibility_alias()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["find-template-migration-candidates", "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var help = output.ToString();
+        Assert.Contains("tiwater-docx list-template-migration-options", help, StringComparison.Ordinal);
+        Assert.Contains("Compatibility alias: find-template-migration-candidates", help, StringComparison.Ordinal);
     }
 
     [Fact]

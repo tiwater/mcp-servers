@@ -303,7 +303,7 @@ public static class TemplateMigration
     {
         if (args.Length < 2)
         {
-            throw new InvalidOperationException("find-template-migration-candidates requires <source.docx> <baseline.docx>");
+            throw new InvalidOperationException("list-template-migration-options requires <source.docx> <baseline.docx>");
         }
         var result = FindCandidates(args[0], args[1]);
         Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
