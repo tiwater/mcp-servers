@@ -2247,6 +2247,62 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_incremental_decision_resolves_a_context_bound_empty_target()
+    {
+        var source = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: "new heading never seen before");
+        var baseline = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: null);
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-empty-target-decisions-{Guid.NewGuid():N}.json");
+
+        var started = TemplateMigration.StartDecisionDraft(source, baseline, draft);
+        var sourceChoice = Assert.Single(TemplateMigration.ListChoices(source, baseline).Sources);
+        Assert.Equal(sourceChoice.Id, started.NextSource?.Id);
+        var targetPage = TemplateMigration.ListCurrentDecisionTargets(source, baseline, draft, "copy-text", null, 0, 100);
+        var emptyTarget = Assert.Single(targetPage.Targets, item => item.Text == string.Empty);
+
+        var completed = TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", sourceChoice.Id, emptyTarget.Id, "copy-text"));
+        Assert.Equal(0, completed.RemainingSourceCount);
+
+        var resolved = TemplateMigration.ResolveDecisionDraft(source, baseline, draft);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId.StartsWith("header:", StringComparison.Ordinal)
+            && item.BaselineObjectId?.StartsWith("header:", StringComparison.Ordinal) == true
+            && item.Disposition == "copy-text");
+    }
+
+    [Fact]
+    public void TemplateMigration_incremental_empty_target_keeps_an_unrelated_local_review_closed()
+    {
+        var source = CreateContextBoundEmptyHeaderMigrationFixture(
+            sourceText: "another unseen heading",
+            bodyText: "business ownership needs review");
+        var baseline = CreateContextBoundEmptyHeaderMigrationFixture(
+            sourceText: null,
+            bodyText: "reserved body target");
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-empty-target-review-{Guid.NewGuid():N}.json");
+
+        TemplateMigration.StartDecisionDraft(source, baseline, draft);
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var heading = Assert.Single(catalog.Sources, item => item.Text == "another unseen heading");
+        var review = Assert.Single(catalog.Sources, item => item.Text == "business ownership needs review");
+        var emptyTarget = Assert.Single(catalog.Targets, item => item.Kind == "table-cell" && item.Text == string.Empty);
+        TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", heading.Id, emptyTarget.Id, "copy-text"));
+        TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", review.Id, Disposition: "review-required"));
+
+        var resolved = TemplateMigration.ResolveDecisionDraft(source, baseline, draft);
+        Assert.False(resolved.Pass);
+        Assert.Equal("tiwater.docx.template-migration-review-closure/v1", resolved.Schema);
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId.StartsWith("header:", StringComparison.Ordinal)
+            && item.BaselineObjectId?.StartsWith("header:", StringComparison.Ordinal) == true
+            && item.Disposition == "copy-text");
+        Assert.Single(resolved.Unresolved, item => item.SourceObjectId == "body:paragraph:0");
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:0"
+            && item.Disposition == "review-required");
+    }
+
+    [Fact]
     public void TemplateMigration_candidate_commands_exit_successfully_when_semantic_work_remains()
     {
         var source = CreateTextMigrationFixture("anchor start", "legacy heading", "anchor end");
@@ -4910,7 +4966,10 @@ public class AnnotationToolsTests
         return path;
     }
 
-    private static string CreateContextBoundEmptyHeaderMigrationFixture(string? sourceText, bool duplicateEmptyTarget = false)
+    private static string CreateContextBoundEmptyHeaderMigrationFixture(
+        string? sourceText,
+        bool duplicateEmptyTarget = false,
+        string bodyText = "shared body")
     {
         var path = Path.Combine(Path.GetTempPath(), $"header-empty-target-{Guid.NewGuid():N}.docx");
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
@@ -4934,7 +4993,7 @@ public class AnnotationToolsTests
         table.Append(rows);
         header.Header = new Header(table);
         main.Document = new Document(new Body(
-            new Paragraph(new Run(new Text("shared body"))),
+            new Paragraph(new Run(new Text(bodyText))),
             new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));
         main.Document.Save();
         header.Header.Save();
