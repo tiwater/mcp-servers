@@ -141,3 +141,34 @@ jobs:
           python -m build
           python ../../scripts/validate_json.py --archives-from ./dist
           twine upload dist/* --skip-existing
+
+  publish-office-mcp:
+    name: Publish Office MCP
+    needs: release-gate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify package and server contract
+        run: |
+          cd servers
+          npm test
+          npm pack --dry-run
+
+      - name: Publish Office MCP
+        working-directory: servers
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          if npm view "@tiwater/office-mcp@${package_version}" version >/dev/null 2>&1; then
+            echo "@tiwater/office-mcp ${package_version} is already published"
+          else
+            npm publish --provenance --access public
+          fi

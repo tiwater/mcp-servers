@@ -50,6 +50,8 @@ public class AnnotationToolsTests
     [InlineData("revise-template-migration-decision", "<source.docx> <baseline.docx> <draft.json> <source-choice-id> mapping <disposition> <target-choice-id|-> [cardinality|-]")]
     [InlineData("resolve-template-migration-decisions", "<source.docx> <baseline.docx> <draft.json>")]
     [InlineData("list-template-migration-choices", "<source.docx> <baseline.docx>")]
+    [InlineData("migrate-template", "<source.docx> <baseline.docx> <choices.json> <output.docx>")]
+    [InlineData("verify-template-migration", "<source.docx> <baseline.docx> <choices.json> <output.docx>")]
     [InlineData("resolve-template-migration-choices", "<source.docx> <baseline.docx> <choices.json>")]
     [InlineData("list-template-migration-options", "<source.docx> <baseline.docx>")]
     [InlineData("build-template-migration-operations", "<source.docx> <baseline.docx> <plan.json>")]
@@ -929,6 +931,150 @@ public class AnnotationToolsTests
                 "tiwater.docx.template-migration-choice-candidate/v1",
                 [new TemplateMigrationChoiceMapping(sourceChoice.Id, targetChoice.Id, "copy-text")])));
         Assert.Equal("template-migration-choice-target-unknown-or-stale", stale.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_business_batch_executes_and_independently_verifies_without_agent_authored_content()
+    {
+        var source = CreateTextMigrationFixture("Unseen current statement");
+        var baseline = CreateTextMigrationFixture("New template slot");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var sourceChoice = Assert.Single(catalog.Sources);
+        var targetChoice = Assert.Single(catalog.Targets, item => item.Kind == "paragraph");
+        var choices = new TemplateMigrationBusinessChoiceBatch(
+            "tiwater.docx.template-migration-business-choices/v1",
+            [new TemplateMigrationBusinessChoice(sourceChoice.Id, "place-content", targetChoice.Id)]);
+        var output = Path.Combine(Path.GetTempPath(), $"migration-business-batch-{Guid.NewGuid():N}.docx");
+
+        var execution = TemplateMigration.MigrateTemplate(source, baseline, choices, output);
+
+        Assert.True(execution.Pass, string.Join("; ", execution.Failures.Select(item => item.Reason)));
+        Assert.Equal("pass", execution.Status);
+        Assert.True(execution.OutputVerified);
+        Assert.True(File.Exists(output));
+        Assert.True(File.Exists(output + ".migration-plan.json"));
+        var verification = TemplateMigration.VerifyTemplateMigration(source, baseline, choices, output);
+        Assert.True(verification.Pass, string.Join("; ", verification.Failures.Select(item => item.Reason)));
+        Assert.True(verification.OutputVerified);
+
+        File.Copy(CreateTextMigrationFixture("tampered output"), output, true);
+        var rejected = TemplateMigration.VerifyTemplateMigration(source, baseline, choices, output);
+        Assert.False(rejected.Pass);
+        Assert.Contains(rejected.Failures, item => item.Reason.Contains("readback", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TemplateMigration_business_batch_supports_distinct_selection_cleanup_and_local_review_outcomes()
+    {
+        var source = CreateTextMigrationFixture("North team", "Research unit", "obsolete section");
+        var baseline = CreateChoiceMigrationFixture("North team", "South team", "Research unit");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var choices = new TemplateMigrationBusinessChoiceBatch(
+            "tiwater.docx.template-migration-business-choices/v1",
+            [
+                new TemplateMigrationBusinessChoice(
+                    Assert.Single(catalog.Sources, item => item.Text == "North team").Id,
+                    "select-template-option",
+                    Assert.Single(catalog.Targets, item => item.Kind == "run" && item.Text == "North team").Id),
+                new TemplateMigrationBusinessChoice(
+                    Assert.Single(catalog.Sources, item => item.Text == "Research unit").Id,
+                    "select-template-option",
+                    Assert.Single(catalog.Targets, item => item.Kind == "run" && item.Text == "Research unit").Id),
+                new TemplateMigrationBusinessChoice(
+                    Assert.Single(catalog.Sources, item => item.Text == "obsolete section").Id,
+                    "exclude-source")
+            ]);
+        var selected = TemplateMigration.ResolveBusinessChoices(source, baseline, choices);
+        Assert.True(selected.Pass, string.Join("; ", selected.Unresolved.Select(item => item.Reason)));
+        Assert.Equal(2, selected.Plan.ChoiceSelections?.Count);
+
+        var cleanupSource = CreateTextMigrationFixture("obsolete container");
+        var cleanupBaseline = CreateBaselineClearFixture("{{approval}}", "target owned");
+        var cleanupCatalog = TemplateMigration.ListChoices(cleanupSource, cleanupBaseline);
+        var cleanup = TemplateMigration.ResolveBusinessChoices(
+            cleanupSource,
+            cleanupBaseline,
+            new TemplateMigrationBusinessChoiceBatch(
+                "tiwater.docx.template-migration-business-choices/v1",
+                [new TemplateMigrationBusinessChoice(cleanupCatalog.Sources.Single().Id, "exclude-source")],
+                [new TemplateMigrationTemplateCleanup(
+                    Assert.Single(cleanupCatalog.Targets, item => item.Kind == "table-cell" && item.Text == "{{approval}}").Id,
+                    "cell")]));
+        Assert.True(cleanup.Pass, string.Join("; ", cleanup.Unresolved.Select(item => item.Reason)));
+        Assert.Single(cleanup.Plan.BaselineClears!);
+
+        var reviewSource = CreateTextMigrationFixture("business meaning is genuinely unclear");
+        var reviewBaseline = CreateTextMigrationFixture("possible target");
+        var reviewCatalog = TemplateMigration.ListChoices(reviewSource, reviewBaseline);
+        var reviewOutput = Path.Combine(Path.GetTempPath(), $"migration-review-{Guid.NewGuid():N}.docx");
+        var review = TemplateMigration.MigrateTemplate(
+            reviewSource,
+            reviewBaseline,
+            new TemplateMigrationBusinessChoiceBatch(
+                "tiwater.docx.template-migration-business-choices/v1",
+                [new TemplateMigrationBusinessChoice(reviewCatalog.Sources.Single().Id, "review-source")]),
+            reviewOutput);
+        Assert.False(review.Pass);
+        Assert.True(review.ReviewRequired, string.Join("; ", review.Failures.Select(item => item.Reason)));
+        Assert.Equal("review-required", review.Status);
+        Assert.True(review.OutputVerified);
+        Assert.True(File.Exists(reviewOutput));
+        Assert.True(File.Exists(reviewOutput + ".migration-plan.json"));
+        var reviewVerification = TemplateMigration.VerifyTemplateMigration(
+            reviewSource,
+            reviewBaseline,
+            new TemplateMigrationBusinessChoiceBatch(
+                "tiwater.docx.template-migration-business-choices/v1",
+                [new TemplateMigrationBusinessChoice(reviewCatalog.Sources.Single().Id, "review-source")]),
+            reviewOutput);
+        Assert.False(reviewVerification.Pass);
+        Assert.True(reviewVerification.ReviewRequired);
+        Assert.True(reviewVerification.OutputVerified);
+        Assert.Equal("review-required", reviewVerification.Status);
+    }
+
+    [Fact]
+    public async Task TemplateMigration_business_batch_fails_closed_for_incomplete_unknown_or_extra_input()
+    {
+        var source = CreateTextMigrationFixture("first current", "second current");
+        var baseline = CreateTextMigrationFixture("first target", "second target");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var firstSource = catalog.Sources.First();
+        var firstTarget = catalog.Targets.First(item => item.Kind == "paragraph");
+        var incomplete = new TemplateMigrationBusinessChoiceBatch(
+            "tiwater.docx.template-migration-business-choices/v1",
+            [new TemplateMigrationBusinessChoice(firstSource.Id, "place-content", firstTarget.Id)]);
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            TemplateMigration.ResolveBusinessChoices(source, baseline, incomplete));
+        Assert.Equal("template-migration-business-choice-set-incomplete", error.Message);
+
+        var duplicate = incomplete with
+        {
+            Choices = [
+                new TemplateMigrationBusinessChoice(firstSource.Id, "exclude-source"),
+                new TemplateMigrationBusinessChoice(firstSource.Id, "exclude-source")
+            ]
+        };
+        error = Assert.Throws<InvalidOperationException>(() =>
+            TemplateMigration.ResolveBusinessChoices(source, baseline, duplicate));
+        Assert.Equal("template-migration-business-source-duplicate", error.Message);
+
+        var choicesPath = Path.Combine(Path.GetTempPath(), $"migration-business-invalid-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(Path.GetTempPath(), $"migration-business-invalid-{Guid.NewGuid():N}.docx");
+        File.WriteAllText(choicesPath, $$"""
+        {
+          "schema": "tiwater.docx.template-migration-business-choices/v1",
+          "choices": [{
+            "sourceChoiceId": "{{firstSource.Id}}",
+            "action": "exclude-source",
+            "documentText": "caller must not supply content"
+          }]
+        }
+        """);
+        Assert.Equal(1, await Dockit.Docx.Cli.Cli.RunAsync([
+            "migrate-template", source, baseline, choicesPath, output]));
+        Assert.False(File.Exists(output));
+        Assert.False(File.Exists(output + ".migration-plan.json"));
     }
 
     [Fact]

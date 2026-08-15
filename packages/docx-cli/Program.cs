@@ -18,6 +18,8 @@ public static class Cli
         "revise-template-migration-decision",
         "resolve-template-migration-decisions",
         "list-template-migration-choices",
+        "migrate-template",
+        "verify-template-migration",
         "resolve-template-migration-choices",
         "list-template-migration-options",
         "resolve-template-migration-semantic-candidate",
@@ -77,6 +79,8 @@ public static class Cli
                 "revise-template-migration-decision" => Task.FromResult(TemplateMigration.RunReviseDecision(args[1..])),
                 "resolve-template-migration-decisions" => Task.FromResult(TemplateMigration.RunResolveDecisionDraft(args[1..])),
                 "list-template-migration-choices" => Task.FromResult(TemplateMigration.RunListChoices(args[1..])),
+                "migrate-template" => Task.FromResult(TemplateMigration.RunMigrateTemplate(args[1..])),
+                "verify-template-migration" => Task.FromResult(TemplateMigration.RunVerifyTemplateMigration(args[1..])),
                 "resolve-template-migration-choices" => Task.FromResult(TemplateMigration.RunResolveChoices(args[1..])),
                 "derive-template-migration-anchor-gap-plan" => Task.FromResult(TemplateMigration.RunDeriveAnchorGapPlan(args[1..])),
                 "resolve-template-migration-semantic-candidate" => Task.FromResult(TemplateMigration.RunResolveSemanticCandidate(args[1..])),
@@ -184,13 +188,16 @@ public static class Cli
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
-        Console.WriteLine("Template migration: record one current-document decision at a time; read each next command's --help before using it.");
+        Console.WriteLine("Template migration: record one current-document decision at a time; read each next command's --help before using it. Agent-facing callers use the published Office MCP batch surface.");
+        Console.WriteLine("  list-template-migration-choices <source.docx> <baseline.docx>");
+        Console.WriteLine("  migrate-template <source.docx> <baseline.docx> <choices.json> <output.docx>");
+        Console.WriteLine("  verify-template-migration <source.docx> <baseline.docx> <choices.json> <output.docx>");
+        Console.WriteLine("Compatibility and diagnostic commands:");
         Console.WriteLine("  start-template-migration-decisions <source.docx> <baseline.docx> <draft.json>");
         Console.WriteLine("  find-template-migration-targets <source.docx> <baseline.docx> <draft.json> <branch> <branch arguments>");
         Console.WriteLine("  record-template-migration-decision <source.docx> <baseline.docx> <draft.json> <branch> <branch arguments>");
         Console.WriteLine("  revise-template-migration-decision <source.docx> <baseline.docx> <draft.json> <source-choice-id> <branch> <branch arguments>");
         Console.WriteLine("  resolve-template-migration-decisions <source.docx> <baseline.docx> <draft.json>");
-        Console.WriteLine("  list-template-migration-choices <source.docx> <baseline.docx>  (compatibility)");
         Console.WriteLine("  resolve-template-migration-choices <source.docx> <baseline.docx> <choices.json>  (compatibility)");
         Console.WriteLine("  list-template-migration-options <source.docx> <baseline.docx>  (compatibility)");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (compatibility)");
@@ -214,7 +221,7 @@ public static class Cli
         Console.WriteLine("Produces: Published DOCX observations, plans, edited documents, previews, and validation receipts.");
         Console.WriteLine("Use when: A scenario-declared capability requires DOCX inspection, template migration, editing, normalization, or validation.");
         Console.WriteLine("Do not use for: Choosing scenario semantics, inventing business values, deciding delivery, rendering Office pages, or OCR.");
-        Console.WriteLine("Command discovery: Run tiwater-docx --help; start template migration with start-template-migration-decisions, then read each command's --help when its inputs exist.");
+        Console.WriteLine("Command discovery: Run tiwater-docx --help for CLI compatibility; Agent-facing callers use the published Office MCP batch surface.");
         Console.WriteLine("Usage: tiwater-docx <command> [arguments]");
     }
 
@@ -315,11 +322,29 @@ public static class Cli
                 Purpose: Present unresolved source observations and selectable baseline targets as concise, current-document-bound choices.
                 Consumes: One current source DOCX and one selected baseline DOCX.
                 Produces: Opaque source and target choice ids with visible text and local context. It does not expose selectors or recommend business semantics.
-                Use when: An existing integration consumes the complete choice catalog.
-                Do not use for: New Agent-facing migration work, inventing business values, choosing a target automatically, building operations, or persisting choices across document revisions. New callers start with start-template-migration-decisions.
+                Use when: A caller needs the complete current choice catalog before one typed batch migration request.
+                Do not use for: Inventing business values, choosing a target automatically, building operations, or persisting choices across document revisions.
                 Usage:
                   tiwater-docx list-template-migration-choices <source.docx> <baseline.docx>
-                Compatibility next: Submit only the chosen ids and business dispositions to resolve-template-migration-choices.
+                Next: Submit the chosen ids and business actions to migrate-template.
+                """,
+            "migrate-template" => """
+                Purpose: Migrate current source content into the selected baseline from one complete batch of business choices.
+                Consumes: Current source DOCX, selected baseline DOCX, typed business choices using only ids returned by list-template-migration-choices, and a new output path.
+                Produces: A passing output DOCX, persistent plan sidecar, and complete execution receipt; or a failed/review-required receipt without an output.
+                Use when: Current scenario knowledge determines each listed source action, with genuine ambiguity marked only on that source.
+                Do not use for: Supplying document text, selectors, coordinates, edit operations, plans, or incremental state.
+                Usage:
+                  tiwater-docx migrate-template <source.docx> <baseline.docx> <choices.json> <output.docx>
+                """,
+            "verify-template-migration" => """
+                Purpose: Independently verify a migrated document from the current source, selected baseline, and the same typed business choices.
+                Consumes: Current source DOCX, selected baseline DOCX, the complete choice batch, output DOCX, and the provider-owned plan sidecar.
+                Produces: A fresh verification receipt that re-resolves choices, rebuilds operations, and reads the output back.
+                Use when: migrate-template has returned a passing stable output.
+                Do not use for: Trusting the migration receipt, editing a document, or repairing a failed output.
+                Usage:
+                  tiwater-docx verify-template-migration <source.docx> <baseline.docx> <choices.json> <output.docx>
                 """,
             "resolve-template-migration-choices" => """
                 Purpose: Expand current-document-bound semantic choices into the provider's validated migration plan.

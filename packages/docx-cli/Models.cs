@@ -412,6 +412,21 @@ public sealed record TemplateMigrationChoiceCandidate(
     IReadOnlyList<TemplateMigrationChoiceSelectionCandidate>? ChoiceSelections = null,
     IReadOnlyList<TemplateMigrationChoiceClear>? BaselineClears = null);
 
+public sealed record TemplateMigrationBusinessChoice(
+    string SourceChoiceId,
+    string Action,
+    string? TargetChoiceId = null,
+    string? Cardinality = null);
+
+public sealed record TemplateMigrationTemplateCleanup(
+    string TargetChoiceId,
+    string Scope);
+
+public sealed record TemplateMigrationBusinessChoiceBatch(
+    string Schema,
+    IReadOnlyList<TemplateMigrationBusinessChoice> Choices,
+    IReadOnlyList<TemplateMigrationTemplateCleanup>? TemplateCleanup = null);
+
 public sealed record TemplateMigrationDecisionDraft(
     string Schema,
     string SourceSha256,
@@ -502,6 +517,35 @@ public sealed record TemplateMigrationApplyResult(
     DocxEditResult? Edit,
     IReadOnlyList<TemplateMigrationPlanFailure> MediaFailures,
     TemplateMigrationReadback? Readback);
+
+public sealed record TemplateMigrationExecutionReceipt(
+    string Schema,
+    string ToolVersion,
+    string Status,
+    bool Pass,
+    bool ReviewRequired,
+    bool OutputVerified,
+    string? Output,
+    string? Plan,
+    TemplateMigrationMappingDerivation Resolution,
+    TemplateMigrationOperationBuild? Build,
+    TemplateMigrationApplyResult? Apply,
+    TemplateMigrationPreviewResult? Preview,
+    TemplateMigrationOutputValidation? Validation,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
+
+public sealed record TemplateMigrationVerificationReceipt(
+    string Schema,
+    string ToolVersion,
+    string Status,
+    bool Pass,
+    bool ReviewRequired,
+    bool OutputVerified,
+    string Output,
+    string? Plan,
+    TemplateMigrationMappingDerivation Resolution,
+    TemplateMigrationOutputValidation? Validation,
+    IReadOnlyList<TemplateMigrationPlanFailure> Failures);
 
 public sealed record TemplateMigrationPreviewResult(
     string Schema,

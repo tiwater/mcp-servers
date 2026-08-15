@@ -96,7 +96,8 @@ async function runCommand(candidate, args, options) {
 
     child.on('error', reject);
     child.on('close', code => {
-      if (code === 0) {
+      const allowedExitCodes = options.allowedExitCodes ?? [0];
+      if (allowedExitCodes.includes(code)) {
         resolve({ code, stdout, stderr, command: candidate.command, args: commandArgs });
         return;
       }

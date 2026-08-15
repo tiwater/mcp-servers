@@ -1,0 +1,21 @@
+{
+  "name": "@tiwater/office-mcp",
+  "version": "0.1.0",
+  "description": "Published MCP server for Tiwater Office document capabilities",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "tiwater-office-mcp": "office/index.mjs"
+  },
+  "files": [
+    "_shared/*.mjs",
+    "office/index.mjs",
+    "office/README.md"
+  ],
+  "scripts": {
+    "test": "node --test office/*.test.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
