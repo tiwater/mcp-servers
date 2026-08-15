@@ -941,6 +941,11 @@ public class AnnotationToolsTests
         var catalog = TemplateMigration.ListChoices(source, baseline);
         var sourceChoice = Assert.Single(catalog.Sources);
         var targetChoice = Assert.Single(catalog.Targets, item => item.Kind == "paragraph");
+        Assert.Contains("place-content", sourceChoice.AllowedActions!);
+        Assert.Contains("place-content", targetChoice.AllowedActions!);
+        Assert.DoesNotContain(catalog.Sources.Concat(catalog.Targets)
+            .SelectMany(item => item.AllowedActions ?? []),
+            action => action is "mapping" or "choice-selection" or "baseline-clear");
         var choices = new TemplateMigrationBusinessChoiceBatch(
             "tiwater.docx.template-migration-business-choices/v1",
             [new TemplateMigrationBusinessChoice(sourceChoice.Id, "place-content", targetChoice.Id)]);
@@ -1186,8 +1191,8 @@ public class AnnotationToolsTests
         Assert.Equal(0, started.RecordedSourceCount);
         Assert.Equal(2, started.RemainingSourceCount);
         Assert.NotNull(started.NextSource);
-        Assert.Contains("review-required", started.NextSource.AllowedFor!);
-        Assert.Contains("out-of-scope", started.NextSource.AllowedFor!);
+        Assert.Contains("review-source", started.NextSource.AllowedActions!);
+        Assert.Contains("exclude-source", started.NextSource.AllowedActions!);
 
         var catalog = TemplateMigration.ListChoices(source, baseline);
         var heading = started.NextSource!;
