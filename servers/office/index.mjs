@@ -216,32 +216,6 @@ const tools = [
     },
   },
   {
-    name: 'docx_strip_direct_formatting',
-    description: 'Copy a DOCX and remove direct paragraph and run formatting while preserving styles.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        output: { type: 'string' },
-      },
-      required: ['input', 'output'],
-    },
-  },
-  {
-    name: 'docx_replace_style_ids',
-    description: 'Copy a DOCX and replace style IDs based on a provided style map object or JSON file.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        output: { type: 'string' },
-        styleMap: { type: 'object', additionalProperties: { type: 'string' } },
-        styleMapPath: { type: 'string' },
-      },
-      required: ['input', 'output'],
-    },
-  },
-  {
     name: 'docx_export_json',
     description: 'Export the body content of a DOCX document as structured JSON.',
     inputSchema: {
@@ -332,10 +306,6 @@ async function callTool(name, args) {
       return createToolResult(await docxCompare(args));
     case 'docx_validate_template_transform':
       return createToolResult(await docxValidateTemplateTransform(args));
-    case 'docx_strip_direct_formatting':
-      return createToolResult(await docxStripDirectFormatting(args));
-    case 'docx_replace_style_ids':
-      return createToolResult(await docxReplaceStyleIds(args));
     case 'docx_export_json':
       return createToolResult(await docxExportJson(args));
     case 'xlsx_inspect':
@@ -415,30 +385,6 @@ async function docxValidateTemplateTransform(args) {
   const targetTemplate = requireString(args.targetTemplate, 'targetTemplate');
   const result = await runJsonCandidateChain(docxCandidates, ['validate-template-transform', sourceTemplate, targetTemplate, '--json']);
   return { tool: 'docx_validate_template_transform', runtime: commandRuntime(result), report: result.json };
-}
-
-async function docxStripDirectFormatting(args) {
-  const input = requireString(args.input, 'input');
-  const output = requireString(args.output, 'output');
-  const result = await runCandidateChain(docxCandidates, ['strip-direct-formatting', input, output]);
-  return { tool: 'docx_strip_direct_formatting', runtime: commandRuntime(result), outputPath: output, stdout: result.stdout.trim() };
-}
-
-async function docxReplaceStyleIds(args) {
-  const input = requireString(args.input, 'input');
-  const output = requireString(args.output, 'output');
-  if (args.styleMapPath) {
-    const styleMapPath = requireString(args.styleMapPath, 'styleMapPath');
-    const result = await runCandidateChain(docxCandidates, ['replace-style-ids', input, output, styleMapPath]);
-    return { tool: 'docx_replace_style_ids', runtime: commandRuntime(result), outputPath: output, stdout: result.stdout.trim(), styleMapPath };
-  }
-  if (!args.styleMap || typeof args.styleMap !== 'object' || Array.isArray(args.styleMap)) {
-    throw Object.assign(new Error('styleMap or styleMapPath is required'), { code: -32602 });
-  }
-  return withTempJsonFile(args.styleMap, async styleMapPath => {
-    const result = await runCandidateChain(docxCandidates, ['replace-style-ids', input, output, styleMapPath]);
-    return { tool: 'docx_replace_style_ids', runtime: commandRuntime(result), outputPath: output, stdout: result.stdout.trim() };
-  });
 }
 
 async function docxExportJson(args) {

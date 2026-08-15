@@ -67,7 +67,16 @@ process.exit(2);
     assert(names.includes('docx_migrate_template'));
     assert(names.includes('docx_verify_migration'));
     assert.deepEqual(
-      names.filter(name => ['docx_edit', 'docx_fill_template', 'xlsx_edit', 'xlsx_fill_template', 'pptx_apply_format_edits', 'pptx_fill_template'].includes(name)),
+      names.filter(name => [
+        'docx_edit',
+        'docx_fill_template',
+        'docx_strip_direct_formatting',
+        'docx_replace_style_ids',
+        'xlsx_edit',
+        'xlsx_fill_template',
+        'pptx_apply_format_edits',
+        'pptx_fill_template',
+      ].includes(name)),
       [],
     );
     assert(!names.some(name => name.includes('record') || name.includes('revise') || name.includes('target_search')));
