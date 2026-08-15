@@ -331,7 +331,7 @@ public static class TemplateMigration
                 item.Source,
                 item.Count,
                 item.RequiredCardinality,
-                ["mapping", "choice-selection", "out-of-scope", "review-required"]))
+                ["place-content", "keep-template-content", "keep-template-label", "select-template-option", "exclude-source", "review-source"]))
             .ToList();
         EnsureUniqueChoiceIds(sources, "source");
 
@@ -345,11 +345,13 @@ public static class TemplateMigration
                 group.Key,
                 group.First(),
                 group.Count(),
-                allowedFor: group.First().Kind == "run"
-                    ? ["choice-selection"]
+                allowedActions: group.First().Kind == "run"
+                    ? ["select-template-option"]
+                    : group.First().Kind == "media"
+                        ? ["place-content"]
                     : group.First().Kind == "table-cell"
-                        ? ["mapping", "baseline-clear"]
-                        : ["mapping"]))
+                        ? ["place-content", "keep-template-content", "keep-template-label", "template-cleanup"]
+                        : ["place-content", "keep-template-content", "keep-template-label"]))
             .ToList();
 
         return new TemplateMigrationChoiceCatalog(
@@ -485,12 +487,12 @@ public static class TemplateMigration
         IEnumerable<TemplateMigrationChoice> targets = branch switch
         {
             "copy-text" or "retain-target" or "retain-target-label" => catalog.Targets.Where(item =>
-                item.AllowedFor?.Contains("mapping", StringComparer.Ordinal) == true
+                item.AllowedActions?.Contains(PublicActionForDisposition(branch), StringComparer.Ordinal) == true
                 && string.Equals(item.Kind, sourceChoice!.Kind, StringComparison.Ordinal)),
-            "copy-media" => catalog.Targets.Where(item => item.AllowedFor?.Contains("mapping", StringComparer.Ordinal) == true
+            "copy-media" => catalog.Targets.Where(item => item.AllowedActions?.Contains("place-content", StringComparer.Ordinal) == true
                 && item.Kind == "media" && sourceChoice!.Kind == "media"),
-            "choice-selection" => catalog.Targets.Where(item => item.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) == true),
-            "baseline-clear" => catalog.Targets.Where(item => item.AllowedFor?.Contains("baseline-clear", StringComparer.Ordinal) == true),
+            "choice-selection" => catalog.Targets.Where(item => item.AllowedActions?.Contains("select-template-option", StringComparer.Ordinal) == true),
+            "baseline-clear" => catalog.Targets.Where(item => item.AllowedActions?.Contains("template-cleanup", StringComparer.Ordinal) == true),
             _ => throw new InvalidOperationException("template-migration-target-branch-invalid")
         };
         if (!string.IsNullOrWhiteSpace(query) && query != "-")
@@ -602,7 +604,7 @@ public static class TemplateMigration
                 if (string.IsNullOrWhiteSpace(decision.TargetChoiceId)) throw new InvalidOperationException("template-migration-decision-target-required");
                 var target = catalog.Targets.SingleOrDefault(item => item.Id == decision.TargetChoiceId)
                     ?? throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-                if (target.AllowedFor?.Contains("mapping", StringComparer.Ordinal) != true
+                if (target.AllowedActions?.Contains(PublicActionForDisposition(decision.Disposition), StringComparer.Ordinal) != true
                     || !string.Equals(sourceChoice.Kind, target.Kind, StringComparison.Ordinal)
                     || (decision.Disposition == "copy-media" && sourceChoice.Kind != "media")
                     || (decision.Disposition != "copy-media" && sourceChoice.Kind == "media"))
@@ -623,8 +625,8 @@ public static class TemplateMigration
                 ?? throw new InvalidOperationException("template-migration-decision-source-unknown-or-stale");
             var target = catalog.Targets.SingleOrDefault(item => item.Id == decision.TargetChoiceId)
                 ?? throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-            if (sourceChoice.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) != true
-                || target.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) != true)
+            if (sourceChoice.AllowedActions?.Contains("select-template-option", StringComparer.Ordinal) != true
+                || target.AllowedActions?.Contains("select-template-option", StringComparer.Ordinal) != true)
             {
                 throw new InvalidOperationException("template-migration-decision-target-incompatible");
             }
@@ -636,7 +638,7 @@ public static class TemplateMigration
             if (!string.IsNullOrWhiteSpace(decision.SourceChoiceId)) throw new InvalidOperationException("template-migration-decision-source-forbidden");
             var target = catalog.Targets.SingleOrDefault(item => item.Id == decision.TargetChoiceId)
                 ?? throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-            if (target.AllowedFor?.Contains("baseline-clear", StringComparer.Ordinal) != true
+            if (target.AllowedActions?.Contains("template-cleanup", StringComparer.Ordinal) != true
                 || decision.Mode is not ("cell" or "row"))
             {
                 throw new InvalidOperationException("template-migration-decision-clear-invalid");
@@ -810,6 +812,15 @@ public static class TemplateMigration
     private static bool IsTargetedMappingDisposition(string value)
         => value is "copy-text" or "copy-media" or "retain-target" or "retain-target-label";
 
+    private static string PublicActionForDisposition(string value)
+        => value switch
+        {
+            "copy-text" or "copy-media" => "place-content",
+            "retain-target" => "keep-template-content",
+            "retain-target-label" => "keep-template-label",
+            _ => throw new InvalidOperationException("template-migration-decision-disposition-invalid")
+        };
+
     private static string ChoiceSearchText(TemplateMigrationChoice choice)
         => string.Join("\n", new[]
         {
@@ -857,7 +868,7 @@ public static class TemplateMigration
                 continue;
             }
             if (mapping.TargetChoiceId is null || !targets.TryGetValue(mapping.TargetChoiceId, out var target)) throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-            if (target.AllowedFor?.Contains("mapping", StringComparer.Ordinal) != true
+            if (target.AllowedActions?.Contains(PublicActionForDisposition(mapping.Disposition), StringComparer.Ordinal) != true
                 || !string.Equals(source.Kind, target.Kind, StringComparison.Ordinal)
                 || (mapping.Disposition == "copy-media" && source.Kind != "media")
                 || (mapping.Disposition != "copy-media" && source.Kind == "media"))
@@ -871,8 +882,8 @@ public static class TemplateMigration
             if (!usedSources.Add(selection.SourceChoiceId)) throw new InvalidOperationException("template-migration-decision-source-duplicate");
             if (!sources.TryGetValue(selection.SourceChoiceId, out var source)) throw new InvalidOperationException("template-migration-decision-source-unknown-or-stale");
             if (!targets.TryGetValue(selection.TargetChoiceId, out var target)) throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-            if (source.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) != true
-                || target.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) != true)
+            if (source.AllowedActions?.Contains("select-template-option", StringComparer.Ordinal) != true
+                || target.AllowedActions?.Contains("select-template-option", StringComparer.Ordinal) != true)
             {
                 throw new InvalidOperationException("template-migration-decision-target-incompatible");
             }
@@ -881,7 +892,7 @@ public static class TemplateMigration
         foreach (var clear in draft.BaselineClears)
         {
             if (!targets.TryGetValue(clear.TargetChoiceId, out var target)
-                || target.AllowedFor?.Contains("baseline-clear", StringComparer.Ordinal) != true)
+                || target.AllowedActions?.Contains("template-cleanup", StringComparer.Ordinal) != true)
             {
                 throw new InvalidOperationException("template-migration-decision-clear-invalid");
             }
@@ -1232,21 +1243,21 @@ public static class TemplateMigration
             switch (choice.Action)
             {
                 case "place-content":
-                    RequireBusinessTarget(targetChoice, "mapping");
+                    RequireBusinessTarget(targetChoice, choice.Action);
                     mappings.Add(new TemplateMigrationChoiceMapping(
                         sourceChoice.Id, targetChoice!.Id,
                         sourceChoice.Kind == "media" ? "copy-media" : "copy-text", choice.Cardinality));
                     break;
                 case "keep-template-content":
-                    RequireBusinessTarget(targetChoice, "mapping");
+                    RequireBusinessTarget(targetChoice, choice.Action);
                     mappings.Add(new TemplateMigrationChoiceMapping(sourceChoice.Id, targetChoice!.Id, "retain-target", choice.Cardinality));
                     break;
                 case "keep-template-label":
-                    RequireBusinessTarget(targetChoice, "mapping");
+                    RequireBusinessTarget(targetChoice, choice.Action);
                     mappings.Add(new TemplateMigrationChoiceMapping(sourceChoice.Id, targetChoice!.Id, "retain-target-label", choice.Cardinality));
                     break;
                 case "select-template-option":
-                    RequireBusinessTarget(targetChoice, "choice-selection");
+                    RequireBusinessTarget(targetChoice, choice.Action);
                     selections.Add(new TemplateMigrationChoiceSelectionCandidate(sourceChoice.Id, targetChoice!.Id));
                     break;
                 case "exclude-source":
@@ -1269,7 +1280,7 @@ public static class TemplateMigration
         {
             if (!clearedTargets.Add(cleanup.TargetChoiceId)) throw new InvalidOperationException("template-migration-business-cleanup-duplicate");
             if (!targets.TryGetValue(cleanup.TargetChoiceId, out var target)) throw new InvalidOperationException("template-migration-business-target-unknown-or-stale");
-            RequireBusinessTarget(target, "baseline-clear");
+            RequireBusinessTarget(target, "template-cleanup");
             clears.Add(new TemplateMigrationChoiceClear(target.Id, cleanup.Scope));
         }
 
@@ -1282,7 +1293,7 @@ public static class TemplateMigration
     private static void RequireBusinessTarget(TemplateMigrationChoice? target, string use)
     {
         if (target is null) throw new InvalidOperationException("template-migration-business-target-required");
-        if (!(target.AllowedFor ?? []).Contains(use, StringComparer.Ordinal))
+        if (!(target.AllowedActions ?? []).Contains(use, StringComparer.Ordinal))
             throw new InvalidOperationException("template-migration-business-target-incompatible");
     }
 
@@ -1296,7 +1307,7 @@ public static class TemplateMigration
         TemplateMigrationSemanticObservation observation,
         int count = 1,
         string? requiredCardinality = null,
-        IReadOnlyList<string>? allowedFor = null)
+        IReadOnlyList<string>? allowedActions = null)
         => new(
             id,
             observation.Kind,
@@ -1310,7 +1321,7 @@ public static class TemplateMigration
                     observation.Context.PreviousText,
                     observation.Context.NextText,
                     observation.Context.SameRowTexts),
-            allowedFor);
+            allowedActions);
 
     private static string ChoiceId(string role, string documentSha256, TemplateMigrationSemanticSelector selector)
         => $"{role}-{HashCanonical(new { role, documentSha256, selector }).ToLowerInvariant()[..20]}";

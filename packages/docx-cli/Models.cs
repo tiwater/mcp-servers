@@ -382,7 +382,7 @@ public sealed record TemplateMigrationChoice(
     int Count = 1,
     string? RequiredCardinality = null,
     TemplateMigrationSemanticContext? Context = null,
-    IReadOnlyList<string>? AllowedFor = null);
+    IReadOnlyList<string>? AllowedActions = null);
 
 public sealed record TemplateMigrationChoiceCatalog(
     string Schema,
