@@ -174,6 +174,9 @@ public class AnnotationToolsTests
         Assert.Contains("The Agent uses current scenario authority", help, StringComparison.Ordinal);
         Assert.Contains("for every RequiredDecision", help, StringComparison.Ordinal);
         Assert.DoesNotContain("SuggestedTargets", help, StringComparison.Ordinal);
+        Assert.Contains("RequiredDecisions[]: Source, Count, RequiredCardinality", help, StringComparison.Ordinal);
+        Assert.Contains("Source and AvailableTargets[]: Kind, Scope, Text, Selector, Context", help, StringComparison.Ordinal);
+        Assert.Contains("Context: PreviousText, NextText, SameRowTexts, SelectableChildren", help, StringComparison.Ordinal);
         Assert.DoesNotContain("Do not use for: Ignoring a RequiredDecision", help, StringComparison.Ordinal);
         Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
         Assert.Contains("performs its conservative exact comparison internally", help, StringComparison.Ordinal);

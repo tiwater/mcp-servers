@@ -202,6 +202,11 @@ public static class Cli
                 Use when: Starting semantic resolution for every source observation that is not already an automatic exact match.
                 Provider boundary: This command observes current sources and possible targets; it does not choose copy, retain, exclude, or review semantics and does not build or execute operations.
                 Next: The Agent uses current scenario authority and AvailableTargets to propose one semantic disposition for every RequiredDecision, then calls resolve-template-migration-semantic-candidate. A RequiredCardinality=all group can be closed only by an out-of-scope mapping with cardinality=all; if those repeated items are business facts, stop because they cannot be assigned individually.
+                Output fields:
+                  top level: Schema, Pass, SourceSha256, BaselineSha256, RequiredDecisions, AvailableTargets
+                  RequiredDecisions[]: Source, Count, RequiredCardinality
+                  Source and AvailableTargets[]: Kind, Scope, Text, Selector, Context
+                  Context: PreviousText, NextText, SameRowTexts, SelectableChildren
                 Usage:
                   tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
                 """,
