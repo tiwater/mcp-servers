@@ -90,6 +90,30 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public async Task TemplateMigration_resolver_help_exposes_every_existing_candidate_branch()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["resolve-template-migration-semantic-candidate", "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var help = output.ToString();
+        foreach (var branch in new[] { "bodyAppends", "bodyInsertions", "valueProjections", "choiceSelections", "baselineClears", "textState" })
+        {
+            Assert.Contains(branch, help, StringComparison.Ordinal);
+        }
+        Assert.Contains("the operation builder consumes Plan", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("See the packaged README", help, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Edit_command_exits_nonzero_when_any_operation_is_not_applied()
     {
         var source = CreateSemanticTableFixture();

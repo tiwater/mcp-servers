@@ -401,6 +401,19 @@ candidate.json uses the published camel-case candidate shape. For v5:
   mapping: source, disposition, and baseline unless disposition is out-of-scope;
            optional cardinality is one, or all only for out-of-scope
 
+Existing branch shapes:
+  bodyAppends: sourceStart, sourceEnd
+  bodyInsertions: sourceStart, sourceEnd, baselineBefore, baselineAfter,
+                  stylePolicy (target-after-context)
+  valueProjections: sourceParent, baselineParent, semantic, valueKind, extraction
+  choiceSelections: sourceMember, baselineLabel (a run selector)
+  baselineClears: baseline, mode (cell or row)
+  v6 empty selector: textState (empty), explicit scope, and at least one of
+                     parentText, previousText, or nextText
+
+Every value above is selected from the current source/baseline inventories.
+Unknown fields, object ids, indexes, and coordinates are rejected.
+
 Minimal v5 example (values are observations from the current source/baseline):
 {
   "schema": "tiwater.docx.template-migration-semantic-candidate/v5",
@@ -430,8 +443,8 @@ Minimal v5 example (values are observations from the current source/baseline):
 }
 
 Allowed mapping dispositions: copy-text, copy-media, retain-target,
-retain-target-label, out-of-scope. Unknown fields, object ids, indexes, and
-coordinates are rejected. See the packaged README for all existing branches.
+retain-target-label, out-of-scope. Successful resolution returns Pass=true,
+Plan, and an empty Unresolved array; the operation builder consumes Plan.
 """);
             return 0;
         }
