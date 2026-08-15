@@ -153,7 +153,7 @@ public static class Cli
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
-        Console.WriteLine("Template migration: list unresolved sources and possible targets first; run each selected command with --help before consuming its output.");
+        Console.WriteLine("Template migration: list unresolved sources and possible targets first; when an artifact supplies the next command's inputs, read that command's --help before using it.");
         Console.WriteLine("  list-template-migration-options <source.docx> <baseline.docx>");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
@@ -176,7 +176,7 @@ public static class Cli
         Console.WriteLine("Produces: Published DOCX observations, plans, edited documents, previews, and validation receipts.");
         Console.WriteLine("Use when: A scenario-declared capability requires DOCX inspection, template migration, editing, normalization, or validation.");
         Console.WriteLine("Do not use for: Choosing scenario semantics, inventing business values, deciding delivery, rendering Office pages, or OCR.");
-        Console.WriteLine("Command discovery: Run tiwater-docx --help; start template migration with list-template-migration-options and run each selected command with --help for its exact contract.");
+        Console.WriteLine("Command discovery: Run tiwater-docx --help; start template migration with list-template-migration-options, then read the next command's --help when its inputs exist.");
         Console.WriteLine("Usage: tiwater-docx <command> [arguments]");
     }
 
