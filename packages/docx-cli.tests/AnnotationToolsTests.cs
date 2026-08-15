@@ -143,6 +143,7 @@ public class AnnotationToolsTests
 
         var usage = output.ToString();
         Assert.Contains("find-template-migration-candidates", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("analyze-template-migration", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("derive-template-migration-exact-text-plan", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("derive-template-migration-anchor-gap-plan", usage, StringComparison.Ordinal);
     }

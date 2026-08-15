@@ -147,7 +147,6 @@ public static class Cli
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
-        Console.WriteLine("  analyze-template-migration <source.docx> <baseline.docx> [--json]");
         Console.WriteLine("  find-template-migration-candidates <source.docx> <baseline.docx>");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (append --help for candidate shape)");
         Console.WriteLine("  close-template-migration-reviews <source.docx> <baseline.docx> <resolution.json> <review-candidate.json>");
@@ -183,8 +182,8 @@ public static class Cli
                 Purpose: Observe the current source and selected baseline as immutable migration object inventories.
                 Consumes: One current source DOCX and one selected baseline DOCX.
                 Produces: A hash-bound analysis with source objects, baseline objects, candidate-ready unique semantic selectors, and unresolved findings; use --json for machine output.
-                Use when: Starting a template migration before selecting any semantic mapping.
-                Do not use for: Selecting mappings, building operations, editing a document, or validating output.
+                Use when: Diagnosing low-level source and baseline object inventories for an existing caller.
+                Do not use for: Starting semantic resolution, selecting mappings, building operations, editing a document, or validating output. New migration callers start with find-template-migration-candidates.
                 Usage:
                   tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
                 """,
