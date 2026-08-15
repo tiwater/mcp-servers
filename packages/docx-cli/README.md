@@ -124,7 +124,8 @@ tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
 
 The result is an observation receipt, not a migration plan.
 `RequiredDecisions` contains every distinguishable source that still needs a
-disposition exactly once. Repeated source observations that the published
+disposition exactly once, with adjacent text, same-row text, and selectable
+child runs attached as context. Repeated source observations that the published
 selector contract cannot distinguish are one decision with `Count > 1` and
 `RequiredCardinality: "all"`; such a group can only be submitted as an
 `out-of-scope` mapping with `cardinality: "all"`. If the group contains business

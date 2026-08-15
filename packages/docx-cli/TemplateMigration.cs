@@ -330,6 +330,9 @@ public static class TemplateMigration
             .Select(item => item.SourceObjectId!)
             .ToHashSet(StringComparer.Ordinal);
         var sourceById = analysis.Source.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var claimedSourceIds = legacy.Plan.Mappings
+            .Select(mapping => mapping.SourceObjectId)
+            .ToHashSet(StringComparer.Ordinal);
         var coveredSourceIds = new HashSet<string>(StringComparer.Ordinal);
         var decisions = new List<TemplateMigrationRequiredDecision>();
         foreach (var item in automaticPending)
@@ -364,7 +367,11 @@ public static class TemplateMigration
                 continue;
             }
             coveredSourceIds.Add(item.SourceObjectId!);
-            decisions.Add(new TemplateMigrationRequiredDecision(item.Source));
+            decisions.Add(new TemplateMigrationRequiredDecision(
+                ObserveContextualRegion(
+                    analysis.Source.Objects,
+                    sourceById[item.SourceObjectId!],
+                    claimedSourceIds)));
         }
         return new TemplateMigrationCandidateDiscovery(
             "tiwater.docx.template-migration-candidate-discovery/v5",
@@ -468,11 +475,11 @@ public static class TemplateMigration
             .Where(item => item.Kind is "paragraph" or "table-cell" or "media")
             .Where(item => item.Selector is not null && !claimed.Contains(item.Id))
             .OrderBy(item => item.Id, StringComparer.Ordinal)
-            .Select(item => ObserveAvailableTarget(analysis.Baseline.Objects, item, claimed))
+            .Select(item => ObserveContextualRegion(analysis.Baseline.Objects, item, claimed))
             .ToList();
     }
 
-    private static TemplateMigrationSemanticObservation ObserveAvailableTarget(
+    private static TemplateMigrationSemanticObservation ObserveContextualRegion(
         IReadOnlyList<TemplateMigrationObject> objects,
         TemplateMigrationObject item,
         IReadOnlySet<string> claimed)

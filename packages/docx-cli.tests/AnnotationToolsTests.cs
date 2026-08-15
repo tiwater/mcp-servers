@@ -1556,7 +1556,7 @@ public class AnnotationToolsTests
     }
 
     [Fact]
-    public void TemplateMigration_candidate_discovery_preserves_target_region_context_without_flattening_runs()
+    public void TemplateMigration_candidate_discovery_preserves_source_and_target_region_context_without_flattening_runs()
     {
         var source = CreateTableMigrationFixture([
             ["legacy revision", "2029-03-04", "legacy calibration note"]
@@ -1569,6 +1569,10 @@ public class AnnotationToolsTests
         var discovered = TemplateMigration.FindCandidates(source, baseline);
 
         Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v5", discovered.Schema);
+        var sourceRevision = Assert.Single(discovered.RequiredDecisions, decision =>
+            decision.Source.Kind == "table-cell" && decision.Source.Text == "legacy revision");
+        Assert.Equal(["2029-03-04", "legacy calibration note"], sourceRevision.Source.Context?.SameRowTexts);
+        Assert.Equal("legacy revision", Assert.Single(sourceRevision.Source.Context?.SelectableChildren ?? []).Text);
         Assert.DoesNotContain(discovered.AvailableTargets, target => target.Kind == "run");
         var revision = Assert.Single(discovered.AvailableTargets, target =>
             target.Kind == "table-cell" && target.Text == "R-7");
