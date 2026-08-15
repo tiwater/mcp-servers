@@ -2374,7 +2374,100 @@ Plan, and an empty Unresolved array; the operation builder consumes Plan.
                 }));
         }
 
-        return new TemplateMigrationInventory(path, HashFile(path), objects);
+        return new TemplateMigrationInventory(path, HashFile(path), AttachSemanticSelectors(objects));
+    }
+
+    private static IReadOnlyList<TemplateMigrationObject> AttachSemanticSelectors(IReadOnlyList<TemplateMigrationObject> objects)
+        => objects.Select(item => item with { Selector = BuildSemanticSelector(objects, item) }).ToList();
+
+    private static TemplateMigrationSemanticSelector? BuildSemanticSelector(
+        IReadOnlyList<TemplateMigrationObject> objects,
+        TemplateMigrationObject item)
+    {
+        TemplateMigrationSemanticSelector? selector = null;
+        if (!string.IsNullOrWhiteSpace(item.Text))
+        {
+            selector = new TemplateMigrationSemanticSelector(item.Kind, item.Scope, Text: item.Text);
+        }
+        else if (item.Kind == "media"
+            && item.Provenance.TryGetValue("sha256", out var sha256)
+            && !string.IsNullOrWhiteSpace(sha256))
+        {
+            selector = new TemplateMigrationSemanticSelector(item.Kind, item.Scope, Sha256: sha256);
+        }
+        if (selector is null) return null;
+        if (SelectsOnly(objects, item, selector)) return selector;
+
+        if (item.Kind == "table-cell" && item.Topology is not null)
+        {
+            foreach (var context in objects
+                .Where(candidate => candidate.Id != item.Id
+                    && candidate.Kind == "table-cell"
+                    && candidate.Topology?.ContainerObjectId == item.Topology.ContainerObjectId
+                    && candidate.Topology.Row == item.Topology.Row
+                    && !string.IsNullOrWhiteSpace(candidate.Text))
+                .Select(candidate => candidate.Text!)
+                .Distinct(StringComparer.Ordinal))
+            {
+                var contextual = selector with { SameRowText = context };
+                if (SelectsOnly(objects, item, contextual)) return contextual;
+            }
+            foreach (var context in objects
+                .Where(candidate => candidate.Id != item.Id
+                    && candidate.Kind == "table-cell"
+                    && candidate.Topology?.ContainerObjectId == item.Topology.ContainerObjectId
+                    && candidate.Topology.Column == item.Topology.Column
+                    && !string.IsNullOrWhiteSpace(candidate.Text))
+                .Select(candidate => candidate.Text!)
+                .Distinct(StringComparer.Ordinal))
+            {
+                var contextual = selector with { SameColumnText = context };
+                if (SelectsOnly(objects, item, contextual)) return contextual;
+            }
+        }
+
+        var byId = objects.ToDictionary(candidate => candidate.Id, StringComparer.Ordinal);
+        var parentText = item.ParentId is not null
+            && byId.TryGetValue(item.ParentId, out var parent)
+            && !string.IsNullOrWhiteSpace(parent.Text)
+                ? parent.Text
+                : null;
+        var siblings = objects.Where(candidate => candidate.ParentId == item.ParentId).ToList();
+        var siblingIndex = siblings.FindIndex(candidate => candidate.Id == item.Id);
+        var previousText = siblingIndex > 0 && !string.IsNullOrWhiteSpace(siblings[siblingIndex - 1].Text)
+            ? siblings[siblingIndex - 1].Text
+            : null;
+        var nextText = siblingIndex >= 0
+            && siblingIndex + 1 < siblings.Count
+            && !string.IsNullOrWhiteSpace(siblings[siblingIndex + 1].Text)
+                ? siblings[siblingIndex + 1].Text
+                : null;
+
+        foreach (var contextual in new[]
+        {
+            parentText is null ? null : selector with { ParentText = parentText },
+            previousText is null ? null : selector with { PreviousText = previousText },
+            nextText is null ? null : selector with { NextText = nextText },
+            parentText is null || previousText is null ? null : selector with { ParentText = parentText, PreviousText = previousText },
+            parentText is null || nextText is null ? null : selector with { ParentText = parentText, NextText = nextText },
+            previousText is null || nextText is null ? null : selector with { PreviousText = previousText, NextText = nextText },
+            parentText is null || previousText is null || nextText is null
+                ? null
+                : selector with { ParentText = parentText, PreviousText = previousText, NextText = nextText }
+        })
+        {
+            if (contextual is not null && SelectsOnly(objects, item, contextual)) return contextual;
+        }
+        return null;
+    }
+
+    private static bool SelectsOnly(
+        IReadOnlyList<TemplateMigrationObject> objects,
+        TemplateMigrationObject expected,
+        TemplateMigrationSemanticSelector selector)
+    {
+        var matches = ResolveSelector(objects, selector);
+        return matches.Count == 1 && matches[0].Id == expected.Id;
     }
 
     private static TemplateMigrationInventory CanonicalReadbackInventory(string input)

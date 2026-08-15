@@ -90,6 +90,24 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public async Task TemplateMigration_analysis_help_publishes_candidate_ready_selector_observations()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["analyze-template-migration", "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        Assert.Contains("candidate-ready unique semantic selectors", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TemplateMigration_resolver_help_exposes_every_existing_candidate_branch()
     {
         var original = Console.Out;
@@ -157,6 +175,81 @@ public class AnnotationToolsTests
         Assert.Contains(analysis.Findings, item => item.SourceObjectId == "body:paragraph:0" && item.Kind == "object-content-differs");
         Assert.Contains(analysis.Findings, item => item.SourceObjectId == "body:table:0:row:0:cell:1" && item.Kind == "object-content-differs");
         Assert.All(analysis.Findings, item => Assert.Equal("requires-semantic-candidate", item.Disposition));
+    }
+
+    [Fact]
+    public void TemplateMigration_analysis_publishes_unique_semantic_selectors_without_mapping_business_objects()
+    {
+        var paragraphs = CreateTextMigrationFixture("North section", "Repeated value", "South section", "Repeated value");
+        var paragraphAnalysis = TemplateMigration.Analyze(paragraphs, paragraphs);
+        var repeatedParagraphs = paragraphAnalysis.Source.Objects
+            .Where(item => item.Kind == "paragraph" && item.Text == "Repeated value")
+            .ToList();
+
+        Assert.Equal(2, repeatedParagraphs.Count);
+        Assert.All(repeatedParagraphs, item => Assert.NotNull(item.Selector));
+        Assert.Contains(repeatedParagraphs, item => item.Selector!.PreviousText == "North section");
+        Assert.Contains(repeatedParagraphs, item => item.Selector!.PreviousText == "South section");
+        Assert.All(repeatedParagraphs, item =>
+        {
+            Assert.Null(item.Selector!.Sha256);
+            Assert.DoesNotContain("paragraph:", JsonSerializer.Serialize(item.Selector, Json.CamelCaseOptions), StringComparison.Ordinal);
+        });
+        var selectedParagraph = repeatedParagraphs[0];
+        var selectedBaseline = Assert.Single(paragraphAnalysis.Baseline.Objects, item => item.Id == selectedParagraph.Id);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(selectedParagraph.Selector!, selectedBaseline.Selector!, "copy-text")]);
+        var resolved = TemplateMigration.ResolveSemanticCandidate(paragraphs, paragraphs, candidate);
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == selectedParagraph.Id && item.BaselineObjectId == selectedBaseline.Id);
+
+        var mutated = candidate with
+        {
+            Mappings = [candidate.Mappings[0] with
+            {
+                Source = candidate.Mappings[0].Source with { PreviousText = "not current context" }
+            }]
+        };
+        var mutatedResult = TemplateMigration.ResolveSemanticCandidate(paragraphs, paragraphs, mutated);
+        Assert.False(mutatedResult.Pass);
+        Assert.Contains(mutatedResult.Unresolved, item => item.Reason == "template-migration-semantic-source-missing");
+
+        var table = CreateTableMigrationFixture(
+            [["Batch A", "Selected"]],
+            [["Batch B", "Selected"]]);
+        var tableAnalysis = TemplateMigration.Analyze(table, table);
+        var repeatedCells = tableAnalysis.Source.Objects
+            .Where(item => item.Kind == "table-cell" && item.Text == "Selected")
+            .ToList();
+
+        Assert.Equal(2, repeatedCells.Count);
+        Assert.All(repeatedCells, item => Assert.NotNull(item.Selector));
+        Assert.Contains(repeatedCells, item => item.Selector!.SameRowText == "Batch A");
+        Assert.Contains(repeatedCells, item => item.Selector!.SameRowText == "Batch B");
+
+        var serializedSelector = JsonSerializer.Serialize(repeatedCells[0].Selector, Json.Options);
+        Assert.Contains("\"kind\": \"table-cell\"", serializedSelector, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Kind\"", serializedSelector, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TemplateMigration_analysis_omits_a_selector_when_supported_semantics_cannot_identify_one_object()
+    {
+        var source = CreateTextMigrationFixture("same", "same", "same", "same");
+        var analysis = TemplateMigration.Analyze(source, source);
+        var repeated = analysis.Source.Objects
+            .Where(item => item.Kind == "paragraph" && item.Text == "same")
+            .ToList();
+
+        Assert.Equal(4, repeated.Count);
+        Assert.All(repeated, item => Assert.Null(item.Selector));
+
+        var legacyJson = """
+            {"Id":"body:paragraph:0","Kind":"paragraph","Scope":"body","ParentId":null,"Text":"legacy","Style":null,"Provenance":{}}
+            """;
+        var legacy = JsonSerializer.Deserialize<TemplateMigrationObject>(legacyJson, Json.Options);
+        Assert.NotNull(legacy);
+        Assert.Null(legacy!.Selector);
     }
 
     [Fact]

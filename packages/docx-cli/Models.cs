@@ -199,7 +199,8 @@ public sealed record TemplateMigrationObject(
     string? Text,
     string? Style,
     IReadOnlyDictionary<string, string> Provenance,
-    TemplateMigrationTopology? Topology = null);
+    TemplateMigrationTopology? Topology = null,
+    TemplateMigrationSemanticSelector? Selector = null);
 
 public sealed record TemplateMigrationTopology(
     string ContainerObjectId,
@@ -287,17 +288,17 @@ public sealed record TemplateMigrationChoiceSelection(
     string BaselineLabelRunObjectId);
 
 public sealed record TemplateMigrationSemanticSelector(
-    string Kind,
-    string? Scope = null,
-    string? Text = null,
-    string? Sha256 = null,
-    string? ParentText = null,
-    string? PreviousText = null,
-    string? NextText = null,
-    string? DescendantText = null,
-    string? TextState = null,
-    string? SameRowText = null,
-    string? SameColumnText = null);
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("scope")] string? Scope = null,
+    [property: JsonPropertyName("text")] string? Text = null,
+    [property: JsonPropertyName("sha256")] string? Sha256 = null,
+    [property: JsonPropertyName("parentText")] string? ParentText = null,
+    [property: JsonPropertyName("previousText")] string? PreviousText = null,
+    [property: JsonPropertyName("nextText")] string? NextText = null,
+    [property: JsonPropertyName("descendantText")] string? DescendantText = null,
+    [property: JsonPropertyName("textState")] string? TextState = null,
+    [property: JsonPropertyName("sameRowText")] string? SameRowText = null,
+    [property: JsonPropertyName("sameColumnText")] string? SameColumnText = null);
 
 public sealed record TemplateMigrationSemanticCandidateMapping(
     TemplateMigrationSemanticSelector Source,
