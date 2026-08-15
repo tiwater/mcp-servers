@@ -318,16 +318,6 @@ public static class TemplateMigration
     {
         var analysis = Analyze(source, baseline);
         var legacy = DeriveAnchorGapPlan(analysis);
-        var pairs = legacy.Unresolved
-            .Where(item => item.Reason == "template-migration-anchor-gap-candidate-review-required"
-                && item.Source is not null
-                && item.Baseline is not null)
-            .ToList();
-        var pairedSourceIds = pairs
-            .Where(item => !string.IsNullOrWhiteSpace(item.SourceObjectId))
-            .Select(item => item.SourceObjectId!)
-            .ToHashSet(StringComparer.Ordinal);
-        var pairsBySourceId = pairs.ToDictionary(item => item.SourceObjectId!, StringComparer.Ordinal);
         var automaticPending = legacy.Unresolved
             .Where(item => item.Reason != "template-migration-anchor-gap-candidate-review-required")
             .ToList();
@@ -335,25 +325,49 @@ public static class TemplateMigration
         {
             throw new InvalidOperationException("template-migration-candidate-source-observation-missing");
         }
-        var decisions = automaticPending.Select(item =>
+        var pendingWithoutSelectorIds = automaticPending
+            .Where(item => item.Source!.Selector is null)
+            .Select(item => item.SourceObjectId!)
+            .ToHashSet(StringComparer.Ordinal);
+        var sourceById = analysis.Source.Objects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var coveredSourceIds = new HashSet<string>(StringComparer.Ordinal);
+        var decisions = new List<TemplateMigrationRequiredDecision>();
+        foreach (var item in automaticPending)
         {
-            IReadOnlyList<TemplateMigrationSuggestedTarget> targets;
-            if (pairedSourceIds.Contains(item.SourceObjectId!))
+            if (coveredSourceIds.Contains(item.SourceObjectId!)) continue;
+            if (item.Source!.Selector is null)
             {
-                targets = [new TemplateMigrationSuggestedTarget(
-                    "reciprocal-anchor-gap",
-                    pairsBySourceId[item.SourceObjectId!].Baseline!)];
+                if (!sourceById.TryGetValue(item.SourceObjectId!, out var sourceObject))
+                {
+                    throw new InvalidOperationException("template-migration-candidate-source-selector-missing");
+                }
+                var group = SemanticSelectorCandidates(analysis.Source.Objects, sourceObject)
+                    .Select(selector => (Selector: selector, Selected: ResolveSelector(analysis.Source.Objects, selector)))
+                    .Where(candidate => candidate.Selected.Count > 1
+                        && candidate.Selected.All(selected => pendingWithoutSelectorIds.Contains(selected.Id)
+                            && !coveredSourceIds.Contains(selected.Id)))
+                    .OrderBy(candidate => candidate.Selected.Count)
+                    .FirstOrDefault();
+                if (group.Selector is null)
+                {
+                    throw new InvalidOperationException("template-migration-candidate-source-selector-missing");
+                }
+                foreach (var selectedItem in group.Selected) coveredSourceIds.Add(selectedItem.Id);
+                decisions.Add(new TemplateMigrationRequiredDecision(
+                    new TemplateMigrationSemanticObservation(
+                        sourceObject.Kind,
+                        sourceObject.Scope,
+                        sourceObject.Text,
+                        group.Selector),
+                    group.Selected.Count,
+                    "all"));
+                continue;
             }
-            else
-            {
-                targets = (item.BaselineOptions ?? [])
-                    .Select(option => new TemplateMigrationSuggestedTarget("exact-text-option", option))
-                    .ToList();
-            }
-            return new TemplateMigrationRequiredDecision(item.Source!, targets);
-        }).ToList();
+            coveredSourceIds.Add(item.SourceObjectId!);
+            decisions.Add(new TemplateMigrationRequiredDecision(item.Source));
+        }
         return new TemplateMigrationCandidateDiscovery(
-            "tiwater.docx.template-migration-candidate-discovery/v4",
+            "tiwater.docx.template-migration-candidate-discovery/v5",
             true,
             legacy.Plan.SourceSha256,
             legacy.Plan.BaselineSha256,
@@ -607,8 +621,8 @@ Every value above is selected from the current source/baseline inventories.
 Candidate source selectors address only items reported in Unresolved by the
 current automatic plan. Plan.Mappings are already complete and must not be
 repeated. AvailableTargets is the current selectable baseline inventory for
-semantic mappings and baseline-only cleanup; SuggestedTargets is only a
-mechanical shortlist and may be empty.
+semantic mappings and baseline-only cleanup; candidate discovery does not
+publish a separate target recommendation.
 Every RequiredDecisions source must be addressed. An omitted source is returned
 as template-migration-semantic-decision-missing; it is not reported as a target
 selection failure or local business ambiguity.
@@ -2772,6 +2786,12 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
     private static TemplateMigrationSemanticSelector? BuildSemanticSelector(
         IReadOnlyList<TemplateMigrationObject> objects,
         TemplateMigrationObject item)
+        => SemanticSelectorCandidates(objects, item)
+            .FirstOrDefault(selector => SelectsOnly(objects, item, selector));
+
+    private static IEnumerable<TemplateMigrationSemanticSelector> SemanticSelectorCandidates(
+        IReadOnlyList<TemplateMigrationObject> objects,
+        TemplateMigrationObject item)
     {
         TemplateMigrationSemanticSelector? selector = null;
         var emptyText = string.IsNullOrWhiteSpace(item.Text);
@@ -2789,8 +2809,8 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         {
             selector = new TemplateMigrationSemanticSelector(item.Kind, item.Scope, TextState: "empty");
         }
-        if (selector is null) return null;
-        if (!emptyText && SelectsOnly(objects, item, selector)) return selector;
+        if (selector is null) yield break;
+        if (!emptyText) yield return selector;
 
         if (!emptyText && item.Kind == "table-cell" && item.Topology is not null)
         {
@@ -2803,8 +2823,7 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
                 .Select(candidate => candidate.Text!)
                 .Distinct(StringComparer.Ordinal))
             {
-                var contextual = selector with { SameRowText = context };
-                if (SelectsOnly(objects, item, contextual)) return contextual;
+                yield return selector with { SameRowText = context };
             }
             foreach (var context in objects
                 .Where(candidate => candidate.Id != item.Id
@@ -2815,8 +2834,7 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
                 .Select(candidate => candidate.Text!)
                 .Distinct(StringComparer.Ordinal))
             {
-                var contextual = selector with { SameColumnText = context };
-                if (SelectsOnly(objects, item, contextual)) return contextual;
+                yield return selector with { SameColumnText = context };
             }
         }
 
@@ -2850,9 +2868,8 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
                 : selector with { ParentText = parentText, PreviousText = previousText, NextText = nextText }
         })
         {
-            if (contextual is not null && SelectsOnly(objects, item, contextual)) return contextual;
+            if (contextual is not null) yield return contextual;
         }
-        return null;
     }
 
     private static bool SelectsOnly(

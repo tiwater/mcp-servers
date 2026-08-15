@@ -114,28 +114,29 @@ join surface.
 
 ### 3ab. Find Template-Migration Candidates
 
-Lists every unmatched current object as one required semantic decision. When
-nearest mapped objects before and after it identify the same unique gap in the
-selected baseline, or exact text has multiple possible targets, those current
-observations are included as non-authoritative suggestions. The provider does
-not choose a target or terminal.
+Lists every unmatched current object as one required semantic decision together
+with the selected baseline's contextual target inventory. The provider does not
+recommend or choose a target or terminal.
 
 ```bash
 tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
 ```
 
 The result is an observation receipt, not a migration plan.
-`RequiredDecisions` contains every source that still needs a disposition exactly
-once. `AvailableTargets` is the complete current baseline inventory from which
-semantic targets and baseline-only cleanup are selected. It presents paragraphs,
+`RequiredDecisions` contains every distinguishable source that still needs a
+disposition exactly once. Repeated source observations that the published
+selector contract cannot distinguish are one decision with `Count > 1` and
+`RequiredCardinality: "all"`; such a group can only be submitted as an
+`out-of-scope` mapping with `cardinality: "all"`. If the group contains business
+facts that require individual destinations, it remains a capability blocker
+rather than being guessed apart. `AvailableTargets` is the complete current
+baseline inventory from which semantic targets and baseline-only cleanup are selected. It presents paragraphs,
 table cells, and media as structural regions, with adjacent text, same-row text,
 and selectable child runs attached as context instead of flattening those runs
 into unrelated top-level targets. A region already claimed by automatic mapping
 is omitted together with its children, because its parent operation already owns
-that content. A decision's
-`SuggestedTargets` is only a mechanical shortlist and may be empty, singular,
-or plural; suggestion count does not determine review status. The Agent chooses
-current business dispositions for the complete collection and submits them to
+that content. The Agent chooses current business dispositions for the complete
+collection and submits them to
 `resolve-template-migration-semantic-candidate`; that resolver independently
 reopens both documents.
 
@@ -257,8 +258,8 @@ unless the disposition is `out-of-scope`. Existing dispositions are
 Candidate source selectors address only items reported in `Unresolved` by the
 current automatic plan. `Plan.Mappings` are already complete and must not be
 repeated. Semantic mappings and baseline-only cleanup select current
-`AvailableTargets` items; an empty `SuggestedTargets` list does not mean the
-target inventory is empty.
+`AvailableTargets` items. Candidate discovery does not publish a second
+mechanical recommendation surface beside that target inventory.
 Every `RequiredDecisions` source must be addressed. If a candidate omits one,
 the resolver returns `template-migration-semantic-decision-missing`, preserving
 the source observation and the earlier mechanical reason as diagnostic detail.

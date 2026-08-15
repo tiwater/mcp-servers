@@ -196,12 +196,12 @@ public static class Cli
                   tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
                 """,
             "find-template-migration-candidates" => """
-                Purpose: List every source observation that still requires one semantic migration decision, with any mechanically suggested targets.
+                Purpose: List every source observation that still requires one semantic migration decision and the complete contextual target inventory.
                 Consumes: One current source DOCX and one selected baseline DOCX; the provider performs its conservative exact comparison internally.
-                Produces: Uniform RequiredDecisions and AvailableTargets observations bound to the current source and baseline hashes. Each required source appears exactly once. AvailableTargets groups selectable baseline paragraphs, cells, and media with their structural context and selectable child runs; SuggestedTargets is only a mechanical shortlist and may be empty, singular, or plural. It does not produce a migration plan.
+                Produces: Uniform RequiredDecisions and AvailableTargets observations bound to the current source and baseline hashes. Each distinguishable required source appears once. Repeated sources that cannot be separated by a semantic selector appear as one Count > 1 group with RequiredCardinality=all. AvailableTargets groups selectable baseline paragraphs, cells, and media with their structural context and selectable child runs. It does not produce a migration plan or target recommendation.
                 Use when: Starting semantic resolution for every source observation that is not already an automatic exact match.
                 Provider boundary: This command observes current sources and possible targets; it does not choose copy, retain, exclude, or review semantics and does not build or execute operations.
-                Next: The Agent uses current scenario authority and AvailableTargets to propose one semantic disposition for every RequiredDecision, regardless of suggestion count, then calls resolve-template-migration-semantic-candidate.
+                Next: The Agent uses current scenario authority and AvailableTargets to propose one semantic disposition for every RequiredDecision, then calls resolve-template-migration-semantic-candidate. A RequiredCardinality=all group can be closed only by an out-of-scope mapping with cardinality=all; if those repeated items are business facts, stop because they cannot be assigned individually.
                 Usage:
                   tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
                 """,
