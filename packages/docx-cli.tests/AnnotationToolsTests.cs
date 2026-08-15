@@ -1235,29 +1235,42 @@ public class AnnotationToolsTests
     [Fact]
     public void TemplateMigration_resolves_a_local_review_without_blocking_the_verified_preview()
     {
-        var source = CreateTextMigrationFixture("shared current fact", "unplaced current value");
-        var baseline = CreateTextMigrationFixture("shared current fact", "target-owned label");
+        var source = CreateTextMigrationFixture("shared current fact", "renamed current fact", "unplaced current value");
+        var baseline = CreateTextMigrationFixture("shared current fact", "renamed target slot", "target-owned label");
         var candidate = new TemplateMigrationSemanticCandidate(
             "tiwater.docx.template-migration-semantic-candidate/v5",
             [
                 new TemplateMigrationSemanticCandidateMapping(
-                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "unplaced current value"),
-                    null,
-                    "review-required")
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "renamed current fact"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "renamed target slot"),
+                    "copy-text")
             ]);
 
         var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
 
         Assert.False(resolved.Pass);
-        var review = Assert.Single(resolved.Plan.Mappings, item => item.Disposition == "review-required");
-        Assert.Equal("body:paragraph:1", review.SourceObjectId);
-        Assert.Null(review.BaselineObjectId);
-        var terminal = Assert.Single(resolved.Unresolved);
-        Assert.Equal(review.SourceObjectId, terminal.SourceObjectId);
-        Assert.Equal("template-migration-exact-text-target-missing", terminal.Reason);
+        Assert.DoesNotContain(resolved.Plan.Mappings, item => item.Disposition == "review-required");
+        var pending = Assert.Single(resolved.Unresolved);
+        Assert.Equal("body:paragraph:2", pending.SourceObjectId);
 
-        var candidatePath = Path.Combine(Path.GetTempPath(), $"migration-local-review-{Guid.NewGuid():N}.json");
-        File.WriteAllText(candidatePath, JsonSerializer.Serialize(candidate, new JsonSerializerOptions
+        var reviewCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "unplaced current value"),
+                null,
+                "review-required")]);
+        var closed = TemplateMigration.CloseReviews(source, baseline, resolved, reviewCandidate);
+        Assert.False(closed.Pass);
+        var review = Assert.Single(closed.Plan.Mappings, item => item.Disposition == "review-required");
+        Assert.Equal(pending.SourceObjectId, review.SourceObjectId);
+        var terminal = Assert.Single(closed.Unresolved);
+        Assert.Equal(review.SourceObjectId, terminal.SourceObjectId);
+        Assert.Equal(pending.Reason, terminal.Reason);
+
+        var resolutionPath = Path.Combine(Path.GetTempPath(), $"migration-local-review-resolution-{Guid.NewGuid():N}.json");
+        var candidatePath = Path.Combine(Path.GetTempPath(), $"migration-local-review-candidate-{Guid.NewGuid():N}.json");
+        File.WriteAllText(resolutionPath, JsonSerializer.Serialize(resolved, Json.Options));
+        File.WriteAllText(candidatePath, JsonSerializer.Serialize(reviewCandidate, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
@@ -1267,7 +1280,7 @@ public class AnnotationToolsTests
         try
         {
             Console.SetOut(commandOutput);
-            Assert.Equal(0, TemplateMigration.RunResolveSemanticCandidate([source, baseline, candidatePath]));
+            Assert.Equal(0, TemplateMigration.RunCloseReviews([source, baseline, resolutionPath, candidatePath]));
         }
         finally
         {
@@ -1277,22 +1290,38 @@ public class AnnotationToolsTests
         Assert.False(commandReceipt.RootElement.GetProperty("Pass").GetBoolean());
         Assert.Single(commandReceipt.RootElement.GetProperty("Unresolved").EnumerateArray());
 
-        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        var build = TemplateMigration.BuildOperations(source, baseline, closed.Plan);
         Assert.False(build.Pass);
         Assert.True(build.ReviewRequired);
         Assert.Empty(build.Failures);
 
         var output = Path.Combine(Path.GetTempPath(), $"migration-local-review-{Guid.NewGuid():N}.docx");
-        var preview = TemplateMigration.Preview(source, baseline, resolved.Plan, output);
+        var preview = TemplateMigration.Preview(source, baseline, closed.Plan, output);
         Assert.False(preview.Pass);
         Assert.True(preview.ReviewRequired);
         Assert.True(preview.OutputVerified, string.Join("; ", preview.Readback?.Failures.Select(item => item.Reason) ?? []));
         using var document = WordprocessingDocument.Open(output, false);
         Assert.Equal(
-            ["shared current fact", "target-owned label"],
+            ["shared current fact", "renamed current fact", "target-owned label"],
             document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Select(GetParagraphText).ToArray());
 
-        var targetInventingCandidate = candidate with
+        var closurePath = Path.Combine(Path.GetTempPath(), $"migration-local-review-closure-{Guid.NewGuid():N}.json");
+        var commandPreviewOutput = Path.Combine(Path.GetTempPath(), $"migration-local-review-command-{Guid.NewGuid():N}.docx");
+        File.WriteAllText(closurePath, JsonSerializer.Serialize(closed, Json.Options));
+        using var previewOutput = new StringWriter();
+        try
+        {
+            Console.SetOut(previewOutput);
+            Assert.Equal(0, TemplateMigration.RunPreview([source, baseline, closurePath, commandPreviewOutput]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+        using var previewReceipt = JsonDocument.Parse(previewOutput.ToString());
+        Assert.True(previewReceipt.RootElement.GetProperty("OutputVerified").GetBoolean());
+
+        var targetInventingCandidate = reviewCandidate with
         {
             Mappings =
             [
@@ -1302,23 +1331,63 @@ public class AnnotationToolsTests
                     "review-required")
             ]
         };
-        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, targetInventingCandidate));
-        Assert.Equal("template-migration-semantic-candidate-baseline-forbidden", error.Message);
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.CloseReviews(source, baseline, resolved, targetInventingCandidate));
+        Assert.Equal("template-migration-review-candidate-mapping-invalid", error.Message);
 
-        var duplicateReview = candidate with
+        var duplicateReview = reviewCandidate with
         {
-            Mappings = [candidate.Mappings.Single(), candidate.Mappings.Single()]
+            Mappings = [reviewCandidate.Mappings.Single(), reviewCandidate.Mappings.Single()]
         };
-        var duplicateResult = TemplateMigration.ResolveSemanticCandidate(source, baseline, duplicateReview);
+        var duplicateResult = TemplateMigration.CloseReviews(source, baseline, resolved, duplicateReview);
         Assert.False(duplicateResult.Pass);
-        Assert.Contains(duplicateResult.Unresolved, item => item.Reason == "template-migration-semantic-source-not-pending");
+        Assert.Contains(duplicateResult.Unresolved, item => item.Reason == "template-migration-review-source-not-unresolved");
 
-        var bulkReview = candidate with
+        var bulkReview = reviewCandidate with
         {
-            Mappings = [candidate.Mappings.Single() with { Cardinality = "all" }]
+            Mappings = [reviewCandidate.Mappings.Single() with { Cardinality = "all" }]
         };
-        var bulkError = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, bulkReview));
-        Assert.Equal("template-migration-semantic-candidate-cardinality-all-terminal-only", bulkError.Message);
+        var bulkError = Assert.Throws<InvalidOperationException>(() => TemplateMigration.CloseReviews(source, baseline, resolved, bulkReview));
+        Assert.Equal("template-migration-review-candidate-mapping-invalid", bulkError.Message);
+
+        var shortcutError = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, reviewCandidate));
+        Assert.Equal("template-migration-semantic-candidate-disposition-invalid", shortcutError.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_review_closure_rejects_incomplete_and_wrong_document_receipts()
+    {
+        var source = CreateTextMigrationFixture("shared", "first unresolved", "second unresolved");
+        var baseline = CreateTextMigrationFixture("shared", "first target label", "second target label");
+        var semanticCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "first unresolved"),
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "first target label"),
+                "copy-text")]);
+        var resolution = TemplateMigration.ResolveSemanticCandidate(source, baseline, semanticCandidate);
+        Assert.False(resolution.Pass);
+        Assert.Single(resolution.Unresolved);
+
+        var unrelatedSource = CreateTextMigrationFixture("shared", "different unresolved", "second unresolved");
+        var reviewCandidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "second unresolved"),
+                null,
+                "review-required")]);
+
+        var wrongDocument = TemplateMigration.CloseReviews(unrelatedSource, baseline, resolution, reviewCandidate);
+        Assert.Contains(wrongDocument.Unresolved, item => item.Reason == "template-migration-review-resolution-invalid");
+
+        var incomplete = TemplateMigration.CloseReviews(source, baseline, resolution with
+        {
+            Unresolved =
+            [
+                .. resolution.Unresolved,
+                new TemplateMigrationPlanFailure("template-migration-exact-text-target-missing", "body:paragraph:0")
+            ]
+        }, reviewCandidate);
+        Assert.Contains(incomplete.Unresolved, item => item.Reason == "template-migration-review-resolution-not-closable");
     }
 
     [Fact]

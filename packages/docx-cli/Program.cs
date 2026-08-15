@@ -42,6 +42,7 @@ public static class Cli
                 "derive-template-migration-exact-text-plan" => Task.FromResult(TemplateMigration.RunDeriveExactTextPlan(args[1..])),
                 "derive-template-migration-anchor-gap-plan" => Task.FromResult(TemplateMigration.RunDeriveAnchorGapPlan(args[1..])),
                 "resolve-template-migration-semantic-candidate" => Task.FromResult(TemplateMigration.RunResolveSemanticCandidate(args[1..])),
+                "close-template-migration-reviews" => Task.FromResult(TemplateMigration.RunCloseReviews(args[1..])),
                 "build-template-migration-operations" => Task.FromResult(TemplateMigration.RunBuildOperations(args[1..])),
                 "apply-template-migration" => Task.FromResult(TemplateMigration.RunApply(args[1..])),
                 "validate-template-migration-output" => Task.FromResult(TemplateMigration.RunValidateOutput(args[1..])),
@@ -149,6 +150,7 @@ public static class Cli
         Console.WriteLine("  derive-template-migration-exact-text-plan <source.docx> <baseline.docx>");
         Console.WriteLine("  derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (append --help for candidate shape)");
+        Console.WriteLine("  close-template-migration-reviews <source.docx> <baseline.docx> <resolution.json> <review-candidate.json>");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
         Console.WriteLine("  apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>");
         Console.WriteLine("  validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>");
