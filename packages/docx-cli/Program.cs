@@ -40,6 +40,7 @@ public static class Cli
                 "validate-openxml" => Task.FromResult(OpenXmlValidation.Run(args[1..])),
                 "analyze-template-migration" => Task.FromResult(TemplateMigration.RunAnalyze(args[1..])),
                 "derive-template-migration-exact-text-plan" => Task.FromResult(TemplateMigration.RunDeriveExactTextPlan(args[1..])),
+                "find-template-migration-candidates" => Task.FromResult(TemplateMigration.RunFindCandidates(args[1..])),
                 "derive-template-migration-anchor-gap-plan" => Task.FromResult(TemplateMigration.RunDeriveAnchorGapPlan(args[1..])),
                 "resolve-template-migration-semantic-candidate" => Task.FromResult(TemplateMigration.RunResolveSemanticCandidate(args[1..])),
                 "close-template-migration-reviews" => Task.FromResult(TemplateMigration.RunCloseReviews(args[1..])),
@@ -148,7 +149,7 @@ public static class Cli
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("  analyze-template-migration <source.docx> <baseline.docx> [--json]");
         Console.WriteLine("  derive-template-migration-exact-text-plan <source.docx> <baseline.docx>");
-        Console.WriteLine("  derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>");
+        Console.WriteLine("  find-template-migration-candidates <source.docx> <baseline.docx>");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (append --help for candidate shape)");
         Console.WriteLine("  close-template-migration-reviews <source.docx> <baseline.docx> <resolution.json> <review-candidate.json>");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
@@ -197,12 +198,21 @@ public static class Cli
                 Usage:
                   tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
                 """,
-            "derive-template-migration-anchor-gap-plan" => """
-                Purpose: Add conservative paragraph candidates found between reciprocal exact-text anchors.
+            "find-template-migration-candidates" => """
+                Purpose: Find conservative paragraph candidate pairs between reciprocal exact-text anchors for a semantic decision.
                 Consumes: One current source DOCX and the same selected baseline DOCX used by the exact-text plan.
-                Produces: A hash-bound plan; Unresolved[].Source and Unresolved[].Baseline carry the current anchor-gap observations, and UnclaimedBaseline remains available for semantic resolution.
+                Produces: Uniform Candidates, Pending source observations, and UnclaimedBaseline observations bound to the current source and baseline hashes. It does not produce a migration plan. Candidates are possible pairs, not approved mappings; Pending items are undecided, not review terminals.
                 Use when: Exact matching leaves paragraph gaps that may have a unique current semantic target.
-                Do not use for: Approving a candidate, building operations, editing, or output validation.
+                Do not use for: Deciding copy/retain/exclude semantics, treating Pending as review-required, building operations, editing, or output validation. Propose current semantic dispositions, then call resolve-template-migration-semantic-candidate.
+                Usage:
+                  tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
+                """,
+            "derive-template-migration-anchor-gap-plan" => """
+                Purpose: Legacy compatibility alias for the former mixed plan-and-candidate receipt.
+                Consumes: One current source DOCX and one selected baseline DOCX.
+                Produces: The legacy anchor-gap plan receipt.
+                Use when: An existing caller still consumes the legacy receipt; new callers use find-template-migration-candidates.
+                Do not use for: New tool discovery, approving mappings, editing, or output validation.
                 Usage:
                   tiwater-docx derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>
                 """,

@@ -103,7 +103,7 @@ itself sufficient for semantic selection;
 the full technical analysis remains an audit artifact rather than an Agent
 join surface.
 
-### 3ab. Derive an Anchor-Gap Mapping Candidate
+### 3ab. Find Template-Migration Candidates
 
 Produces a deterministic candidate for unmatched current objects when their
 nearest mapped objects before and after them identify the same unique gap in
@@ -111,13 +111,15 @@ the selected baseline. It preserves current object order and leaves any
 missing, reversed, or non-unique gap unresolved for a semantic candidate.
 
 ```bash
-tiwater-docx derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>
+tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
 ```
 
-This command uses the same candidate status contract: unresolved gaps remain
-in `Unresolved` while the successfully derived candidate remains `Pass` true.
-When a reciprocal anchor gap identifies one baseline object mechanically, its
-compact current observation is included without approving the mapping.
+The result is an observation receipt, not a migration plan. `Candidates`
+contains uniform source/baseline pairs found mechanically; `Pending` contains
+the remaining source observations. Neither collection approves a mapping or
+creates a review terminal. The Agent chooses current business dispositions and
+submits them to `resolve-template-migration-semantic-candidate`; that resolver
+independently reopens both documents.
 
 ### 3b. Build Cross-Template Operations
 
