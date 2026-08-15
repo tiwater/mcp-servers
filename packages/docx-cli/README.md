@@ -44,9 +44,9 @@ Validates compatibility between a source template and a target template. Ensures
 tiwater-docx validate-template-transform <source-template.docx> <target-template.docx> [--json]
 ```
 
-### 3a. Analyze Cross-Template Migration
+### 3a. Diagnose Cross-Template Migration Inventories
 
-Exports hash-attested source and baseline object inventories plus unresolved
+This low-level compatibility command exports hash-attested source and baseline object inventories plus unresolved
 structural/content/style differences. Table-cell objects include canonical
 `Topology` (`ContainerObjectId`, `Row`, `Column`). It does not infer a business
 mapping or modify either document. A content object also includes `Selector`
@@ -62,6 +62,10 @@ again and rejects flattened or otherwise changed visible line structure.
 ```bash
 tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
 ```
+
+New semantic-resolution callers start with
+`find-template-migration-candidates`; this diagnostic command is not listed by
+top-level discovery.
 
 ### 3aa. Legacy Exact-Text Diagnostic
 
