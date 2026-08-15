@@ -1233,6 +1233,95 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_resolves_a_local_review_without_blocking_the_verified_preview()
+    {
+        var source = CreateTextMigrationFixture("shared current fact", "unplaced current value");
+        var baseline = CreateTextMigrationFixture("shared current fact", "target-owned label");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "unplaced current value"),
+                    null,
+                    "review-required")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+
+        Assert.False(resolved.Pass);
+        var review = Assert.Single(resolved.Plan.Mappings, item => item.Disposition == "review-required");
+        Assert.Equal("body:paragraph:1", review.SourceObjectId);
+        Assert.Null(review.BaselineObjectId);
+        var terminal = Assert.Single(resolved.Unresolved);
+        Assert.Equal(review.SourceObjectId, terminal.SourceObjectId);
+        Assert.Equal("template-migration-exact-text-target-missing", terminal.Reason);
+
+        var candidatePath = Path.Combine(Path.GetTempPath(), $"migration-local-review-{Guid.NewGuid():N}.json");
+        File.WriteAllText(candidatePath, JsonSerializer.Serialize(candidate, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        }));
+        var original = Console.Out;
+        using var commandOutput = new StringWriter();
+        try
+        {
+            Console.SetOut(commandOutput);
+            Assert.Equal(0, TemplateMigration.RunResolveSemanticCandidate([source, baseline, candidatePath]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+        using var commandReceipt = JsonDocument.Parse(commandOutput.ToString());
+        Assert.False(commandReceipt.RootElement.GetProperty("Pass").GetBoolean());
+        Assert.Single(commandReceipt.RootElement.GetProperty("Unresolved").EnumerateArray());
+
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.False(build.Pass);
+        Assert.True(build.ReviewRequired);
+        Assert.Empty(build.Failures);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-local-review-{Guid.NewGuid():N}.docx");
+        var preview = TemplateMigration.Preview(source, baseline, resolved.Plan, output);
+        Assert.False(preview.Pass);
+        Assert.True(preview.ReviewRequired);
+        Assert.True(preview.OutputVerified, string.Join("; ", preview.Readback?.Failures.Select(item => item.Reason) ?? []));
+        using var document = WordprocessingDocument.Open(output, false);
+        Assert.Equal(
+            ["shared current fact", "target-owned label"],
+            document.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().Select(GetParagraphText).ToArray());
+
+        var targetInventingCandidate = candidate with
+        {
+            Mappings =
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "unplaced current value"),
+                    new TemplateMigrationSemanticSelector("paragraph", Scope: "body", Text: "target-owned label"),
+                    "review-required")
+            ]
+        };
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, targetInventingCandidate));
+        Assert.Equal("template-migration-semantic-candidate-baseline-forbidden", error.Message);
+
+        var duplicateReview = candidate with
+        {
+            Mappings = [candidate.Mappings.Single(), candidate.Mappings.Single()]
+        };
+        var duplicateResult = TemplateMigration.ResolveSemanticCandidate(source, baseline, duplicateReview);
+        Assert.False(duplicateResult.Pass);
+        Assert.Contains(duplicateResult.Unresolved, item => item.Reason == "template-migration-semantic-source-not-pending");
+
+        var bulkReview = candidate with
+        {
+            Mappings = [candidate.Mappings.Single() with { Cardinality = "all" }]
+        };
+        var bulkError = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, bulkReview));
+        Assert.Equal("template-migration-semantic-candidate-cardinality-all-terminal-only", bulkError.Message);
+    }
+
+    [Fact]
     public void TemplateMigration_pairs_only_equal_paragraph_gaps_between_unique_text_anchors()
     {
         var source = CreateTextMigrationFixture("anchor start", "legacy heading", "anchor end");
