@@ -18,6 +18,12 @@ public static class Cli
             return Task.FromResult(0);
         }
 
+        if (args.Length == 1 && args[0] is "--help" or "-h")
+        {
+            PrintUsage();
+            return Task.FromResult(0);
+        }
+
         if (args.Length == 0)
         {
             PrintUsage();
@@ -147,8 +153,9 @@ public static class Cli
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
+        Console.WriteLine("Template migration: start with candidate discovery and run each selected command with --help before consuming its output.");
         Console.WriteLine("  find-template-migration-candidates <source.docx> <baseline.docx>");
-        Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (append --help for candidate shape)");
+        Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
         Console.WriteLine("  apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>");
         Console.WriteLine("  validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>");
@@ -169,7 +176,7 @@ public static class Cli
         Console.WriteLine("Produces: Published DOCX observations, plans, edited documents, previews, and validation receipts.");
         Console.WriteLine("Use when: A scenario-declared capability requires DOCX inspection, template migration, editing, normalization, or validation.");
         Console.WriteLine("Do not use for: Choosing scenario semantics, inventing business values, deciding delivery, rendering Office pages, or OCR.");
-        Console.WriteLine("Command discovery: Run tiwater-docx with no arguments; run a listed template-migration command with --help for its exact contract.");
+        Console.WriteLine("Command discovery: Run tiwater-docx --help; start template migration with candidate discovery and run each selected command with --help for its exact contract.");
         Console.WriteLine("Usage: tiwater-docx <command> [arguments]");
     }
 

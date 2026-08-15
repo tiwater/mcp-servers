@@ -38,6 +38,7 @@ public class AnnotationToolsTests
         }
         Assert.Contains("template migration", help, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Usage: tiwater-docx <command> [arguments]", help, StringComparison.Ordinal);
+        Assert.Contains("Run tiwater-docx --help", help, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -150,6 +151,27 @@ public class AnnotationToolsTests
         Assert.DoesNotContain("derive-template-migration-exact-text-plan", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("derive-template-migration-anchor-gap-plan", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("close-template-migration-reviews", usage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Top_level_help_routes_template_migration_through_command_contracts()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var usage = output.ToString();
+        Assert.Contains("start with candidate discovery", usage, StringComparison.Ordinal);
+        Assert.Contains("run each selected command with --help before consuming its output", usage, StringComparison.Ordinal);
+        Assert.Contains("find-template-migration-candidates", usage, StringComparison.Ordinal);
     }
 
     [Fact]
