@@ -164,7 +164,8 @@ public class AnnotationToolsTests
 
         var help = output.ToString();
         Assert.Contains("does not produce a migration plan", help, StringComparison.Ordinal);
-        Assert.Contains("Pending items are undecided, not review terminals", help, StringComparison.Ordinal);
+        Assert.Contains("Each required source appears exactly once", help, StringComparison.Ordinal);
+        Assert.Contains("Ignoring a RequiredDecision", help, StringComparison.Ordinal);
         Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
         Assert.Contains("performs its conservative exact comparison internally", help, StringComparison.Ordinal);
     }
@@ -1461,7 +1462,7 @@ public class AnnotationToolsTests
     }
 
     [Fact]
-    public void TemplateMigration_candidate_discovery_separates_uniform_pairs_from_pending_sources()
+    public void TemplateMigration_candidate_discovery_lists_every_required_source_once_with_optional_suggestions()
     {
         var source = CreateTextMigrationFixture("stable start", "legacy title", "legacy instruction", "stable end");
         var baseline = CreateTextMigrationFixture("stable start", "target title", "target instruction", "stable end");
@@ -1469,23 +1470,35 @@ public class AnnotationToolsTests
         var discovered = TemplateMigration.FindCandidates(source, baseline);
 
         Assert.True(discovered.Pass);
-        Assert.Equal(2, discovered.Candidates.Count);
-        Assert.Empty(discovered.Pending);
-        Assert.All(discovered.Candidates, candidate =>
+        Assert.Equal(2, discovered.RequiredDecisions.Count);
+        Assert.All(discovered.RequiredDecisions, decision =>
         {
-            Assert.Equal("reciprocal-anchor-gap", candidate.Basis);
-            Assert.NotNull(candidate.Source.Selector);
-            Assert.NotNull(candidate.Baseline.Selector);
+            Assert.NotNull(decision.Source.Selector);
+            var target = Assert.Single(decision.SuggestedTargets);
+            Assert.Equal("reciprocal-anchor-gap", target.Basis);
+            Assert.NotNull(target.Baseline.Selector);
         });
         var serialized = JsonSerializer.Serialize(discovered, Json.Options);
         Assert.DoesNotContain("Plan", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("ObjectId", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("Candidates", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("Pending", serialized, StringComparison.Ordinal);
 
         var unequalSource = CreateTextMigrationFixture("stable start", "one", "two", "three", "stable end");
         var unequal = TemplateMigration.FindCandidates(unequalSource, baseline);
-        Assert.Empty(unequal.Candidates);
-        Assert.Equal(3, unequal.Pending.Count);
-        Assert.All(unequal.Pending, item => Assert.NotNull(item.Source?.Selector));
+        Assert.Equal(3, unequal.RequiredDecisions.Count);
+        Assert.All(unequal.RequiredDecisions, item =>
+        {
+            Assert.NotNull(item.Source.Selector);
+            Assert.Empty(item.SuggestedTargets);
+        });
+
+        var repeatedBaseline = CreateTextMigrationFixture("stable start", "same", "same", "stable end");
+        var oneSource = CreateTextMigrationFixture("stable start", "same", "stable end");
+        var nonUnique = TemplateMigration.FindCandidates(oneSource, repeatedBaseline);
+        var decision = Assert.Single(nonUnique.RequiredDecisions);
+        Assert.Equal(2, decision.SuggestedTargets.Count);
+        Assert.All(decision.SuggestedTargets, target => Assert.Equal("exact-text-option", target.Basis));
     }
 
     [Fact]
