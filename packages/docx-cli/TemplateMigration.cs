@@ -450,7 +450,8 @@ candidate.json uses the published camel-case candidate shape. For v5:
   optional: bodyAppends, valueProjections, bodyInsertions, choiceSelections, baselineClears
   selector: kind plus exactly one of text, sha256, or descendantText; optional scope,
             parentText, previousText, nextText, sameRowText, sameColumnText
-  mapping: source, disposition, and baseline unless disposition is out-of-scope;
+  mapping: source, disposition, and baseline unless disposition is out-of-scope
+           or review-required;
            optional cardinality is one, or all only for out-of-scope
 
 Existing branch shapes:
@@ -481,6 +482,10 @@ Minimal v5 example (values are observations from the current source/baseline):
     {
       "source": {"kind":"paragraph","scope":"header","text":"<excluded source text>"},
       "disposition": "out-of-scope"
+    },
+    {
+      "source": {"kind":"table-cell","scope":"body","text":"<source value with no unique target>"},
+      "disposition": "review-required"
     }
   ],
   "choiceSelections": [
@@ -498,8 +503,15 @@ Minimal v5 example (values are observations from the current source/baseline):
 }
 
 Allowed mapping dispositions: copy-text, copy-media, retain-target,
-retain-target-label, out-of-scope. Successful resolution returns Pass=true,
-Plan, and an empty Unresolved array; the operation builder consumes Plan.
+retain-target-label, out-of-scope, review-required. A review-required mapping
+closes one current Unresolved item without inventing a target. Resolution then
+returns Pass=false with a closed Plan and only those explicit review items in
+Unresolved; preview-template-migration consumes that Plan to produce an
+independently verified provisional output. The command exits successfully for
+that closed review receipt even though Pass=false. Other failures are not
+previewable.
+Successful full resolution returns Pass=true, Plan, and an empty Unresolved
+array; the operation builder consumes Plan.
 """);
             return 0;
         }
@@ -510,7 +522,18 @@ Plan, and an empty Unresolved array; the operation builder consumes Plan.
         var candidate = ReadSemanticCandidate(args[2]);
         var result = ResolveSemanticCandidate(args[0], args[1], candidate);
         Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
-        return result.Pass ? 0 : 1;
+        var reviewSourceIds = result.Plan.Mappings
+            .Where(mapping => string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal))
+            .Select(mapping => mapping.SourceObjectId)
+            .ToHashSet(StringComparer.Ordinal);
+        var unresolvedSourceIds = result.Unresolved
+            .Where(item => item.SourceObjectId is not null)
+            .Select(item => item.SourceObjectId!)
+            .ToHashSet(StringComparer.Ordinal);
+        var closedReview = reviewSourceIds.Count != 0
+            && result.Unresolved.Count == reviewSourceIds.Count
+            && unresolvedSourceIds.SetEquals(reviewSourceIds);
+        return result.Pass || closedReview ? 0 : 1;
     }
 
     /// <summary>
@@ -569,9 +592,17 @@ Plan, and an empty Unresolved array; the operation builder consumes Plan.
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id));
                 continue;
             }
-            if (string.Equals(proposal.Disposition, "out-of-scope", StringComparison.Ordinal))
+            if (string.Equals(proposal.Disposition, "review-required", StringComparison.Ordinal) && !sourcePending)
             {
-                mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, null, proposal.Disposition, "semantic-candidate-out-of-scope");
+                failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id));
+                continue;
+            }
+            if (proposal.Disposition is "out-of-scope" or "review-required")
+            {
+                var terminalReason = string.Equals(proposal.Disposition, "review-required", StringComparison.Ordinal)
+                    ? pending[sourceObject.Id].Reason
+                    : "semantic-candidate-out-of-scope";
+                mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, null, proposal.Disposition, terminalReason);
                 pending.Remove(sourceObject.Id);
                 continue;
             }
@@ -776,11 +807,19 @@ Plan, and an empty Unresolved array; the operation builder consumes Plan.
             var build = BuildOperations(source, baseline, plan);
             failures.AddRange(build.Failures);
         }
+        var reviewTerminals = plan.Mappings
+            .Where(mapping => string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal))
+            .Select(mapping => new TemplateMigrationPlanFailure(
+                mapping.Reason ?? "template-migration-review-required",
+                mapping.SourceObjectId,
+                mapping.BaselineObjectId))
+            .ToList();
+        var unresolved = failures.Concat(reviewTerminals).ToList();
         return new TemplateMigrationMappingDerivation(
             "tiwater.docx.template-migration-semantic-resolution/v1",
-            failures.Count == 0,
+            unresolved.Count == 0,
             plan,
-            failures);
+            unresolved);
     }
 
     private static TemplateMigrationSemanticCandidate ReadSemanticCandidate(string file)
@@ -800,14 +839,14 @@ Plan, and an empty Unresolved array; the operation builder consumes Plan.
             RequireOnlyFields(mapping, new HashSet<string>(["source", "baseline", "disposition", "cardinality"], StringComparer.Ordinal), "template-migration-semantic-candidate-mapping");
             if (!mapping.TryGetProperty("source", out var source)) throw new InvalidOperationException("template-migration-semantic-candidate-source-missing");
             RequireOnlyFields(source, SemanticSelectorFields(), "template-migration-semantic-candidate-source");
-            var outOfScope = mapping.TryGetProperty("disposition", out var disposition)
-                && string.Equals(disposition.GetString(), "out-of-scope", StringComparison.Ordinal);
+            var terminalWithoutTarget = mapping.TryGetProperty("disposition", out var disposition)
+                && disposition.GetString() is "out-of-scope" or "review-required";
             if (mapping.TryGetProperty("baseline", out var baseline))
             {
-                if (outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");
+                if (terminalWithoutTarget) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");
                 RequireOnlyFields(baseline, SemanticSelectorFields(), "template-migration-semantic-candidate-baseline");
             }
-            else if (!outOfScope) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-missing");
+            else if (!terminalWithoutTarget) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-missing");
         }
         if (root.TryGetProperty("bodyAppends", out var appends))
         {
@@ -907,11 +946,11 @@ Plan, and an empty Unresolved array; the operation builder consumes Plan.
         foreach (var mapping in candidate.Mappings ?? [])
         {
             ValidateSemanticSelector(mapping.Source, "source", candidate.Schema);
-            if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label" or "out-of-scope")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
+            if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label" or "out-of-scope" or "review-required")) throw new InvalidOperationException("template-migration-semantic-candidate-disposition-invalid");
             if (mapping.Cardinality is not (null or "one" or "all")) throw new InvalidOperationException("template-migration-semantic-candidate-cardinality-invalid");
             if (string.Equals(mapping.Cardinality, "all", StringComparison.Ordinal)
                 && !string.Equals(mapping.Disposition, "out-of-scope", StringComparison.Ordinal)) throw new InvalidOperationException("template-migration-semantic-candidate-cardinality-all-terminal-only");
-            if (string.Equals(mapping.Disposition, "out-of-scope", StringComparison.Ordinal))
+            if (mapping.Disposition is "out-of-scope" or "review-required")
             {
                 if (mapping.Baseline is not null) throw new InvalidOperationException("template-migration-semantic-candidate-baseline-forbidden");
             }
@@ -1639,6 +1678,18 @@ Plan, and an empty Unresolved array; the operation builder consumes Plan.
 
     public static int RunPreview(string[] args)
     {
+        if (args.Length == 1 && args[0] is "--help" or "-h")
+        {
+            Console.WriteLine("""
+Purpose: Produce and independently read back a provisional DOCX from the verified subset of a closed review-required migration plan.
+Consumes: The current source DOCX, selected baseline DOCX, and a resolver-produced plan whose only non-pass items are explicit review-required mappings.
+Produces: A preview receipt with ReviewRequired=true, OutputVerified, output path, operation build, edit receipt, and independent readback.
+Use when: Semantic resolution closed every current item but one or more items have a genuine local review-required terminal.
+Do not use for: An unresolved plan, a failed semantic request, full-pass delivery, inventing a missing target, or replacing the canonical delivery decision.
+Usage: preview-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>
+""");
+            return 0;
+        }
         if (args.Length < 4)
         {
             throw new InvalidOperationException("preview-template-migration requires <source.docx> <baseline.docx> <plan.json> <output.docx>");
