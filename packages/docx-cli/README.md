@@ -110,21 +110,23 @@ join surface.
 
 ### 3ab. Find Template-Migration Candidates
 
-Produces a deterministic candidate for unmatched current objects when their
-nearest mapped objects before and after them identify the same unique gap in
-the selected baseline. It preserves current object order and leaves any
-missing, reversed, or non-unique gap unresolved for a semantic candidate.
+Lists every unmatched current object as one required semantic decision. When
+nearest mapped objects before and after it identify the same unique gap in the
+selected baseline, or exact text has multiple possible targets, those current
+observations are included as non-authoritative suggestions. The provider does
+not choose a target or terminal.
 
 ```bash
 tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
 ```
 
-The result is an observation receipt, not a migration plan. `Candidates`
-contains uniform source/baseline pairs found mechanically; `Pending` contains
-the remaining source observations. Neither collection approves a mapping or
-creates a review terminal. The Agent chooses current business dispositions and
-submits them to `resolve-template-migration-semantic-candidate`; that resolver
-independently reopens both documents.
+The result is an observation receipt, not a migration plan.
+`RequiredDecisions` contains every source that still needs a disposition exactly
+once. Its `SuggestedTargets` may be empty, singular, or plural; suggestion count
+does not determine review status. The Agent chooses current business
+dispositions for the complete collection and submits them to
+`resolve-template-migration-semantic-candidate`; that resolver independently
+reopens both documents.
 
 ### 3b. Build Cross-Template Operations
 

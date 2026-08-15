@@ -198,11 +198,11 @@ public static class Cli
                   tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
                 """,
             "find-template-migration-candidates" => """
-                Purpose: Find conservative paragraph candidate pairs between reciprocal exact-text anchors for a semantic decision.
+                Purpose: List every source observation that still requires one semantic migration decision, with any mechanically suggested targets.
                 Consumes: One current source DOCX and one selected baseline DOCX; the provider performs its conservative exact comparison internally.
-                Produces: Uniform Candidates, Pending source observations, and UnclaimedBaseline observations bound to the current source and baseline hashes. It does not produce a migration plan. Candidates are possible pairs, not approved mappings; Pending items are undecided, not review terminals.
-                Use when: Starting semantic resolution for source content that is not already an automatic exact match.
-                Do not use for: Deciding copy/retain/exclude semantics, treating Pending as review-required, building operations, editing, or output validation. Propose current semantic dispositions, then call resolve-template-migration-semantic-candidate.
+                Produces: Uniform RequiredDecisions and UnclaimedBaseline observations bound to the current source and baseline hashes. Each required source appears exactly once; SuggestedTargets may be empty, singular, or plural and never approve a mapping. It does not produce a migration plan.
+                Use when: Starting semantic resolution for every source observation that is not already an automatic exact match.
+                Do not use for: Ignoring a RequiredDecision, treating an absent or plural suggestion as review-required, deciding copy/retain/exclude semantics, building operations, editing, or output validation. Propose one current semantic disposition per required source, then call resolve-template-migration-semantic-candidate.
                 Usage:
                   tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
                 """,

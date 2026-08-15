@@ -321,25 +321,37 @@ public static class TemplateMigration
             .Where(item => !string.IsNullOrWhiteSpace(item.SourceObjectId))
             .Select(item => item.SourceObjectId!)
             .ToHashSet(StringComparer.Ordinal);
-        var pending = legacy.Unresolved
+        var pairsBySourceId = pairs.ToDictionary(item => item.SourceObjectId!, StringComparer.Ordinal);
+        var automaticPending = legacy.Unresolved
             .Where(item => item.Reason != "template-migration-anchor-gap-candidate-review-required")
-            .Where(item => item.SourceObjectId is null || !pairedSourceIds.Contains(item.SourceObjectId))
-            .Select(item => new TemplateMigrationPlanFailure(
-                item.Reason,
-                Detail: item.Detail,
-                Source: item.Source,
-                BaselineOptions: item.BaselineOptions))
             .ToList();
+        if (automaticPending.Any(item => item.Source is null || string.IsNullOrWhiteSpace(item.SourceObjectId)))
+        {
+            throw new InvalidOperationException("template-migration-candidate-source-observation-missing");
+        }
+        var decisions = automaticPending.Select(item =>
+        {
+            IReadOnlyList<TemplateMigrationSuggestedTarget> targets;
+            if (pairedSourceIds.Contains(item.SourceObjectId!))
+            {
+                targets = [new TemplateMigrationSuggestedTarget(
+                    "reciprocal-anchor-gap",
+                    pairsBySourceId[item.SourceObjectId!].Baseline!)];
+            }
+            else
+            {
+                targets = (item.BaselineOptions ?? [])
+                    .Select(option => new TemplateMigrationSuggestedTarget("exact-text-option", option))
+                    .ToList();
+            }
+            return new TemplateMigrationRequiredDecision(item.Source!, targets);
+        }).ToList();
         return new TemplateMigrationCandidateDiscovery(
-            "tiwater.docx.template-migration-candidate-discovery/v1",
+            "tiwater.docx.template-migration-candidate-discovery/v2",
             true,
             legacy.Plan.SourceSha256,
             legacy.Plan.BaselineSha256,
-            pairs.Select(pair => new TemplateMigrationCandidatePair(
-                "reciprocal-anchor-gap",
-                pair.Source!,
-                pair.Baseline!)).ToList(),
-            pending,
+            decisions,
             legacy.UnclaimedBaseline ?? []);
     }
 
