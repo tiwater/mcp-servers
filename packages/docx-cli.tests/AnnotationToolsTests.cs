@@ -66,7 +66,10 @@ public class AnnotationToolsTests
         Assert.Contains("Consumes:", help, StringComparison.Ordinal);
         Assert.Contains("Produces:", help, StringComparison.Ordinal);
         Assert.Contains("Use when:", help, StringComparison.Ordinal);
-        Assert.Contains("Do not use for:", help, StringComparison.Ordinal);
+        Assert.True(
+            help.Contains("Do not use for:", StringComparison.Ordinal)
+            || help.Contains("Provider boundary:", StringComparison.Ordinal),
+            "Command help must state its non-goal boundary.");
     }
 
     [Fact]
@@ -146,6 +149,7 @@ public class AnnotationToolsTests
         Assert.DoesNotContain("analyze-template-migration", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("derive-template-migration-exact-text-plan", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("derive-template-migration-anchor-gap-plan", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("close-template-migration-reviews", usage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -166,7 +170,9 @@ public class AnnotationToolsTests
         var help = output.ToString();
         Assert.Contains("does not produce a migration plan", help, StringComparison.Ordinal);
         Assert.Contains("Each required source appears exactly once", help, StringComparison.Ordinal);
-        Assert.Contains("Ignoring a RequiredDecision", help, StringComparison.Ordinal);
+        Assert.Contains("The Agent uses current scenario authority", help, StringComparison.Ordinal);
+        Assert.Contains("for every RequiredDecision, regardless of suggestion count", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("Do not use for: Ignoring a RequiredDecision", help, StringComparison.Ordinal);
         Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
         Assert.Contains("performs its conservative exact comparison internally", help, StringComparison.Ordinal);
     }
