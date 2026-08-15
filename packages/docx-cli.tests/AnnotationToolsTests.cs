@@ -171,7 +171,8 @@ public class AnnotationToolsTests
 
         var usage = output.ToString();
         Assert.Contains("list unresolved sources and possible targets first", usage, StringComparison.Ordinal);
-        Assert.Contains("run each selected command with --help before consuming its output", usage, StringComparison.Ordinal);
+        Assert.Contains("when an artifact supplies the next command's inputs", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("each selected command", usage, StringComparison.Ordinal);
         Assert.Contains("list-template-migration-options", usage, StringComparison.Ordinal);
     }
 
