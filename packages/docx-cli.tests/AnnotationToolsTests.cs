@@ -1101,6 +1101,34 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_current_targets_exclude_targets_already_claimed_by_the_draft()
+    {
+        var source = CreateTextMigrationFixture("First unseen statement", "Second unseen statement");
+        var baseline = CreateTextMigrationFixture("First available target", "Second available target");
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-available-targets-{Guid.NewGuid():N}.json");
+        var started = TemplateMigration.StartDecisionDraft(source, baseline, draft);
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var firstTarget = Assert.Single(catalog.Targets, item => item.Kind == "paragraph" && item.Text == "First available target");
+        var secondTarget = Assert.Single(catalog.Targets, item => item.Kind == "paragraph" && item.Text == "Second available target");
+
+        var before = TemplateMigration.ListCurrentDecisionTargets(source, baseline, draft, "copy-text", null, 0, 100);
+        Assert.Contains(before.Targets, item => item.Id == firstTarget.Id);
+        Assert.Contains(before.Targets, item => item.Id == secondTarget.Id);
+
+        TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", started.NextSource!.Id, firstTarget.Id, "copy-text"));
+
+        var after = TemplateMigration.ListCurrentDecisionTargets(source, baseline, draft, "copy-text", null, 0, 100);
+        Assert.Equal(1, after.Total);
+        Assert.DoesNotContain(after.Targets, item => item.Id == firstTarget.Id);
+        Assert.Contains(after.Targets, item => item.Id == secondTarget.Id);
+
+        var explicitCompatibilityPage = TemplateMigration.ListDecisionTargets(
+            source, baseline, after.SourceChoiceId, "copy-text", null, 0, 100);
+        Assert.Contains(explicitCompatibilityPage.Targets, item => item.Id == firstTarget.Id);
+    }
+
+    [Fact]
     public void TemplateMigration_incremental_decisions_fail_closed_without_changing_the_draft()
     {
         var source = CreateTextMigrationFixture("One source");

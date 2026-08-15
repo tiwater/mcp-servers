@@ -434,6 +434,17 @@ public static class TemplateMigration
         string? query,
         int offset,
         int limit)
+        => ListDecisionTargets(source, baseline, sourceChoiceId, branch, query, offset, limit, null);
+
+    private static TemplateMigrationTargetPage ListDecisionTargets(
+        string source,
+        string baseline,
+        string? sourceChoiceId,
+        string branch,
+        string? query,
+        int offset,
+        int limit,
+        IReadOnlySet<string>? excludedTargetIds)
     {
         if (offset < 0) throw new InvalidOperationException("template-migration-target-offset-invalid");
         if (limit is < 1 or > 100) throw new InvalidOperationException("template-migration-target-limit-invalid");
@@ -464,6 +475,10 @@ public static class TemplateMigration
         {
             targets = targets.Where(item => ChoiceSearchText(item).Contains(query, StringComparison.OrdinalIgnoreCase));
         }
+        if (excludedTargetIds is not null)
+        {
+            targets = targets.Where(item => !excludedTargetIds.Contains(item.Id));
+        }
         var all = targets.OrderBy(item => item.Id, StringComparer.Ordinal).ToList();
         return new TemplateMigrationTargetPage(
             "tiwater.docx.template-migration-target-page/v1",
@@ -493,7 +508,13 @@ public static class TemplateMigration
             ? null
             : DecisionProgress(catalog, draft).NextSource?.Id
                 ?? throw new InvalidOperationException("template-migration-decision-draft-complete");
-        return ListDecisionTargets(source, baseline, sourceChoiceId, branch, query, offset, limit);
+        var usedTargets = draft.Mappings
+            .Where(item => item.TargetChoiceId is not null)
+            .Select(item => item.TargetChoiceId!)
+            .Concat(draft.ChoiceSelections.Select(item => item.TargetChoiceId))
+            .Concat(draft.BaselineClears.Select(item => item.TargetChoiceId))
+            .ToHashSet(StringComparer.Ordinal);
+        return ListDecisionTargets(source, baseline, sourceChoiceId, branch, query, offset, limit, usedTargets);
     }
 
     public static TemplateMigrationDecisionProgress RecordDecision(
