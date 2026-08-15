@@ -238,6 +238,7 @@ public class AnnotationToolsTests
         }
 
         var help = output.ToString();
+        foreach (var label in new[] { "Purpose:", "Consumes:", "Produces:", "Use when:", "Do not use for:", "Usage:" }) Assert.Contains(label, help, StringComparison.Ordinal);
         Assert.Contains("does not produce a migration plan", help, StringComparison.Ordinal);
         Assert.Contains("Each distinguishable required source appears once", help, StringComparison.Ordinal);
         Assert.Contains("Count > 1 group with RequiredCardinality=all", help, StringComparison.Ordinal);
