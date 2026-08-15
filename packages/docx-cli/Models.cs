@@ -361,13 +361,10 @@ public sealed record TemplateMigrationSemanticContext(
     IReadOnlyList<string>? SameRowTexts = null,
     IReadOnlyList<TemplateMigrationSemanticObservation>? SelectableChildren = null);
 
-public sealed record TemplateMigrationSuggestedTarget(
-    string Basis,
-    TemplateMigrationSemanticObservation Baseline);
-
 public sealed record TemplateMigrationRequiredDecision(
     TemplateMigrationSemanticObservation Source,
-    IReadOnlyList<TemplateMigrationSuggestedTarget> SuggestedTargets);
+    int Count = 1,
+    string RequiredCardinality = "one");
 
 public sealed record TemplateMigrationCandidateDiscovery(
     string Schema,

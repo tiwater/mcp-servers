@@ -169,9 +169,11 @@ public class AnnotationToolsTests
 
         var help = output.ToString();
         Assert.Contains("does not produce a migration plan", help, StringComparison.Ordinal);
-        Assert.Contains("Each required source appears exactly once", help, StringComparison.Ordinal);
+        Assert.Contains("Each distinguishable required source appears once", help, StringComparison.Ordinal);
+        Assert.Contains("Count > 1 group with RequiredCardinality=all", help, StringComparison.Ordinal);
         Assert.Contains("The Agent uses current scenario authority", help, StringComparison.Ordinal);
-        Assert.Contains("for every RequiredDecision, regardless of suggestion count", help, StringComparison.Ordinal);
+        Assert.Contains("for every RequiredDecision", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("SuggestedTargets", help, StringComparison.Ordinal);
         Assert.DoesNotContain("Do not use for: Ignoring a RequiredDecision", help, StringComparison.Ordinal);
         Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
         Assert.Contains("performs its conservative exact comparison internally", help, StringComparison.Ordinal);
@@ -1510,7 +1512,7 @@ public class AnnotationToolsTests
     }
 
     [Fact]
-    public void TemplateMigration_candidate_discovery_lists_every_required_source_once_with_optional_suggestions()
+    public void TemplateMigration_candidate_discovery_lists_every_required_source_without_target_recommendations()
     {
         var source = CreateTextMigrationFixture("stable start", "legacy title", "legacy instruction", "stable end");
         var baseline = CreateTextMigrationFixture("stable start", "target title", "target instruction", "stable end");
@@ -1518,14 +1520,13 @@ public class AnnotationToolsTests
         var discovered = TemplateMigration.FindCandidates(source, baseline);
 
         Assert.True(discovered.Pass);
-        Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v4", discovered.Schema);
+        Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v5", discovered.Schema);
         Assert.Equal(2, discovered.RequiredDecisions.Count);
         Assert.All(discovered.RequiredDecisions, decision =>
         {
             Assert.NotNull(decision.Source.Selector);
-            var target = Assert.Single(decision.SuggestedTargets);
-            Assert.Equal("reciprocal-anchor-gap", target.Basis);
-            Assert.NotNull(target.Baseline.Selector);
+            Assert.Equal(1, decision.Count);
+            Assert.Equal("one", decision.RequiredCardinality);
         });
         var serialized = JsonSerializer.Serialize(discovered, Json.Options);
         Assert.DoesNotContain("Plan", serialized, StringComparison.Ordinal);
@@ -1533,6 +1534,7 @@ public class AnnotationToolsTests
         Assert.DoesNotContain("Candidates", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("Pending", serialized, StringComparison.Ordinal);
         Assert.Contains("AvailableTargets", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("SuggestedTargets", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("UnclaimedBaseline", serialized, StringComparison.Ordinal);
         Assert.NotEmpty(discovered.AvailableTargets);
         Assert.All(discovered.AvailableTargets, target => Assert.True(
@@ -1544,15 +1546,13 @@ public class AnnotationToolsTests
         Assert.All(unequal.RequiredDecisions, item =>
         {
             Assert.NotNull(item.Source.Selector);
-            Assert.Empty(item.SuggestedTargets);
         });
 
         var repeatedBaseline = CreateTextMigrationFixture("stable start", "same", "same", "stable end");
         var oneSource = CreateTextMigrationFixture("stable start", "same", "stable end");
         var nonUnique = TemplateMigration.FindCandidates(oneSource, repeatedBaseline);
-        var decision = Assert.Single(nonUnique.RequiredDecisions);
-        Assert.Equal(2, decision.SuggestedTargets.Count);
-        Assert.All(decision.SuggestedTargets, target => Assert.Equal("exact-text-option", target.Basis));
+        Assert.Single(nonUnique.RequiredDecisions);
+        Assert.Equal(2, nonUnique.AvailableTargets.Count(target => target.Text == "same"));
     }
 
     [Fact]
@@ -1568,7 +1568,7 @@ public class AnnotationToolsTests
 
         var discovered = TemplateMigration.FindCandidates(source, baseline);
 
-        Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v4", discovered.Schema);
+        Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v5", discovered.Schema);
         Assert.DoesNotContain(discovered.AvailableTargets, target => target.Kind == "run");
         var revision = Assert.Single(discovered.AvailableTargets, target =>
             target.Kind == "table-cell" && target.Text == "R-7");
@@ -1589,6 +1589,92 @@ public class AnnotationToolsTests
 
         Assert.DoesNotContain(discovered.AvailableTargets, target =>
             target.Kind == "paragraph" && target.Text == "Approved by");
+    }
+
+    [Fact]
+    public void TemplateMigration_candidate_discovery_groups_indistinguishable_pending_sources_for_terminal_all()
+    {
+        var source = CreateTableMigrationFixture([
+            ["Reviewed by"],
+            ["Reviewed by"],
+            ["Reviewed by"]
+        ]);
+        var baseline = CreateTableMigrationFixture([
+            ["Approval owner"]
+        ]);
+
+        var discovered = TemplateMigration.FindCandidates(source, baseline);
+
+        var group = Assert.Single(discovered.RequiredDecisions);
+        Assert.Equal(3, group.Count);
+        Assert.Equal("all", group.RequiredCardinality);
+        Assert.Equal("Reviewed by", group.Source.Selector?.Text);
+        var resolved = TemplateMigration.ResolveSemanticCandidate(
+            source,
+            baseline,
+            new TemplateMigrationSemanticCandidate(
+                "tiwater.docx.template-migration-semantic-candidate/v5",
+                [new TemplateMigrationSemanticCandidateMapping(
+                    group.Source.Selector!,
+                    null,
+                    "out-of-scope",
+                    "all")]));
+        Assert.True(resolved.Pass);
+        Assert.Equal(3, resolved.Plan.Mappings.Count(mapping => mapping.Disposition == "out-of-scope"));
+    }
+
+    [Fact]
+    public void TemplateMigration_candidate_discovery_does_not_absorb_a_distinguishable_source_into_a_repeat_group()
+    {
+        var source = CreateTableMigrationFixture([
+            ["Reviewed by", "Team A"],
+            ["Reviewed by", "Team A"],
+            ["Reviewed by", "Team B"]
+        ]);
+        var baseline = CreateTableMigrationFixture([
+            ["Approval owner", "Target team"]
+        ]);
+
+        var decisions = TemplateMigration.FindCandidates(source, baseline).RequiredDecisions
+            .Where(decision => decision.Source.Text == "Reviewed by")
+            .OrderBy(decision => decision.Count)
+            .ToList();
+
+        Assert.Equal(2, decisions.Count);
+        Assert.Equal(1, decisions[0].Count);
+        Assert.Equal("one", decisions[0].RequiredCardinality);
+        Assert.Equal("Team B", decisions[0].Source.Selector?.SameRowText);
+        Assert.Equal(2, decisions[1].Count);
+        Assert.Equal("all", decisions[1].RequiredCardinality);
+        Assert.Equal("Team A", decisions[1].Source.Selector?.SameRowText);
+    }
+
+    [Fact]
+    public void TemplateMigration_candidate_discovery_keeps_contextually_distinct_repeat_groups_separate()
+    {
+        var source = CreateTableMigrationFixture([
+            ["Reviewed by", "Team A"],
+            ["Reviewed by", "Team A"],
+            ["Reviewed by", "Team B"],
+            ["Reviewed by", "Team B"]
+        ]);
+        var baseline = CreateTableMigrationFixture([
+            ["Approval owner", "Target team"]
+        ]);
+
+        var decisions = TemplateMigration.FindCandidates(source, baseline).RequiredDecisions
+            .Where(decision => decision.Source.Text == "Reviewed by")
+            .OrderBy(decision => decision.Source.Selector?.SameRowText, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(2, decisions.Count);
+        Assert.All(decisions, decision =>
+        {
+            Assert.Equal(2, decision.Count);
+            Assert.Equal("all", decision.RequiredCardinality);
+        });
+        Assert.Equal("Team A", decisions[0].Source.Selector?.SameRowText);
+        Assert.Equal("Team B", decisions[1].Source.Selector?.SameRowText);
     }
 
     [Fact]
