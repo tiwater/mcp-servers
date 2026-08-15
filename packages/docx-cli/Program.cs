@@ -12,6 +12,12 @@ public static class Cli
 {
     public static Task<int> RunAsync(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--describe-tool")
+        {
+            PrintToolDescription();
+            return Task.FromResult(0);
+        }
+
         if (args.Length == 0)
         {
             PrintUsage();
@@ -154,6 +160,17 @@ public static class Cli
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
         Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
         Console.WriteLine("  validate-font-policy <input.docx> <policy.json>");
+    }
+
+    private static void PrintToolDescription()
+    {
+        Console.WriteLine("Purpose: Inspect, migrate, edit, normalize, and validate DOCX documents through the published DOCX provider.");
+        Console.WriteLine("Consumes: DOCX files and the typed plans, candidates, operations, or policies required by the selected subcommand.");
+        Console.WriteLine("Produces: Published DOCX observations, plans, edited documents, previews, and validation receipts.");
+        Console.WriteLine("Use when: A scenario-declared capability requires DOCX inspection, template migration, editing, normalization, or validation.");
+        Console.WriteLine("Do not use for: Choosing scenario semantics, inventing business values, deciding delivery, rendering Office pages, or OCR.");
+        Console.WriteLine("Command discovery: Run tiwater-docx with no arguments; run a listed template-migration command with --help for its exact contract.");
+        Console.WriteLine("Usage: tiwater-docx <command> [arguments]");
     }
 
     private static bool PrintCommandUsage(string command)
