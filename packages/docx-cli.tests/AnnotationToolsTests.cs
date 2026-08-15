@@ -44,6 +44,10 @@ public class AnnotationToolsTests
     [Theory]
     [InlineData("analyze-template-migration", "<source.docx> <baseline.docx> [--json]")]
     [InlineData("derive-template-migration-exact-text-plan", "<source.docx> <baseline.docx>")]
+    [InlineData("start-template-migration-decisions", "<source.docx> <baseline.docx> <draft.json>")]
+    [InlineData("find-template-migration-targets", "<source.docx> <baseline.docx> <source-choice-id|-> <copy-text|copy-media|retain-target|retain-target-label|choice-selection|baseline-clear> [query|-] [offset] [limit]")]
+    [InlineData("record-template-migration-decision", "<source.docx> <baseline.docx> <draft.json> mapping <source-choice-id> <disposition> <target-choice-id|-> [cardinality|-]")]
+    [InlineData("resolve-template-migration-decisions", "<source.docx> <baseline.docx> <draft.json>")]
     [InlineData("list-template-migration-choices", "<source.docx> <baseline.docx>")]
     [InlineData("resolve-template-migration-choices", "<source.docx> <baseline.docx> <choices.json>")]
     [InlineData("list-template-migration-options", "<source.docx> <baseline.docx>")]
@@ -91,8 +95,8 @@ public class AnnotationToolsTests
         }
 
         var help = output.ToString();
-        Assert.Contains("resolve-template-migration-choices", help, StringComparison.Ordinal);
-        Assert.Contains("compatible selector resolver", help, StringComparison.Ordinal);
+        Assert.Contains("resolve-template-migration-decisions", help, StringComparison.Ordinal);
+        Assert.Contains("compatible choice/selector resolver", help, StringComparison.Ordinal);
         Assert.Contains("exact-text or anchor-gap plan that still has Unresolved items", help, StringComparison.Ordinal);
     }
 
@@ -130,7 +134,7 @@ public class AnnotationToolsTests
         }
 
         Assert.Contains("Unresolved[].BaselineOptions", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("new semantic-resolution callers use list-template-migration-choices", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("new semantic-resolution callers use start-template-migration-decisions", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -149,7 +153,7 @@ public class AnnotationToolsTests
         }
 
         var usage = output.ToString();
-        Assert.Contains("list-template-migration-choices", usage, StringComparison.Ordinal);
+        Assert.Contains("start-template-migration-decisions", usage, StringComparison.Ordinal);
         Assert.Contains("list-template-migration-options", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("find-template-migration-candidates", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("analyze-template-migration", usage, StringComparison.Ordinal);
@@ -174,7 +178,7 @@ public class AnnotationToolsTests
         }
 
         var usage = output.ToString();
-        Assert.Contains("start with current-document choices", usage, StringComparison.Ordinal);
+        Assert.Contains("record one current-document decision at a time", usage, StringComparison.Ordinal);
         Assert.Contains("read each next command's --help", usage, StringComparison.Ordinal);
         Assert.DoesNotContain("each selected command", usage, StringComparison.Ordinal);
         Assert.Contains("list-template-migration-choices", usage, StringComparison.Ordinal);
@@ -200,8 +204,10 @@ public class AnnotationToolsTests
         var root = document.RootElement;
         Assert.Equal("tiwater.provider-tool-list/v1", root.GetProperty("schema").GetString());
         var commands = root.GetProperty("commands").EnumerateArray().Select(value => value.GetString()).ToArray();
-        Assert.Equal("list-template-migration-choices", commands[0]);
-        Assert.Equal("resolve-template-migration-choices", commands[1]);
+        Assert.Equal("start-template-migration-decisions", commands[0]);
+        Assert.Equal("find-template-migration-targets", commands[1]);
+        Assert.Equal("record-template-migration-decision", commands[2]);
+        Assert.Equal("resolve-template-migration-decisions", commands[3]);
         Assert.Contains("list-template-migration-options", commands);
         Assert.Contains("resolve-template-migration-semantic-candidate", commands);
         Assert.Contains("validate-template-migration-output", commands);
@@ -259,7 +265,7 @@ public class AnnotationToolsTests
         Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
         Assert.Contains("performs its conservative exact comparison internally", help, StringComparison.Ordinal);
         Assert.Contains("selector-level migration discovery artifact for compatible callers", help, StringComparison.Ordinal);
-        Assert.Contains("New callers start with list-template-migration-choices", help, StringComparison.Ordinal);
+        Assert.Contains("New callers start with start-template-migration-decisions", help, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -281,7 +287,7 @@ public class AnnotationToolsTests
         var help = output.ToString();
         Assert.Contains("opaque source and target choice ids", help, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("does not expose selectors", help, StringComparison.Ordinal);
-        Assert.Contains("Do not use for: Supplying selectors, object ids, coordinates, document values, or operation payloads", help, StringComparison.Ordinal);
+        Assert.Contains("supplying selectors, object ids, coordinates, document values, or operation payloads", help, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("unknown, stale, duplicate, or incompatible choices fail", help, StringComparison.Ordinal);
     }
 
@@ -1019,6 +1025,185 @@ public class AnnotationToolsTests
         Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:3"
             && item.BaselineObjectId == "body:paragraph:3"
             && item.Reason == "semantic-candidate-resolved");
+    }
+
+    [Fact]
+    public void TemplateMigration_incremental_decisions_are_provider_owned_and_resolve_without_agent_authored_json()
+    {
+        var source = CreateTextMigrationFixture("Legacy heading", "Remove this note");
+        var baseline = CreateTextMigrationFixture("Current heading", "Reserved target");
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-decisions-{Guid.NewGuid():N}.json");
+
+        var started = TemplateMigration.StartDecisionDraft(source, baseline, draft);
+        Assert.Equal(0, started.RecordedSourceCount);
+        Assert.Equal(2, started.RemainingSourceCount);
+        Assert.NotNull(started.NextSource);
+
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var heading = Assert.Single(catalog.Sources, item => item.Text == "Legacy heading");
+        var targetPage = TemplateMigration.ListDecisionTargets(
+            source, baseline, heading.Id, "copy-text", "Current", 0, 10);
+        var currentHeading = Assert.Single(targetPage.Targets, item => item.Text == "Current heading");
+        Assert.Equal("Current heading", currentHeading.Text);
+
+        var afterMapping = TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", heading.Id, currentHeading.Id, "copy-text"));
+        Assert.Equal(1, afterMapping.RecordedSourceCount);
+        Assert.Equal(1, afterMapping.RemainingSourceCount);
+
+        var note = Assert.Single(catalog.Sources, item => item.Text == "Remove this note");
+        var complete = TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", note.Id, Disposition: "out-of-scope"));
+        Assert.Equal(0, complete.RemainingSourceCount);
+        Assert.Null(complete.NextSource);
+
+        var resolved = TemplateMigration.ResolveDecisionDraft(source, baseline, draft);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:0"
+            && item.BaselineObjectId == "body:paragraph:0");
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1"
+            && item.Disposition == "out-of-scope");
+    }
+
+    [Fact]
+    public void TemplateMigration_incremental_decisions_fail_closed_without_changing_the_draft()
+    {
+        var source = CreateTextMigrationFixture("One source");
+        var baseline = CreateChoiceMigrationFixture("North option", "South option");
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-decisions-{Guid.NewGuid():N}.json");
+        TemplateMigration.StartDecisionDraft(source, baseline, draft);
+        var before = File.ReadAllBytes(draft);
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var sourceChoice = Assert.Single(catalog.Sources);
+        var runTarget = Assert.Single(catalog.Targets, item => item.Kind == "run" && item.Text == "North option");
+
+        var wrongBranch = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RecordDecision(
+            source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", sourceChoice.Id, runTarget.Id, "copy-text")));
+        Assert.Equal("template-migration-decision-target-incompatible", wrongBranch.Message);
+        Assert.Equal(before, File.ReadAllBytes(draft));
+
+        var staleSource = CreateTextMigrationFixture("Changed source");
+        var stale = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RecordDecision(
+            staleSource, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", sourceChoice.Id, Disposition: "out-of-scope")));
+        Assert.Equal("template-migration-decision-draft-source-stale", stale.Message);
+        Assert.Equal(before, File.ReadAllBytes(draft));
+
+        var incomplete = Assert.Throws<InvalidOperationException>(() =>
+            TemplateMigration.ResolveDecisionDraft(source, baseline, draft));
+        Assert.Equal("template-migration-decision-draft-incomplete", incomplete.Message);
+
+        var json = File.ReadAllText(draft).TrimEnd('}');
+        File.WriteAllText(draft, json + ",\"unapprovedField\":true}");
+        var unknownField = Assert.Throws<InvalidOperationException>(() =>
+            TemplateMigration.ResolveDecisionDraft(source, baseline, draft));
+        Assert.Equal("template-migration-decision-draft-unknown-field:unapprovedField", unknownField.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_target_pages_are_complete_by_branch_and_path_invariant()
+    {
+        var source = CreateTextMigrationFixture("Unseen source");
+        var baseline = CreateChoiceMigrationFixture("Alpha option", "Beta option", "Gamma option");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var sourceChoice = Assert.Single(catalog.Sources);
+
+        var first = TemplateMigration.ListDecisionTargets(source, baseline, sourceChoice.Id, "choice-selection", null, 0, 2);
+        var second = TemplateMigration.ListDecisionTargets(source, baseline, sourceChoice.Id, "choice-selection", null, 2, 2);
+        var third = TemplateMigration.ListDecisionTargets(source, baseline, sourceChoice.Id, "choice-selection", null, 4, 2);
+        Assert.Equal(6, first.Total);
+        Assert.Equal(2, first.Targets.Count);
+        Assert.Equal(2, second.Targets.Count);
+        Assert.Equal(2, third.Targets.Count);
+        Assert.Equal(6, first.Targets.Concat(second.Targets).Concat(third.Targets).Select(item => item.Id).Distinct().Count());
+
+        var copiedSource = Path.Combine(Path.GetTempPath(), $"migration-source-{Guid.NewGuid():N}.docx");
+        var copiedBaseline = Path.Combine(Path.GetTempPath(), $"migration-baseline-{Guid.NewGuid():N}.docx");
+        File.Copy(source, copiedSource);
+        File.Copy(baseline, copiedBaseline);
+        var copied = TemplateMigration.ListDecisionTargets(copiedSource, copiedBaseline, sourceChoice.Id, "choice-selection", null, 0, 10);
+        Assert.Equal(first.Targets.Concat(second.Targets).Concat(third.Targets).Select(item => item.Id), copied.Targets.Select(item => item.Id));
+    }
+
+    [Fact]
+    public async Task TemplateMigration_incremental_decision_commands_are_connected_to_the_public_cli()
+    {
+        var source = CreateTextMigrationFixture("Source statement");
+        var baseline = CreateTextMigrationFixture("Target statement");
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-cli-decisions-{Guid.NewGuid():N}.json");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var sourceChoice = Assert.Single(catalog.Sources);
+        var targetChoice = Assert.Single(catalog.Targets, item => item.Kind == "paragraph");
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync([
+                "start-template-migration-decisions", source, baseline, draft]));
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync([
+                "find-template-migration-targets", source, baseline, sourceChoice.Id, "copy-text", "Target", "0", "10"]));
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync([
+                "record-template-migration-decision", source, baseline, draft,
+                "mapping", sourceChoice.Id, "copy-text", targetChoice.Id]));
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync([
+                "resolve-template-migration-decisions", source, baseline, draft]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+        Assert.Contains("\"remainingSourceCount\": 0", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("\"Pass\": true", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TemplateMigration_incremental_decision_help_exposes_each_business_branch_without_a_json_shape()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["record-template-migration-decision", "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+        var help = output.ToString();
+        Assert.Contains("mapping <source-choice-id>", help, StringComparison.Ordinal);
+        Assert.Contains("choice-selection <source-choice-id>", help, StringComparison.Ordinal);
+        Assert.Contains("baseline-clear <target-choice-id>", help, StringComparison.Ordinal);
+        Assert.Contains("review-required", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("Candidate shape", help, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TemplateMigration_incremental_decisions_preserve_one_genuine_local_review_without_blocking_other_choices()
+    {
+        var source = CreateTextMigrationFixture("Mapped fact", "Business ownership is unclear");
+        var baseline = CreateTextMigrationFixture("Mapped target", "Unused target");
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-review-decisions-{Guid.NewGuid():N}.json");
+        TemplateMigration.StartDecisionDraft(source, baseline, draft);
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var mapped = Assert.Single(catalog.Sources, item => item.Text == "Mapped fact");
+        var review = Assert.Single(catalog.Sources, item => item.Text == "Business ownership is unclear");
+        var target = Assert.Single(catalog.Targets, item => item.Kind == "paragraph" && item.Text == "Mapped target");
+
+        TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", mapped.Id, target.Id, "copy-text"));
+        var complete = TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", review.Id, Disposition: "review-required"));
+        Assert.Equal(0, complete.RemainingSourceCount);
+
+        var resolved = TemplateMigration.ResolveDecisionDraft(source, baseline, draft);
+        Assert.False(resolved.Pass);
+        Assert.Equal("tiwater.docx.template-migration-review-closure/v1", resolved.Schema);
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:0" && item.Disposition == "copy-text");
+        Assert.Contains(resolved.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "review-required");
+        Assert.DoesNotContain(resolved.Unresolved, item => item.SourceObjectId == "body:paragraph:0");
     }
 
     [Fact]
