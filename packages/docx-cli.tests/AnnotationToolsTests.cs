@@ -43,7 +43,7 @@ public class AnnotationToolsTests
     [Theory]
     [InlineData("analyze-template-migration", "<source.docx> <baseline.docx> [--json]")]
     [InlineData("derive-template-migration-exact-text-plan", "<source.docx> <baseline.docx>")]
-    [InlineData("derive-template-migration-anchor-gap-plan", "<source.docx> <baseline.docx>")]
+    [InlineData("find-template-migration-candidates", "<source.docx> <baseline.docx>")]
     [InlineData("build-template-migration-operations", "<source.docx> <baseline.docx> <plan.json>")]
     [InlineData("apply-template-migration", "<source.docx> <baseline.docx> <plan.json> <output.docx>")]
     [InlineData("validate-template-migration-output", "<source.docx> <baseline.docx> <plan.json> <output.docx>")]
@@ -107,24 +107,43 @@ public class AnnotationToolsTests
         Assert.Contains("candidate-ready unique semantic selectors", output.ToString(), StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData("derive-template-migration-exact-text-plan", "Unresolved[].BaselineOptions")]
-    [InlineData("derive-template-migration-anchor-gap-plan", "Unresolved[].Baseline")]
-    public async Task TemplateMigration_plan_help_describes_its_semantic_decision_observations(string command, string expected)
+    [Fact]
+    public async Task TemplateMigration_exact_plan_help_describes_its_semantic_decision_observations()
     {
         var original = Console.Out;
         using var output = new StringWriter();
         try
         {
             Console.SetOut(output);
-            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync([command, "--help"]));
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["derive-template-migration-exact-text-plan", "--help"]));
         }
         finally
         {
             Console.SetOut(original);
         }
 
-        Assert.Contains(expected, output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Unresolved[].BaselineOptions", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TemplateMigration_candidate_discovery_help_rejects_plan_and_terminal_semantics()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["find-template-migration-candidates", "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var help = output.ToString();
+        Assert.Contains("does not produce a migration plan", help, StringComparison.Ordinal);
+        Assert.Contains("Pending items are undecided, not review terminals", help, StringComparison.Ordinal);
+        Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1416,6 +1435,34 @@ public class AnnotationToolsTests
         Assert.True(unequal.Pass);
         Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:1" && item.Disposition == "unresolved");
         Assert.Contains(unequal.Plan.Mappings, item => item.SourceObjectId == "body:paragraph:2" && item.Disposition == "unresolved");
+    }
+
+    [Fact]
+    public void TemplateMigration_candidate_discovery_separates_uniform_pairs_from_pending_sources()
+    {
+        var source = CreateTextMigrationFixture("stable start", "legacy title", "legacy instruction", "stable end");
+        var baseline = CreateTextMigrationFixture("stable start", "target title", "target instruction", "stable end");
+
+        var discovered = TemplateMigration.FindCandidates(source, baseline);
+
+        Assert.True(discovered.Pass);
+        Assert.Equal(2, discovered.Candidates.Count);
+        Assert.Empty(discovered.Pending);
+        Assert.All(discovered.Candidates, candidate =>
+        {
+            Assert.Equal("reciprocal-anchor-gap", candidate.Basis);
+            Assert.NotNull(candidate.Source.Selector);
+            Assert.NotNull(candidate.Baseline.Selector);
+        });
+        var serialized = JsonSerializer.Serialize(discovered, Json.Options);
+        Assert.DoesNotContain("Plan", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("ObjectId", serialized, StringComparison.Ordinal);
+
+        var unequalSource = CreateTextMigrationFixture("stable start", "one", "two", "three", "stable end");
+        var unequal = TemplateMigration.FindCandidates(unequalSource, baseline);
+        Assert.Empty(unequal.Candidates);
+        Assert.Equal(3, unequal.Pending.Count);
+        Assert.All(unequal.Pending, item => Assert.NotNull(item.Source?.Selector));
     }
 
     [Fact]

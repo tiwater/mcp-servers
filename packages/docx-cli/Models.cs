@@ -354,6 +354,20 @@ public sealed record TemplateMigrationSemanticObservation(
     string? Text,
     TemplateMigrationSemanticSelector? Selector);
 
+public sealed record TemplateMigrationCandidatePair(
+    string Basis,
+    TemplateMigrationSemanticObservation Source,
+    TemplateMigrationSemanticObservation Baseline);
+
+public sealed record TemplateMigrationCandidateDiscovery(
+    string Schema,
+    bool Pass,
+    string SourceSha256,
+    string BaselineSha256,
+    IReadOnlyList<TemplateMigrationCandidatePair> Candidates,
+    IReadOnlyList<TemplateMigrationPlanFailure> Pending,
+    IReadOnlyList<TemplateMigrationSemanticObservation> UnclaimedBaseline);
+
 public sealed record TemplateMigrationPlanFailure(
     string Reason,
     string? SourceObjectId = null,

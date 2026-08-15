@@ -294,6 +294,55 @@ public static class TemplateMigration
         return 0;
     }
 
+    public static int RunFindCandidates(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            throw new InvalidOperationException("find-template-migration-candidates requires <source.docx> <baseline.docx>");
+        }
+        var result = FindCandidates(args[0], args[1]);
+        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
+        return 0;
+    }
+
+    /// <summary>
+    /// Finds mechanical source/baseline observation pairs without producing a
+    /// migration plan or deciding any semantic disposition.
+    /// </summary>
+    public static TemplateMigrationCandidateDiscovery FindCandidates(string source, string baseline)
+    {
+        var legacy = DeriveAnchorGapPlan(source, baseline);
+        var pairs = legacy.Unresolved
+            .Where(item => item.Reason == "template-migration-anchor-gap-candidate-review-required"
+                && item.Source is not null
+                && item.Baseline is not null)
+            .ToList();
+        var pairedSourceIds = pairs
+            .Where(item => !string.IsNullOrWhiteSpace(item.SourceObjectId))
+            .Select(item => item.SourceObjectId!)
+            .ToHashSet(StringComparer.Ordinal);
+        var pending = legacy.Unresolved
+            .Where(item => item.Reason != "template-migration-anchor-gap-candidate-review-required")
+            .Where(item => item.SourceObjectId is null || !pairedSourceIds.Contains(item.SourceObjectId))
+            .Select(item => new TemplateMigrationPlanFailure(
+                item.Reason,
+                Detail: item.Detail,
+                Source: item.Source,
+                BaselineOptions: item.BaselineOptions))
+            .ToList();
+        return new TemplateMigrationCandidateDiscovery(
+            "tiwater.docx.template-migration-candidate-discovery/v1",
+            true,
+            legacy.Plan.SourceSha256,
+            legacy.Plan.BaselineSha256,
+            pairs.Select(pair => new TemplateMigrationCandidatePair(
+                "reciprocal-anchor-gap",
+                pair.Source!,
+                pair.Baseline!)).ToList(),
+            pending,
+            legacy.UnclaimedBaseline ?? []);
+    }
+
     /// <summary>
     /// Derives semantic candidates only when two consecutive
     /// exact-text anchors enclose equally sized paragraph gaps in the same
