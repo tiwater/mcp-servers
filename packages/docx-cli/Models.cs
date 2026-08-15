@@ -352,7 +352,14 @@ public sealed record TemplateMigrationSemanticObservation(
     string Kind,
     string Scope,
     string? Text,
-    TemplateMigrationSemanticSelector? Selector);
+    TemplateMigrationSemanticSelector? Selector,
+    TemplateMigrationSemanticContext? Context = null);
+
+public sealed record TemplateMigrationSemanticContext(
+    string? PreviousText = null,
+    string? NextText = null,
+    IReadOnlyList<string>? SameRowTexts = null,
+    IReadOnlyList<TemplateMigrationSemanticObservation>? SelectableChildren = null);
 
 public sealed record TemplateMigrationSuggestedTarget(
     string Basis,

@@ -1518,7 +1518,7 @@ public class AnnotationToolsTests
         var discovered = TemplateMigration.FindCandidates(source, baseline);
 
         Assert.True(discovered.Pass);
-        Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v3", discovered.Schema);
+        Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v4", discovered.Schema);
         Assert.Equal(2, discovered.RequiredDecisions.Count);
         Assert.All(discovered.RequiredDecisions, decision =>
         {
@@ -1535,7 +1535,8 @@ public class AnnotationToolsTests
         Assert.Contains("AvailableTargets", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("UnclaimedBaseline", serialized, StringComparison.Ordinal);
         Assert.NotEmpty(discovered.AvailableTargets);
-        Assert.All(discovered.AvailableTargets, target => Assert.NotNull(target.Selector));
+        Assert.All(discovered.AvailableTargets, target => Assert.True(
+            target.Selector is not null || (target.Context?.SelectableChildren?.Count ?? 0) > 0));
 
         var unequalSource = CreateTextMigrationFixture("stable start", "one", "two", "three", "stable end");
         var unequal = TemplateMigration.FindCandidates(unequalSource, baseline);
@@ -1552,6 +1553,42 @@ public class AnnotationToolsTests
         var decision = Assert.Single(nonUnique.RequiredDecisions);
         Assert.Equal(2, decision.SuggestedTargets.Count);
         Assert.All(decision.SuggestedTargets, target => Assert.Equal("exact-text-option", target.Basis));
+    }
+
+    [Fact]
+    public void TemplateMigration_candidate_discovery_preserves_target_region_context_without_flattening_runs()
+    {
+        var source = CreateTableMigrationFixture([
+            ["legacy revision", "2029-03-04", "legacy calibration note"]
+        ]);
+        var baseline = CreateTableMigrationFixture([
+            ["Revision", "Effective date", "Change summary"],
+            ["R-7", "2030-04-05", "Target calibration slot"]
+        ]);
+
+        var discovered = TemplateMigration.FindCandidates(source, baseline);
+
+        Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v4", discovered.Schema);
+        Assert.DoesNotContain(discovered.AvailableTargets, target => target.Kind == "run");
+        var revision = Assert.Single(discovered.AvailableTargets, target =>
+            target.Kind == "table-cell" && target.Text == "R-7");
+        Assert.Equal(["2030-04-05", "Target calibration slot"], revision.Context?.SameRowTexts);
+        var child = Assert.Single(revision.Context?.SelectableChildren ?? []);
+        Assert.Equal("run", child.Kind);
+        Assert.Equal("R-7", child.Text);
+        Assert.NotNull(child.Selector);
+    }
+
+    [Fact]
+    public void TemplateMigration_candidate_discovery_does_not_offer_children_of_an_already_claimed_region()
+    {
+        var source = CreateSplitRunMigrationFixture("Approved by");
+        var baseline = CreateSplitRunMigrationFixture("Approved", " by");
+
+        var discovered = TemplateMigration.FindCandidates(source, baseline);
+
+        Assert.DoesNotContain(discovered.AvailableTargets, target =>
+            target.Kind == "paragraph" && target.Text == "Approved by");
     }
 
     [Fact]
@@ -5102,6 +5139,16 @@ public class AnnotationToolsTests
         }
         var cell = new TableCell(labels.Select((label, index) => new Paragraph(new Run(Glyph((uint)index + 1)), new Run(new Text(label)))));
         main.Document = new Document(new Body(new Table(new TableRow(cell))));
+        main.Document.Save();
+        return path;
+    }
+
+    private static string CreateSplitRunMigrationFixture(params string[] runs)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-split-run-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(new Paragraph(runs.Select(text => new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve })))));
         main.Document.Save();
         return path;
     }
