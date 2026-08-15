@@ -885,8 +885,13 @@ public static class TemplateMigration
             clears.Add(new TemplateMigrationSemanticCandidateBaselineClear(targetSelector, clear.Mode));
         }
 
+        var semanticSchema = mappings.Any(item => UsesEmptyTextState(item.Source) || UsesEmptyTextState(item.Baseline))
+            || selections.Any(item => UsesEmptyTextState(item.SourceMember) || UsesEmptyTextState(item.BaselineLabel))
+            || clears.Any(item => UsesEmptyTextState(item.Baseline))
+            ? "tiwater.docx.template-migration-semantic-candidate/v6"
+            : "tiwater.docx.template-migration-semantic-candidate/v5";
         var semanticCandidate = new TemplateMigrationSemanticCandidate(
-            "tiwater.docx.template-migration-semantic-candidate/v5",
+            semanticSchema,
             mappings,
             ChoiceSelections: selections,
             BaselineClears: clears);
@@ -899,6 +904,9 @@ public static class TemplateMigration
             analysis,
             DeriveExactTextPlan(analysis));
     }
+
+    private static bool UsesEmptyTextState(TemplateMigrationSemanticSelector? selector)
+        => !string.IsNullOrWhiteSpace(selector?.TextState);
 
     private static TemplateMigrationChoice ToChoice(
         string id,
