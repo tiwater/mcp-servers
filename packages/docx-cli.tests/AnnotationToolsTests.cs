@@ -199,7 +199,7 @@ public class AnnotationToolsTests
         }
         Assert.Contains("the operation builder consumes Plan", help, StringComparison.Ordinal);
         Assert.Contains("Plan.Mappings are already complete and must not be", help, StringComparison.Ordinal);
-        Assert.Contains("UnclaimedBaseline", help, StringComparison.Ordinal);
+        Assert.Contains("AvailableTargets", help, StringComparison.Ordinal);
         Assert.Contains("template-migration-semantic-decision-missing", help, StringComparison.Ordinal);
         Assert.DoesNotContain("See the packaged README", help, StringComparison.Ordinal);
     }
@@ -1518,6 +1518,7 @@ public class AnnotationToolsTests
         var discovered = TemplateMigration.FindCandidates(source, baseline);
 
         Assert.True(discovered.Pass);
+        Assert.Equal("tiwater.docx.template-migration-candidate-discovery/v3", discovered.Schema);
         Assert.Equal(2, discovered.RequiredDecisions.Count);
         Assert.All(discovered.RequiredDecisions, decision =>
         {
@@ -1531,6 +1532,10 @@ public class AnnotationToolsTests
         Assert.DoesNotContain("ObjectId", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("Candidates", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("Pending", serialized, StringComparison.Ordinal);
+        Assert.Contains("AvailableTargets", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("UnclaimedBaseline", serialized, StringComparison.Ordinal);
+        Assert.NotEmpty(discovered.AvailableTargets);
+        Assert.All(discovered.AvailableTargets, target => Assert.NotNull(target.Selector));
 
         var unequalSource = CreateTextMigrationFixture("stable start", "one", "two", "three", "stable end");
         var unequal = TemplateMigration.FindCandidates(unequalSource, baseline);
@@ -1547,6 +1552,23 @@ public class AnnotationToolsTests
         var decision = Assert.Single(nonUnique.RequiredDecisions);
         Assert.Equal(2, decision.SuggestedTargets.Count);
         Assert.All(decision.SuggestedTargets, target => Assert.Equal("exact-text-option", target.Basis));
+    }
+
+    [Fact]
+    public void TemplateMigration_candidate_discovery_includes_context_selectable_empty_targets()
+    {
+        var source = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: "unseen source heading");
+        var baseline = CreateContextBoundEmptyHeaderMigrationFixture(sourceText: null);
+
+        var discovered = TemplateMigration.FindCandidates(source, baseline);
+
+        Assert.Contains(discovered.AvailableTargets, target =>
+            target.Kind == "table-cell"
+            && target.Scope == "header"
+            && target.Selector?.TextState == "empty"
+            && (target.Selector.ParentText is not null
+                || target.Selector.PreviousText is not null
+                || target.Selector.NextText is not null));
     }
 
     [Fact]

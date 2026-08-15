@@ -368,7 +368,7 @@ public sealed record TemplateMigrationCandidateDiscovery(
     string SourceSha256,
     string BaselineSha256,
     IReadOnlyList<TemplateMigrationRequiredDecision> RequiredDecisions,
-    IReadOnlyList<TemplateMigrationSemanticObservation> UnclaimedBaseline);
+    IReadOnlyList<TemplateMigrationSemanticObservation> AvailableTargets);
 
 public sealed record TemplateMigrationPlanFailure(
     string Reason,

@@ -126,9 +126,11 @@ tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
 
 The result is an observation receipt, not a migration plan.
 `RequiredDecisions` contains every source that still needs a disposition exactly
-once. Its `SuggestedTargets` may be empty, singular, or plural; suggestion count
-does not determine review status. The Agent chooses current business
-dispositions for the complete collection and submits them to
+once. `AvailableTargets` is the complete current baseline inventory from which
+semantic targets and baseline-only cleanup are selected. A decision's
+`SuggestedTargets` is only a mechanical shortlist and may be empty, singular,
+or plural; suggestion count does not determine review status. The Agent chooses
+current business dispositions for the complete collection and submits them to
 `resolve-template-migration-semantic-candidate`; that resolver independently
 reopens both documents.
 
@@ -249,7 +251,9 @@ unless the disposition is `out-of-scope`. Existing dispositions are
 
 Candidate source selectors address only items reported in `Unresolved` by the
 current automatic plan. `Plan.Mappings` are already complete and must not be
-repeated. Baseline-only cleanup may select current `UnclaimedBaseline` items.
+repeated. Semantic mappings and baseline-only cleanup select current
+`AvailableTargets` items; an empty `SuggestedTargets` list does not mean the
+target inventory is empty.
 Every `RequiredDecisions` source must be addressed. If a candidate omits one,
 the resolver returns `template-migration-semantic-decision-missing`, preserving
 the source observation and the earlier mechanical reason as diagnostic detail.

@@ -123,6 +123,11 @@ public static class TemplateMigration
     public static TemplateMigrationMappingDerivation DeriveExactTextPlan(string source, string baseline)
     {
         var analysis = Analyze(source, baseline);
+        return DeriveExactTextPlan(analysis);
+    }
+
+    private static TemplateMigrationMappingDerivation DeriveExactTextPlan(TemplateMigrationAnalysis analysis)
+    {
         var sourceContent = analysis.Source.Objects.Where(IsContentBearing).OrderBy(item => item.Id, StringComparer.Ordinal).ToList();
         var baselineContent = analysis.Baseline.Objects.Where(IsContentBearing).ToList();
         var sourceCounts = sourceContent.GroupBy(MappingKey).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
@@ -311,7 +316,8 @@ public static class TemplateMigration
     /// </summary>
     public static TemplateMigrationCandidateDiscovery FindCandidates(string source, string baseline)
     {
-        var legacy = DeriveAnchorGapPlan(source, baseline);
+        var analysis = Analyze(source, baseline);
+        var legacy = DeriveAnchorGapPlan(analysis);
         var pairs = legacy.Unresolved
             .Where(item => item.Reason == "template-migration-anchor-gap-candidate-review-required"
                 && item.Source is not null
@@ -347,12 +353,12 @@ public static class TemplateMigration
             return new TemplateMigrationRequiredDecision(item.Source!, targets);
         }).ToList();
         return new TemplateMigrationCandidateDiscovery(
-            "tiwater.docx.template-migration-candidate-discovery/v2",
+            "tiwater.docx.template-migration-candidate-discovery/v3",
             true,
             legacy.Plan.SourceSha256,
             legacy.Plan.BaselineSha256,
             decisions,
-            legacy.UnclaimedBaseline ?? []);
+            ObserveAvailableTargets(analysis, legacy.Plan));
     }
 
     /// <summary>
@@ -363,7 +369,12 @@ public static class TemplateMigration
     public static TemplateMigrationMappingDerivation DeriveAnchorGapPlan(string source, string baseline)
     {
         var analysis = Analyze(source, baseline);
-        var exact = DeriveExactTextPlan(source, baseline);
+        return DeriveAnchorGapPlan(analysis);
+    }
+
+    private static TemplateMigrationMappingDerivation DeriveAnchorGapPlan(TemplateMigrationAnalysis analysis)
+    {
+        var exact = DeriveExactTextPlan(analysis);
         var mappings = exact.Plan.Mappings.ToDictionary(mapping => mapping.SourceObjectId, StringComparer.Ordinal);
         var pendingSourceIds = exact.Unresolved
             .Where(item => !string.IsNullOrWhiteSpace(item.SourceObjectId))
@@ -426,6 +437,22 @@ public static class TemplateMigration
                 && !string.IsNullOrWhiteSpace(item.Text)
                 && item.ParentId is not null
                 && unclaimedCellIds.Contains(item.ParentId)))
+            .OrderBy(item => item.Id, StringComparer.Ordinal)
+            .Select(ObserveForSemanticDecision)
+            .ToList();
+    }
+
+    private static IReadOnlyList<TemplateMigrationSemanticObservation> ObserveAvailableTargets(
+        TemplateMigrationAnalysis analysis,
+        TemplateMigrationPlan plan)
+    {
+        var claimed = plan.Mappings
+            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.BaselineObjectId))
+            .Select(mapping => mapping.BaselineObjectId!)
+            .ToHashSet(StringComparer.Ordinal);
+        return analysis.Baseline.Objects
+            .Where(item => item.Kind is "paragraph" or "table-cell" or "run" or "media")
+            .Where(item => item.Selector is not null && !claimed.Contains(item.Id))
             .OrderBy(item => item.Id, StringComparer.Ordinal)
             .Select(ObserveForSemanticDecision)
             .ToList();
@@ -527,7 +554,9 @@ Existing branch shapes:
 Every value above is selected from the current source/baseline inventories.
 Candidate source selectors address only items reported in Unresolved by the
 current automatic plan. Plan.Mappings are already complete and must not be
-repeated. Baseline-only cleanup may select current UnclaimedBaseline items.
+repeated. AvailableTargets is the current selectable baseline inventory for
+semantic mappings and baseline-only cleanup; SuggestedTargets is only a
+mechanical shortlist and may be empty.
 Every RequiredDecisions source must be addressed. An omitted source is returned
 as template-migration-semantic-decision-missing; it is not reported as a target
 selection failure or local business ambiguity.
@@ -2693,6 +2722,7 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         TemplateMigrationObject item)
     {
         TemplateMigrationSemanticSelector? selector = null;
+        var emptyText = string.IsNullOrWhiteSpace(item.Text);
         if (!string.IsNullOrWhiteSpace(item.Text))
         {
             selector = new TemplateMigrationSemanticSelector(item.Kind, item.Scope, Text: item.Text);
@@ -2703,10 +2733,14 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         {
             selector = new TemplateMigrationSemanticSelector(item.Kind, item.Scope, Sha256: sha256);
         }
+        else if (item.Kind is "paragraph" or "table-cell" or "run")
+        {
+            selector = new TemplateMigrationSemanticSelector(item.Kind, item.Scope, TextState: "empty");
+        }
         if (selector is null) return null;
-        if (SelectsOnly(objects, item, selector)) return selector;
+        if (!emptyText && SelectsOnly(objects, item, selector)) return selector;
 
-        if (item.Kind == "table-cell" && item.Topology is not null)
+        if (!emptyText && item.Kind == "table-cell" && item.Topology is not null)
         {
             foreach (var context in objects
                 .Where(candidate => candidate.Id != item.Id
