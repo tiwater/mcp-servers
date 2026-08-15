@@ -292,11 +292,14 @@ public class AnnotationToolsTests
 
         var derived = TemplateMigration.DeriveExactTextPlan(source, baseline);
         var repeated = derived.Unresolved
-            .Where(item => item.Reason == "template-migration-exact-text-ambiguous")
+            .Where(item => item.Reason == "template-migration-exact-text-match-non-unique")
             .ToList();
         var missing = Assert.Single(derived.Unresolved, item => item.Source?.Text == "Source-only instruction");
 
         Assert.Equal(2, repeated.Count);
+        Assert.Equal("template-migration-exact-text-match-missing", missing.Reason);
+        Assert.DoesNotContain(derived.Unresolved, item => item.Reason.Contains("target-missing", StringComparison.Ordinal));
+        Assert.DoesNotContain(derived.Unresolved, item => item.Reason.EndsWith("-ambiguous", StringComparison.Ordinal));
         Assert.All(repeated, item =>
         {
             Assert.Equal("Repeated requirement", item.Source?.Text);
@@ -1384,7 +1387,7 @@ public class AnnotationToolsTests
             Unresolved =
             [
                 .. resolution.Unresolved,
-                new TemplateMigrationPlanFailure("template-migration-exact-text-target-missing", "body:paragraph:0")
+                new TemplateMigrationPlanFailure("template-migration-exact-text-match-missing", "body:paragraph:0")
             ]
         }, reviewCandidate);
         Assert.Contains(incomplete.Unresolved, item => item.Reason == "template-migration-review-resolution-not-closable");
@@ -1989,7 +1992,7 @@ public class AnnotationToolsTests
         var duplicateBaseline = CreateExactTextMappingFixture(includeDuplicateBaselineText: true, baseline: true);
         var rejected = TemplateMigration.DeriveExactTextPlan(source, duplicateBaseline);
         Assert.True(rejected.Pass);
-        Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
+        Assert.Contains(rejected.Unresolved, item => item.Reason == "template-migration-exact-text-match-non-unique");
     }
 
     [Fact]
@@ -2049,9 +2052,9 @@ public class AnnotationToolsTests
         var nonIsomorphic = TemplateMigration.DeriveExactTextPlan(source, nonIsomorphicBaseline);
 
         Assert.True(ambiguous.Pass);
-        Assert.Contains(ambiguous.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
+        Assert.Contains(ambiguous.Unresolved, item => item.Reason == "template-migration-exact-text-match-non-unique");
         Assert.True(nonIsomorphic.Pass);
-        Assert.Contains(nonIsomorphic.Unresolved, item => item.Reason == "template-migration-exact-text-ambiguous");
+        Assert.Contains(nonIsomorphic.Unresolved, item => item.Reason == "template-migration-exact-text-match-non-unique");
     }
 
     [Fact]
