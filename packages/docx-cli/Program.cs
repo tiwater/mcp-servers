@@ -12,6 +12,10 @@ public static class Cli
 {
     private static readonly string[] DiscoverableCommands =
     [
+        "start-template-migration-decisions",
+        "find-template-migration-targets",
+        "record-template-migration-decision",
+        "resolve-template-migration-decisions",
         "list-template-migration-choices",
         "resolve-template-migration-choices",
         "list-template-migration-options",
@@ -66,6 +70,10 @@ public static class Cli
                 "analyze-template-migration" => Task.FromResult(TemplateMigration.RunAnalyze(args[1..])),
                 "derive-template-migration-exact-text-plan" => Task.FromResult(TemplateMigration.RunDeriveExactTextPlan(args[1..])),
                 "list-template-migration-options" or "find-template-migration-candidates" => Task.FromResult(TemplateMigration.RunFindCandidates(args[1..])),
+                "start-template-migration-decisions" => Task.FromResult(TemplateMigration.RunStartDecisions(args[1..])),
+                "find-template-migration-targets" => Task.FromResult(TemplateMigration.RunListDecisionTargets(args[1..])),
+                "record-template-migration-decision" => Task.FromResult(TemplateMigration.RunRecordDecision(args[1..])),
+                "resolve-template-migration-decisions" => Task.FromResult(TemplateMigration.RunResolveDecisionDraft(args[1..])),
                 "list-template-migration-choices" => Task.FromResult(TemplateMigration.RunListChoices(args[1..])),
                 "resolve-template-migration-choices" => Task.FromResult(TemplateMigration.RunResolveChoices(args[1..])),
                 "derive-template-migration-anchor-gap-plan" => Task.FromResult(TemplateMigration.RunDeriveAnchorGapPlan(args[1..])),
@@ -174,9 +182,13 @@ public static class Cli
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
-        Console.WriteLine("Template migration: start with current-document choices; read each next command's --help before using it.");
-        Console.WriteLine("  list-template-migration-choices <source.docx> <baseline.docx>");
-        Console.WriteLine("  resolve-template-migration-choices <source.docx> <baseline.docx> <choices.json>");
+        Console.WriteLine("Template migration: record one current-document decision at a time; read each next command's --help before using it.");
+        Console.WriteLine("  start-template-migration-decisions <source.docx> <baseline.docx> <draft.json>");
+        Console.WriteLine("  find-template-migration-targets <source.docx> <baseline.docx> <source-choice-id|-> <branch> [query|-] [offset] [limit]");
+        Console.WriteLine("  record-template-migration-decision <source.docx> <baseline.docx> <draft.json> <branch> <branch arguments>");
+        Console.WriteLine("  resolve-template-migration-decisions <source.docx> <baseline.docx> <draft.json>");
+        Console.WriteLine("  list-template-migration-choices <source.docx> <baseline.docx>  (compatibility)");
+        Console.WriteLine("  resolve-template-migration-choices <source.docx> <baseline.docx> <choices.json>  (compatibility)");
         Console.WriteLine("  list-template-migration-options <source.docx> <baseline.docx>  (compatibility)");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (compatibility)");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
@@ -199,7 +211,7 @@ public static class Cli
         Console.WriteLine("Produces: Published DOCX observations, plans, edited documents, previews, and validation receipts.");
         Console.WriteLine("Use when: A scenario-declared capability requires DOCX inspection, template migration, editing, normalization, or validation.");
         Console.WriteLine("Do not use for: Choosing scenario semantics, inventing business values, deciding delivery, rendering Office pages, or OCR.");
-        Console.WriteLine("Command discovery: Run tiwater-docx --help; start template migration with list-template-migration-choices, then read the next command's --help when its inputs exist.");
+        Console.WriteLine("Command discovery: Run tiwater-docx --help; start template migration with start-template-migration-decisions, then read each command's --help when its inputs exist.");
         Console.WriteLine("Usage: tiwater-docx <command> [arguments]");
     }
 
@@ -212,7 +224,7 @@ public static class Cli
                 Consumes: One current source DOCX and one selected baseline DOCX.
                 Produces: A hash-bound analysis with source objects, baseline objects, candidate-ready unique semantic selectors, and unresolved findings; use --json for machine output.
                 Use when: Diagnosing low-level source and baseline object inventories for an existing caller.
-                Do not use for: Starting semantic resolution, selecting mappings, building operations, editing a document, or validating output. New migration callers start with list-template-migration-choices.
+                Do not use for: Starting semantic resolution, selecting mappings, building operations, editing a document, or validating output. New migration callers start with start-template-migration-decisions.
                 Usage:
                   tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
                 """,
@@ -220,7 +232,7 @@ public static class Cli
                 Purpose: Preserve the legacy exact-text diagnostic receipt for compatible callers.
                 Consumes: One current source DOCX and the same selected baseline DOCX used for analysis.
                 Produces: A hash-bound plan; Unresolved[].Source and Unresolved[].BaselineOptions carry current observations, and UnclaimedBaseline lists unclaimed baseline content and selectable child runs. Exact-text match missing or non-unique describes only this mechanical comparison; it does not mean that a semantic target is absent or ambiguous.
-                Use when: An existing caller still consumes this diagnostic receipt; new semantic-resolution callers use list-template-migration-choices.
+                Use when: An existing caller still consumes this diagnostic receipt; new semantic-resolution callers use start-template-migration-decisions.
                 Do not use for: New tool discovery, treating Unresolved as review-required, building operations, inventing target mappings, editing, or output validation.
                 Usage:
                   tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
@@ -230,7 +242,7 @@ public static class Cli
                 Consumes: One current source DOCX and one selected baseline DOCX; the provider performs its conservative exact comparison internally.
                 Produces: Uniform RequiredDecisions and AvailableTargets observations bound to the current source and baseline hashes. Each distinguishable required source appears once with its structural context. Repeated sources that cannot be separated by a semantic selector appear as one Count > 1 group with RequiredCardinality=all. AvailableTargets groups selectable baseline paragraphs, cells, and media with the same contextual shape and selectable child runs. It does not produce a migration plan or target recommendation.
                 Use when: An existing integration is explicitly bound to selector-level semantic candidates.
-                Do not use for: New Agent-facing migration work, choosing copy, retain, exclude, or review semantics, building a migration plan, or executing document operations. New callers start with list-template-migration-choices.
+                Do not use for: New Agent-facing migration work, choosing copy, retain, exclude, or review semantics, building a migration plan, or executing document operations. New callers start with start-template-migration-decisions.
                 Next for compatible callers: Use current scenario authority and AvailableTargets to propose one semantic disposition for every RequiredDecision, then call resolve-template-migration-semantic-candidate. A RequiredCardinality=all group can be closed only by an out-of-scope mapping with cardinality=all; if those repeated items are business facts, stop because they cannot be assigned individually.
                 Output fields:
                   top level: Schema, Pass, SourceSha256, BaselineSha256, RequiredDecisions, AvailableTargets
@@ -241,22 +253,62 @@ public static class Cli
                   tiwater-docx list-template-migration-options <source.docx> <baseline.docx>
                 Compatibility alias: find-template-migration-candidates
                 """,
+            "start-template-migration-decisions" => """
+                Purpose: Create a provider-owned run-local draft and return the first unresolved current source choice.
+                Consumes: One current source DOCX, one selected baseline DOCX, and a new draft path.
+                Produces: An atomic decision draft plus progress containing only counts and the next source choice.
+                Use when: Starting Agent-guided template migration without asking the Agent to author candidate JSON.
+                Do not use for: Choosing business meaning, overwriting an existing draft, building operations, or editing a document.
+                Usage:
+                  tiwater-docx start-template-migration-decisions <source.docx> <baseline.docx> <draft.json>
+                Next: For the returned source choice, inspect targets when needed and record one decision.
+                """,
+            "find-template-migration-targets" => """
+                Purpose: Page or filter the complete structurally eligible target choices for one current source and decision branch.
+                Consumes: The same current source and baseline, one returned source choice id (or - for baseline-clear), a branch, and optional literal query, offset, and limit.
+                Produces: One bounded target page; ordering is stable and no target is ranked by presumed business meaning.
+                Use when: The next business decision needs a target without loading the full baseline inventory into Agent context.
+                Do not use for: Choosing a target, hiding targets outside a page, inferring scenario semantics, or editing a document.
+                Usage:
+                  tiwater-docx find-template-migration-targets <source.docx> <baseline.docx> <source-choice-id|-> <copy-text|copy-media|retain-target|retain-target-label|choice-selection|baseline-clear> [query|-] [offset] [limit]
+                """,
+            "record-template-migration-decision" => """
+                Purpose: Validate and atomically record exactly one business decision in the provider-owned draft.
+                Consumes: The same current source and baseline, the draft path, and one mapping, choice-selection, or baseline-clear decision using current opaque choice ids.
+                Produces: The updated draft plus progress containing counts and the next unresolved source choice.
+                Use when: The current scenario and document observations determine one source disposition or one baseline cleanup.
+                Do not use for: Authoring draft JSON, supplying selectors or coordinates, guessing a business decision, or editing a document.
+                Usage:
+                  tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> mapping <source-choice-id> <disposition> <target-choice-id|-> [cardinality|-]
+                  tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> choice-selection <source-choice-id> <target-choice-id>
+                  tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> baseline-clear <target-choice-id> <cell|row>
+                Mapping dispositions: copy-text, copy-media, retain-target, retain-target-label, out-of-scope, review-required. The last two use - as the target.
+                """,
+            "resolve-template-migration-decisions" => """
+                Purpose: Re-read both current documents and expand the complete provider-owned decision draft into a validated migration plan.
+                Consumes: The same current source DOCX, selected baseline DOCX, and provider-owned draft.
+                Produces: A hash-bound migration resolution and plan; stale, missing, duplicate, or incompatible decisions fail without mutation.
+                Use when: Progress reports no remaining source choices and any required baseline cleanup has been recorded.
+                Do not use for: Supplying selectors, object ids, coordinates, values, operation payloads, or bypassing unresolved choices.
+                Usage:
+                  tiwater-docx resolve-template-migration-decisions <source.docx> <baseline.docx> <draft.json>
+                """,
             "list-template-migration-choices" => """
                 Purpose: Present unresolved source observations and selectable baseline targets as concise, current-document-bound choices.
                 Consumes: One current source DOCX and one selected baseline DOCX.
                 Produces: Opaque source and target choice ids with visible text and local context. It does not expose selectors or recommend business semantics.
-                Use when: An Agent must choose migration dispositions without transcribing provider object identities or selector fields.
-                Do not use for: Inventing business values, choosing a target automatically, building operations, or persisting choices across document revisions.
+                Use when: An existing integration consumes the complete choice catalog.
+                Do not use for: New Agent-facing migration work, inventing business values, choosing a target automatically, building operations, or persisting choices across document revisions. New callers start with start-template-migration-decisions.
                 Usage:
                   tiwater-docx list-template-migration-choices <source.docx> <baseline.docx>
-                Next: Submit only the chosen ids and business dispositions to resolve-template-migration-choices.
+                Compatibility next: Submit only the chosen ids and business dispositions to resolve-template-migration-choices.
                 """,
             "resolve-template-migration-choices" => """
                 Purpose: Expand current-document-bound semantic choices into the provider's validated migration plan.
                 Consumes: The same current source DOCX and selected baseline DOCX plus a choice candidate returned from list-template-migration-choices.
                 Produces: The existing hash-bound migration resolution and plan; unknown, stale, duplicate, or incompatible choices fail without mutation.
-                Use when: Business semantics have selected a disposition for each determinate source choice.
-                Do not use for: Supplying selectors, object ids, coordinates, document values, or operation payloads.
+                Use when: An existing integration has already produced the complete compatibility candidate.
+                Do not use for: New Agent-facing migration work, supplying selectors, object ids, coordinates, document values, or operation payloads. New callers use resolve-template-migration-decisions.
                 Usage:
                   tiwater-docx resolve-template-migration-choices <source.docx> <baseline.docx> <choices.json>
                 Candidate shape:
@@ -270,7 +322,7 @@ public static class Cli
                 Purpose: Legacy compatibility alias for the former mixed plan-and-candidate receipt.
                 Consumes: One current source DOCX and one selected baseline DOCX.
                 Produces: The legacy anchor-gap plan receipt.
-                Use when: An existing caller still consumes the legacy receipt; new callers use list-template-migration-choices.
+                Use when: An existing caller still consumes the legacy receipt; new callers use start-template-migration-decisions.
                 Do not use for: New tool discovery, approving mappings, editing, or output validation.
                 Usage:
                   tiwater-docx derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>
@@ -279,7 +331,7 @@ public static class Cli
                 Purpose: Deterministically build DOCX operations from one fully resolved, hash-bound migration plan.
                 Consumes: The current source DOCX, selected baseline DOCX, and a plan returned by semantic resolution.
                 Produces: An operation build receipt; any unresolved mapping is rejected with template-migration-semantic-resolution-required.
-                Use when: resolve-template-migration-choices, or a compatible selector resolver, has returned Pass=true and no Unresolved items.
+                Use when: resolve-template-migration-decisions, or a compatible choice/selector resolver, has returned Pass=true and no Unresolved items.
                 Do not use for: Consuming an exact-text or anchor-gap plan that still has Unresolved items, selecting mappings, or editing.
                 Usage:
                   tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>

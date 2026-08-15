@@ -412,6 +412,39 @@ public sealed record TemplateMigrationChoiceCandidate(
     IReadOnlyList<TemplateMigrationChoiceSelectionCandidate>? ChoiceSelections = null,
     IReadOnlyList<TemplateMigrationChoiceClear>? BaselineClears = null);
 
+public sealed record TemplateMigrationDecisionDraft(
+    string Schema,
+    string SourceSha256,
+    string BaselineSha256,
+    IReadOnlyList<TemplateMigrationChoiceMapping> Mappings,
+    IReadOnlyList<TemplateMigrationChoiceSelectionCandidate> ChoiceSelections,
+    IReadOnlyList<TemplateMigrationChoiceClear> BaselineClears);
+
+public sealed record TemplateMigrationDecisionProgress(
+    string Schema,
+    bool Pass,
+    int RecordedSourceCount,
+    int RemainingSourceCount,
+    TemplateMigrationChoice? NextSource);
+
+public sealed record TemplateMigrationDecisionInput(
+    string Branch,
+    string? SourceChoiceId = null,
+    string? TargetChoiceId = null,
+    string? Disposition = null,
+    string? Cardinality = null,
+    string? Mode = null);
+
+public sealed record TemplateMigrationTargetPage(
+    string Schema,
+    bool Pass,
+    string? SourceChoiceId,
+    string Branch,
+    int Offset,
+    int Limit,
+    int Total,
+    IReadOnlyList<TemplateMigrationChoice> Targets);
+
 public sealed record TemplateMigrationPlanFailure(
     string Reason,
     string? SourceObjectId = null,

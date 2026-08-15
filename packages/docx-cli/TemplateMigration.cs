@@ -361,6 +361,419 @@ public static class TemplateMigration
             targets);
     }
 
+    public static int RunStartDecisions(string[] args)
+    {
+        if (args.Length < 3) throw new InvalidOperationException("start-template-migration-decisions requires <source.docx> <baseline.docx> <draft.json>");
+        Console.WriteLine(JsonSerializer.Serialize(StartDecisionDraft(args[0], args[1], args[2]), Json.CamelCaseOptions));
+        return 0;
+    }
+
+    public static int RunListDecisionTargets(string[] args)
+    {
+        if (args.Length < 4) throw new InvalidOperationException("find-template-migration-targets requires <source.docx> <baseline.docx> <source-choice-id|-> <branch> [query|-] [offset] [limit]");
+        var query = args.Length > 4 && args[4] != "-" ? args[4] : null;
+        var offset = args.Length > 5 ? int.Parse(args[5], System.Globalization.CultureInfo.InvariantCulture) : 0;
+        var limit = args.Length > 6 ? int.Parse(args[6], System.Globalization.CultureInfo.InvariantCulture) : 20;
+        Console.WriteLine(JsonSerializer.Serialize(ListDecisionTargets(
+            args[0], args[1], args[2] == "-" ? null : args[2], args[3], query, offset, limit), Json.CamelCaseOptions));
+        return 0;
+    }
+
+    public static int RunRecordDecision(string[] args)
+    {
+        if (args.Length < 5) throw new InvalidOperationException("record-template-migration-decision requires <source.docx> <baseline.docx> <draft.json> <branch> <branch arguments>");
+        TemplateMigrationDecisionInput decision = args[3] switch
+        {
+            "mapping" when args.Length >= 7 => new TemplateMigrationDecisionInput(
+                "mapping", args[4], args[6] == "-" ? null : args[6], args[5], args.Length > 7 && args[7] != "-" ? args[7] : null),
+            "choice-selection" when args.Length >= 6 => new TemplateMigrationDecisionInput(
+                "choice-selection", args[4], args[5]),
+            "baseline-clear" when args.Length >= 6 => new TemplateMigrationDecisionInput(
+                "baseline-clear", TargetChoiceId: args[4], Mode: args[5]),
+            _ => throw new InvalidOperationException("template-migration-decision-arguments-invalid")
+        };
+        Console.WriteLine(JsonSerializer.Serialize(RecordDecision(args[0], args[1], args[2], decision), Json.CamelCaseOptions));
+        return 0;
+    }
+
+    public static int RunResolveDecisionDraft(string[] args)
+    {
+        if (args.Length < 3) throw new InvalidOperationException("resolve-template-migration-decisions requires <source.docx> <baseline.docx> <draft.json>");
+        var result = ResolveDecisionDraft(args[0], args[1], args[2]);
+        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
+        return result.Pass ? 0 : 1;
+    }
+
+    public static TemplateMigrationDecisionProgress StartDecisionDraft(string source, string baseline, string draftFile)
+    {
+        if (File.Exists(draftFile)) throw new InvalidOperationException("template-migration-decision-draft-already-exists");
+        var catalog = ListChoices(source, baseline);
+        var draft = new TemplateMigrationDecisionDraft(
+            "tiwater.docx.template-migration-decision-draft/v1",
+            catalog.SourceSha256,
+            catalog.BaselineSha256,
+            [],
+            [],
+            []);
+        WriteDecisionDraft(draftFile, draft, overwrite: false);
+        return DecisionProgress(catalog, draft);
+    }
+
+    public static TemplateMigrationTargetPage ListDecisionTargets(
+        string source,
+        string baseline,
+        string? sourceChoiceId,
+        string branch,
+        string? query,
+        int offset,
+        int limit)
+    {
+        if (offset < 0) throw new InvalidOperationException("template-migration-target-offset-invalid");
+        if (limit is < 1 or > 100) throw new InvalidOperationException("template-migration-target-limit-invalid");
+        var catalog = ListChoices(source, baseline);
+        TemplateMigrationChoice? sourceChoice = null;
+        if (!string.Equals(branch, "baseline-clear", StringComparison.Ordinal))
+        {
+            sourceChoice = catalog.Sources.SingleOrDefault(item => string.Equals(item.Id, sourceChoiceId, StringComparison.Ordinal))
+                ?? throw new InvalidOperationException("template-migration-decision-source-unknown-or-stale");
+        }
+        else if (!string.IsNullOrWhiteSpace(sourceChoiceId))
+        {
+            throw new InvalidOperationException("template-migration-target-source-forbidden");
+        }
+
+        IEnumerable<TemplateMigrationChoice> targets = branch switch
+        {
+            "copy-text" or "retain-target" or "retain-target-label" => catalog.Targets.Where(item =>
+                item.AllowedFor?.Contains("mapping", StringComparer.Ordinal) == true
+                && string.Equals(item.Kind, sourceChoice!.Kind, StringComparison.Ordinal)),
+            "copy-media" => catalog.Targets.Where(item => item.AllowedFor?.Contains("mapping", StringComparer.Ordinal) == true
+                && item.Kind == "media" && sourceChoice!.Kind == "media"),
+            "choice-selection" => catalog.Targets.Where(item => item.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) == true),
+            "baseline-clear" => catalog.Targets.Where(item => item.AllowedFor?.Contains("baseline-clear", StringComparer.Ordinal) == true),
+            _ => throw new InvalidOperationException("template-migration-target-branch-invalid")
+        };
+        if (!string.IsNullOrWhiteSpace(query) && query != "-")
+        {
+            targets = targets.Where(item => ChoiceSearchText(item).Contains(query, StringComparison.OrdinalIgnoreCase));
+        }
+        var all = targets.OrderBy(item => item.Id, StringComparer.Ordinal).ToList();
+        return new TemplateMigrationTargetPage(
+            "tiwater.docx.template-migration-target-page/v1",
+            true,
+            sourceChoice?.Id,
+            branch,
+            offset,
+            limit,
+            all.Count,
+            all.Skip(offset).Take(limit).ToList());
+    }
+
+    public static TemplateMigrationDecisionProgress RecordDecision(
+        string source,
+        string baseline,
+        string draftFile,
+        TemplateMigrationDecisionInput decision)
+    {
+        var catalog = ListChoices(source, baseline);
+        var draft = ReadDecisionDraft(draftFile);
+        ValidateDecisionDraftIdentity(catalog, draft);
+        ValidateDecisionDraftContent(catalog, draft);
+        var mappings = draft.Mappings.ToList();
+        var selections = draft.ChoiceSelections.ToList();
+        var clears = draft.BaselineClears.ToList();
+        var usedSources = mappings.Select(item => item.SourceChoiceId)
+            .Concat(selections.Select(item => item.SourceChoiceId))
+            .ToHashSet(StringComparer.Ordinal);
+        var usedTargets = mappings.Where(item => item.TargetChoiceId is not null).Select(item => item.TargetChoiceId!)
+            .Concat(selections.Select(item => item.TargetChoiceId))
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (decision.Branch is "mapping" or "choice-selection")
+        {
+            if (string.IsNullOrWhiteSpace(decision.SourceChoiceId)) throw new InvalidOperationException("template-migration-decision-source-required");
+            if (!usedSources.Add(decision.SourceChoiceId)) throw new InvalidOperationException("template-migration-decision-source-duplicate");
+        }
+
+        if (decision.Branch == "mapping")
+        {
+            var sourceChoice = catalog.Sources.SingleOrDefault(item => item.Id == decision.SourceChoiceId)
+                ?? throw new InvalidOperationException("template-migration-decision-source-unknown-or-stale");
+            if (decision.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label" or "out-of-scope" or "review-required"))
+            {
+                throw new InvalidOperationException("template-migration-decision-disposition-invalid");
+            }
+            if (decision.Cardinality is not (null or "one" or "all")
+                || (decision.Cardinality == "all" && decision.Disposition is not ("out-of-scope" or "review-required")))
+            {
+                throw new InvalidOperationException("template-migration-decision-cardinality-invalid");
+            }
+            if (sourceChoice.RequiredCardinality == "all"
+                && decision.Disposition == "review-required")
+            {
+                throw new InvalidOperationException("template-migration-decision-review-group-unsupported");
+            }
+            if (sourceChoice.RequiredCardinality == "all"
+                && (decision.Disposition != "out-of-scope" || decision.Cardinality != "all"))
+            {
+                throw new InvalidOperationException("template-migration-decision-cardinality-all-required");
+            }
+            if (decision.Disposition is "out-of-scope" or "review-required")
+            {
+                if (!string.IsNullOrWhiteSpace(decision.TargetChoiceId)) throw new InvalidOperationException("template-migration-decision-target-forbidden");
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(decision.TargetChoiceId)) throw new InvalidOperationException("template-migration-decision-target-required");
+                var target = catalog.Targets.SingleOrDefault(item => item.Id == decision.TargetChoiceId)
+                    ?? throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
+                if (target.AllowedFor?.Contains("mapping", StringComparer.Ordinal) != true
+                    || !string.Equals(sourceChoice.Kind, target.Kind, StringComparison.Ordinal)
+                    || (decision.Disposition == "copy-media" && sourceChoice.Kind != "media")
+                    || (decision.Disposition != "copy-media" && sourceChoice.Kind == "media"))
+                {
+                    throw new InvalidOperationException("template-migration-decision-target-incompatible");
+                }
+                if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+            }
+            mappings.Add(new TemplateMigrationChoiceMapping(
+                sourceChoice.Id,
+                decision.Disposition is "out-of-scope" or "review-required" ? null : decision.TargetChoiceId,
+                decision.Disposition,
+                decision.Cardinality));
+        }
+        else if (decision.Branch == "choice-selection")
+        {
+            var sourceChoice = catalog.Sources.SingleOrDefault(item => item.Id == decision.SourceChoiceId)
+                ?? throw new InvalidOperationException("template-migration-decision-source-unknown-or-stale");
+            var target = catalog.Targets.SingleOrDefault(item => item.Id == decision.TargetChoiceId)
+                ?? throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
+            if (sourceChoice.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) != true
+                || target.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) != true)
+            {
+                throw new InvalidOperationException("template-migration-decision-target-incompatible");
+            }
+            if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+            selections.Add(new TemplateMigrationChoiceSelectionCandidate(sourceChoice.Id, target.Id));
+        }
+        else if (decision.Branch == "baseline-clear")
+        {
+            if (!string.IsNullOrWhiteSpace(decision.SourceChoiceId)) throw new InvalidOperationException("template-migration-decision-source-forbidden");
+            var target = catalog.Targets.SingleOrDefault(item => item.Id == decision.TargetChoiceId)
+                ?? throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
+            if (target.AllowedFor?.Contains("baseline-clear", StringComparer.Ordinal) != true
+                || decision.Mode is not ("cell" or "row"))
+            {
+                throw new InvalidOperationException("template-migration-decision-clear-invalid");
+            }
+            if (usedTargets.Contains(target.Id)) throw new InvalidOperationException("template-migration-decision-clear-target-conflict");
+            if (clears.Any(item => item.TargetChoiceId == target.Id)) throw new InvalidOperationException("template-migration-decision-clear-duplicate");
+            clears.Add(new TemplateMigrationChoiceClear(target.Id, decision.Mode));
+        }
+        else
+        {
+            throw new InvalidOperationException("template-migration-decision-branch-invalid");
+        }
+
+        var updated = draft with { Mappings = mappings, ChoiceSelections = selections, BaselineClears = clears };
+        WriteDecisionDraft(draftFile, updated, overwrite: true);
+        return DecisionProgress(catalog, updated);
+    }
+
+    public static TemplateMigrationMappingDerivation ResolveDecisionDraft(string source, string baseline, string draftFile)
+    {
+        var catalog = ListChoices(source, baseline);
+        var draft = ReadDecisionDraft(draftFile);
+        ValidateDecisionDraftIdentity(catalog, draft);
+        ValidateDecisionDraftContent(catalog, draft);
+        if (DecisionProgress(catalog, draft).RemainingSourceCount != 0)
+        {
+            throw new InvalidOperationException("template-migration-decision-draft-incomplete");
+        }
+        var reviewMappings = draft.Mappings.Where(item => item.Disposition == "review-required").ToList();
+        var determinateMappings = draft.Mappings.Where(item => item.Disposition != "review-required").ToList();
+        TemplateMigrationMappingDerivation resolution;
+        if (determinateMappings.Count == 0 && draft.ChoiceSelections.Count == 0 && draft.BaselineClears.Count == 0)
+        {
+            var automatic = DeriveExactTextPlan(source, baseline);
+            if (catalog.Sources.Count == 0) return automatic;
+            resolution = new TemplateMigrationMappingDerivation(
+                "tiwater.docx.template-migration-semantic-resolution/v1",
+                false,
+                automatic.Plan,
+                automatic.Unresolved);
+        }
+        else
+        {
+            resolution = ResolveChoices(source, baseline, new TemplateMigrationChoiceCandidate(
+                "tiwater.docx.template-migration-choice-candidate/v1",
+                determinateMappings,
+                draft.ChoiceSelections,
+                draft.BaselineClears));
+        }
+        if (reviewMappings.Count == 0) return resolution;
+        var discovery = FindCandidates(source, baseline);
+        var sourceSelectors = discovery.RequiredDecisions.ToDictionary(
+            item => ChoiceId("source", discovery.SourceSha256, item.Source.Selector
+                ?? throw new InvalidOperationException("template-migration-choice-source-selector-missing")),
+            item => item.Source.Selector!,
+            StringComparer.Ordinal);
+        var reviews = reviewMappings.Select(item => new TemplateMigrationSemanticCandidateMapping(
+            sourceSelectors.TryGetValue(item.SourceChoiceId, out var selector)
+                ? selector
+                : throw new InvalidOperationException("template-migration-decision-source-unknown-or-stale"),
+            null,
+            "review-required",
+            item.Cardinality)).ToList();
+        return CloseReviews(source, baseline, resolution, new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            reviews));
+    }
+
+    private static TemplateMigrationDecisionProgress DecisionProgress(
+        TemplateMigrationChoiceCatalog catalog,
+        TemplateMigrationDecisionDraft draft)
+    {
+        var usedSources = draft.Mappings.Select(item => item.SourceChoiceId)
+            .Concat(draft.ChoiceSelections.Select(item => item.SourceChoiceId))
+            .ToHashSet(StringComparer.Ordinal);
+        var remaining = catalog.Sources.Where(item => !usedSources.Contains(item.Id)).ToList();
+        return new TemplateMigrationDecisionProgress(
+            "tiwater.docx.template-migration-decision-progress/v1",
+            true,
+            usedSources.Count,
+            remaining.Count,
+            remaining.FirstOrDefault());
+    }
+
+    private static string ChoiceSearchText(TemplateMigrationChoice choice)
+        => string.Join("\n", new[]
+        {
+            choice.Text,
+            choice.Context?.PreviousText,
+            choice.Context?.NextText,
+            choice.Context?.SameRowTexts is null ? null : string.Join("\n", choice.Context.SameRowTexts)
+        }.Where(item => !string.IsNullOrWhiteSpace(item))!);
+
+    private static void ValidateDecisionDraftIdentity(TemplateMigrationChoiceCatalog catalog, TemplateMigrationDecisionDraft draft)
+    {
+        if (draft.Schema != "tiwater.docx.template-migration-decision-draft/v1") throw new InvalidOperationException("template-migration-decision-draft-schema-invalid");
+        if (!string.Equals(draft.SourceSha256, catalog.SourceSha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("template-migration-decision-draft-source-stale");
+        if (!string.Equals(draft.BaselineSha256, catalog.BaselineSha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("template-migration-decision-draft-baseline-stale");
+    }
+
+    private static void ValidateDecisionDraftContent(TemplateMigrationChoiceCatalog catalog, TemplateMigrationDecisionDraft draft)
+    {
+        var determinateMappings = draft.Mappings.Where(item => item.Disposition != "review-required").ToList();
+        if (determinateMappings.Count != 0 || draft.ChoiceSelections.Count != 0 || draft.BaselineClears.Count != 0)
+        {
+            ValidateChoiceCandidate(new TemplateMigrationChoiceCandidate(
+                "tiwater.docx.template-migration-choice-candidate/v1",
+                determinateMappings,
+                draft.ChoiceSelections,
+                draft.BaselineClears));
+        }
+        var sources = catalog.Sources.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var targets = catalog.Targets.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var usedSources = new HashSet<string>(StringComparer.Ordinal);
+        var usedTargets = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var mapping in draft.Mappings)
+        {
+            if (!usedSources.Add(mapping.SourceChoiceId)) throw new InvalidOperationException("template-migration-decision-source-duplicate");
+            if (!sources.TryGetValue(mapping.SourceChoiceId, out var source)) throw new InvalidOperationException("template-migration-decision-source-unknown-or-stale");
+            if (mapping.Disposition is not ("copy-text" or "copy-media" or "retain-target" or "retain-target-label" or "out-of-scope" or "review-required"))
+            {
+                throw new InvalidOperationException("template-migration-decision-disposition-invalid");
+            }
+            if (mapping.Disposition is "out-of-scope" or "review-required")
+            {
+                if (mapping.TargetChoiceId is not null) throw new InvalidOperationException("template-migration-decision-target-forbidden");
+                if (mapping.Disposition == "review-required" && source.RequiredCardinality == "all") throw new InvalidOperationException("template-migration-decision-review-group-unsupported");
+                if (source.RequiredCardinality == "all" && mapping.Cardinality != "all") throw new InvalidOperationException("template-migration-decision-cardinality-all-required");
+                continue;
+            }
+            if (mapping.TargetChoiceId is null || !targets.TryGetValue(mapping.TargetChoiceId, out var target)) throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
+            if (target.AllowedFor?.Contains("mapping", StringComparer.Ordinal) != true
+                || !string.Equals(source.Kind, target.Kind, StringComparison.Ordinal)
+                || (mapping.Disposition == "copy-media" && source.Kind != "media")
+                || (mapping.Disposition != "copy-media" && source.Kind == "media"))
+            {
+                throw new InvalidOperationException("template-migration-decision-target-incompatible");
+            }
+            if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+        }
+        foreach (var selection in draft.ChoiceSelections)
+        {
+            if (!usedSources.Add(selection.SourceChoiceId)) throw new InvalidOperationException("template-migration-decision-source-duplicate");
+            if (!sources.TryGetValue(selection.SourceChoiceId, out var source)) throw new InvalidOperationException("template-migration-decision-source-unknown-or-stale");
+            if (!targets.TryGetValue(selection.TargetChoiceId, out var target)) throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
+            if (source.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) != true
+                || target.AllowedFor?.Contains("choice-selection", StringComparer.Ordinal) != true)
+            {
+                throw new InvalidOperationException("template-migration-decision-target-incompatible");
+            }
+            if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+        }
+        foreach (var clear in draft.BaselineClears)
+        {
+            if (!targets.TryGetValue(clear.TargetChoiceId, out var target)
+                || target.AllowedFor?.Contains("baseline-clear", StringComparer.Ordinal) != true)
+            {
+                throw new InvalidOperationException("template-migration-decision-clear-invalid");
+            }
+            if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-clear-target-conflict");
+        }
+    }
+
+    private static TemplateMigrationDecisionDraft ReadDecisionDraft(string file)
+    {
+        if (!File.Exists(file)) throw new InvalidOperationException("template-migration-decision-draft-missing");
+        using var document = JsonDocument.Parse(File.ReadAllText(file));
+        var root = document.RootElement;
+        RequireOnlyFields(root, new HashSet<string>(["schema", "sourceSha256", "baselineSha256", "mappings", "choiceSelections", "baselineClears"], StringComparer.Ordinal), "template-migration-decision-draft");
+        foreach (var field in new[] { "schema", "sourceSha256", "baselineSha256" })
+        {
+            if (!root.TryGetProperty(field, out var value) || value.ValueKind != JsonValueKind.String) throw new InvalidOperationException($"template-migration-decision-draft-{field}-invalid");
+        }
+        foreach (var field in new[] { "mappings", "choiceSelections", "baselineClears" })
+        {
+            if (!root.TryGetProperty(field, out var value) || value.ValueKind != JsonValueKind.Array) throw new InvalidOperationException($"template-migration-decision-draft-{field}-invalid");
+        }
+        foreach (var mapping in root.GetProperty("mappings").EnumerateArray())
+        {
+            RequireOnlyFields(mapping, new HashSet<string>(["sourceChoiceId", "targetChoiceId", "disposition", "cardinality"], StringComparer.Ordinal), "template-migration-decision-draft-mapping");
+        }
+        foreach (var selection in root.GetProperty("choiceSelections").EnumerateArray())
+        {
+            RequireOnlyFields(selection, new HashSet<string>(["sourceChoiceId", "targetChoiceId"], StringComparer.Ordinal), "template-migration-decision-draft-selection");
+        }
+        foreach (var clear in root.GetProperty("baselineClears").EnumerateArray())
+        {
+            RequireOnlyFields(clear, new HashSet<string>(["targetChoiceId", "mode"], StringComparer.Ordinal), "template-migration-decision-draft-clear");
+        }
+        var draft = JsonSerializer.Deserialize<TemplateMigrationDecisionDraft>(root.GetRawText(), Json.CamelCaseOptions)
+            ?? throw new InvalidOperationException("template-migration-decision-draft-invalid");
+        if (draft.Mappings is null || draft.ChoiceSelections is null || draft.BaselineClears is null) throw new InvalidOperationException("template-migration-decision-draft-invalid");
+        return draft;
+    }
+
+    private static void WriteDecisionDraft(string file, TemplateMigrationDecisionDraft draft, bool overwrite)
+    {
+        var fullPath = Path.GetFullPath(file);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        var temporary = fullPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        File.WriteAllText(temporary, JsonSerializer.Serialize(draft, Json.CamelCaseOptions));
+        try
+        {
+            if (!overwrite && File.Exists(fullPath)) throw new InvalidOperationException("template-migration-decision-draft-already-exists");
+            File.Move(temporary, fullPath, overwrite);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
     public static int RunResolveChoices(string[] args)
     {
         if (args.Length < 3)
@@ -775,7 +1188,7 @@ Purpose: Preserve selector-level semantic candidate resolution for compatible ca
 Consumes: One current source DOCX, one selected baseline DOCX, and a candidate containing mappings plus any applicable append, insertion, value-projection, choice-selection, or baseline-clear branches.
 Produces: A hash-bound migration plan, an empty Unresolved array on pass, or typed selector and coverage failures without document mutation.
 Use when: An existing integration is explicitly bound to list-template-migration-options and selector-level candidates.
-Do not use for: New Agent-facing migration work, discovering source observations, submitting an empty diagnostic candidate, inventing values or targets, building operations, editing, or closing genuine local review items. New callers use list-template-migration-choices and resolve-template-migration-choices.
+Do not use for: New Agent-facing migration work, discovering source observations, submitting an empty diagnostic candidate, inventing values or targets, building operations, editing, or closing genuine local review items. New callers use the incremental template-migration decision commands.
 Usage:
   tiwater-docx resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>
 
