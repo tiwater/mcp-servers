@@ -69,6 +69,83 @@ function templateMigrationInputSchema() {
   };
 }
 
+const runtimeIdentitySchema = {
+  type: 'object',
+  properties: {
+    command: { type: 'string' },
+    cwd: { type: 'string' },
+  },
+  required: ['command', 'cwd'],
+  additionalProperties: false,
+};
+
+const migrationChoiceSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    kind: { type: 'string' },
+    scope: { type: 'string' },
+    text: { type: ['string', 'null'] },
+    count: { type: 'integer' },
+    requiredCardinality: { type: ['string', 'null'] },
+    context: { type: ['object', 'null'] },
+    allowedActions: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['id', 'kind', 'scope', 'text', 'count', 'requiredCardinality', 'context', 'allowedActions'],
+  additionalProperties: false,
+};
+
+const migrationCatalogOutputSchema = {
+  type: 'object',
+  properties: {
+    tool: { const: 'docx_list_migration_choices' },
+    runtime: runtimeIdentitySchema,
+    catalog: {
+      type: 'object',
+      properties: {
+        schema: { type: 'string' },
+        pass: { type: 'boolean' },
+        sourceSha256: { type: 'string' },
+        baselineSha256: { type: 'string' },
+        sources: { type: 'array', items: migrationChoiceSchema },
+        targets: { type: 'array', items: migrationChoiceSchema },
+      },
+      required: ['schema', 'pass', 'sourceSha256', 'baselineSha256', 'sources', 'targets'],
+      additionalProperties: false,
+    },
+  },
+  required: ['tool', 'runtime', 'catalog'],
+  additionalProperties: false,
+};
+
+function migrationReceiptOutputSchema(tool) {
+  return {
+    type: 'object',
+    properties: {
+      tool: { const: tool },
+      runtime: runtimeIdentitySchema,
+      receipt: {
+        type: 'object',
+        properties: {
+          schema: { type: 'string' },
+          toolVersion: { type: 'string' },
+          status: { type: 'string', enum: ['pass', 'review-required', 'failed'] },
+          pass: { type: 'boolean' },
+          reviewRequired: { type: 'boolean' },
+          outputVerified: { type: 'boolean' },
+          output: { type: ['string', 'null'] },
+          plan: { type: ['string', 'null'] },
+          failures: { type: 'array', items: { type: 'object' } },
+        },
+        required: ['schema', 'toolVersion', 'status', 'pass', 'reviewRequired', 'outputVerified', 'output', 'plan', 'failures'],
+        additionalProperties: true,
+      },
+    },
+    required: ['tool', 'runtime', 'receipt'],
+    additionalProperties: false,
+  };
+}
+
 const tools = [
   {
     name: 'docx_inspect',
@@ -100,16 +177,19 @@ const tools = [
       required: ['source', 'baseline'],
       additionalProperties: false,
     },
+    outputSchema: migrationCatalogOutputSchema,
   },
   {
     name: 'docx_migrate_template',
     description: 'Migrate a current DOCX into the selected baseline from one complete batch of business choices. Choices reference only opaque ids returned by docx_list_migration_choices; the tool derives all document values, coordinates, plans, and edits.',
     inputSchema: templateMigrationInputSchema(),
+    outputSchema: migrationReceiptOutputSchema('docx_migrate_template'),
   },
   {
     name: 'docx_verify_migration',
     description: 'Independently re-resolve the same business choices and verify a migrated DOCX against the current source and baseline. This does not trust the migration receipt.',
     inputSchema: templateMigrationInputSchema(),
+    outputSchema: migrationReceiptOutputSchema('docx_verify_migration'),
   },
   {
     name: 'docx_compare',
@@ -430,7 +510,7 @@ function commandRuntime(result) {
   };
 }
 
-await new McpStdioServer({ name: 'tiwater-office', version: '0.1.0', tools, callTool }).start();
+await new McpStdioServer({ name: 'tiwater-office', version: '0.2.0', tools, callTool }).start();
 
 async function runXlsxValidateCandidateChain(args) {
   const errors = [];

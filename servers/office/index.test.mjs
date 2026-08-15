@@ -15,12 +15,13 @@ test('published Office MCP exposes one batch migration surface and forwards type
 const fs = require('node:fs');
 const command = process.argv[2];
 if (command === 'list-template-migration-choices') {
-  process.stdout.write(JSON.stringify({schema:'catalog/v1',sources:[{id:'source-1'}],targets:[{id:'target-1'}]}));
+  const choice = id => ({id,kind:'paragraph',scope:'body',text:id,count:1,requiredCardinality:'one',context:null,allowedActions:['place-content']});
+  process.stdout.write(JSON.stringify({schema:'catalog/v1',pass:true,sourceSha256:'a',baselineSha256:'b',sources:[choice('source-1')],targets:[choice('target-1')]}));
   process.exit(0);
 }
 if (command === 'migrate-template' || command === 'verify-template-migration') {
   const payload = JSON.parse(fs.readFileSync(process.argv[5], 'utf8'));
-  process.stdout.write(JSON.stringify({schema:'receipt/v1',pass:true,command,payload,output:process.argv[6]}));
+  process.stdout.write(JSON.stringify({schema:'receipt/v1',toolVersion:'0.12.2',status:'pass',pass:true,reviewRequired:false,outputVerified:true,command,payload,output:process.argv[6],plan:process.argv[6]+'.migration-plan.json',failures:[]}));
   process.exit(0);
 }
 process.stderr.write('unexpected command: ' + command);
@@ -58,7 +59,8 @@ process.exit(2);
   });
 
   try {
-    await request('initialize', { protocolVersion: '2025-06-18' });
+    const initialized = await request('initialize', { protocolVersion: '2025-06-18' });
+    assert.equal(initialized.result.serverInfo.version, '0.2.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -70,6 +72,9 @@ process.exit(2);
     );
     assert(!names.some(name => name.includes('record') || name.includes('revise') || name.includes('target_search')));
     const migrateTool = listed.result.tools.find(tool => tool.name === 'docx_migrate_template');
+    const listTool = listed.result.tools.find(tool => tool.name === 'docx_list_migration_choices');
+    assert.equal(listTool.outputSchema.properties.catalog.properties.sources.items.properties.allowedActions.type, 'array');
+    assert.equal(migrateTool.outputSchema.properties.receipt.properties.outputVerified.type, 'boolean');
     assert.deepEqual(migrateTool.inputSchema.properties.choices.items.properties.action.enum, [
       'place-content',
       'keep-template-content',
@@ -80,12 +85,19 @@ process.exit(2);
     ]);
     assert.equal(migrateTool.inputSchema.additionalProperties, false);
 
+    const listedChoices = await request('tools/call', {
+      name: 'docx_list_migration_choices',
+      arguments: { source: '/current.docx', baseline: '/baseline.docx' },
+    });
+    assert.equal(listedChoices.result.structuredContent.catalog.sources[0].id, 'source-1');
+
     const choices = [{ sourceChoiceId: 'source-1', action: 'place-content', targetChoiceId: 'target-1' }];
     const migrated = await request('tools/call', {
       name: 'docx_migrate_template',
       arguments: { source: '/current.docx', baseline: '/baseline.docx', output: '/output.docx', choices },
     });
     const payload = JSON.parse(migrated.result.content[0].text);
+    assert.deepEqual(migrated.result.structuredContent, payload);
     assert.equal(payload.receipt.pass, true);
     assert.equal(payload.receipt.command, 'migrate-template');
     assert.deepEqual(payload.receipt.payload, {

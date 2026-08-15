@@ -35,6 +35,10 @@ The third operation independently repeats admission and readback from the
 current source, baseline, choices, and output. It does not trust the migration
 operation's embedded verdict.
 
+All three operations publish MCP input and output schemas and return structured
+content. Text content is a human-readable projection of the same result, not a
+second contract.
+
 The Agent-facing server does not expose target search, incremental draft,
 record, revise, replay, plan construction, apply, or legacy candidate commands.
 Those may remain command-line compatibility or diagnostic operations, but the
