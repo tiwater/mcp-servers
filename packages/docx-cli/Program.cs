@@ -198,7 +198,7 @@ public static class Cli
             "find-template-migration-candidates" => """
                 Purpose: List every source observation that still requires one semantic migration decision, with any mechanically suggested targets.
                 Consumes: One current source DOCX and one selected baseline DOCX; the provider performs its conservative exact comparison internally.
-                Produces: Uniform RequiredDecisions and AvailableTargets observations bound to the current source and baseline hashes. Each required source appears exactly once. AvailableTargets is the complete selectable baseline inventory; SuggestedTargets is only a mechanical shortlist and may be empty, singular, or plural. It does not produce a migration plan.
+                Produces: Uniform RequiredDecisions and AvailableTargets observations bound to the current source and baseline hashes. Each required source appears exactly once. AvailableTargets groups selectable baseline paragraphs, cells, and media with their structural context and selectable child runs; SuggestedTargets is only a mechanical shortlist and may be empty, singular, or plural. It does not produce a migration plan.
                 Use when: Starting semantic resolution for every source observation that is not already an automatic exact match.
                 Provider boundary: This command observes current sources and possible targets; it does not choose copy, retain, exclude, or review semantics and does not build or execute operations.
                 Next: The Agent uses current scenario authority and AvailableTargets to propose one semantic disposition for every RequiredDecision, regardless of suggestion count, then calls resolve-template-migration-semantic-candidate.

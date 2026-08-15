@@ -353,7 +353,7 @@ public static class TemplateMigration
             return new TemplateMigrationRequiredDecision(item.Source!, targets);
         }).ToList();
         return new TemplateMigrationCandidateDiscovery(
-            "tiwater.docx.template-migration-candidate-discovery/v3",
+            "tiwater.docx.template-migration-candidate-discovery/v4",
             true,
             legacy.Plan.SourceSha256,
             legacy.Plan.BaselineSha256,
@@ -451,11 +451,63 @@ public static class TemplateMigration
             .Select(mapping => mapping.BaselineObjectId!)
             .ToHashSet(StringComparer.Ordinal);
         return analysis.Baseline.Objects
-            .Where(item => item.Kind is "paragraph" or "table-cell" or "run" or "media")
+            .Where(item => item.Kind is "paragraph" or "table-cell" or "media")
             .Where(item => item.Selector is not null && !claimed.Contains(item.Id))
             .OrderBy(item => item.Id, StringComparer.Ordinal)
+            .Select(item => ObserveAvailableTarget(analysis.Baseline.Objects, item, claimed))
+            .ToList();
+    }
+
+    private static TemplateMigrationSemanticObservation ObserveAvailableTarget(
+        IReadOnlyList<TemplateMigrationObject> objects,
+        TemplateMigrationObject item,
+        IReadOnlySet<string> claimed)
+    {
+        var siblings = objects
+            .Where(candidate => candidate.Kind == item.Kind
+                && candidate.Scope == item.Scope
+                && candidate.ParentId == item.ParentId)
+            .ToList();
+        var siblingIndex = siblings.FindIndex(candidate => candidate.Id == item.Id);
+        var previousText = siblingIndex > 0 ? siblings[siblingIndex - 1].Text : null;
+        var nextText = siblingIndex >= 0 && siblingIndex + 1 < siblings.Count
+            ? siblings[siblingIndex + 1].Text
+            : null;
+
+        IReadOnlyList<string>? sameRowTexts = null;
+        IReadOnlyList<TemplateMigrationSemanticObservation>? selectableChildren = null;
+        if (item.Kind == "table-cell" && item.Topology is not null)
+        {
+            sameRowTexts = objects
+                .Where(candidate => candidate.Kind == "table-cell"
+                    && candidate.Id != item.Id
+                    && candidate.Topology?.ContainerObjectId == item.Topology.ContainerObjectId
+                    && candidate.Topology.Row == item.Topology.Row
+                    && !string.IsNullOrWhiteSpace(candidate.Text))
+                .OrderBy(candidate => candidate.Topology!.Column)
+                .Select(candidate => candidate.Text!)
+                .ToList();
+        }
+        if (item.Kind is "paragraph" or "table-cell") selectableChildren = objects
+            .Where(candidate => candidate.Kind == "run"
+                && candidate.ParentId == item.Id
+                && candidate.Selector is not null
+                && !claimed.Contains(candidate.Id))
+            .OrderBy(candidate => candidate.Id, StringComparer.Ordinal)
             .Select(ObserveForSemanticDecision)
             .ToList();
+
+        var context = string.IsNullOrWhiteSpace(previousText)
+            && string.IsNullOrWhiteSpace(nextText)
+            && (sameRowTexts is null || sameRowTexts.Count == 0)
+            && (selectableChildren is null || selectableChildren.Count == 0)
+                ? null
+                : new TemplateMigrationSemanticContext(
+                    string.IsNullOrWhiteSpace(previousText) ? null : previousText,
+                    string.IsNullOrWhiteSpace(nextText) ? null : nextText,
+                    sameRowTexts is { Count: > 0 } ? sameRowTexts : null,
+                    selectableChildren is { Count: > 0 } ? selectableChildren : null);
+        return new TemplateMigrationSemanticObservation(item.Kind, item.Scope, item.Text, item.Selector, context);
     }
 
     private static IReadOnlyList<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)> FindEqualAnchorGapCandidates(

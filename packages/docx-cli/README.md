@@ -127,7 +127,12 @@ tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
 The result is an observation receipt, not a migration plan.
 `RequiredDecisions` contains every source that still needs a disposition exactly
 once. `AvailableTargets` is the complete current baseline inventory from which
-semantic targets and baseline-only cleanup are selected. A decision's
+semantic targets and baseline-only cleanup are selected. It presents paragraphs,
+table cells, and media as structural regions, with adjacent text, same-row text,
+and selectable child runs attached as context instead of flattening those runs
+into unrelated top-level targets. A region already claimed by automatic mapping
+is omitted together with its children, because its parent operation already owns
+that content. A decision's
 `SuggestedTargets` is only a mechanical shortlist and may be empty, singular,
 or plural; suggestion count does not determine review status. The Agent chooses
 current business dispositions for the complete collection and submits them to
