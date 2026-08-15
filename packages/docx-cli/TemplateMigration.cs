@@ -1043,7 +1043,7 @@ public static class TemplateMigration
             throw new InvalidOperationException("migrate-template requires <source.docx> <baseline.docx> <choices.json> <output.docx>");
         }
         var receipt = MigrateTemplate(args[0], args[1], ReadBusinessChoiceBatch(args[2]), args[3]);
-        Console.WriteLine(JsonSerializer.Serialize(receipt, Json.Options));
+        Console.WriteLine(JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
         return receipt.Pass ? 0 : 1;
     }
 
@@ -1054,7 +1054,7 @@ public static class TemplateMigration
             throw new InvalidOperationException("verify-template-migration requires <source.docx> <baseline.docx> <choices.json> <output.docx>");
         }
         var receipt = VerifyTemplateMigration(args[0], args[1], ReadBusinessChoiceBatch(args[2]), args[3]);
-        Console.WriteLine(JsonSerializer.Serialize(receipt, Json.Options));
+        Console.WriteLine(JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
         return receipt.Pass ? 0 : 1;
     }
 

@@ -9,6 +9,7 @@ export const repoRoot = path.resolve(sharedDir, '..', '..');
 
 export function createToolResult(payload) {
   return {
+    structuredContent: payload,
     content: [
       {
         type: 'text',
