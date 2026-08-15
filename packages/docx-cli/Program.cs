@@ -148,7 +148,6 @@ public static class Cli
         Console.WriteLine("  validate-template-transform <source-template.docx> <target-template.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("  analyze-template-migration <source.docx> <baseline.docx> [--json]");
-        Console.WriteLine("  derive-template-migration-exact-text-plan <source.docx> <baseline.docx>");
         Console.WriteLine("  find-template-migration-candidates <source.docx> <baseline.docx>");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (append --help for candidate shape)");
         Console.WriteLine("  close-template-migration-reviews <source.docx> <baseline.docx> <resolution.json> <review-candidate.json>");
@@ -190,19 +189,19 @@ public static class Cli
                   tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
                 """,
             "derive-template-migration-exact-text-plan" => """
-                Purpose: Derive the conservative automatic portion of a template-migration plan from unique current text and topology.
+                Purpose: Preserve the legacy exact-text diagnostic receipt for compatible callers.
                 Consumes: One current source DOCX and the same selected baseline DOCX used for analysis.
                 Produces: A hash-bound plan; Unresolved[].Source and Unresolved[].BaselineOptions carry current observations, and UnclaimedBaseline lists unclaimed baseline content and selectable child runs. Exact-text match missing or non-unique describes only this mechanical comparison; it does not mean that a semantic target is absent or ambiguous.
-                Use when: The source and baseline have been observed and automatic exact matches are needed.
-                Do not use for: Treating Unresolved as review-required, inventing target mappings, editing, or output validation.
+                Use when: An existing caller still consumes this diagnostic receipt; new semantic-resolution callers use find-template-migration-candidates.
+                Do not use for: New tool discovery, treating Unresolved as review-required, building operations, inventing target mappings, editing, or output validation.
                 Usage:
                   tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
                 """,
             "find-template-migration-candidates" => """
                 Purpose: Find conservative paragraph candidate pairs between reciprocal exact-text anchors for a semantic decision.
-                Consumes: One current source DOCX and the same selected baseline DOCX used by the exact-text plan.
+                Consumes: One current source DOCX and one selected baseline DOCX; the provider performs its conservative exact comparison internally.
                 Produces: Uniform Candidates, Pending source observations, and UnclaimedBaseline observations bound to the current source and baseline hashes. It does not produce a migration plan. Candidates are possible pairs, not approved mappings; Pending items are undecided, not review terminals.
-                Use when: Exact matching leaves paragraph gaps that may have a unique current semantic target.
+                Use when: Starting semantic resolution for source content that is not already an automatic exact match.
                 Do not use for: Deciding copy/retain/exclude semantics, treating Pending as review-required, building operations, editing, or output validation. Propose current semantic dispositions, then call resolve-template-migration-semantic-candidate.
                 Usage:
                   tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>

@@ -63,9 +63,9 @@ again and rejects flattened or otherwise changed visible line structure.
 tiwater-docx analyze-template-migration <source.docx> <baseline.docx> [--json]
 ```
 
-### 3aa. Derive an Exact-Text Mapping Candidate
+### 3aa. Legacy Exact-Text Diagnostic
 
-Produces a plan for content that is unique within both source and baseline for
+This compatibility command produces a diagnostic plan for content that is unique within both source and baseline for
 the same object kind. Repeated table-cell content is also mapped when the full
 normalized cell topology identifies exactly one source table and exactly one
 baseline table, with a one-to-one row/column correspondence. The provider uses
@@ -81,6 +81,11 @@ as the terminal `review-required` disposition.
 ```bash
 tiwater-docx derive-template-migration-exact-text-plan <source.docx> <baseline.docx>
 ```
+
+It is not listed by new tool discovery and must not be passed to the operation
+builder. New semantic-resolution callers start with
+`find-template-migration-candidates`, whose resolver recomputes the automatic
+portion from the same current documents.
 
 This is a candidate producer: `Pass` means the typed candidate was derived
 successfully. A non-empty `Unresolved` list is valid current evidence for

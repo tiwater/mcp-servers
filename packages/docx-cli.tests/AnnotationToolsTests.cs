@@ -123,6 +123,28 @@ public class AnnotationToolsTests
         }
 
         Assert.Contains("Unresolved[].BaselineOptions", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("new semantic-resolution callers use find-template-migration-candidates", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TemplateMigration_top_level_discovery_exposes_one_semantic_resolution_entry()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(1, await Dockit.Docx.Cli.Cli.RunAsync([]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var usage = output.ToString();
+        Assert.Contains("find-template-migration-candidates", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("derive-template-migration-exact-text-plan", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("derive-template-migration-anchor-gap-plan", usage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -144,6 +166,7 @@ public class AnnotationToolsTests
         Assert.Contains("does not produce a migration plan", help, StringComparison.Ordinal);
         Assert.Contains("Pending items are undecided, not review terminals", help, StringComparison.Ordinal);
         Assert.Contains("resolve-template-migration-semantic-candidate", help, StringComparison.Ordinal);
+        Assert.Contains("performs its conservative exact comparison internally", help, StringComparison.Ordinal);
     }
 
     [Fact]
