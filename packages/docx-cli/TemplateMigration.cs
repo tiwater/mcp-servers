@@ -153,7 +153,12 @@ public static class TemplateMigration
                 ? "template-migration-exact-text-target-missing"
                 : "template-migration-exact-text-ambiguous";
             mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "unresolved", reason));
-            unresolved.Add(new TemplateMigrationPlanFailure(reason, sourceObject.Id, Detail: $"sourceMatches={sourceCount};baselineMatches={candidates?.Count ?? 0}"));
+            unresolved.Add(new TemplateMigrationPlanFailure(
+                reason,
+                sourceObject.Id,
+                Detail: $"sourceMatches={sourceCount};baselineMatches={candidates?.Count ?? 0}",
+                Source: ObserveForSemanticDecision(sourceObject),
+                BaselineOptions: candidates?.Select(ObserveForSemanticDecision).ToList() ?? []));
         }
 
         var sourceMedia = analysis.Source.Objects.Where(item => item.Kind == "media").OrderBy(item => item.Id, StringComparer.Ordinal).ToList();
@@ -185,7 +190,12 @@ public static class TemplateMigration
                 ? "template-migration-media-hash-target-missing"
                 : "template-migration-media-hash-ambiguous";
             mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "unresolved", reason));
-            unresolved.Add(new TemplateMigrationPlanFailure(reason, sourceObject.Id, Detail: $"sourceMatches={sourceMatches};baselineMatches={baselineMatches?.Count ?? 0}"));
+            unresolved.Add(new TemplateMigrationPlanFailure(
+                reason,
+                sourceObject.Id,
+                Detail: $"sourceMatches={sourceMatches};baselineMatches={baselineMatches?.Count ?? 0}",
+                Source: ObserveForSemanticDecision(sourceObject),
+                BaselineOptions: baselineMatches?.Select(ObserveForSemanticDecision).ToList() ?? []));
         }
 
         var coveredDrawingRelationships = DeriveCoveredDrawingRelationships(analysis, mappings);
@@ -198,7 +208,11 @@ public static class TemplateMigration
                 && coveredDrawingRelationships.Contains(relationshipKey);
             if (handledMediaObject || coveredDrawing) continue;
             mappings.Add(new TemplateMigrationMapping(sourceObject.Id, null, "unresolved", "template-migration-automatic-strategy-unsupported"));
-            unresolved.Add(new TemplateMigrationPlanFailure("template-migration-automatic-strategy-unsupported", sourceObject.Id, Detail: sourceObject.Kind));
+            unresolved.Add(new TemplateMigrationPlanFailure(
+                "template-migration-automatic-strategy-unsupported",
+                sourceObject.Id,
+                Detail: sourceObject.Kind,
+                Source: ObserveForSemanticDecision(sourceObject)));
         }
 
         var plan = new TemplateMigrationPlan(
@@ -210,7 +224,8 @@ public static class TemplateMigration
             Schema: "tiwater.docx.template-migration-exact-text-plan/v1",
             Pass: true,
             Plan: plan,
-            Unresolved: unresolved);
+            Unresolved: unresolved,
+            UnclaimedBaseline: ObserveUnclaimedBaseline(analysis, plan));
     }
 
     private static IReadOnlyDictionary<string, string> DeriveReciprocalTableCellTargets(TemplateMigrationAnalysis analysis)
@@ -309,13 +324,50 @@ public static class TemplateMigration
         var unresolved = new List<TemplateMigrationPlanFailure>(exact.Unresolved);
         foreach (var candidate in candidates)
         {
-            unresolved.Add(new TemplateMigrationPlanFailure("template-migration-anchor-gap-candidate-review-required", candidate.Source.Id, candidate.Baseline.Id));
+            unresolved.Add(new TemplateMigrationPlanFailure(
+                "template-migration-anchor-gap-candidate-review-required",
+                candidate.Source.Id,
+                candidate.Baseline.Id,
+                Source: ObserveForSemanticDecision(candidate.Source),
+                Baseline: ObserveForSemanticDecision(candidate.Baseline)));
         }
         return new TemplateMigrationMappingDerivation(
             "tiwater.docx.template-migration-anchor-gap-plan/v1",
             true,
             plan,
-            unresolved);
+            unresolved,
+            ObserveUnclaimedBaseline(analysis, plan));
+    }
+
+    private static TemplateMigrationSemanticObservation ObserveForSemanticDecision(TemplateMigrationObject item)
+        => new(item.Kind, item.Scope, item.Text, item.Selector);
+
+    private static IReadOnlyList<TemplateMigrationSemanticObservation> ObserveUnclaimedBaseline(
+        TemplateMigrationAnalysis analysis,
+        TemplateMigrationPlan plan)
+    {
+        var claimed = plan.Mappings
+            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.BaselineObjectId))
+            .Select(mapping => mapping.BaselineObjectId!)
+            .ToHashSet(StringComparer.Ordinal);
+        var unclaimedContent = analysis.Baseline.Objects
+            .Where(IsContentBearing)
+            .Where(item => !claimed.Contains(item.Id))
+            .ToList();
+        var unclaimedCellIds = unclaimedContent
+            .Where(item => item.Kind == "table-cell")
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        return unclaimedContent
+            .Concat(analysis.Baseline.Objects.Where(item =>
+                item.Kind == "run"
+                && item.Selector is not null
+                && !string.IsNullOrWhiteSpace(item.Text)
+                && item.ParentId is not null
+                && unclaimedCellIds.Contains(item.ParentId)))
+            .OrderBy(item => item.Id, StringComparer.Ordinal)
+            .Select(ObserveForSemanticDecision)
+            .ToList();
     }
 
     private static IReadOnlyList<(TemplateMigrationObject Source, TemplateMigrationObject Baseline)> FindEqualAnchorGapCandidates(

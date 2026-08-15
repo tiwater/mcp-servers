@@ -89,6 +89,14 @@ plan. Passing that incomplete plan to the operation builder fails with
 `template-migration-semantic-resolution-required`; it does not create a
 customer-review terminal.
 
+Each unresolved entry repeats the compact current source observation and any
+exact baseline options. The same receipt also lists unclaimed non-empty
+baseline paragraphs and table cells plus their uniquely selectable child runs.
+These observations contain no object ids or coordinates and make the plan
+itself sufficient for semantic selection;
+the full technical analysis remains an audit artifact rather than an Agent
+join surface.
+
 ### 3ab. Derive an Anchor-Gap Mapping Candidate
 
 Produces a deterministic candidate for unmatched current objects when their
@@ -102,6 +110,8 @@ tiwater-docx derive-template-migration-anchor-gap-plan <source.docx> <baseline.d
 
 This command uses the same candidate status contract: unresolved gaps remain
 in `Unresolved` while the successfully derived candidate remains `Pass` true.
+When a reciprocal anchor gap identifies one baseline object mechanically, its
+compact current observation is included without approving the mapping.
 
 ### 3b. Build Cross-Template Operations
 
