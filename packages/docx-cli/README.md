@@ -49,7 +49,11 @@ tiwater-docx validate-template-transform <source-template.docx> <target-template
 Exports hash-attested source and baseline object inventories plus unresolved
 structural/content/style differences. Table-cell objects include canonical
 `Topology` (`ContainerObjectId`, `Row`, `Column`). It does not infer a business
-mapping or modify either document.
+mapping or modify either document. A content object also includes `Selector`
+when the existing semantic-selector fields identify it uniquely within that
+same current inventory. The selector contains no object id or coordinate and
+can be copied into a semantic candidate after the caller chooses the business
+mapping. Objects that cannot be identified uniquely have no `Selector`.
 When a mapped table cell contains multiple source paragraphs, the deterministic
 copy operation retains their visible boundaries as line breaks instead of
 joining them. Independent readback observes the source and output paragraphs

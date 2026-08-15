@@ -180,7 +180,7 @@ public static class Cli
             "analyze-template-migration" => """
                 Purpose: Observe the current source and selected baseline as immutable migration object inventories.
                 Consumes: One current source DOCX and one selected baseline DOCX.
-                Produces: A hash-bound analysis with source objects, baseline objects, and unresolved findings; use --json for machine output.
+                Produces: A hash-bound analysis with source objects, baseline objects, candidate-ready unique semantic selectors, and unresolved findings; use --json for machine output.
                 Use when: Starting a template migration before selecting any semantic mapping.
                 Do not use for: Selecting mappings, building operations, editing a document, or validating output.
                 Usage:
