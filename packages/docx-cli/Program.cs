@@ -15,6 +15,7 @@ public static class Cli
         "start-template-migration-decisions",
         "find-template-migration-targets",
         "record-template-migration-decision",
+        "revise-template-migration-decision",
         "resolve-template-migration-decisions",
         "list-template-migration-choices",
         "resolve-template-migration-choices",
@@ -73,6 +74,7 @@ public static class Cli
                 "start-template-migration-decisions" => Task.FromResult(TemplateMigration.RunStartDecisions(args[1..])),
                 "find-template-migration-targets" => Task.FromResult(TemplateMigration.RunListDecisionTargets(args[1..])),
                 "record-template-migration-decision" => Task.FromResult(TemplateMigration.RunRecordDecision(args[1..])),
+                "revise-template-migration-decision" => Task.FromResult(TemplateMigration.RunReviseDecision(args[1..])),
                 "resolve-template-migration-decisions" => Task.FromResult(TemplateMigration.RunResolveDecisionDraft(args[1..])),
                 "list-template-migration-choices" => Task.FromResult(TemplateMigration.RunListChoices(args[1..])),
                 "resolve-template-migration-choices" => Task.FromResult(TemplateMigration.RunResolveChoices(args[1..])),
@@ -184,8 +186,9 @@ public static class Cli
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("Template migration: record one current-document decision at a time; read each next command's --help before using it.");
         Console.WriteLine("  start-template-migration-decisions <source.docx> <baseline.docx> <draft.json>");
-        Console.WriteLine("  find-template-migration-targets <source.docx> <baseline.docx> <draft.json> <branch> [query|-] [offset] [limit]");
+        Console.WriteLine("  find-template-migration-targets <source.docx> <baseline.docx> <draft.json> <branch> <branch arguments>");
         Console.WriteLine("  record-template-migration-decision <source.docx> <baseline.docx> <draft.json> <branch> <branch arguments>");
+        Console.WriteLine("  revise-template-migration-decision <source.docx> <baseline.docx> <draft.json> <source-choice-id> <branch> <branch arguments>");
         Console.WriteLine("  resolve-template-migration-decisions <source.docx> <baseline.docx> <draft.json>");
         Console.WriteLine("  list-template-migration-choices <source.docx> <baseline.docx>  (compatibility)");
         Console.WriteLine("  resolve-template-migration-choices <source.docx> <baseline.docx> <choices.json>  (compatibility)");
@@ -270,7 +273,10 @@ public static class Cli
                 Use when: The next business decision needs a target without loading the full baseline inventory into Agent context.
                 Do not use for: Choosing a target, hiding targets outside a page, inferring scenario semantics, or editing a document.
                 Usage:
-                  tiwater-docx find-template-migration-targets <source.docx> <baseline.docx> <draft.json> <copy-text|copy-media|retain-target|retain-target-label|choice-selection|baseline-clear> [query|-] [offset] [limit]
+                  tiwater-docx find-template-migration-targets <source.docx> <baseline.docx> <draft.json> mapping <copy-text|copy-media|retain-target|retain-target-label> [query|-] [offset] [limit]
+                  tiwater-docx find-template-migration-targets <source.docx> <baseline.docx> <draft.json> choice-selection [query|-] [offset] [limit]
+                  tiwater-docx find-template-migration-targets <source.docx> <baseline.docx> <draft.json> baseline-clear [query|-] [offset] [limit]
+                Compatibility: The earlier disposition-first form remains accepted.
                 """,
             "record-template-migration-decision" => """
                 Purpose: Validate and atomically record exactly one business decision in the provider-owned draft.
@@ -283,7 +289,18 @@ public static class Cli
                   tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> choice-selection <target-choice-id>
                   tiwater-docx record-template-migration-decision <source.docx> <baseline.docx> <draft.json> baseline-clear <target-choice-id> <cell|row>
                 Mapping dispositions: copy-text, copy-media, retain-target, retain-target-label, out-of-scope, review-required. The last two use - as the target.
-                Recording an explicit previously returned source choice replaces that source's earlier decision atomically for compatibility with a typed validation correction.
+                A rejected decision leaves the draft unchanged and the same source current. Use revise-template-migration-decision to change an accepted earlier decision.
+                """,
+            "revise-template-migration-decision" => """
+                Purpose: Validate and atomically replace one accepted source decision without replaying the draft.
+                Consumes: The same current source and baseline, the provider-owned draft, one source choice id already recorded in that draft, and one replacement mapping or choice-selection decision.
+                Produces: The updated draft plus progress; all unrelated recorded decisions remain unchanged.
+                Use when: Current business evidence changes one earlier accepted decision or a later local observation makes its disposition more precise.
+                Do not use for: Replaying a draft, revising an unrecorded source, supplying selectors or coordinates, choosing business meaning, baseline cleanup, or editing a document.
+                Usage:
+                  tiwater-docx revise-template-migration-decision <source.docx> <baseline.docx> <draft.json> <source-choice-id> mapping <disposition> <target-choice-id|-> [cardinality|-]
+                  tiwater-docx revise-template-migration-decision <source.docx> <baseline.docx> <draft.json> <source-choice-id> choice-selection <target-choice-id>
+                Mapping dispositions: copy-text, copy-media, retain-target, retain-target-label, out-of-scope, review-required. The last two use - as the target.
                 """,
             "resolve-template-migration-decisions" => """
                 Purpose: Re-read both current documents and expand the complete provider-owned decision draft into a validated migration plan.
