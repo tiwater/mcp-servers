@@ -10,29 +10,8 @@ internal static class Program
 
 public static class Cli
 {
-    private static readonly string[] DiscoverableCommands =
-    [
-        "list-template-migration-options",
-        "resolve-template-migration-semantic-candidate",
-        "close-template-migration-reviews",
-        "build-template-migration-operations",
-        "apply-template-migration",
-        "validate-template-migration-output",
-        "preview-template-migration",
-    ];
-
     public static Task<int> RunAsync(string[] args)
     {
-        if (args.Length == 1 && args[0] == "--list-tools")
-        {
-            WriteJson(new
-            {
-                schema = "tiwater.provider-tool-list/v1",
-                commands = DiscoverableCommands,
-            });
-            return Task.FromResult(0);
-        }
-
         if (args.Length == 1 && args[0] == "--describe-tool")
         {
             PrintToolDescription();
@@ -247,78 +226,6 @@ public static class Cli
                 Do not use for: New tool discovery, approving mappings, editing, or output validation.
                 Usage:
                   tiwater-docx derive-template-migration-anchor-gap-plan <source.docx> <baseline.docx>
-                """,
-            "resolve-template-migration-semantic-candidate" => """
-                Purpose: Resolve every listed template-migration source through one scenario-supported semantic candidate and independently re-read its selectors from the current source and baseline.
-                Consumes: One current source DOCX, one selected baseline DOCX, and a candidate containing mappings plus any applicable append, insertion, value-projection, choice-selection, or baseline-clear branches.
-                Produces: A hash-bound migration plan, an empty Unresolved array on pass, or typed selector and coverage failures without document mutation.
-                Use when: list-template-migration-options has returned the current RequiredDecisions and AvailableTargets and the Agent has proposed a disposition for every determinate source.
-                Do not use for: Discovering source observations, submitting an empty diagnostic candidate, inventing values or targets, building operations, editing, or closing genuine local review items.
-                Usage:
-                  tiwater-docx resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>
-
-                candidate.json uses the published camel-case candidate shape. For v5:
-                  required: schema, mappings (the array may be empty when another branch supplies content)
-                  optional: bodyAppends, valueProjections, bodyInsertions, choiceSelections, baselineClears
-                  selector: kind plus exactly one of text, sha256, or descendantText; optional scope,
-                            parentText, previousText, nextText, sameRowText, sameColumnText
-                  mapping: source, disposition, and baseline unless disposition is out-of-scope;
-                           optional cardinality is one, or all only for out-of-scope
-
-                Existing branch shapes:
-                  bodyAppends: sourceStart, sourceEnd
-                  bodyInsertions: sourceStart, sourceEnd, baselineBefore, baselineAfter,
-                                  stylePolicy (target-after-context)
-                  valueProjections: sourceParent, baselineParent, semantic, valueKind, extraction
-                  choiceSelections: sourceMember, baselineLabel (a run selector)
-                  baselineClears: baseline, mode (cell or row)
-                  v6 empty selector: textState (empty), explicit scope, and at least one of
-                                     parentText, previousText, or nextText
-
-                Every value above is selected from the current source/baseline inventories.
-                Candidate source selectors address only items reported in Unresolved by the
-                current automatic plan. Plan.Mappings are already complete and must not be
-                repeated. AvailableTargets is the current selectable baseline inventory for
-                semantic mappings and baseline-only cleanup; candidate discovery does not
-                publish a separate target recommendation.
-                Every RequiredDecisions source must be addressed. An omitted source is returned
-                as template-migration-semantic-decision-missing; it is not reported as a target
-                selection failure or local business ambiguity.
-                Unknown fields, object ids, indexes, and coordinates are rejected.
-
-                Minimal v5 example (values are observations from the current source/baseline):
-                {
-                  "schema": "tiwater.docx.template-migration-semantic-candidate/v5",
-                  "mappings": [
-                    {
-                      "source": {"kind":"paragraph","scope":"body","text":"<source text>"},
-                      "baseline": {"kind":"paragraph","scope":"body","text":"<baseline text>"},
-                      "disposition": "copy-text"
-                    },
-                    {
-                      "source": {"kind":"paragraph","scope":"header","text":"<excluded source text>"},
-                      "disposition": "out-of-scope"
-                    }
-                  ],
-                  "choiceSelections": [
-                    {
-                      "sourceMember": {"kind":"table-cell","scope":"body","text":"<selected member>"},
-                      "baselineLabel": {"kind":"run","scope":"body","text":"<target label>"}
-                    }
-                  ],
-                  "baselineClears": [
-                    {
-                      "baseline": {"kind":"table-cell","scope":"body","text":"<baseline placeholder>"},
-                      "mode": "cell"
-                    }
-                  ]
-                }
-
-                Allowed mapping dispositions: copy-text, copy-media, retain-target,
-                retain-target-label, out-of-scope. Successful resolution returns Pass=true,
-                Plan, and an empty Unresolved array; the operation builder consumes Plan. If
-                genuine local ambiguity remains after all determinate mappings were proposed,
-                close-template-migration-reviews consumes this resolution as a separate step.
                 """,
             "build-template-migration-operations" => """
                 Purpose: Deterministically build DOCX operations from one fully resolved, hash-bound migration plan.
