@@ -118,12 +118,6 @@ compact current observation is included without approving the mapping.
 Compiles a hash-bound, validated semantic mapping into deterministic edit
 operations. It rejects missing/duplicate source content, duplicate targets,
 hash drift, type mismatches, unsupported targets, and unresolved mappings.
-Only an explicit semantic-candidate `review-required` disposition has review
-meaning. It closes one current `Unresolved` item without inventing a target;
-the resolver returns a closed non-pass plan whose verified subset can be
-rendered with `preview-template-migration`. Leaving an item unmentioned keeps
-it unresolved and does not authorize a preview. The resolver command exits
-successfully for a closed review plan even though its receipt has `Pass=false`.
 The builder does not infer any source-to-target mapping. A mapping can target
 an attested `run` as well as a paragraph or table cell; run operations preserve
 the target template's surrounding labels and formatting while replacing only
@@ -227,9 +221,9 @@ with explicit scope and parent/previous/next context. Selectors never accept
 object ids, indexes, or coordinates.
 
 A mapping requires `source` and `disposition`. It also requires `baseline`
-unless the disposition is `out-of-scope` or `review-required`. Existing dispositions are
-`copy-text`, `copy-media`, `retain-target`, `retain-target-label`,
-`out-of-scope`, and `review-required`. Optional `cardinality` is `one`, or `all` only for an
+unless the disposition is `out-of-scope`. Existing dispositions are
+`copy-text`, `copy-media`, `retain-target`, `retain-target-label`, and
+`out-of-scope`. Optional `cardinality` is `one`, or `all` only for an
 `out-of-scope` mapping. Choice entries require `sourceMember` and a
 `baselineLabel` selector whose kind is `run`. Baseline clears require
 `baseline` and mode `cell` or `row`.
@@ -268,14 +262,6 @@ baseline; they are not fixed document values:
         "text": "<current excluded source text>"
       },
       "disposition": "out-of-scope"
-    },
-    {
-      "source": {
-        "kind": "table-cell",
-        "scope": "body",
-        "text": "<current value with no unique target>"
-      },
-      "disposition": "review-required"
     }
   ],
   "choiceSelections": [
@@ -319,6 +305,20 @@ Other existing branches use these fields:
 Unknown fields and invalid branch combinations fail closed. A non-zero resolve
 exit still writes its typed unresolved result to stdout; only a passing result
 with no unresolved mappings may proceed to operation building.
+
+If a completed semantic attempt has already resolved every determinate item
+and leaves only genuine local business ambiguity, close those remaining items
+in a separate candidate containing only `review-required` source selectors:
+
+```bash
+tiwater-docx close-template-migration-reviews <source.docx> <baseline.docx> <resolution.json> <review-candidate.json>
+tiwater-docx preview-template-migration <source.docx> <baseline.docx> <closed-review.json> <output.docx>
+```
+
+The close command rejects targets, other candidate branches, sources that are
+not unresolved in that resolution, and incomplete review closure. Its output
+is non-pass and remains review-required; preview independently reads back only
+the verified subset and does not make it delivery-eligible.
 
 ```bash
 tiwater-docx build-template-migration-operations <source.docx> <baseline.docx> <plan.json>
