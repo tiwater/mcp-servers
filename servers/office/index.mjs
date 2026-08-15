@@ -13,24 +13,61 @@ import {
   withTempJsonFile,
 } from '../_shared/tool-runtime.mjs';
 
-const docxProject = resolveRepoPath('packages', 'docx-cli', 'docx.csproj');
-const xlsxProject = resolveRepoPath('packages', 'xlsx-cli', 'xlsx.csproj');
-const pptxProject = resolveRepoPath('packages', 'pptx-cli', 'pptx.csproj');
-
 const docxCandidates = [
   commandCandidate('tiwater-docx'),
-  commandCandidate('dotnet', ['run', '--project', docxProject, '--']),
 ];
 
 const xlsxCandidates = [
   commandCandidate('tiwater-xlsx'),
-  commandCandidate('dotnet', ['run', '--project', xlsxProject, '--']),
 ];
 
 const pptxCandidates = [
   commandCandidate('tiwater-pptx'),
-  commandCandidate('dotnet', ['run', '--project', pptxProject, '--']),
 ];
+
+function templateMigrationInputSchema() {
+  return {
+    type: 'object',
+    properties: {
+      source: { type: 'string', description: 'Path to the current source DOCX.' },
+      baseline: { type: 'string', description: 'Path to the selected current baseline DOCX.' },
+      output: { type: 'string', description: 'Path to the migrated output DOCX.' },
+      choices: {
+        type: 'array',
+        description: 'Exactly one business choice for every source id returned by docx_list_migration_choices.',
+        items: {
+          type: 'object',
+          properties: {
+            sourceChoiceId: { type: 'string' },
+            action: {
+              type: 'string',
+              enum: ['place-content', 'keep-template-content', 'keep-template-label', 'select-template-option', 'exclude-source', 'review-source'],
+            },
+            targetChoiceId: { type: 'string', description: 'Required only when the selected action uses a baseline target.' },
+            cardinality: { type: 'string', enum: ['one', 'all'] },
+          },
+          required: ['sourceChoiceId', 'action'],
+          additionalProperties: false,
+        },
+      },
+      templateCleanup: {
+        type: 'array',
+        description: 'Optional baseline-owned placeholders or example rows to clear.',
+        items: {
+          type: 'object',
+          properties: {
+            targetChoiceId: { type: 'string' },
+            scope: { type: 'string', enum: ['cell', 'row'] },
+          },
+          required: ['targetChoiceId', 'scope'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['source', 'baseline', 'output', 'choices'],
+    additionalProperties: false,
+  };
+}
 
 const tools = [
   {
@@ -50,6 +87,29 @@ const tools = [
       properties: { input: { type: 'string', description: 'Absolute or relative path to a .docx file.' } },
       required: ['input'],
     },
+  },
+  {
+    name: 'docx_list_migration_choices',
+    description: 'List every current source item that still needs a business choice and the selectable current baseline targets. Returns opaque ids and context; it does not recommend a choice.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Path to the current source DOCX.' },
+        baseline: { type: 'string', description: 'Path to the selected current baseline DOCX.' },
+      },
+      required: ['source', 'baseline'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'docx_migrate_template',
+    description: 'Migrate a current DOCX into the selected baseline from one complete batch of business choices. Choices reference only opaque ids returned by docx_list_migration_choices; the tool derives all document values, coordinates, plans, and edits.',
+    inputSchema: templateMigrationInputSchema(),
+  },
+  {
+    name: 'docx_verify_migration',
+    description: 'Independently re-resolve the same business choices and verify a migrated DOCX against the current source and baseline. This does not trust the migration receipt.',
+    inputSchema: templateMigrationInputSchema(),
   },
   {
     name: 'docx_compare',
@@ -114,124 +174,6 @@ const tools = [
     },
   },
   {
-    name: 'docx_fill_template',
-    description: 'Fill DOCX placeholders using a data object or an existing JSON data file.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        template: { type: 'string' },
-        output: { type: 'string' },
-        data: { type: 'object' },
-        dataPath: { type: 'string' },
-      },
-      required: ['template', 'output'],
-    },
-  },
-  {
-    name: 'docx_edit',
-    description: 'Apply explicit edit operations to a DOCX document, including anchored text replacement, paragraph/cell edits, rich text table cells, cell merging, comment deletion, and field refresh.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        output: { type: 'string' },
-        edits: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              type: { type: 'string', enum: ['replaceAnchoredText', 'replaceParagraphText', 'replaceBodyText', 'replaceAllHeaderParagraphText', 'replaceHeaderParagraphText', 'replaceHeaderText', 'replaceTableCellText', 'replaceTableCellRichText', 'replaceTable', 'insertTableRows', 'deleteTableRows', 'replaceTableRows', 'insertTableColumns', 'setTableWidth', 'setTableCellAlignment', 'setTableCellNoWrap', 'setTableCellFontSize', 'setTableRowHeight', 'setTableRowCantSplit', 'mergeTableCells', 'unmergeTableRowHorizontalCells', 'unmergeTableColumnVerticalCells', 'fillTableSemantically', 'deleteComment', 'deleteComments', 'markFieldsDirty', 'sanitizeFields', 'freezeFields'] },
-              commentId: { type: 'string' },
-              text: { type: 'string' },
-              richText: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    text: { type: 'string' },
-                    color: { type: 'string' },
-                    underline: { type: 'boolean' },
-                    bold: { type: 'boolean' }
-                  },
-                  required: ['text']
-                }
-              },
-              findText: { type: 'string' },
-              paragraphIndex: { type: 'integer' },
-              headerIndex: { type: 'integer' },
-              tableIndex: { type: 'integer' },
-              rowIndex: { type: 'integer' },
-              cellIndex: { type: 'integer' },
-              commentIds: { type: 'array', items: { type: 'string' } },
-              startCellIndex: { type: 'integer' },
-              endCellIndex: { type: 'integer' },
-              startRowIndex: { type: 'integer' },
-              endRowIndex: { type: 'integer' },
-              columnIndex: { type: 'integer' },
-              columnCount: { type: 'integer' },
-              templateColumnIndex: { type: 'integer' },
-              templateRowIndex: { type: 'integer' },
-              width: { type: 'string' },
-              widthType: { type: 'string', enum: ['pct', 'dxa', 'auto', 'nil'] },
-              alignment: { type: 'string', enum: ['left', 'center', 'right', 'both'] },
-              noWrap: { type: 'boolean', description: 'When true or omitted, set Word w:noWrap on the target table cell; false removes it.' },
-              fontSize: { type: 'string', description: 'OpenXML half-points such as 18, or point size such as 9pt.' },
-              height: { type: 'string', description: 'Table row height in twips.' },
-              heightRule: { type: 'string', enum: ['atLeast', 'at-least', 'at_least', 'exact', 'auto'] },
-              cantSplit: { type: 'boolean', description: 'When true, set Word w:cantSplit on the target table row; false removes it.' },
-              rows: {
-                type: 'array',
-                items: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      text: { type: 'string' },
-                      gridSpan: { type: 'integer' },
-                      vMerge: { type: 'string', enum: ['restart', 'continue'] },
-                      bold: { type: 'boolean' },
-                      header: { type: 'boolean' },
-                      shading: { type: 'string' },
-                      alignment: { type: 'string', enum: ['left', 'center', 'right'] },
-                      richText: {
-                        type: 'array',
-                        items: {
-                          type: 'object',
-                          properties: {
-                            text: { type: 'string' },
-                            color: { type: 'string' },
-                            underline: { type: 'boolean' },
-                            bold: { type: 'boolean' }
-                          },
-                          required: ['text']
-                        }
-                      }
-                    }
-                  }
-                }
-               },
-              cells: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    rowPatterns: { type: 'array', items: { type: 'string' } },
-                    colPatterns: { type: 'array', items: { type: 'string' } },
-                    text: { type: 'string' }
-                  },
-                  required: ['rowPatterns', 'colPatterns', 'text']
-                }
-              }
-            },
-            required: ['type']
-          }
-        },
-        editsPath: { type: 'string' }
-      },
-      required: ['input', 'output'],
-    },
-  },
-  {
     name: 'xlsx_inspect',
     description: 'Inspect an XLSX workbook and return sheet-level metrics, used ranges, formula counts, and merged ranges.',
     inputSchema: {
@@ -251,61 +193,6 @@ const tools = [
         resolveMergedCells: { type: 'boolean', description: 'Resolve merged cells to project values' }
       },
       required: ['input'],
-    },
-  },
-  {
-    name: 'xlsx_fill_template',
-    description: 'Fill an XLSX template using a data object or an existing JSON data file.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        template: { type: 'string' },
-        output: { type: 'string' },
-        data: { type: 'object' },
-        dataPath: { type: 'string' },
-      },
-      required: ['template', 'output'],
-    },
-  },
-  {
-    name: 'xlsx_edit',
-    description: 'Apply explicit edit operations to an XLSX workbook, including single-cell writes, range writes, structural row operations, and anchored section expansion for fixed-layout sheets.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        output: { type: 'string' },
-        edits: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              type: { type: 'string' },
-              sheet: { type: 'string' },
-              cell: { type: 'string' },
-              value: { type: 'string' },
-              valueType: { type: 'string' },
-              bold: { type: 'boolean' },
-              startCell: { type: 'string' },
-              values: { type: 'array', items: { type: 'array', items: { type: 'string' } } },
-              startRow: { type: 'integer' },
-              count: { type: 'integer' },
-              sourceRow: { type: 'integer' },
-              targetRow: { type: 'integer' },
-              translateFormulas: { type: 'boolean' },
-              anchorText: { type: 'string' },
-              exampleRows: { type: 'integer' },
-              targetRows: { type: 'integer' },
-              preserveStyle: { type: 'boolean' },
-              preserveFormulas: { type: 'boolean' },
-              preserveMergedRanges: { type: 'boolean' }
-            },
-            required: ['type']
-          }
-        },
-        editsPath: { type: 'string' }
-      },
-      required: ['input', 'output'],
     },
   },
   {
@@ -347,34 +234,6 @@ const tools = [
       required: ['input'],
     },
   },
-  {
-    name: 'pptx_fill_template',
-    description: 'Fill PPTX text placeholders using a data object or JSON data file.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        template: { type: 'string' },
-        output: { type: 'string' },
-        data: { type: 'object' },
-        dataPath: { type: 'string' },
-      },
-      required: ['template', 'output'],
-    },
-  },
-  {
-    name: 'pptx_apply_format_edits',
-    description: 'Copy a PPTX and apply targeted run-format edits from a data object or JSON edit plan file.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        output: { type: 'string' },
-        plan: { type: 'object' },
-        planPath: { type: 'string' },
-      },
-      required: ['input', 'output'],
-    },
-  },
 ];
 
 async function callTool(name, args) {
@@ -383,6 +242,12 @@ async function callTool(name, args) {
       return createToolResult(await docxInspect(args));
     case 'docx_inspect_tables':
       return createToolResult(await docxInspectTables(args));
+    case 'docx_list_migration_choices':
+      return createToolResult(await docxListMigrationChoices(args));
+    case 'docx_migrate_template':
+      return createToolResult(await docxMigrateTemplate(args));
+    case 'docx_verify_migration':
+      return createToolResult(await docxVerifyMigration(args));
     case 'docx_compare':
       return createToolResult(await docxCompare(args));
     case 'docx_validate_template_transform':
@@ -393,18 +258,10 @@ async function callTool(name, args) {
       return createToolResult(await docxReplaceStyleIds(args));
     case 'docx_export_json':
       return createToolResult(await docxExportJson(args));
-    case 'docx_fill_template':
-      return createToolResult(await docxFillTemplate(args));
-    case 'docx_edit':
-      return createToolResult(await docxEdit(args));
     case 'xlsx_inspect':
       return createToolResult(await xlsxInspect(args));
     case 'xlsx_export_json':
       return createToolResult(await xlsxExportJson(args));
-    case 'xlsx_fill_template':
-      return createToolResult(await xlsxFillTemplate(args));
-    case 'xlsx_edit':
-      return createToolResult(await xlsxEdit(args));
     case 'xlsx_validate':
       return createToolResult(await xlsxValidate(args));
     case 'pptx_inspect':
@@ -413,10 +270,6 @@ async function callTool(name, args) {
       return createToolResult(await pptxInspectDetail(args));
     case 'pptx_export_json':
       return createToolResult(await pptxExportJson(args));
-    case 'pptx_fill_template':
-      return createToolResult(await pptxFillTemplate(args));
-    case 'pptx_apply_format_edits':
-      return createToolResult(await pptxApplyFormatEdits(args));
     default:
       throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32601 });
   }
@@ -432,6 +285,42 @@ async function docxInspectTables(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(docxCandidates, ['inspect-tables', input, '--json']);
   return { tool: 'docx_inspect_tables', runtime: commandRuntime(result), report: result.json };
+}
+
+async function docxListMigrationChoices(args) {
+  const source = requireString(args.source, 'source');
+  const baseline = requireString(args.baseline, 'baseline');
+  const result = await runJsonCandidateChain(docxCandidates, ['list-template-migration-choices', source, baseline]);
+  return { tool: 'docx_list_migration_choices', runtime: commandRuntime(result), catalog: result.json };
+}
+
+async function docxMigrateTemplate(args) {
+  return runTemplateMigrationCommand('docx_migrate_template', 'migrate-template', args);
+}
+
+async function docxVerifyMigration(args) {
+  return runTemplateMigrationCommand('docx_verify_migration', 'verify-template-migration', args);
+}
+
+async function runTemplateMigrationCommand(tool, command, args) {
+  const source = requireString(args.source, 'source');
+  const baseline = requireString(args.baseline, 'baseline');
+  const output = requireString(args.output, 'output');
+  if (!Array.isArray(args.choices)) {
+    throw Object.assign(new Error('choices must be an array'), { code: -32602 });
+  }
+  const payload = {
+    schema: 'tiwater.docx.template-migration-business-choices/v1',
+    choices: args.choices,
+    ...(Array.isArray(args.templateCleanup) ? { templateCleanup: args.templateCleanup } : {}),
+  };
+  return withTempJsonFile(payload, async choicesPath => {
+    const result = await runJsonCandidateChain(
+      docxCandidates,
+      [command, source, baseline, choicesPath, output],
+      { allowedExitCodes: [0, 1] });
+    return { tool, runtime: commandRuntime(result), receipt: result.json };
+  });
 }
 
 async function docxCompare(args) {
@@ -483,40 +372,6 @@ async function docxExportJson(args) {
   return { tool: 'docx_export_json', runtime: commandRuntime(result), document: JSON.parse(result.stdout) };
 }
 
-async function docxFillTemplate(args) {
-  const template = requireString(args.template, 'template');
-  const output = requireString(args.output, 'output');
-  if (args.dataPath) {
-    const dataPath = requireString(args.dataPath, 'dataPath');
-    const result = await runCandidateChain(docxCandidates, ['fill-template', template, dataPath, output]);
-    return { tool: 'docx_fill_template', runtime: commandRuntime(result), outputPath: output, stdout: result.stdout.trim() };
-  }
-  if (args.data === undefined) {
-    throw Object.assign(new Error('data or dataPath is required'), { code: -32602 });
-  }
-  return withTempJsonFile(args.data, async dataPath => {
-    const result = await runCandidateChain(docxCandidates, ['fill-template', template, dataPath, output]);
-    return { tool: 'docx_fill_template', runtime: commandRuntime(result), outputPath: output, stdout: result.stdout.trim() };
-  });
-}
-
-async function docxEdit(args) {
-  const input = requireString(args.input, 'input');
-  const output = requireString(args.output, 'output');
-  if (args.editsPath) {
-    const editsPath = requireString(args.editsPath, 'editsPath');
-    const result = await runCandidateChain(docxCandidates, ['edit', input, editsPath, output]);
-    return { tool: 'docx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
-  }
-  if (!Array.isArray(args.edits)) {
-    throw Object.assign(new Error('edits or editsPath is required'), { code: -32602 });
-  }
-  return withTempJsonFile({ operations: args.edits }, async editsPath => {
-    const result = await runCandidateChain(docxCandidates, ['edit', input, editsPath, output]);
-    return { tool: 'docx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
-  });
-}
-
 async function xlsxInspect(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(xlsxCandidates, ['inspect', input, '--json']);
@@ -537,23 +392,6 @@ async function xlsxExportJson(args) {
   }
   const result = await runCandidateChain(xlsxCandidates, cmdArgs);
   return { tool: 'xlsx_export_json', runtime: commandRuntime(result), workbook: JSON.parse(result.stdout) };
-}
-
-async function xlsxFillTemplate(args) {
-  const template = requireString(args.template, 'template');
-  const output = requireString(args.output, 'output');
-  if (args.dataPath) {
-    const dataPath = requireString(args.dataPath, 'dataPath');
-    const result = await runCandidateChain(xlsxCandidates, ['fill-template', template, dataPath, output]);
-    return { tool: 'xlsx_fill_template', runtime: commandRuntime(result), outputPath: output, stdout: result.stdout.trim() };
-  }
-  if (args.data === undefined) {
-    throw Object.assign(new Error('data or dataPath is required'), { code: -32602 });
-  }
-  return withTempJsonFile(args.data, async dataPath => {
-    const result = await runCandidateChain(xlsxCandidates, ['fill-template', template, dataPath, output]);
-    return { tool: 'xlsx_fill_template', runtime: commandRuntime(result), outputPath: output, stdout: result.stdout.trim() };
-  });
 }
 
 async function xlsxValidate(args) {
@@ -585,39 +423,6 @@ async function pptxExportJson(args) {
   return { tool: 'pptx_export_json', runtime: commandRuntime(result), document: JSON.parse(result.stdout) };
 }
 
-async function pptxFillTemplate(args) {
-  const template = requireString(args.template, 'template');
-  const output = requireString(args.output, 'output');
-  if (args.dataPath) {
-    const dataPath = requireString(args.dataPath, 'dataPath');
-    const result = await runCandidateChain(pptxCandidates, ['fill-template', template, dataPath, output]);
-    return { tool: 'pptx_fill_template', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
-  }
-  if (args.data === undefined) {
-    throw Object.assign(new Error('data or dataPath is required'), { code: -32602 });
-  }
-  return withTempJsonFile(args.data, async dataPath => {
-    const result = await runCandidateChain(pptxCandidates, ['fill-template', template, dataPath, output]);
-    return { tool: 'pptx_fill_template', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
-  });
-}
-
-async function pptxApplyFormatEdits(args) {
-  const input = requireString(args.input, 'input');
-  const output = requireString(args.output, 'output');
-  if (args.planPath) {
-    const planPath = requireString(args.planPath, 'planPath');
-    const result = await runCandidateChain(pptxCandidates, ['apply-format-edits', input, planPath, output]);
-    return { tool: 'pptx_apply_format_edits', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
-  }
-  if (args.plan === undefined) {
-    throw Object.assign(new Error('plan or planPath is required'), { code: -32602 });
-  }
-  return withTempJsonFile(args.plan, async planPath => {
-    const result = await runCandidateChain(pptxCandidates, ['apply-format-edits', input, planPath, output]);
-    return { tool: 'pptx_apply_format_edits', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
-  });
-}
 function commandRuntime(result) {
   return {
     command: result.command,
@@ -626,24 +431,6 @@ function commandRuntime(result) {
 }
 
 await new McpStdioServer({ name: 'tiwater-office', version: '0.1.0', tools, callTool }).start();
-
-
-async function xlsxEdit(args) {
-  const input = requireString(args.input, 'input');
-  const output = requireString(args.output, 'output');
-  if (args.editsPath) {
-    const editsPath = requireString(args.editsPath, 'editsPath');
-    const result = await runCandidateChain(xlsxCandidates, ['edit', input, editsPath, output]);
-    return { tool: 'xlsx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
-  }
-  if (!Array.isArray(args.edits)) {
-    throw Object.assign(new Error('edits or editsPath is required'), { code: -32602 });
-  }
-  return withTempJsonFile({ operations: args.edits }, async editsPath => {
-    const result = await runCandidateChain(xlsxCandidates, ['edit', input, editsPath, output]);
-    return { tool: 'xlsx_edit', runtime: commandRuntime(result), outputPath: output, result: JSON.parse(result.stdout) };
-  });
-}
 
 async function runXlsxValidateCandidateChain(args) {
   const errors = [];

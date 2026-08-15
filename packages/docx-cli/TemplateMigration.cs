@@ -715,6 +715,15 @@ public static class TemplateMigration
     {
         var catalog = ListChoices(source, baseline);
         var draft = ReadDecisionDraft(draftFile);
+        return ResolveDecisionDraft(source, baseline, catalog, draft);
+    }
+
+    private static TemplateMigrationMappingDerivation ResolveDecisionDraft(
+        string source,
+        string baseline,
+        TemplateMigrationChoiceCatalog catalog,
+        TemplateMigrationDecisionDraft draft)
+    {
         ValidateDecisionDraftIdentity(catalog, draft);
         ValidateDecisionDraftContent(catalog, draft);
         if (DecisionProgress(catalog, draft).RemainingSourceCount != 0)
@@ -728,10 +737,19 @@ public static class TemplateMigration
         {
             var automatic = DeriveExactTextPlan(source, baseline);
             if (catalog.Sources.Count == 0) return automatic;
+            var pendingSourceIds = automatic.Unresolved
+                .Where(item => item.SourceObjectId is not null)
+                .Select(item => item.SourceObjectId!)
+                .ToHashSet(StringComparer.Ordinal);
             resolution = new TemplateMigrationMappingDerivation(
                 "tiwater.docx.template-migration-semantic-resolution/v1",
                 false,
-                automatic.Plan,
+                automatic.Plan with
+                {
+                    Mappings = automatic.Plan.Mappings
+                        .Where(item => !pendingSourceIds.Contains(item.SourceObjectId))
+                        .ToList()
+                },
                 automatic.Unresolved);
         }
         else
@@ -1006,6 +1024,269 @@ public static class TemplateMigration
             analysis,
             DeriveExactTextPlan(analysis));
     }
+
+    public static int RunMigrateTemplate(string[] args)
+    {
+        if (args.Length < 4)
+        {
+            throw new InvalidOperationException("migrate-template requires <source.docx> <baseline.docx> <choices.json> <output.docx>");
+        }
+        var receipt = MigrateTemplate(args[0], args[1], ReadBusinessChoiceBatch(args[2]), args[3]);
+        Console.WriteLine(JsonSerializer.Serialize(receipt, Json.Options));
+        return receipt.Pass ? 0 : 1;
+    }
+
+    public static int RunVerifyTemplateMigration(string[] args)
+    {
+        if (args.Length < 4)
+        {
+            throw new InvalidOperationException("verify-template-migration requires <source.docx> <baseline.docx> <choices.json> <output.docx>");
+        }
+        var receipt = VerifyTemplateMigration(args[0], args[1], ReadBusinessChoiceBatch(args[2]), args[3]);
+        Console.WriteLine(JsonSerializer.Serialize(receipt, Json.Options));
+        return receipt.Pass ? 0 : 1;
+    }
+
+    public static TemplateMigrationExecutionReceipt MigrateTemplate(
+        string source,
+        string baseline,
+        TemplateMigrationBusinessChoiceBatch choices,
+        string output)
+    {
+        var version = typeof(TemplateMigration).Assembly.GetName().Version?.ToString() ?? "unknown";
+        var resolution = ResolveBusinessChoices(source, baseline, choices);
+        if (!resolution.Pass)
+        {
+            var review = IsClosedReview(resolution);
+            if (review)
+            {
+                return MigrateReviewTemplate(source, baseline, output, version, resolution);
+            }
+            return new TemplateMigrationExecutionReceipt(
+                "tiwater.docx.template-migration-execution/v1", version,
+                "failed", false, false, false,
+                null, null, resolution, null, null, null, null, resolution.Unresolved);
+        }
+
+        var build = BuildOperations(source, baseline, resolution.Plan);
+        if (!build.Pass)
+        {
+            return new TemplateMigrationExecutionReceipt(
+                "tiwater.docx.template-migration-execution/v1", version,
+                "failed", false, false, false, null, null, resolution, build, null, null, null, build.Failures);
+        }
+
+        var outputPath = Path.GetFullPath(output);
+        var planPath = MigrationPlanPath(outputPath);
+        if (File.Exists(outputPath)) throw new InvalidOperationException("template-migration-output-already-exists");
+        if (File.Exists(planPath)) throw new InvalidOperationException("template-migration-plan-already-exists");
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? Directory.GetCurrentDirectory());
+        var temporaryOutput = Path.Combine(Path.GetDirectoryName(outputPath)!, $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.verified");
+        var temporaryPlan = Path.Combine(Path.GetDirectoryName(outputPath)!, $".{Path.GetFileName(planPath)}.{Guid.NewGuid():N}.pending");
+        TemplateMigrationApplyResult? apply = null;
+        TemplateMigrationOutputValidation? validation = null;
+        try
+        {
+            File.WriteAllText(temporaryPlan, JsonSerializer.Serialize(resolution.Plan, Json.Options));
+            apply = Apply(source, baseline, resolution.Plan, temporaryOutput);
+            if (!apply.Pass)
+            {
+                return new TemplateMigrationExecutionReceipt(
+                    "tiwater.docx.template-migration-execution/v1", version,
+                    "failed", false, false, false, null, null, resolution, build, apply, null, null,
+                    [.. apply.Build.Failures, .. apply.MediaFailures, .. (apply.Readback?.Failures ?? [])]);
+            }
+            validation = ValidateOutput(source, baseline, temporaryPlan, temporaryOutput, resolution.Plan);
+            if (!validation.Pass)
+            {
+                return new TemplateMigrationExecutionReceipt(
+                    "tiwater.docx.template-migration-execution/v1", version,
+                    "failed", false, false, false, null, null, resolution, build, apply, null, validation, validation.Failures);
+            }
+            File.Move(temporaryOutput, outputPath);
+            File.Move(temporaryPlan, planPath);
+            validation = ValidateOutput(source, baseline, planPath, outputPath, resolution.Plan);
+            return new TemplateMigrationExecutionReceipt(
+                "tiwater.docx.template-migration-execution/v1", version,
+                validation.Pass ? "pass" : "failed", validation.Pass, false, validation.Pass,
+                validation.Pass ? outputPath : null, planPath, resolution, build, apply, null, validation, validation.Failures);
+        }
+        finally
+        {
+            if (File.Exists(temporaryOutput)) File.Delete(temporaryOutput);
+            if (File.Exists(temporaryPlan)) File.Delete(temporaryPlan);
+        }
+    }
+
+    private static TemplateMigrationExecutionReceipt MigrateReviewTemplate(
+        string source,
+        string baseline,
+        string output,
+        string version,
+        TemplateMigrationMappingDerivation resolution)
+    {
+        var build = BuildOperations(source, baseline, resolution.Plan);
+        if (build.Failures.Count != 0)
+        {
+            return new TemplateMigrationExecutionReceipt(
+                "tiwater.docx.template-migration-execution/v1", version,
+                "failed", false, true, false, null, null, resolution, build, null, null, null,
+                [.. resolution.Unresolved, .. build.Failures]);
+        }
+
+        var outputPath = Path.GetFullPath(output);
+        var planPath = MigrationPlanPath(outputPath);
+        if (File.Exists(outputPath)) throw new InvalidOperationException("template-migration-output-already-exists");
+        if (File.Exists(planPath)) throw new InvalidOperationException("template-migration-plan-already-exists");
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? Directory.GetCurrentDirectory());
+        var temporaryOutput = Path.Combine(Path.GetDirectoryName(outputPath)!, $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.review");
+        var temporaryPlan = Path.Combine(Path.GetDirectoryName(outputPath)!, $".{Path.GetFileName(planPath)}.{Guid.NewGuid():N}.pending");
+        try
+        {
+            File.WriteAllText(temporaryPlan, JsonSerializer.Serialize(resolution.Plan, Json.Options));
+            var preview = Preview(source, baseline, resolution.Plan, temporaryOutput);
+            if (!preview.OutputVerified)
+            {
+                return new TemplateMigrationExecutionReceipt(
+                    "tiwater.docx.template-migration-execution/v1", version,
+                    "failed", false, true, false, null, null, resolution, build, null, preview, null,
+                    [.. resolution.Unresolved, .. preview.Build.Failures, .. preview.MediaFailures, .. (preview.Readback?.Failures ?? [])]);
+            }
+            File.Move(temporaryOutput, outputPath);
+            File.Move(temporaryPlan, planPath);
+            return new TemplateMigrationExecutionReceipt(
+                "tiwater.docx.template-migration-execution/v1", version,
+                "review-required", false, true, true, outputPath, planPath,
+                resolution, build, null, preview, null, resolution.Unresolved);
+        }
+        finally
+        {
+            if (File.Exists(temporaryOutput)) File.Delete(temporaryOutput);
+            if (File.Exists(temporaryPlan)) File.Delete(temporaryPlan);
+        }
+    }
+
+    public static TemplateMigrationVerificationReceipt VerifyTemplateMigration(
+        string source,
+        string baseline,
+        TemplateMigrationBusinessChoiceBatch choices,
+        string output)
+    {
+        var version = typeof(TemplateMigration).Assembly.GetName().Version?.ToString() ?? "unknown";
+        var outputPath = Path.GetFullPath(output);
+        var planPath = MigrationPlanPath(outputPath);
+        var resolution = ResolveBusinessChoices(source, baseline, choices);
+        var review = IsClosedReview(resolution);
+        var failures = new List<TemplateMigrationPlanFailure>();
+        failures.AddRange(resolution.Unresolved);
+        if ((!resolution.Pass && !review) || !File.Exists(outputPath) || !File.Exists(planPath))
+        {
+            if (!File.Exists(outputPath)) failures.Add(new TemplateMigrationPlanFailure("template-migration-output-missing"));
+            if (!File.Exists(planPath)) failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-missing"));
+            return new TemplateMigrationVerificationReceipt(
+                "tiwater.docx.template-migration-verification/v1", version, "failed", false, review, false,
+                outputPath, File.Exists(planPath) ? planPath : null, resolution, null, failures);
+        }
+
+        var storedPlan = JsonSerializer.Deserialize<TemplateMigrationPlan>(File.ReadAllText(planPath), Json.Options)
+            ?? throw new InvalidOperationException("template-migration-plan-invalid");
+        if (!string.Equals(HashCanonical(storedPlan), HashCanonical(resolution.Plan), StringComparison.Ordinal))
+        {
+            failures.Add(new TemplateMigrationPlanFailure("template-migration-plan-choice-mismatch"));
+            return new TemplateMigrationVerificationReceipt(
+                "tiwater.docx.template-migration-verification/v1", version, "failed", false, review, false,
+                outputPath, planPath, resolution, null, failures);
+        }
+        var validation = ValidateOutput(source, baseline, planPath, outputPath, resolution.Plan);
+        failures.AddRange(validation.Failures);
+        var outputVerified = review
+            ? validation.Build.Failures.Count == 0 && validation.Readback.Pass
+            : validation.Pass;
+        return new TemplateMigrationVerificationReceipt(
+            "tiwater.docx.template-migration-verification/v1", version,
+            outputVerified ? (review ? "review-required" : "pass") : "failed",
+            !review && outputVerified, review, outputVerified,
+            outputPath, planPath, resolution, validation, failures);
+    }
+
+    public static TemplateMigrationMappingDerivation ResolveBusinessChoices(
+        string source,
+        string baseline,
+        TemplateMigrationBusinessChoiceBatch batch)
+    {
+        ValidateBusinessChoiceBatch(batch);
+        var catalog = ListChoices(source, baseline);
+        var sources = catalog.Sources.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var targets = catalog.Targets.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var usedSources = new HashSet<string>(StringComparer.Ordinal);
+        var mappings = new List<TemplateMigrationChoiceMapping>();
+        var selections = new List<TemplateMigrationChoiceSelectionCandidate>();
+        foreach (var choice in batch.Choices)
+        {
+            if (!usedSources.Add(choice.SourceChoiceId)) throw new InvalidOperationException("template-migration-business-source-duplicate");
+            if (!sources.TryGetValue(choice.SourceChoiceId, out var sourceChoice)) throw new InvalidOperationException("template-migration-business-source-unknown-or-stale");
+            TemplateMigrationChoice? targetChoice = null;
+            if (choice.TargetChoiceId is not null && !targets.TryGetValue(choice.TargetChoiceId, out targetChoice))
+                throw new InvalidOperationException("template-migration-business-target-unknown-or-stale");
+
+            switch (choice.Action)
+            {
+                case "place-content":
+                    RequireBusinessTarget(targetChoice, "mapping");
+                    mappings.Add(new TemplateMigrationChoiceMapping(
+                        sourceChoice.Id, targetChoice!.Id,
+                        sourceChoice.Kind == "media" ? "copy-media" : "copy-text", choice.Cardinality));
+                    break;
+                case "keep-template-content":
+                    RequireBusinessTarget(targetChoice, "mapping");
+                    mappings.Add(new TemplateMigrationChoiceMapping(sourceChoice.Id, targetChoice!.Id, "retain-target", choice.Cardinality));
+                    break;
+                case "keep-template-label":
+                    RequireBusinessTarget(targetChoice, "mapping");
+                    mappings.Add(new TemplateMigrationChoiceMapping(sourceChoice.Id, targetChoice!.Id, "retain-target-label", choice.Cardinality));
+                    break;
+                case "select-template-option":
+                    RequireBusinessTarget(targetChoice, "choice-selection");
+                    selections.Add(new TemplateMigrationChoiceSelectionCandidate(sourceChoice.Id, targetChoice!.Id));
+                    break;
+                case "exclude-source":
+                    if (targetChoice is not null) throw new InvalidOperationException("template-migration-business-target-forbidden");
+                    mappings.Add(new TemplateMigrationChoiceMapping(sourceChoice.Id, null, "out-of-scope", choice.Cardinality));
+                    break;
+                case "review-source":
+                    if (targetChoice is not null) throw new InvalidOperationException("template-migration-business-target-forbidden");
+                    mappings.Add(new TemplateMigrationChoiceMapping(sourceChoice.Id, null, "review-required", choice.Cardinality));
+                    break;
+                default:
+                    throw new InvalidOperationException("template-migration-business-action-invalid");
+            }
+        }
+        if (!usedSources.SetEquals(sources.Keys)) throw new InvalidOperationException("template-migration-business-choice-set-incomplete");
+
+        var clears = new List<TemplateMigrationChoiceClear>();
+        var clearedTargets = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var cleanup in batch.TemplateCleanup ?? [])
+        {
+            if (!clearedTargets.Add(cleanup.TargetChoiceId)) throw new InvalidOperationException("template-migration-business-cleanup-duplicate");
+            if (!targets.TryGetValue(cleanup.TargetChoiceId, out var target)) throw new InvalidOperationException("template-migration-business-target-unknown-or-stale");
+            RequireBusinessTarget(target, "baseline-clear");
+            clears.Add(new TemplateMigrationChoiceClear(target.Id, cleanup.Scope));
+        }
+
+        var draft = new TemplateMigrationDecisionDraft(
+            "tiwater.docx.template-migration-decision-draft/v1",
+            catalog.SourceSha256, catalog.BaselineSha256, mappings, selections, clears);
+        return ResolveDecisionDraft(source, baseline, catalog, draft);
+    }
+
+    private static void RequireBusinessTarget(TemplateMigrationChoice? target, string use)
+    {
+        if (target is null) throw new InvalidOperationException("template-migration-business-target-required");
+        if (!(target.AllowedFor ?? []).Contains(use, StringComparer.Ordinal))
+            throw new InvalidOperationException("template-migration-business-target-incompatible");
+    }
+
+    private static string MigrationPlanPath(string outputPath) => outputPath + ".migration-plan.json";
 
     private static bool UsesEmptyTextState(TemplateMigrationSemanticSelector? selector)
         => !string.IsNullOrWhiteSpace(selector?.TextState);
@@ -1876,6 +2157,45 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
         ValidateChoiceCandidateJson(document.RootElement);
         return JsonSerializer.Deserialize<TemplateMigrationChoiceCandidate>(document.RootElement.GetRawText(), Json.CamelCaseOptions)
             ?? throw new InvalidOperationException("template-migration-choice-candidate-invalid");
+    }
+
+    private static TemplateMigrationBusinessChoiceBatch ReadBusinessChoiceBatch(string file)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.GetFullPath(file)));
+        var root = document.RootElement;
+        RequireOnlyFields(root, new HashSet<string>(["schema", "choices", "templateCleanup"], StringComparer.Ordinal), "template-migration-business-choice-batch");
+        if (!root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("template-migration-business-choices-invalid");
+        foreach (var choice in choices.EnumerateArray())
+            RequireOnlyFields(choice, new HashSet<string>(["sourceChoiceId", "action", "targetChoiceId", "cardinality"], StringComparer.Ordinal), "template-migration-business-choice");
+        if (root.TryGetProperty("templateCleanup", out var cleanup))
+        {
+            if (cleanup.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("template-migration-business-cleanup-invalid");
+            foreach (var item in cleanup.EnumerateArray())
+                RequireOnlyFields(item, new HashSet<string>(["targetChoiceId", "scope"], StringComparer.Ordinal), "template-migration-business-cleanup");
+        }
+        return JsonSerializer.Deserialize<TemplateMigrationBusinessChoiceBatch>(root.GetRawText(), Json.CamelCaseOptions)
+            ?? throw new InvalidOperationException("template-migration-business-choice-batch-invalid");
+    }
+
+    private static void ValidateBusinessChoiceBatch(TemplateMigrationBusinessChoiceBatch batch)
+    {
+        if (!string.Equals(batch.Schema, "tiwater.docx.template-migration-business-choices/v1", StringComparison.Ordinal))
+            throw new InvalidOperationException("template-migration-business-choice-schema-invalid");
+        foreach (var choice in batch.Choices)
+        {
+            if (string.IsNullOrWhiteSpace(choice.SourceChoiceId)) throw new InvalidOperationException("template-migration-business-source-required");
+            if (choice.Action is not ("place-content" or "keep-template-content" or "keep-template-label" or "select-template-option" or "exclude-source" or "review-source"))
+                throw new InvalidOperationException("template-migration-business-action-invalid");
+            if (choice.Cardinality is not (null or "one" or "all")) throw new InvalidOperationException("template-migration-business-cardinality-invalid");
+            if (choice.Cardinality == "all" && choice.Action is not ("exclude-source" or "review-source"))
+                throw new InvalidOperationException("template-migration-business-cardinality-all-terminal-only");
+        }
+        foreach (var cleanup in batch.TemplateCleanup ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(cleanup.TargetChoiceId)) throw new InvalidOperationException("template-migration-business-cleanup-target-required");
+            if (cleanup.Scope is not ("cell" or "row")) throw new InvalidOperationException("template-migration-business-cleanup-scope-invalid");
+        }
     }
 
     private static void ValidateChoiceCandidateJson(JsonElement root)
