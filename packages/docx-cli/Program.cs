@@ -10,8 +10,25 @@ internal static class Program
 
 public static class Cli
 {
+    private static readonly string[] DiscoverableCommands =
+    [
+        "list-template-migration-options",
+        "resolve-template-migration-semantic-candidate",
+        "close-template-migration-reviews",
+        "build-template-migration-operations",
+        "apply-template-migration",
+        "validate-template-migration-output",
+        "preview-template-migration",
+    ];
+
     public static Task<int> RunAsync(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--list-tools")
+        {
+            WriteJson(new { schema = "tiwater.provider-tool-list/v1", commands = DiscoverableCommands });
+            return Task.FromResult(0);
+        }
+
         if (args.Length == 1 && args[0] == "--describe-tool")
         {
             PrintToolDescription();

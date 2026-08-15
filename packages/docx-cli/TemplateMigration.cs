@@ -603,6 +603,11 @@ public static class TemplateMigration
         if (args.Length == 1 && args[0] is "--help" or "-h")
         {
             Console.WriteLine("""
+Purpose: Resolve every listed template-migration source through one scenario-supported semantic candidate and independently re-read its selectors from the current source and baseline.
+Consumes: One current source DOCX, one selected baseline DOCX, and a candidate containing mappings plus any applicable append, insertion, value-projection, choice-selection, or baseline-clear branches.
+Produces: A hash-bound migration plan, an empty Unresolved array on pass, or typed selector and coverage failures without document mutation.
+Use when: list-template-migration-options has returned the current RequiredDecisions and AvailableTargets and the Agent has proposed a disposition for every determinate source.
+Do not use for: Discovering source observations, submitting an empty diagnostic candidate, inventing values or targets, building operations, editing, or closing genuine local review items.
 Usage:
   tiwater-docx resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>
 

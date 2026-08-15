@@ -177,6 +177,52 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public async Task Provider_lists_template_migration_subcommands_for_independent_discovery()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["--list-tools"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        using var document = JsonDocument.Parse(output.ToString());
+        var root = document.RootElement;
+        Assert.Equal("tiwater.provider-tool-list/v1", root.GetProperty("schema").GetString());
+        var commands = root.GetProperty("commands").EnumerateArray().Select(value => value.GetString()).ToArray();
+        Assert.Contains("list-template-migration-options", commands);
+        Assert.Contains("resolve-template-migration-semantic-candidate", commands);
+        Assert.Contains("validate-template-migration-output", commands);
+        Assert.Equal(commands.Length, commands.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public async Task Semantic_candidate_resolver_has_complete_independent_tool_help()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["resolve-template-migration-semantic-candidate", "--help"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var help = output.ToString();
+        foreach (var label in new[] { "Purpose:", "Consumes:", "Produces:", "Use when:", "Do not use for:", "Usage:" }) Assert.Contains(label, help, StringComparison.Ordinal);
+        Assert.Contains("Every RequiredDecisions source must be addressed", help, StringComparison.Ordinal);
+        Assert.Contains("Minimal v5 example", help, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TemplateMigration_candidate_discovery_help_rejects_plan_and_terminal_semantics()
     {
         var original = Console.Out;
