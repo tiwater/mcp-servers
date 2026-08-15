@@ -155,6 +155,9 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Use npm client with trusted publishing support
+        run: npm install --global npm@11.11.0
+
       - name: Verify package and server contract
         run: |
           cd servers
@@ -171,4 +174,11 @@ jobs:
             echo "@tiwater/office-mcp ${package_version} is already published"
           else
             npm publish --provenance --access public
+          fi
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            npm trust github @tiwater/office-mcp \
+              --file publish.yml \
+              --repo tiwater/mcp-servers \
+              --env production \
+              --yes
           fi
