@@ -528,6 +528,9 @@ Every value above is selected from the current source/baseline inventories.
 Candidate source selectors address only items reported in Unresolved by the
 current automatic plan. Plan.Mappings are already complete and must not be
 repeated. Baseline-only cleanup may select current UnclaimedBaseline items.
+Every RequiredDecisions source must be addressed. An omitted source is returned
+as template-migration-semantic-decision-missing; it is not reported as a target
+selection failure or local business ambiguity.
 Unknown fields, object ids, indexes, and coordinates are rejected.
 
 Minimal v5 example (values are observations from the current source/baseline):
@@ -594,6 +597,7 @@ close-template-migration-reviews consumes this resolution as a separate step.
             .GroupBy(item => item.SourceObjectId!, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         var failures = new List<TemplateMigrationPlanFailure>();
+        var addressedSourceIds = new HashSet<string>(StringComparer.Ordinal);
         var bodyAppends = new List<TemplateMigrationBodyAppend>();
         var bodyInsertions = new List<TemplateMigrationBodyInsertion>();
         var choiceSelections = new List<TemplateMigrationChoiceSelection>();
@@ -632,6 +636,7 @@ close-template-migration-reviews consumes this resolution as a separate step.
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-source-not-pending", sourceObject.Id));
                 continue;
             }
+            if (sourcePending) addressedSourceIds.Add(sourceObject.Id);
             if (string.Equals(proposal.Disposition, "out-of-scope", StringComparison.Ordinal))
             {
                 mappings[sourceObject.Id] = new TemplateMigrationMapping(sourceObject.Id, null, proposal.Disposition, "semantic-candidate-out-of-scope");
@@ -672,7 +677,9 @@ close-template-migration-reviews consumes this resolution as a separate step.
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-append-range-invalid", starts[0].Id, ends[0].Id));
                 continue;
             }
-            foreach (var objectId in DescendantsOf(analysis.Source.Objects, range))
+            var sourceObjectIds = DescendantsOf(analysis.Source.Objects, range).ToList();
+            addressedSourceIds.UnionWith(sourceObjectIds.Where(pending.ContainsKey));
+            foreach (var objectId in sourceObjectIds)
             {
                 mappings.Remove(objectId);
                 pending.Remove(objectId);
@@ -700,7 +707,9 @@ close-template-migration-reviews consumes this resolution as a separate step.
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-body-insertion-range-invalid", starts[0].Id, after[0].Id));
                 continue;
             }
-            foreach (var objectId in DescendantsOf(analysis.Source.Objects, range))
+            var sourceObjectIds = DescendantsOf(analysis.Source.Objects, range).ToList();
+            addressedSourceIds.UnionWith(sourceObjectIds.Where(pending.ContainsKey));
+            foreach (var objectId in sourceObjectIds)
             {
                 mappings.Remove(objectId);
                 pending.Remove(objectId);
@@ -717,6 +726,7 @@ close-template-migration-reviews consumes this resolution as a separate step.
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-choice-selector-not-unique"));
                 continue;
             }
+            if (pending.ContainsKey(members[0].Id)) addressedSourceIds.Add(members[0].Id);
             if (labels[0].Kind != "run" || string.IsNullOrWhiteSpace(members[0].Text))
             {
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-choice-binding-invalid", members[0].Id, labels[0].Id));
@@ -768,6 +778,7 @@ close-template-migration-reviews consumes this resolution as a separate step.
                 continue;
             }
             var sourceParent = sourceMatches[0];
+            if (pending.ContainsKey(sourceParent.Id)) addressedSourceIds.Add(sourceParent.Id);
             var baselineParent = baselineMatches[0];
             if (sourceParent.Kind is not ("paragraph" or "table-cell")
                 || baselineParent.Kind is not ("paragraph" or "table-cell"))
@@ -833,7 +844,15 @@ close-template-migration-reviews consumes this resolution as a separate step.
             ValueProjections: valueProjections,
             BodyInsertions: bodyInsertions,
             ChoiceSelections: choiceSelections);
-        failures.AddRange(pending.Values);
+        failures.AddRange(pending.Values
+            .Where(item => !addressedSourceIds.Contains(item.SourceObjectId!))
+            .Select(item => new TemplateMigrationPlanFailure(
+                "template-migration-semantic-decision-missing",
+                item.SourceObjectId,
+                Detail: item.Reason,
+                Source: item.Source,
+                Baseline: item.Baseline,
+                BaselineOptions: item.BaselineOptions)));
         if (failures.Count == 0)
         {
             var build = BuildOperations(source, baseline, plan);

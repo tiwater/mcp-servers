@@ -194,6 +194,7 @@ public class AnnotationToolsTests
         Assert.Contains("the operation builder consumes Plan", help, StringComparison.Ordinal);
         Assert.Contains("Plan.Mappings are already complete and must not be", help, StringComparison.Ordinal);
         Assert.Contains("UnclaimedBaseline", help, StringComparison.Ordinal);
+        Assert.Contains("template-migration-semantic-decision-missing", help, StringComparison.Ordinal);
         Assert.DoesNotContain("See the packaged README", help, StringComparison.Ordinal);
     }
 
@@ -707,6 +708,46 @@ public class AnnotationToolsTests
         """);
         var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RunResolveSemanticCandidate([source, baseline, invalidCandidate]));
         Assert.Equal("template-migration-semantic-candidate-source-unknown-field:sourceObjectId", error.Message);
+    }
+
+    [Fact]
+    public void TemplateMigration_resolver_distinguishes_an_omitted_required_decision_from_a_rejected_target()
+    {
+        var source = CreateTextMigrationFixture("legacy alpha", "legacy beta");
+        var baseline = CreateTextMigrationFixture("target alpha", "target beta");
+        var partial = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [new TemplateMigrationSemanticCandidateMapping(
+                new TemplateMigrationSemanticSelector("paragraph", "body", Text: "legacy alpha"),
+                new TemplateMigrationSemanticSelector("paragraph", "body", Text: "target alpha"),
+                "copy-text")]);
+
+        var partialResult = TemplateMigration.ResolveSemanticCandidate(source, baseline, partial);
+
+        Assert.False(partialResult.Pass);
+        var omitted = Assert.Single(partialResult.Unresolved);
+        Assert.Equal("template-migration-semantic-decision-missing", omitted.Reason);
+        Assert.Equal("body:paragraph:1", omitted.SourceObjectId);
+        Assert.Equal("template-migration-exact-text-match-missing", omitted.Detail);
+        Assert.Equal("legacy beta", omitted.Source?.Text);
+
+        var rejectedTarget = partial with
+        {
+            Mappings = [partial.Mappings.Single() with
+            {
+                Baseline = new TemplateMigrationSemanticSelector("paragraph", "body", Text: "absent target")
+            }]
+        };
+        var rejectedResult = TemplateMigration.ResolveSemanticCandidate(source, baseline, rejectedTarget);
+
+        Assert.False(rejectedResult.Pass);
+        Assert.Contains(rejectedResult.Unresolved, item => item.Reason == "template-migration-semantic-baseline-missing");
+        Assert.DoesNotContain(rejectedResult.Unresolved, item =>
+            item.Reason == "template-migration-semantic-decision-missing"
+            && item.SourceObjectId == "body:paragraph:0");
+        Assert.Contains(rejectedResult.Unresolved, item =>
+            item.Reason == "template-migration-semantic-decision-missing"
+            && item.SourceObjectId == "body:paragraph:1");
     }
 
     [Fact]

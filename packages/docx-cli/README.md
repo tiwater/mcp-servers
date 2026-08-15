@@ -250,6 +250,10 @@ unless the disposition is `out-of-scope`. Existing dispositions are
 Candidate source selectors address only items reported in `Unresolved` by the
 current automatic plan. `Plan.Mappings` are already complete and must not be
 repeated. Baseline-only cleanup may select current `UnclaimedBaseline` items.
+Every `RequiredDecisions` source must be addressed. If a candidate omits one,
+the resolver returns `template-migration-semantic-decision-missing`, preserving
+the source observation and the earlier mechanical reason as diagnostic detail.
+An omitted decision is not a target-selection failure or local review finding.
 
 This complete but minimal v5 example shows independent existing branches.
 Placeholder strings stand for unique observations from the current source or
