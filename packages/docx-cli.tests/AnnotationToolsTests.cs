@@ -16,6 +16,30 @@ namespace Dockit.Docx.Tests;
 
 public class AnnotationToolsTests
 {
+    [Fact]
+    public async Task Docx_provider_publishes_a_discoverable_tool_description()
+    {
+        var original = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await Dockit.Docx.Cli.Cli.RunAsync(["--describe-tool"]));
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var help = output.ToString();
+        foreach (var label in new[] { "Purpose:", "Consumes:", "Produces:", "Use when:", "Do not use for:", "Usage:" })
+        {
+            Assert.Contains(label, help, StringComparison.Ordinal);
+        }
+        Assert.Contains("template migration", help, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage: tiwater-docx <command> [arguments]", help, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("analyze-template-migration", "<source.docx> <baseline.docx> [--json]")]
     [InlineData("derive-template-migration-exact-text-plan", "<source.docx> <baseline.docx>")]
