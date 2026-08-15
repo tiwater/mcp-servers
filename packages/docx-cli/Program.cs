@@ -149,7 +149,6 @@ public static class Cli
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("  find-template-migration-candidates <source.docx> <baseline.docx>");
         Console.WriteLine("  resolve-template-migration-semantic-candidate <source.docx> <baseline.docx> <candidate.json>  (append --help for candidate shape)");
-        Console.WriteLine("  close-template-migration-reviews <source.docx> <baseline.docx> <resolution.json> <review-candidate.json>");
         Console.WriteLine("  build-template-migration-operations <source.docx> <baseline.docx> <plan.json>");
         Console.WriteLine("  apply-template-migration <source.docx> <baseline.docx> <plan.json> <output.docx>");
         Console.WriteLine("  validate-template-migration-output <source.docx> <baseline.docx> <plan.json> <output.docx>");
@@ -201,7 +200,8 @@ public static class Cli
                 Consumes: One current source DOCX and one selected baseline DOCX; the provider performs its conservative exact comparison internally.
                 Produces: Uniform RequiredDecisions and UnclaimedBaseline observations bound to the current source and baseline hashes. Each required source appears exactly once; SuggestedTargets may be empty, singular, or plural and never approve a mapping. It does not produce a migration plan.
                 Use when: Starting semantic resolution for every source observation that is not already an automatic exact match.
-                Do not use for: Ignoring a RequiredDecision, treating an absent or plural suggestion as review-required, deciding copy/retain/exclude semantics, building operations, editing, or output validation. Propose one current semantic disposition per required source, then call resolve-template-migration-semantic-candidate.
+                Provider boundary: This command observes current sources and possible targets; it does not choose copy, retain, exclude, or review semantics and does not build or execute operations.
+                Next: The Agent uses current scenario authority to propose one semantic disposition for every RequiredDecision, regardless of suggestion count, then calls resolve-template-migration-semantic-candidate.
                 Usage:
                   tiwater-docx find-template-migration-candidates <source.docx> <baseline.docx>
                 """,
