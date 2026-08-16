@@ -10,7 +10,6 @@ Shared stdio MCP server for Office document workflows.
 - `docx_migrate_template`
 - `docx_verify_migration`
 - `docx_compare`
-- `docx_validate_template_transform`
 - `docx_export_json`
 - `xlsx_inspect`
 - `xlsx_export_json`

@@ -146,6 +146,7 @@ process.exit(2);
     assert(!names.some(name => name.includes('record') || name.includes('revise') || name.includes('target_search')));
     assert(!names.includes('docx_inspect_tables'));
     assert(!names.includes('pptx_inspect_detail'));
+    assert(!names.includes('docx_validate_template_transform'));
     const migrateTool = listed.result.tools.find(tool => tool.name === 'docx_migrate_template');
     const listTool = listed.result.tools.find(tool => tool.name === 'docx_list_migration_choices');
     assert.equal(listTool.inputSchema.required.includes('output'), true);

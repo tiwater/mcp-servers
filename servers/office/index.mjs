@@ -292,13 +292,6 @@ const tools = [
     handler: docxCompare,
   },
   {
-    name: 'docx_validate_template_transform',
-    description: 'Validate whether a source DOCX template and target DOCX template are structurally compatible.',
-    inputSchema: z.object({ sourceTemplate: pathInput, targetTemplate: pathInput }).strict(),
-    annotations: { readOnlyHint: true, idempotentHint: true },
-    handler: docxValidateTemplateTransform,
-  },
-  {
     name: 'docx_export_json',
     description: 'Export DOCX body content to a new JSON artifact without returning the full document through MCP.',
     inputSchema: artifactInput,
@@ -656,13 +649,6 @@ async function docxCompare(args) {
   const updated = requireString(args.updated, 'updated');
   const result = await runJsonCandidateChain(docxCandidates, ['compare', baseline, updated, '--json']);
   return { tool: 'docx_compare', runtime: commandRuntime(result), report: result.json };
-}
-
-async function docxValidateTemplateTransform(args) {
-  const sourceTemplate = requireString(args.sourceTemplate, 'sourceTemplate');
-  const targetTemplate = requireString(args.targetTemplate, 'targetTemplate');
-  const result = await runJsonCandidateChain(docxCandidates, ['validate-template-transform', sourceTemplate, targetTemplate, '--json']);
-  return { tool: 'docx_validate_template_transform', runtime: commandRuntime(result), report: result.json };
 }
 
 async function docxExportJson(args) {
