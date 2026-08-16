@@ -6,6 +6,7 @@ Shared stdio MCP server for Office document workflows.
 
 - `docx_inspect`
 - `docx_list_migration_choices`
+- `docx_query_migration_choices`
 - `docx_migrate_template`
 - `docx_verify_migration`
 - `docx_compare`
