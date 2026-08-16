@@ -1,6 +1,6 @@
 {
   "name": "@tiwater/office-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Published MCP server for Tiwater Office document capabilities",
   "type": "module",
   "license": "MIT",
@@ -12,8 +12,11 @@
   "bin": {
     "tiwater-office-mcp": "office/index.mjs"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "files": [
-    "_shared/*.mjs",
+    "_shared/tool-runtime.mjs",
     "office/index.mjs",
     "office/README.md"
   ],
@@ -22,5 +25,9 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.4.3"
   }
 }

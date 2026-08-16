@@ -7,6 +7,16 @@ and PowerPoint technical capabilities. It is installed from a package registry
 and uses the exact published Office runtimes. Production does not require this
 repository or discover Office work through command-line help.
 
+The server uses the official MCP SDK for protocol negotiation, stdio framing,
+argument validation, and structured-result validation. The adapter declares
+each public tool once; it does not maintain a second protocol implementation or
+hand-written validator for the same contract.
+
+Large observations are durable artifacts, not model messages. The caller
+chooses a new run-local JSON path; the adapter writes the complete provider
+result once and returns only its path, hash, and size. A compact business choice
+catalog may remain structured MCP content because the Agent must act on it.
+
 Command-line programs remain implementation and compatibility surfaces. They
 may expose diagnostic commands, but those commands do not become an Agent
 workflow.

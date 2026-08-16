@@ -99,7 +99,7 @@ async function runCommand(candidate, args, options) {
     child.on('close', code => {
       const allowedExitCodes = options.allowedExitCodes ?? [0];
       if (allowedExitCodes.includes(code)) {
-        resolve({ code, stdout, stderr, command: candidate.command, args: commandArgs });
+        resolve({ code, stdout, stderr, command: candidate.command, args: commandArgs, cwd });
         return;
       }
       reject(new Error(`${candidate.command} ${commandArgs.join(' ')} failed with exit code ${code}\n${stderr || stdout}`));

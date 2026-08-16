@@ -1,340 +1,269 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { McpStdioServer } from '../_shared/mcp-stdio.mjs';
+import { McpServer } from '@modelcontextprotocol/server';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
+import * as z from 'zod/v4';
 import {
   commandCandidate,
   createToolResult,
-  maybeReadJson,
   requireString,
-  resolveRepoPath,
-  runCandidateChain,
   runJsonCandidateChain,
   withTempJsonFile,
 } from '../_shared/tool-runtime.mjs';
 
+const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const invocationCwd = process.cwd();
+
 const docxCandidates = [
-  commandCandidate('tiwater-docx'),
+  commandCandidate('tiwater-docx', [], { cwd: invocationCwd }),
 ];
 
 const xlsxCandidates = [
-  commandCandidate('tiwater-xlsx'),
+  commandCandidate('tiwater-xlsx', [], { cwd: invocationCwd }),
 ];
 
 const pptxCandidates = [
-  commandCandidate('tiwater-pptx'),
+  commandCandidate('tiwater-pptx', [], { cwd: invocationCwd }),
 ];
 
-function templateMigrationInputSchema() {
-  return {
-    type: 'object',
-    properties: {
-      source: { type: 'string', description: 'Path to the current source DOCX.' },
-      baseline: { type: 'string', description: 'Path to the selected current baseline DOCX.' },
-      output: { type: 'string', description: 'Path to the migrated output DOCX.' },
-      choices: {
-        type: 'array',
-        description: 'Exactly one business choice for every source id returned by docx_list_migration_choices.',
-        items: {
-          type: 'object',
-          properties: {
-            sourceChoiceId: { type: 'string' },
-            action: {
-              type: 'string',
-              enum: ['place-content', 'keep-template-content', 'keep-template-label', 'select-template-option', 'exclude-source', 'review-source'],
-            },
-            targetChoiceId: { type: 'string', description: 'Required only when the selected action uses a baseline target.' },
-            cardinality: { type: 'string', enum: ['one', 'all'] },
-          },
-          required: ['sourceChoiceId', 'action'],
-          additionalProperties: false,
-        },
-      },
-      templateCleanup: {
-        type: 'array',
-        description: 'Optional baseline-owned placeholders or example rows to clear.',
-        items: {
-          type: 'object',
-          properties: {
-            targetChoiceId: { type: 'string' },
-            scope: { type: 'string', enum: ['cell', 'row'] },
-          },
-          required: ['targetChoiceId', 'scope'],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['source', 'baseline', 'output', 'choices'],
-    additionalProperties: false,
-  };
+const pathInput = z.string().trim().min(1);
+const migrationAction = z.enum([
+  'place-content',
+  'keep-template-content',
+  'keep-template-label',
+  'select-template-option',
+  'exclude-source',
+  'review-source',
+]);
+const targetActions = new Set([
+  'place-content',
+  'keep-template-content',
+  'keep-template-label',
+  'select-template-option',
+]);
+const terminalActions = new Set(['exclude-source', 'review-source']);
+
+const migrationChoiceInput = z.object({
+  sourceChoiceId: z.string().trim().min(1),
+  action: migrationAction,
+  targetChoiceId: z.string().trim().min(1).optional(),
+  cardinality: z.enum(['one', 'all']).optional(),
+}).strict().superRefine((choice, context) => {
+  if (targetActions.has(choice.action) && !choice.targetChoiceId) {
+    context.addIssue({ code: 'custom', path: ['targetChoiceId'], message: `${choice.action} requires targetChoiceId` });
+  }
+  if (terminalActions.has(choice.action) && choice.targetChoiceId) {
+    context.addIssue({ code: 'custom', path: ['targetChoiceId'], message: `${choice.action} forbids targetChoiceId` });
+  }
+  if (choice.cardinality === 'all' && !terminalActions.has(choice.action)) {
+    context.addIssue({ code: 'custom', path: ['cardinality'], message: 'cardinality all is limited to terminal actions' });
+  }
+});
+
+const templateCleanupInput = z.object({
+  targetChoiceId: z.string().trim().min(1),
+  scope: z.enum(['cell', 'row']),
+}).strict();
+
+const templateMigrationInput = z.object({
+  source: pathInput.describe('Path to the current source DOCX.'),
+  baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
+  output: pathInput.describe('Path to the migrated output DOCX.'),
+  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id returned by docx_list_migration_choices.'),
+  templateCleanup: z.array(templateCleanupInput).optional().describe('Optional baseline-owned placeholders or example rows to clear.'),
+}).strict();
+
+const runtimeIdentity = z.object({
+  command: z.string(),
+  cwd: z.string(),
+}).strict();
+
+const migrationChoiceOutput = z.object({
+  id: z.string(),
+  kind: z.string(),
+  scope: z.string(),
+  text: z.string().nullable(),
+  count: z.number().int(),
+  requiredCardinality: z.string().nullable(),
+  context: z.record(z.string(), z.unknown()).nullable(),
+  allowedActions: z.array(z.string()),
+}).strict();
+
+const migrationCatalogOutput = z.object({
+  tool: z.literal('docx_list_migration_choices'),
+  runtime: runtimeIdentity,
+  catalog: z.object({
+    schema: z.string(),
+    pass: z.boolean(),
+    sourceSha256: z.string(),
+    baselineSha256: z.string(),
+    sources: z.array(migrationChoiceOutput),
+    targets: z.array(migrationChoiceOutput),
+  }).strict(),
+}).strict();
+
+function migrationReceiptOutput(tool) {
+  return z.object({
+    tool: z.literal(tool),
+    runtime: runtimeIdentity,
+    receipt: z.object({
+      schema: z.string(),
+      toolVersion: z.string(),
+      status: z.enum(['pass', 'review-required', 'failed']),
+      pass: z.boolean(),
+      reviewRequired: z.boolean(),
+      outputVerified: z.boolean(),
+      output: z.string().nullable(),
+      plan: z.string().nullable(),
+      failures: z.array(z.unknown()),
+    }).passthrough(),
+  }).strict();
 }
 
-const runtimeIdentitySchema = {
-  type: 'object',
-  properties: {
-    command: { type: 'string' },
-    cwd: { type: 'string' },
-  },
-  required: ['command', 'cwd'],
-  additionalProperties: false,
-};
+const inputOnly = z.object({ input: pathInput }).strict();
+const artifactInput = z.object({
+  input: pathInput,
+  output: pathInput.describe('New JSON artifact path. Existing files are never overwritten.'),
+}).strict();
+const artifact = z.object({
+  path: z.string(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  bytes: z.number().int().nonnegative(),
+}).strict();
 
-const migrationChoiceSchema = {
-  type: 'object',
-  properties: {
-    id: { type: 'string' },
-    kind: { type: 'string' },
-    scope: { type: 'string' },
-    text: { type: ['string', 'null'] },
-    count: { type: 'integer' },
-    requiredCardinality: { type: ['string', 'null'] },
-    context: { type: ['object', 'null'] },
-    allowedActions: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['id', 'kind', 'scope', 'text', 'count', 'requiredCardinality', 'context', 'allowedActions'],
-  additionalProperties: false,
-};
-
-const migrationCatalogOutputSchema = {
-  type: 'object',
-  properties: {
-    tool: { const: 'docx_list_migration_choices' },
-    runtime: runtimeIdentitySchema,
-    catalog: {
-      type: 'object',
-      properties: {
-        schema: { type: 'string' },
-        pass: { type: 'boolean' },
-        sourceSha256: { type: 'string' },
-        baselineSha256: { type: 'string' },
-        sources: { type: 'array', items: migrationChoiceSchema },
-        targets: { type: 'array', items: migrationChoiceSchema },
-      },
-      required: ['schema', 'pass', 'sourceSha256', 'baselineSha256', 'sources', 'targets'],
-      additionalProperties: false,
-    },
-  },
-  required: ['tool', 'runtime', 'catalog'],
-  additionalProperties: false,
-};
-
-function migrationReceiptOutputSchema(tool) {
-  return {
-    type: 'object',
-    properties: {
-      tool: { const: tool },
-      runtime: runtimeIdentitySchema,
-      receipt: {
-        type: 'object',
-        properties: {
-          schema: { type: 'string' },
-          toolVersion: { type: 'string' },
-          status: { type: 'string', enum: ['pass', 'review-required', 'failed'] },
-          pass: { type: 'boolean' },
-          reviewRequired: { type: 'boolean' },
-          outputVerified: { type: 'boolean' },
-          output: { type: ['string', 'null'] },
-          plan: { type: ['string', 'null'] },
-          failures: { type: 'array', items: { type: 'object' } },
-        },
-        required: ['schema', 'toolVersion', 'status', 'pass', 'reviewRequired', 'outputVerified', 'output', 'plan', 'failures'],
-        additionalProperties: true,
-      },
-    },
-    required: ['tool', 'runtime', 'receipt'],
-    additionalProperties: false,
-  };
+function artifactOutput(tool) {
+  return z.object({ tool: z.literal(tool), runtime: runtimeIdentity, artifact }).strict();
 }
 
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect a DOCX document and return a unified structural report including placeholders, comments, anchors, tables, fields, and formatting metrics.',
-    inputSchema: {
-      type: 'object',
-      properties: { input: { type: 'string', description: 'Absolute or relative path to a .docx file.' } },
-      required: ['input'],
-    },
-  },
-  {
-    name: 'docx_inspect_tables',
-    description: 'Inspect DOCX body tables with row, cell, merge, paragraph alignment, run font, color, underline, and text-fill details.',
-    inputSchema: {
-      type: 'object',
-      properties: { input: { type: 'string', description: 'Absolute or relative path to a .docx file.' } },
-      required: ['input'],
-    },
+    description: 'Inspect a DOCX document and write one unified JSON observation containing placeholders, comments, anchors, tables, fields, flow, fonts, and formatting metrics.',
+    inputSchema: artifactInput,
+    outputSchema: artifactOutput('docx_inspect'),
+    handler: docxInspect,
   },
   {
     name: 'docx_list_migration_choices',
     description: 'List every current source item that still needs a business choice and the selectable current baseline targets. Returns opaque ids and context; it does not recommend a choice.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        source: { type: 'string', description: 'Path to the current source DOCX.' },
-        baseline: { type: 'string', description: 'Path to the selected current baseline DOCX.' },
-      },
-      required: ['source', 'baseline'],
-      additionalProperties: false,
-    },
-    outputSchema: migrationCatalogOutputSchema,
+    inputSchema: z.object({
+      source: pathInput.describe('Path to the current source DOCX.'),
+      baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
+    }).strict(),
+    outputSchema: migrationCatalogOutput,
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: docxListMigrationChoices,
   },
   {
     name: 'docx_migrate_template',
     description: 'Migrate a current DOCX into the selected baseline from one complete batch of business choices. Choices reference only opaque ids returned by docx_list_migration_choices; the tool derives all document values, coordinates, plans, and edits.',
-    inputSchema: templateMigrationInputSchema(),
-    outputSchema: migrationReceiptOutputSchema('docx_migrate_template'),
+    inputSchema: templateMigrationInput,
+    outputSchema: migrationReceiptOutput('docx_migrate_template'),
+    handler: docxMigrateTemplate,
   },
   {
     name: 'docx_verify_migration',
     description: 'Independently re-resolve the same business choices and verify a migrated DOCX against the current source and baseline. This does not trust the migration receipt.',
-    inputSchema: templateMigrationInputSchema(),
-    outputSchema: migrationReceiptOutputSchema('docx_verify_migration'),
+    inputSchema: templateMigrationInput,
+    outputSchema: migrationReceiptOutput('docx_verify_migration'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: docxVerifyMigration,
   },
   {
     name: 'docx_compare',
     description: 'Compare two DOCX files and report package, metric, and style differences.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        baseline: { type: 'string' },
-        updated: { type: 'string' },
-      },
-      required: ['baseline', 'updated'],
-    },
+    inputSchema: z.object({ baseline: pathInput, updated: pathInput }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: docxCompare,
   },
   {
     name: 'docx_validate_template_transform',
     description: 'Validate whether a source DOCX template and target DOCX template are structurally compatible.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sourceTemplate: { type: 'string' },
-        targetTemplate: { type: 'string' },
-      },
-      required: ['sourceTemplate', 'targetTemplate'],
-    },
+    inputSchema: z.object({ sourceTemplate: pathInput, targetTemplate: pathInput }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: docxValidateTemplateTransform,
   },
   {
     name: 'docx_export_json',
-    description: 'Export the body content of a DOCX document as structured JSON.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        output: { type: 'string' },
-      },
-      required: ['input'],
-    },
+    description: 'Export DOCX body content to a new JSON artifact without returning the full document through MCP.',
+    inputSchema: artifactInput,
+    outputSchema: artifactOutput('docx_export_json'),
+    handler: docxExportJson,
   },
   {
     name: 'xlsx_inspect',
-    description: 'Inspect an XLSX workbook and return sheet-level metrics, used ranges, formula counts, and merged ranges.',
-    inputSchema: {
-      type: 'object',
-      properties: { input: { type: 'string' } },
-      required: ['input'],
-    },
+    description: 'Inspect an XLSX workbook and write one JSON observation containing workbook structure, exported values, formulas, styles, merged ranges, and conversion evidence.',
+    inputSchema: artifactInput,
+    outputSchema: artifactOutput('xlsx_inspect'),
+    handler: xlsxInspect,
   },
   {
     name: 'xlsx_export_json',
     description: 'Export workbook sheet data from XLSX as structured JSON.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        output: { type: 'string' },
-        resolveMergedCells: { type: 'boolean', description: 'Resolve merged cells to project values' }
-      },
-      required: ['input'],
-    },
+    inputSchema: z.object({
+      input: pathInput,
+      output: pathInput.describe('New JSON artifact path. Existing files are never overwritten.'),
+      resolveMergedCells: z.boolean().optional().describe('Resolve merged cells to project values.'),
+    }).strict(),
+    outputSchema: artifactOutput('xlsx_export_json'),
+    handler: xlsxExportJson,
   },
   {
     name: 'xlsx_validate',
     description: 'Validate an XLSX workbook package and return Open XML validation evidence.',
-    inputSchema: {
-      type: 'object',
-      properties: { input: { type: 'string', description: 'Absolute or relative path to a .xlsx file.' } },
-      required: ['input'],
-    },
+    inputSchema: inputOnly,
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: xlsxValidate,
   },
   {
     name: 'pptx_inspect',
-    description: 'Inspect a PPTX file and return slide metrics and discovered placeholders.',
-    inputSchema: {
-      type: 'object',
-      properties: { input: { type: 'string' } },
-      required: ['input'],
-    },
-  },
-  {
-    name: 'pptx_inspect_detail',
-    description: 'Inspect a PPTX file and return detailed slide, shape, transform, paragraph, and run-format evidence.',
-    inputSchema: {
-      type: 'object',
-      properties: { input: { type: 'string' } },
-      required: ['input'],
-    },
+    description: 'Inspect a PPTX file and write one detailed JSON observation containing slides, masters, layouts, shapes, transforms, paragraphs, runs, and placeholders.',
+    inputSchema: artifactInput,
+    outputSchema: artifactOutput('pptx_inspect'),
+    handler: pptxInspect,
   },
   {
     name: 'pptx_export_json',
-    description: 'Export PPTX slide text and placeholder hints as structured JSON.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        input: { type: 'string' },
-        output: { type: 'string' },
-      },
-      required: ['input'],
-    },
+    description: 'Export PPTX slide text, notes, and placeholder hints to a new JSON artifact without returning the full presentation through MCP.',
+    inputSchema: artifactInput,
+    outputSchema: artifactOutput('pptx_export_json'),
+    handler: pptxExportJson,
   },
 ];
 
-async function callTool(name, args) {
-  switch (name) {
-    case 'docx_inspect':
-      return createToolResult(await docxInspect(args));
-    case 'docx_inspect_tables':
-      return createToolResult(await docxInspectTables(args));
-    case 'docx_list_migration_choices':
-      return createToolResult(await docxListMigrationChoices(args));
-    case 'docx_migrate_template':
-      return createToolResult(await docxMigrateTemplate(args));
-    case 'docx_verify_migration':
-      return createToolResult(await docxVerifyMigration(args));
-    case 'docx_compare':
-      return createToolResult(await docxCompare(args));
-    case 'docx_validate_template_transform':
-      return createToolResult(await docxValidateTemplateTransform(args));
-    case 'docx_export_json':
-      return createToolResult(await docxExportJson(args));
-    case 'xlsx_inspect':
-      return createToolResult(await xlsxInspect(args));
-    case 'xlsx_export_json':
-      return createToolResult(await xlsxExportJson(args));
-    case 'xlsx_validate':
-      return createToolResult(await xlsxValidate(args));
-    case 'pptx_inspect':
-      return createToolResult(await pptxInspect(args));
-    case 'pptx_inspect_detail':
-      return createToolResult(await pptxInspectDetail(args));
-    case 'pptx_export_json':
-      return createToolResult(await pptxExportJson(args));
-    default:
-      throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32601 });
+function buildServer() {
+  const server = new McpServer(
+    { name: 'tiwater-office', version: packageMetadata.version },
+    {
+      instructions: 'Use the Office tools for technical document observation. For template migration, list the current choices, select only allowed business actions, migrate once, and independently verify the result. Never invent document values, identities, coordinates, plans, or edit operations.',
+    },
+  );
+  for (const tool of tools) {
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+        ...(tool.annotations ? { annotations: tool.annotations } : {}),
+      },
+      async args => createToolResult(await tool.handler(args)),
+    );
   }
+  return server;
 }
 
 async function docxInspect(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(docxCandidates, ['inspect', input, '--json']);
-  return { tool: 'docx_inspect', runtime: commandRuntime(result), report: result.json };
-}
-
-async function docxInspectTables(args) {
-  const input = requireString(args.input, 'input');
-  const result = await runJsonCandidateChain(docxCandidates, ['inspect-tables', input, '--json']);
-  return { tool: 'docx_inspect_tables', runtime: commandRuntime(result), report: result.json };
+  return {
+    tool: 'docx_inspect',
+    runtime: commandRuntime(result),
+    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
+  };
 }
 
 async function docxListMigrationChoices(args) {
@@ -389,19 +318,22 @@ async function docxValidateTemplateTransform(args) {
 
 async function docxExportJson(args) {
   const input = requireString(args.input, 'input');
-  if (args.output) {
-    const output = requireString(args.output, 'output');
-    const result = await runCandidateChain(docxCandidates, ['export-json', input, output]);
-    return { tool: 'docx_export_json', runtime: commandRuntime(result), outputPath: output, document: await maybeReadJson(output) };
-  }
-  const result = await runCandidateChain(docxCandidates, ['export-json', input]);
-  return { tool: 'docx_export_json', runtime: commandRuntime(result), document: JSON.parse(result.stdout) };
+  const result = await runJsonCandidateChain(docxCandidates, ['export-json', input]);
+  return {
+    tool: 'docx_export_json',
+    runtime: commandRuntime(result),
+    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
+  };
 }
 
 async function xlsxInspect(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(xlsxCandidates, ['inspect', input, '--json']);
-  return { tool: 'xlsx_inspect', runtime: commandRuntime(result), report: result.json };
+  return {
+    tool: 'xlsx_inspect',
+    runtime: commandRuntime(result),
+    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
+  };
 }
 
 async function xlsxExportJson(args) {
@@ -410,14 +342,12 @@ async function xlsxExportJson(args) {
   if (args.resolveMergedCells) {
     cmdArgs.push('--resolve-merged-cells');
   }
-  if (args.output) {
-    const output = requireString(args.output, 'output');
-    cmdArgs.push(output);
-    const result = await runCandidateChain(xlsxCandidates, cmdArgs);
-    return { tool: 'xlsx_export_json', runtime: commandRuntime(result), outputPath: output, workbook: await maybeReadJson(output) };
-  }
-  const result = await runCandidateChain(xlsxCandidates, cmdArgs);
-  return { tool: 'xlsx_export_json', runtime: commandRuntime(result), workbook: JSON.parse(result.stdout) };
+  const result = await runJsonCandidateChain(xlsxCandidates, cmdArgs);
+  return {
+    tool: 'xlsx_export_json',
+    runtime: commandRuntime(result),
+    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
+  };
 }
 
 async function xlsxValidate(args) {
@@ -429,24 +359,33 @@ async function xlsxValidate(args) {
 async function pptxInspect(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json']);
-  return { tool: 'pptx_inspect', runtime: commandRuntime(result), report: result.json };
-}
-
-async function pptxInspectDetail(args) {
-  const input = requireString(args.input, 'input');
-  const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json', '--detail']);
-  return { tool: 'pptx_inspect_detail', runtime: commandRuntime(result), report: result.json };
+  return {
+    tool: 'pptx_inspect',
+    runtime: commandRuntime(result),
+    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
+  };
 }
 
 async function pptxExportJson(args) {
   const input = requireString(args.input, 'input');
-  if (args.output) {
-    const output = requireString(args.output, 'output');
-    const result = await runCandidateChain(pptxCandidates, ['export-json', input, output]);
-    return { tool: 'pptx_export_json', runtime: commandRuntime(result), outputPath: output, document: await maybeReadJson(output) };
-  }
-  const result = await runCandidateChain(pptxCandidates, ['export-json', input]);
-  return { tool: 'pptx_export_json', runtime: commandRuntime(result), document: JSON.parse(result.stdout) };
+  const result = await runJsonCandidateChain(pptxCandidates, ['export-json', input]);
+  return {
+    tool: 'pptx_export_json',
+    runtime: commandRuntime(result),
+    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
+  };
+}
+
+async function writeJsonArtifact(output, payload) {
+  const fullPath = path.resolve(output);
+  await mkdir(path.dirname(fullPath), { recursive: true });
+  const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  await writeFile(fullPath, bytes, { flag: 'wx' });
+  return {
+    path: fullPath,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    bytes: bytes.length,
+  };
 }
 
 function commandRuntime(result) {
@@ -456,7 +395,7 @@ function commandRuntime(result) {
   };
 }
 
-await new McpStdioServer({ name: 'tiwater-office', version: '0.2.0', tools, callTool }).start();
+serveStdio(buildServer);
 
 async function runXlsxValidateCandidateChain(args) {
   const errors = [];
@@ -487,7 +426,7 @@ async function runXlsxValidateCandidateChain(args) {
 
 async function runValidationCommand(candidate, args) {
   const env = { ...process.env, ...(candidate.env || {}) };
-  const cwd = candidate.cwd || resolveRepoPath();
+  const cwd = candidate.cwd || process.cwd();
   const commandArgs = [...(candidate.argsPrefix || []), ...args];
 
   return await new Promise((resolve, reject) => {
@@ -506,7 +445,7 @@ async function runValidationCommand(candidate, args) {
     child.on('error', reject);
     child.on('close', code => {
       if (code === 0 || code === 1) {
-        resolve({ code, stdout, stderr, command: candidate.command, args: commandArgs });
+        resolve({ code, stdout, stderr, command: candidate.command, args: commandArgs, cwd });
         return;
       }
       reject(new Error(`${candidate.command} ${commandArgs.join(' ')} failed with exit code ${code}\n${stderr || stdout}`));
