@@ -1986,6 +1986,56 @@ close-template-migration-reviews consumes this resolution as a separate step.
                 proposal.Extraction));
         }
 
+        foreach (var mapping in mappings.Values
+                     .Where(item => string.Equals(item.Disposition, "retain-target-label", StringComparison.Ordinal))
+                     .ToList())
+        {
+            if (string.IsNullOrWhiteSpace(mapping.BaselineObjectId)
+                || analysis.Source.Objects.FirstOrDefault(item => item.Id == mapping.SourceObjectId) is not { } sourceParent
+                || analysis.Baseline.Objects.FirstOrDefault(item => item.Id == mapping.BaselineObjectId) is not { } baselineParent
+                || sourceParent.Kind is not ("paragraph" or "table-cell")
+                || !string.Equals(sourceParent.Kind, baselineParent.Kind, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var addedProjection = false;
+            foreach (var valueKind in new[] { "identifier", "version", "date" })
+            {
+                if (!TryDeriveProjectionValue(analysis.Source.Objects, sourceParent, valueKind, "unique-delimited-value", out _, out var sourceFailure))
+                {
+                    if (sourceFailure is not ("template-migration-semantic-value-source-kind-mismatch"
+                        or "template-migration-semantic-value-source-empty"
+                        or "template-migration-semantic-value-source-runs-missing"))
+                    {
+                        failures.Add(new TemplateMigrationPlanFailure(sourceFailure!, sourceParent.Id, baselineParent.Id, valueKind));
+                    }
+                    continue;
+                }
+                if (!TryLocateProjectionTarget(analysis.Baseline.Objects, baselineParent, valueKind, "unique-delimited-value", out _, out var targetFailure))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure(targetFailure!, sourceParent.Id, baselineParent.Id, valueKind));
+                    continue;
+                }
+                var semantic = RetainedLabelValueSemantic(sourceParent.Id, baselineParent.Id, valueKind);
+                if (!projectionBindings.Add($"{sourceParent.Id}\u001F{baselineParent.Id}\u001F{semantic}")
+                    || !projectedSemantics.Add(semantic))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-value-binding-duplicate", sourceParent.Id, baselineParent.Id, semantic));
+                    continue;
+                }
+                projectedSources.Add(sourceParent.Id);
+                valueProjections.Add(new TemplateMigrationValueProjection(
+                    sourceParent.Id,
+                    baselineParent.Id,
+                    semantic,
+                    valueKind,
+                    "unique-delimited-value"));
+                addedProjection = true;
+            }
+            if (addedProjection) mappings.Remove(mapping.SourceObjectId);
+        }
+
         var copiedMediaRelationships = DeriveCoveredDrawingRelationships(analysis, mappings.Values);
         foreach (var drawing in analysis.Source.Objects.Where(item => item.Kind == "drawing"))
         {
@@ -4838,6 +4888,12 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         }
         value = candidates[0];
         return true;
+    }
+
+    private static string RetainedLabelValueSemantic(string sourceParentId, string baselineParentId, string valueKind)
+    {
+        var identity = Encoding.UTF8.GetBytes($"{sourceParentId}\u001F{baselineParentId}\u001F{valueKind}");
+        return $"retained-label-{valueKind}-{Convert.ToHexString(SHA256.HashData(identity)).ToLowerInvariant()[..12]}";
     }
 
     private static bool TryLocateProjectionTarget(

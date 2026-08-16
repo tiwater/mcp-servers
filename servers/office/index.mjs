@@ -75,7 +75,7 @@ const templateMigrationInput = z.object({
   baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
   output: pathInput.describe('Path to the migrated output DOCX.'),
   receiptOutput: pathInput.describe('New JSON receipt artifact path. Existing files are never overwritten.'),
-  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id: place-content writes the source fact; keep-template-content or keep-template-label preserves the matching baseline-owned content or label; select-template-option carries an option identity; exclude-source requires declared exclusion; review-source is limited to genuine local ambiguity.'),
+  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id: place-content writes the source fact; keep-template-content preserves matching baseline-owned content; keep-template-label preserves the matching baseline label and fields while the provider migrates uniquely delimited identifier, version, and date facts; select-template-option carries an option identity; exclude-source requires declared exclusion; review-source is limited to genuine local ambiguity.'),
   templateCleanup: z.array(templateCleanupInput).optional().describe('Optional baseline-owned placeholders or example rows to clear.'),
 }).strict();
 
@@ -231,7 +231,7 @@ const migrationChoiceQueryInput = z.discriminatedUnion('view', [
     ...migrationQueryDocuments,
     view: z.literal('targets'),
     sourceChoiceId: z.string().trim().min(1).describe('Opaque current source id returned by the sources view.'),
-    action: migrationTargetAction.describe('Business action: place-content writes the current source fact; keep-template-content keeps baseline-owned fixed content; keep-template-label keeps the baseline label for the same source meaning; select-template-option carries a selected source option into the matching baseline option.'),
+    action: migrationTargetAction.describe('Business action: place-content writes the current source fact; keep-template-content keeps baseline-owned fixed content; keep-template-label keeps the baseline label and fields while the provider migrates uniquely delimited identifier, version, and date facts; select-template-option carries a selected source option into the matching baseline option.'),
     text: z.string().trim().min(1).optional().describe('Optional literal case-insensitive text to find in target visible text or context.'),
     offset: boundedOffset,
     limit: boundedLimit,

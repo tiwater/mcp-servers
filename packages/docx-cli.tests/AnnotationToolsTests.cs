@@ -2895,6 +2895,100 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_retains_header_labels_and_fields_while_migrating_unique_typed_values()
+    {
+        var source = CreateLabeledHeaderMigrationFixture(
+            "Legacy protocol: ", "ALPHA-7", "Issue: ", "03", pageCount: "23");
+        var baseline = CreateLabeledHeaderMigrationFixture(
+            "Document code: ", "BASE-1", "Revision: ", "1.0", pageCount: "17");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("table-cell", "header", DescendantText: "ALPHA-7"),
+                    new TemplateMigrationSemanticSelector("table-cell", "header", DescendantText: "BASE-1"),
+                    "retain-target-label")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.DoesNotContain(resolved.Plan.Mappings, item => item.Disposition == "retain-target-label");
+        Assert.Equal(["identifier", "version"], resolved.Plan.ValueProjections!.Select(item => item.ValueKind).Order().ToArray());
+
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Equal(2, build.Operations.Count(operation => operation.Type == "replaceHeaderTableCellRunText"));
+        Assert.DoesNotContain(build.Operations, operation => operation.Type == "replaceHeaderTableCellText");
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-labeled-header-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using (var document = WordprocessingDocument.Open(output, false))
+        {
+            var header = document.MainDocumentPart!.HeaderParts.Single().Header!;
+            Assert.Contains("Document code: ALPHA-7", header.InnerText, StringComparison.Ordinal);
+            Assert.Contains("Revision: 03", header.InnerText, StringComparison.Ordinal);
+            Assert.DoesNotContain("Legacy protocol", header.InnerText, StringComparison.Ordinal);
+            Assert.Equal(2, header.Descendants<FieldCode>().Count());
+            Assert.Contains(header.Descendants<FieldCode>(), field => field.Text.Contains("PAGE", StringComparison.Ordinal));
+            Assert.Contains(header.Descendants<FieldCode>(), field => field.Text.Contains("NUMPAGES", StringComparison.Ordinal));
+        }
+
+        using (var document = WordprocessingDocument.Open(output, true))
+        {
+            document.MainDocumentPart!.HeaderParts.Single().Header!
+                .Descendants<Text>().First(text => text.Text == "03").Text = "04";
+            document.MainDocumentPart.HeaderParts.Single().Header!.Save();
+        }
+        var tampered = TemplateMigration.ValidateReadback(source, baseline, output, resolved.Plan);
+        Assert.Contains(tampered.Failures, item => item.Reason == "template-migration-readback-semantic-value-mismatch");
+    }
+
+    [Fact]
+    public void TemplateMigration_retains_body_label_while_migrating_a_unique_date()
+    {
+        var source = CreateLabeledRunMigrationFixture("Legacy effective date: ", "2026-08-17");
+        var baseline = CreateLabeledRunMigrationFixture("Effective date: ", "2025-01-01");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Legacy effective date: 2026-08-17"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Effective date: 2025-01-01"),
+                    "retain-target-label")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal("date", Assert.Single(resolved.Plan.ValueProjections!).ValueKind);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-labeled-date-output-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        using var document = WordprocessingDocument.Open(output, false);
+        Assert.Equal("Effective date: 2026-08-17", document.MainDocumentPart!.Document!.Body!.InnerText);
+    }
+
+    [Fact]
+    public void TemplateMigration_rejects_ambiguous_typed_values_behind_a_retained_label()
+    {
+        var source = CreateLabeledRunMigrationFixture("First issue: 01; second issue: ", "02");
+        var baseline = CreateLabeledRunMigrationFixture("Revision: ", "1.0");
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "First issue: 01; second issue: 02"),
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Revision: 1.0"),
+                    "retain-target-label")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.False(resolved.Pass);
+        Assert.Contains(resolved.Unresolved, item => item.Reason == "template-migration-semantic-value-source-value-ambiguous");
+        Assert.Empty(TemplateMigration.BuildOperations(source, baseline, resolved.Plan).Operations);
+    }
+
+    [Fact]
     public void TemplateMigration_output_validator_rebuilds_authority_and_rejects_tampering_without_apply_result()
     {
         var source = CreateTextMigrationFixture("source fact"); var baseline = CreateTextMigrationFixture("target slot");
@@ -6301,6 +6395,46 @@ public class AnnotationToolsTests
             new Run(new RunProperties(new Bold()), new Text(label)),
             new Run(new RunProperties(new Italic()), new Text(value)))));
         main.Document.Save();
+        return path;
+    }
+
+    private static string CreateLabeledHeaderMigrationFixture(
+        string identifierLabel,
+        string identifier,
+        string versionLabel,
+        string version,
+        string pageCount)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-labeled-header-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        var page = new Paragraph(
+            new Run(new Text("Page: ")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+            new Run(new FieldCode(" PAGE ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            new Run(new Text("1")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End }),
+            new Run(new Text(" / ")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+            new Run(new FieldCode(" NUMPAGES ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            new Run(new Text(pageCount)),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+        var cell = new TableCell(
+            new Paragraph(new Run(new RunProperties(new Bold()), new Text(identifierLabel)), new Run(new Text(identifier))),
+            new Paragraph(new Run(new RunProperties(new Bold()), new Text(versionLabel)), new Run(new Text(version))),
+            page);
+        header.Header = new Header(new Table(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "4800" }),
+            new TableRow(cell)));
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("body"))),
+            new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));
+        main.Document.Save();
+        header.Header.Save();
         return path;
     }
 
