@@ -52,6 +52,12 @@ identities remain accepted for compatibility.
 The final batch selects a returned alternative as one unit. It does not combine
 an action from one alternative with a target from another. Source exclusions
 and genuine local review remain explicit target-free terminal choices.
+Every returned alternative is independently valid for that source and target;
+an alternative never requires the Agent to add a second, hidden companion
+choice. Structural label alignment may preserve one target for more than one
+current label observation because it does not claim or rewrite the target's
+business value. Provider-internal parent/value dependencies are not exposed as
+Agent choices.
 
 The third operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the
