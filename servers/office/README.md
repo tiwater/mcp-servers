@@ -31,3 +31,7 @@ The official MCP SDK derives the schemas advertised to clients and validates
 tool arguments and structured results before they cross the protocol boundary.
 Large observations and exports are written to a caller-selected new JSON
 artifact. MCP returns only the artifact path, hash, and byte count.
+Template-migration choice artifacts are opaque evidence. Query the same current
+source and baseline through `docx_query_migration_choices` to page unresolved
+sources, request targets compatible with one business action, or inspect cleanup
+targets.

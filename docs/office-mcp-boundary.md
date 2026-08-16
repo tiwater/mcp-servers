@@ -15,8 +15,9 @@ hand-written validator for the same contract.
 Large observations are durable artifacts, not model messages. The caller
 chooses a new run-local JSON path; the adapter writes the complete provider
 result once and returns only its path, hash, and size. A choice catalog remains
-a durable artifact. The Agent reads it through a bounded semantic query instead
-of parsing its storage shape.
+an opaque durable artifact. A bounded semantic query reads the same current
+source and baseline directly, so the Agent never parses or relays catalog
+storage.
 
 Command-line programs remain implementation and compatibility surfaces. They
 may expose diagnostic commands, but those commands do not become an Agent
@@ -32,12 +33,14 @@ Template migration has four public operations:
 - independently verify the result from the same current inputs and choices.
 
 The first operation writes every source item that still needs business judgment
-and the current baseline targets to an artifact. The query operation returns a
-bounded source page or targets for one opaque source identity, optionally
-filtered by literal visible text, kind, and scope. It does not rank or recommend
-a target. The Agent selects identities and actions without parsing the artifact
-format. It does not author document content, selectors, coordinates, edit
-operations, plans, or intermediate files.
+and the current baseline targets to an evidence artifact. The query operation
+re-observes the same current source and baseline, then returns a bounded source
+page, provider-compatible targets for one opaque source identity and business
+action, or cleanup targets. Literal visible-text filtering is optional. The
+query does not rank or recommend a target. The Agent selects identities and
+actions without parsing the artifact format or reconstructing technical target
+compatibility. It does not author document content, selectors, coordinates,
+edit operations, plans, or intermediate files.
 
 The second operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the
@@ -93,10 +96,12 @@ shapes.
 
 Incremental find-record-revise was rejected because it exposes bookkeeping,
 multiplies tool calls with document size, and asks the Agent to manage provider
-state. Region-level automatic expansion was rejected because it requires a new
-semantic inference model and risks moving scenario meaning into the Word
-runtime. A single opaque migration operation with no independent verifier was
-rejected because it weakens evidence and makes producer errors self-validating.
+state. The bounded query is stateless discovery: it records no decision and the
+final migration still receives one complete choice batch. Region-level
+automatic expansion was rejected because it requires a new semantic inference
+model and risks moving scenario meaning into the Word runtime. A single opaque
+migration operation with no independent verifier was rejected because it
+weakens evidence and makes producer errors self-validating.
 
 ## Compatibility and acceptance
 

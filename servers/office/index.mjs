@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
@@ -156,29 +157,64 @@ const migrationQueryPage = z.object({
   hasMore: z.boolean(),
 }).strict();
 
+const migrationTargetPage = z.object({
+  schema: z.string(),
+  pass: z.boolean(),
+  sourceChoiceId: z.string().nullable(),
+  branch: z.string(),
+  offset: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  targets: z.array(migrationChoiceOutput),
+}).strict();
+
+const migrationTargetAction = z.enum([
+  'place-content',
+  'keep-template-content',
+  'keep-template-label',
+  'select-template-option',
+]);
+
+const migrationQueryDocuments = {
+  source: pathInput.describe('Path to the current source DOCX used by docx_list_migration_choices.'),
+  baseline: pathInput.describe('Path to the same selected current baseline DOCX used by docx_list_migration_choices.'),
+};
+
+const boundedOffset = z.number().int().nonnegative().optional().describe('Zero-based result offset. Defaults to 0.');
+const boundedLimit = z.number().int().min(1).max(10).optional().describe('Maximum results to return. Defaults to 10 and cannot exceed 10.');
+
 const migrationChoiceQueryInput = z.discriminatedUnion('view', [
   z.object({
-    catalog: pathInput.describe('Path returned by docx_list_migration_choices.'),
+    ...migrationQueryDocuments,
     view: z.literal('sources'),
-    offset: z.number().int().nonnegative().optional(),
-    limit: z.number().int().min(1).max(10).optional(),
+    offset: boundedOffset,
+    limit: boundedLimit,
   }).strict(),
   z.object({
-    catalog: pathInput.describe('Path returned by docx_list_migration_choices.'),
+    ...migrationQueryDocuments,
     view: z.literal('targets'),
-    sourceChoiceId: z.string().trim().min(1),
-    text: z.string().trim().min(1).optional().describe('Literal case-insensitive text to find in target text or visible context.'),
-    kinds: z.array(z.string().trim().min(1)).min(1).optional(),
-    scopes: z.array(z.string().trim().min(1)).min(1).optional(),
-    offset: z.number().int().nonnegative().optional(),
-    limit: z.number().int().min(1).max(10).optional(),
+    sourceChoiceId: z.string().trim().min(1).describe('Opaque current source id returned by the sources view.'),
+    action: migrationTargetAction.describe('Business action whose technically compatible current baseline targets are requested.'),
+    text: z.string().trim().min(1).optional().describe('Optional literal case-insensitive text to find in target visible text or context.'),
+    offset: boundedOffset,
+    limit: boundedLimit,
+  }).strict(),
+  z.object({
+    ...migrationQueryDocuments,
+    view: z.literal('cleanup'),
+    text: z.string().trim().min(1).optional().describe('Optional literal case-insensitive text to find in cleanup target visible text or context.'),
+    offset: boundedOffset,
+    limit: boundedLimit,
   }).strict(),
 ]);
 
 const migrationChoiceQueryOutput = z.object({
   tool: z.literal('docx_query_migration_choices'),
-  catalogSha256: z.string().regex(/^[0-9a-f]{64}$/),
-  view: z.enum(['sources', 'targets']),
+  runtime: runtimeIdentity,
+  sourceSha256: z.string(),
+  baselineSha256: z.string(),
+  view: z.enum(['sources', 'targets', 'cleanup']),
+  action: migrationTargetAction.nullable(),
   source: migrationChoiceOutput.nullable(),
   items: z.array(migrationChoiceOutput),
   page: migrationQueryPage,
@@ -217,7 +253,7 @@ const tools = [
   },
   {
     name: 'docx_list_migration_choices',
-    description: 'Write every current source item that still needs a business choice and the selectable current baseline targets to a run-local JSON artifact. Returns only artifact metadata and counts; it does not recommend a choice.',
+    description: 'Write every current source item that still needs a business choice and the selectable current baseline targets to an opaque run-local evidence artifact. Use docx_query_migration_choices with the same source and baseline to inspect bounded alternatives; do not parse the artifact.',
     inputSchema: z.object({
       source: pathInput.describe('Path to the current source DOCX.'),
       baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
@@ -228,7 +264,7 @@ const tools = [
   },
   {
     name: 'docx_query_migration_choices',
-    description: 'Read one bounded page from a migration-choice catalog. List source choices, or inspect targets for one source using literal text, kind, and scope filters. This tool does not recommend or make a business choice.',
+    description: 'Query current template-migration alternatives without reading the catalog artifact. Page unresolved sources, request provider-compatible targets for one source and business action, or inspect cleanup targets. This tool does not rank, recommend, or make a business choice.',
     inputSchema: migrationChoiceQueryInput,
     outputSchema: migrationChoiceQueryOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -363,59 +399,103 @@ async function docxListMigrationChoices(args) {
 }
 
 async function docxQueryMigrationChoices(args) {
-  const catalogPath = requireString(args.catalog, 'catalog');
-  const bytes = await readFile(catalogPath);
-  const catalog = migrationCatalog.parse(JSON.parse(bytes.toString('utf8')));
+  const sourcePath = requireString(args.source, 'source');
+  const baselinePath = requireString(args.baseline, 'baseline');
   const offset = args.offset ?? 0;
   const limit = args.limit ?? 10;
-  let source = null;
-  let matches;
+  const catalogResult = await runJsonCandidateChain(docxCandidates, ['list-template-migration-choices', sourcePath, baselinePath]);
+  const catalog = migrationCatalog.parse(catalogResult.json);
 
   if (args.view === 'sources') {
-    matches = catalog.sources;
+    return migrationQueryResult({
+      runtime: commandRuntime(catalogResult),
+      catalog,
+      view: 'sources',
+      action: null,
+      source: null,
+      items: catalog.sources.slice(offset, offset + limit),
+      offset,
+      total: catalog.sources.length,
+    });
+  }
+
+  let source = null;
+  let action = null;
+  let branch;
+  let sourceChoiceId = '-';
+  if (args.view === 'cleanup') {
+    branch = 'baseline-clear';
   } else {
     source = catalog.sources.find(item => item.id === args.sourceChoiceId) ?? null;
     if (!source) {
       throw Object.assign(new Error(`Unknown sourceChoiceId: ${args.sourceChoiceId}`), { code: -32602 });
     }
-    const kinds = args.kinds ? new Set(args.kinds) : null;
-    const scopes = args.scopes ? new Set(args.scopes) : null;
-    const textQuery = args.text?.toLocaleLowerCase();
-    matches = catalog.targets.filter(item =>
-      (!kinds || kinds.has(item.kind)) &&
-      (!scopes || scopes.has(item.scope)) &&
-      (!textQuery || migrationChoiceSearchText(item).includes(textQuery)));
+    action = args.action;
+    if (!source.allowedActions.includes(action)) {
+      throw Object.assign(new Error(`Action ${action} is not allowed for ${source.id}`), { code: -32602 });
+    }
+    sourceChoiceId = source.id;
+    branch = migrationTargetBranch(action, source.kind);
   }
 
-  const items = matches.slice(offset, offset + limit);
+  const targetResult = await runJsonCandidateChain(docxCandidates, [
+    'find-template-migration-targets',
+    sourcePath,
+    baselinePath,
+    sourceChoiceId,
+    branch,
+    args.text ?? '-',
+    String(offset),
+    String(limit),
+  ]);
+  const targetPage = migrationTargetPage.parse(targetResult.json);
+  if (targetPage.sourceChoiceId !== (args.view === 'cleanup' ? null : sourceChoiceId) || targetPage.branch !== branch) {
+    throw new Error('Migration target page identity does not match the requested current source and action');
+  }
+  const catalogTargets = new Map(catalog.targets.map(item => [item.id, item]));
+  for (const target of targetPage.targets) {
+    const current = catalogTargets.get(target.id);
+    if (!current || !isDeepStrictEqual(current, target)) {
+      throw new Error(`Migration target ${target.id} is not bound to the current catalog`);
+    }
+  }
+  return migrationQueryResult({
+    runtime: commandRuntime(targetResult),
+    catalog,
+    view: args.view,
+    action,
+    source,
+    items: targetPage.targets,
+    offset: targetPage.offset,
+    total: targetPage.total,
+  });
+}
+
+function migrationTargetBranch(action, sourceKind) {
+  if (action === 'place-content') return sourceKind === 'media' ? 'copy-media' : 'copy-text';
+  if (action === 'keep-template-content') return 'retain-target';
+  if (action === 'keep-template-label') return 'retain-target-label';
+  if (action === 'select-template-option') return 'choice-selection';
+  throw new Error(`Unsupported migration target action: ${action}`);
+}
+
+function migrationQueryResult({ runtime, catalog, view, action, source, items, offset, total }) {
   return {
     tool: 'docx_query_migration_choices',
-    catalogSha256: createHash('sha256').update(bytes).digest('hex'),
-    view: args.view,
+    runtime,
+    sourceSha256: catalog.sourceSha256,
+    baselineSha256: catalog.baselineSha256,
+    view,
+    action,
     source,
     items,
     page: {
       offset,
       returned: items.length,
-      total: matches.length,
-      hasMore: offset + items.length < matches.length,
+      total,
+      hasMore: offset + items.length < total,
     },
   };
-}
-
-function migrationChoiceSearchText(choice) {
-  return collectVisibleStrings({ text: choice.text, context: choice.context })
-    .join('\n')
-    .toLocaleLowerCase();
-}
-
-function collectVisibleStrings(value, fieldName = '') {
-  if (typeof value === 'string') return /text/i.test(fieldName) ? [value] : [];
-  if (Array.isArray(value)) return value.flatMap(item => collectVisibleStrings(item, fieldName));
-  if (value && typeof value === 'object') {
-    return Object.entries(value).flatMap(([key, item]) => collectVisibleStrings(item, key));
-  }
-  return [];
 }
 
 async function docxMigrateTemplate(args) {

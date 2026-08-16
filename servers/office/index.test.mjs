@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -17,31 +17,57 @@ test('published Office MCP exposes one batch migration surface and forwards type
   await writeFile(fakeRuntime, `#!${process.execPath}
 const fs = require('node:fs');
 const command = process.argv[2];
-if (command === 'inspect') {
-  process.stdout.write(JSON.stringify({schema:'inspection/v1',file:process.argv[3],tables:[{rows:2}],dotnetRoot:process.env.DOTNET_ROOT,dotnetRootArm64:process.env.DOTNET_ROOT_ARM64}));
-  process.exit(0);
-}
-if (command === 'list-template-migration-choices') {
-  const choice = (id, options={}) => ({id,kind:options.kind??'paragraph',scope:options.scope??'body',text:options.text??id,count:1,requiredCardinality:options.requiredCardinality??'one',context:options.context??null,allowedActions:['place-content']});
+const choice = (id, options={}) => ({id,kind:options.kind??'paragraph',scope:options.scope??'body',text:options.text??id,count:1,requiredCardinality:options.requiredCardinality??'one',context:options.context??null,allowedActions:options.allowedActions??['place-content','keep-template-content','keep-template-label']});
+const catalogFor = sourcePath => {
   let sources = [choice('source-1')];
   let targets = [choice('target-1')];
-  if (process.argv[3] === '/invalid-output.docx') sources = [{id:'source-1'}];
-  if (process.argv[3] === '/empty.docx') { sources = []; targets = []; }
-  if (process.argv[3] === '/multi.docx') {
+  if (sourcePath === '/invalid-output.docx') sources = [{id:'source-1'}];
+  if (sourcePath === '/empty.docx') { sources = []; targets = []; }
+  if (sourcePath === '/multi.docx') {
     sources = [
       choice('source-alpha', {text:'Alpha heading'}),
       choice('source-beta', {text:'Beta value',kind:'table-cell'}),
     ];
     targets = [
       choice('target-header', {text:'Current heading',scope:'header'}),
-      choice('target-revision', {text:'',kind:'table-cell',context:{sameRowTexts:['Revision history','01']}}),
+      choice('target-revision', {text:'',kind:'table-cell',context:{sameRowTexts:['Revision history','01']},allowedActions:['place-content','keep-template-content','keep-template-label','template-cleanup']}),
       choice('target-body', {text:'Beta destination',kind:'table-cell'}),
     ];
   }
-  if (process.argv[3] === '/many.docx') {
+  if (sourcePath === '/many.docx') {
     targets = Array.from({length:25}, (_, index) => choice('target-' + String(index + 1).padStart(2, '0')));
   }
-  process.stdout.write(JSON.stringify({schema:'catalog/v1',pass:true,sourceSha256:'a',baselineSha256:'b',sources,targets}));
+  return {schema:'catalog/v1',pass:true,sourceSha256:'a',baselineSha256:'b',sources,targets};
+};
+if (command === 'inspect') {
+  process.stdout.write(JSON.stringify({schema:'inspection/v1',file:process.argv[3],tables:[{rows:2}],dotnetRoot:process.env.DOTNET_ROOT,dotnetRootArm64:process.env.DOTNET_ROOT_ARM64}));
+  process.exit(0);
+}
+if (command === 'list-template-migration-choices') {
+  process.stdout.write(JSON.stringify(catalogFor(process.argv[3])));
+  process.exit(0);
+}
+if (command === 'find-template-migration-targets') {
+  const catalog = catalogFor(process.argv[3]);
+  const sourceChoiceId = process.argv[5] === '-' ? null : process.argv[5];
+  const branch = process.argv[6];
+  const query = process.argv[7] === '-' ? null : process.argv[7].toLowerCase();
+  const offset = Number(process.argv[8]);
+  const limit = Number(process.argv[9]);
+  const source = sourceChoiceId ? catalog.sources.find(item => item.id === sourceChoiceId) : null;
+  let targets = catalog.targets.filter(item => {
+    if (branch === 'baseline-clear') return item.allowedActions.includes('template-cleanup');
+    if (branch === 'choice-selection') return item.allowedActions.includes('select-template-option');
+    if (!source || item.kind !== source.kind) return false;
+    if (branch === 'copy-text' || branch === 'copy-media') return item.allowedActions.includes('place-content');
+    if (branch === 'retain-target') return item.allowedActions.includes('keep-template-content');
+    if (branch === 'retain-target-label') return item.allowedActions.includes('keep-template-label');
+    return false;
+  });
+  if (query) targets = targets.filter(item => JSON.stringify({text:item.text,context:item.context}).toLowerCase().includes(query));
+  if (process.argv[3] === '/drift.docx') targets = [choice('target-not-in-current-catalog')];
+  targets.sort((left,right)=>left.id.localeCompare(right.id));
+  process.stdout.write(JSON.stringify({schema:'target-page/v1',pass:true,sourceChoiceId,branch,offset,limit,total:targets.length,targets:targets.slice(offset,offset+limit)}));
   process.exit(0);
 }
 if (command === 'migrate-template' || command === 'verify-template-migration') {
@@ -90,7 +116,7 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.5.0');
+    assert.equal(initialized.result.serverInfo.version, '0.6.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -179,29 +205,31 @@ process.exit(2);
 
     const sourcePage = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: catalogPath, view: 'sources', offset: 0, limit: 10 },
+      arguments: { source: '/current.docx', baseline: '/baseline.docx', view: 'sources', offset: 0, limit: 10 },
     });
     assert.equal(sourcePage.result.structuredContent.view, 'sources');
     assert.deepEqual(sourcePage.result.structuredContent.items.map(item => item.id), ['source-1']);
     assert.deepEqual(sourcePage.result.structuredContent.page, {
       offset: 0, returned: 1, total: 1, hasMore: false,
     });
-    assert.match(sourcePage.result.structuredContent.catalogSha256, /^[0-9a-f]{64}$/);
+    assert.equal(sourcePage.result.structuredContent.sourceSha256, 'a');
+    assert.equal(sourcePage.result.structuredContent.baselineSha256, 'b');
 
     const targetPage = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: {
-        catalog: catalogPath,
+        source: '/current.docx',
+        baseline: '/baseline.docx',
         view: 'targets',
         sourceChoiceId: 'source-1',
+        action: 'place-content',
         text: 'TARGET',
-        kinds: ['paragraph'],
-        scopes: ['body'],
         offset: 0,
         limit: 10,
       },
     });
     assert.equal(targetPage.result.structuredContent.view, 'targets');
+    assert.equal(targetPage.result.structuredContent.action, 'place-content');
     assert.equal(targetPage.result.structuredContent.source.id, 'source-1');
     assert.deepEqual(targetPage.result.structuredContent.items.map(item => item.id), ['target-1']);
     assert.deepEqual(targetPage.result.structuredContent.page, {
@@ -210,13 +238,13 @@ process.exit(2);
 
     const unknownSource = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: catalogPath, view: 'targets', sourceChoiceId: 'missing-source' },
+      arguments: { source: '/current.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'missing-source', action: 'place-content' },
     });
     assert.equal(unknownSource.result.isError, true);
 
     const oversizedPage = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: catalogPath, view: 'sources', limit: 11 },
+      arguments: { source: '/current.docx', baseline: '/baseline.docx', view: 'sources', limit: 11 },
     });
     assert.equal(oversizedPage.result.isError, true);
 
@@ -227,13 +255,13 @@ process.exit(2);
     });
     const firstSource = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: multiCatalogPath, view: 'sources', limit: 1 },
+      arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'sources', limit: 1 },
     });
     assert.deepEqual(firstSource.result.structuredContent.items.map(item => item.id), ['source-alpha']);
     assert.equal(firstSource.result.structuredContent.page.hasMore, true);
     const secondSource = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: multiCatalogPath, view: 'sources', offset: 1, limit: 1 },
+      arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'sources', offset: 1, limit: 1 },
     });
     assert.deepEqual(secondSource.result.structuredContent.items.map(item => item.id), ['source-beta']);
     assert.equal(secondSource.result.structuredContent.page.hasMore, false);
@@ -241,35 +269,34 @@ process.exit(2);
     const contextMatch = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: {
-        catalog: multiCatalogPath,
+        source: '/multi.docx',
+        baseline: '/baseline.docx',
         view: 'targets',
         sourceChoiceId: 'source-beta',
+        action: 'place-content',
         text: 'REVISION',
-        kinds: ['table-cell'],
       },
     });
     assert.deepEqual(contextMatch.result.structuredContent.items.map(item => item.id), ['target-revision']);
     const noMatches = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: multiCatalogPath, view: 'targets', sourceChoiceId: 'source-beta', text: 'not present' },
+      arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-beta', action: 'place-content', text: 'not present' },
     });
     assert.deepEqual(noMatches.result.structuredContent.items, []);
     assert.equal(noMatches.result.structuredContent.page.total, 0);
     const opaqueIdIsNotVisibleText = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: multiCatalogPath, view: 'targets', sourceChoiceId: 'source-beta', text: 'target-header' },
+      arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-beta', action: 'place-content', text: 'target-header' },
     });
     assert.deepEqual(opaqueIdIsNotVisibleText.result.structuredContent.items, []);
 
-    const copiedMultiCatalogPath = path.join(temporary, 'copied', 'arbitrary-name.json');
-    await mkdir(path.dirname(copiedMultiCatalogPath), { recursive: true });
-    await writeFile(copiedMultiCatalogPath, await readFile(multiCatalogPath));
-    const relocatedQuery = await request('tools/call', {
+    const cleanupTargets = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: copiedMultiCatalogPath, view: 'targets', sourceChoiceId: 'source-beta', scopes: ['header'] },
+      arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'cleanup', text: 'revision' },
     });
-    assert.deepEqual(relocatedQuery.result.structuredContent.items.map(item => item.id), ['target-header']);
-    assert.equal(relocatedQuery.result.structuredContent.catalogSha256, contextMatch.result.structuredContent.catalogSha256);
+    assert.equal(cleanupTargets.result.structuredContent.source, null);
+    assert.equal(cleanupTargets.result.structuredContent.action, null);
+    assert.deepEqual(cleanupTargets.result.structuredContent.items.map(item => item.id), ['target-revision']);
 
     const manyCatalogPath = path.join(temporary, 'catalogs', 'many.json');
     await request('tools/call', {
@@ -278,33 +305,33 @@ process.exit(2);
     });
     const boundedTargets = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: manyCatalogPath, view: 'targets', sourceChoiceId: 'source-1', limit: 10 },
+      arguments: { source: '/many.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-1', action: 'place-content', limit: 10 },
     });
     assert.equal(boundedTargets.result.structuredContent.items.length, 10);
     assert.equal(boundedTargets.result.structuredContent.page.total, 25);
     assert.equal(boundedTargets.result.structuredContent.page.hasMore, true);
 
-    const malformedCatalogPath = path.join(temporary, 'catalogs', 'malformed.json');
-    await writeFile(malformedCatalogPath, JSON.stringify({schema:'catalog/v1',pass:true,sourceSha256:'a',baselineSha256:'b',sources:[{id:'source-only'}],targets:[]}));
-    const malformedCatalog = await request('tools/call', {
+    const invalidCatalogSource = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: malformedCatalogPath, view: 'sources' },
+      arguments: { source: '/invalid-output.docx', baseline: '/baseline.docx', view: 'sources' },
     });
-    assert.equal(malformedCatalog.result.isError, true);
+    assert.equal(invalidCatalogSource.result.isError, true);
 
-    const duplicateCatalogPath = path.join(temporary, 'catalogs', 'duplicate.json');
-    const duplicateCatalog = JSON.parse(await readFile(catalogPath, 'utf8'));
-    duplicateCatalog.sources.push(duplicateCatalog.sources[0]);
-    await writeFile(duplicateCatalogPath, JSON.stringify(duplicateCatalog));
-    const duplicatedSource = await request('tools/call', {
+    const actionNotAllowed = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: duplicateCatalogPath, view: 'sources' },
+      arguments: { source: '/current.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-1', action: 'select-template-option' },
     });
-    assert.equal(duplicatedSource.result.isError, true);
+    assert.equal(actionNotAllowed.result.isError, true);
+
+    const targetDrift = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { source: '/drift.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-1', action: 'place-content' },
+    });
+    assert.equal(targetDrift.result.isError, true);
 
     const inventedQueryField = await request('tools/call', {
       name: 'docx_query_migration_choices',
-      arguments: { catalog: catalogPath, view: 'sources', recommendation: true },
+      arguments: { source: '/current.docx', baseline: '/baseline.docx', view: 'sources', recommendation: true },
     });
     assert.equal(inventedQueryField.result.isError, true);
 
