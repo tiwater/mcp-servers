@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,7 +79,7 @@ export function requireString(value, label) {
 }
 
 async function runCommand(candidate, args, options) {
-  const env = { ...process.env, ...(candidate.env || {}), ...(options.env || {}) };
+  const env = await withDotnetRoot({ ...process.env, ...(candidate.env || {}), ...(options.env || {}) });
   const cwd = candidate.cwd || options.cwd || repoRoot;
   const commandArgs = [...(candidate.argsPrefix || []), ...args];
 
@@ -105,4 +106,36 @@ async function runCommand(candidate, args, options) {
       reject(new Error(`${candidate.command} ${commandArgs.join(' ')} failed with exit code ${code}\n${stderr || stdout}`));
     });
   });
+}
+
+async function withDotnetRoot(env) {
+  const architectureVariable = process.arch === 'arm64'
+    ? 'DOTNET_ROOT_ARM64'
+    : process.arch === 'x64'
+      ? 'DOTNET_ROOT_X64'
+      : null;
+  if (env.DOTNET_ROOT || (architectureVariable && env[architectureVariable])) return env;
+
+  const dotnet = await findOnPath(process.platform === 'win32' ? 'dotnet.exe' : 'dotnet', env.PATH);
+  if (!dotnet) return env;
+
+  const root = path.dirname(dotnet);
+  return {
+    ...env,
+    DOTNET_ROOT: root,
+    ...(architectureVariable ? { [architectureVariable]: root } : {}),
+  };
+}
+
+async function findOnPath(command, pathValue) {
+  for (const directory of String(pathValue ?? '').split(path.delimiter).filter(Boolean)) {
+    const candidate = path.join(directory, command);
+    try {
+      await fs.access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {
+      // Continue to the next PATH entry.
+    }
+  }
+  return null;
 }

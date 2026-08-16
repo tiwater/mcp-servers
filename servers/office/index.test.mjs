@@ -11,11 +11,14 @@ const officeDir = path.dirname(fileURLToPath(import.meta.url));
 test('published Office MCP exposes one batch migration surface and forwards typed choices', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'office-mcp-test-'));
   const fakeRuntime = path.join(temporary, 'tiwater-docx');
-  await writeFile(fakeRuntime, `#!/usr/bin/env node
+  const fakeDotnet = path.join(temporary, 'dotnet');
+  await writeFile(fakeDotnet, '#!/bin/sh\nexit 0\n', 'utf8');
+  await chmod(fakeDotnet, 0o755);
+  await writeFile(fakeRuntime, `#!${process.execPath}
 const fs = require('node:fs');
 const command = process.argv[2];
 if (command === 'inspect') {
-  process.stdout.write(JSON.stringify({schema:'inspection/v1',file:process.argv[3],tables:[{rows:2}]}));
+  process.stdout.write(JSON.stringify({schema:'inspection/v1',file:process.argv[3],tables:[{rows:2}],dotnetRoot:process.env.DOTNET_ROOT,dotnetRootArm64:process.env.DOTNET_ROOT_ARM64}));
   process.exit(0);
 }
 if (command === 'list-template-migration-choices') {
@@ -35,7 +38,7 @@ process.exit(2);
   await chmod(fakeRuntime, 0o755);
 
   const child = spawn(process.execPath, [path.join(officeDir, 'index.mjs')], {
-    env: { ...process.env, PATH: `${temporary}${path.delimiter}${process.env.PATH ?? ''}` },
+    env: { ...process.env, PATH: temporary, DOTNET_ROOT: '', DOTNET_ROOT_ARM64: '', DOTNET_ROOT_X64: '' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const pending = new Map();
@@ -69,7 +72,7 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.3.0');
+    assert.equal(initialized.result.serverInfo.version, '0.3.1');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -128,6 +131,8 @@ process.exit(2);
       schema: 'inspection/v1',
       file: '/current.docx',
       tables: [{ rows: 2 }],
+      dotnetRoot: temporary,
+      ...(process.arch === 'arm64' ? { dotnetRootArm64: temporary } : {}),
     });
     const overwrite = await request('tools/call', {
       name: 'docx_inspect',
