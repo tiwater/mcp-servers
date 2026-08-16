@@ -47,8 +47,10 @@ Query results give sources and cleanup targets short references such as
 `S1-a1b2c3d4` and `T1-a1b2c3d4`. A targeted alternative additionally binds its
 source, action, and target. Reference suffixes bind these identities to the
 freshly observed source and baseline; the adapter deterministically restores
-the provider identity before invoking the Word runtime. Legacy provider
-identities remain accepted for compatibility.
+the provider identity before invoking the Word runtime. The MCP surface accepts
+only references returned by the current query. Legacy provider identities
+remain command-line compatibility inputs and are not a second Agent-facing
+identity branch.
 The final batch selects a returned alternative as one unit. It does not combine
 an action from one alternative with a target from another. Source exclusions
 and genuine local review remain explicit target-free terminal choices.
