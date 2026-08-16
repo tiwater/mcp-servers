@@ -127,12 +127,13 @@ process.exit(2);
     });
     assert.equal(observed.result.structuredContent.artifact.path, observationPath);
     assert.match(observed.result.structuredContent.artifact.sha256, /^[0-9a-f]{64}$/);
-    assert.deepEqual(JSON.parse(await readFile(observationPath, 'utf8')), {
+    const observation = JSON.parse(await readFile(observationPath, 'utf8'));
+    assert.deepEqual(observation, {
       schema: 'inspection/v1',
       file: '/current.docx',
       tables: [{ rows: 2 }],
       dotnetRoot: temporary,
-      ...(process.arch === 'arm64' ? { dotnetRootArm64: temporary } : {}),
+      dotnetRootArm64: process.arch === 'arm64' ? temporary : '',
     });
     const overwrite = await request('tools/call', {
       name: 'docx_inspect',
