@@ -34,6 +34,13 @@ const catalogFor = sourcePath => {
       choice('target-body', {text:'Beta destination',kind:'table-cell'}),
     ];
   }
+  if (sourcePath === '/context.docx' || sourcePath === '/context-mutated.docx') {
+    sources = [choice('source-context', {text:'R-204',kind:'table-cell',context:{sameRowTexts:['2027-04-03','Changed scope'],columnHeaderText:'Release identifier',tableHeaderTexts:['Release identifier','Effective on','Change narrative']}})];
+    targets = [
+      choice('target-decoy', {text:'R-204',kind:'table-cell',context:{sameRowTexts:['Owner'],columnHeaderText:'Approver',tableHeaderTexts:['Approver','Signed on']}}),
+      choice('target-context', {text:'template-value',kind:'table-cell',context:sourcePath === '/context.docx'?{sameRowTexts:['template-date','template-summary'],columnHeaderText:'Release identifier',tableHeaderTexts:['Release identifier','Effective on','Change narrative']}:{sameRowTexts:['Owner'],columnHeaderText:'Approver',tableHeaderTexts:['Approver','Signed on']}}),
+    ];
+  }
   if (sourcePath === '/many.docx') {
     targets = Array.from({length:25}, (_, index) => choice('target-' + String(index + 1).padStart(2, '0')));
   }
@@ -116,7 +123,7 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.6.0');
+    assert.equal(initialized.result.serverInfo.version, '0.7.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -278,6 +285,21 @@ process.exit(2);
       },
     });
     assert.deepEqual(contextMatch.result.structuredContent.items.map(item => item.id), ['target-revision']);
+    const structurallyRelated = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { source: '/context.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-context', action: 'place-content' },
+    });
+    assert.deepEqual(structurallyRelated.result.structuredContent.items.map(item => item.id), ['target-context', 'target-decoy']);
+    const headerSearch = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { source: '/context.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-context', action: 'place-content', text: 'Release identifier' },
+    });
+    assert.deepEqual(headerSearch.result.structuredContent.items.map(item => item.id), ['target-context']);
+    const changedContextChangesOrder = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { source: '/context-mutated.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-context', action: 'place-content' },
+    });
+    assert.deepEqual(changedContextChangesOrder.result.structuredContent.items.map(item => item.id), ['target-decoy', 'target-context']);
     const noMatches = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-beta', action: 'place-content', text: 'not present' },
@@ -310,6 +332,20 @@ process.exit(2);
     assert.equal(boundedTargets.result.structuredContent.items.length, 10);
     assert.equal(boundedTargets.result.structuredContent.page.total, 25);
     assert.equal(boundedTargets.result.structuredContent.page.hasMore, true);
+    const nextTargets = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { source: '/many.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-1', action: 'place-content', offset: 10, limit: 10 },
+    });
+    const finalTargets = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { source: '/many.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-1', action: 'place-content', offset: 20, limit: 10 },
+    });
+    assert.equal(finalTargets.result.structuredContent.page.hasMore, false);
+    assert.equal(new Set([
+      ...boundedTargets.result.structuredContent.items,
+      ...nextTargets.result.structuredContent.items,
+      ...finalTargets.result.structuredContent.items,
+    ].map(item => item.id)).size, 25);
 
     const invalidCatalogSource = await request('tools/call', {
       name: 'docx_query_migration_choices',

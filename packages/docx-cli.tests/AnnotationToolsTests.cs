@@ -1420,6 +1420,37 @@ public class AnnotationToolsTests
         Assert.Equal("template-migration-decision-draft-missing", missingDraft.Message);
     }
 
+    [Theory]
+    [InlineData("Release identifier", "Effective on", "Change narrative", "R-204", "{{release}}")]
+    [InlineData("Batch identity", "Owned by", "Reason for update", "Lot-X", "{{batch}}")]
+    public void TemplateMigration_choices_expose_table_headers_without_deciding_the_mapping(
+        string identityHeader,
+        string dateHeader,
+        string narrativeHeader,
+        string sourceValue,
+        string targetValue)
+    {
+        var source = CreateTableMigrationFixture([
+            [identityHeader, dateHeader, narrativeHeader],
+            [sourceValue, "2027-04-03", "Changed scope"]]);
+        var baseline = CreateTableMigrationFixture([
+            [identityHeader, dateHeader, narrativeHeader],
+            [targetValue, "{{date}}", "{{summary}}"]]);
+
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var sourceChoice = Assert.Single(catalog.Sources, item => item.Text == sourceValue);
+        var targetChoice = Assert.Single(catalog.Targets, item => item.Kind == "table-cell" && item.Text == targetValue);
+
+        Assert.Equal(identityHeader, sourceChoice.Context?.ColumnHeaderText);
+        Assert.Equal([identityHeader, dateHeader, narrativeHeader], sourceChoice.Context?.TableHeaderTexts);
+        Assert.Equal(identityHeader, targetChoice.Context?.ColumnHeaderText);
+        Assert.Equal([identityHeader, dateHeader, narrativeHeader], targetChoice.Context?.TableHeaderTexts);
+
+        var targetPage = TemplateMigration.ListDecisionTargets(
+            source, baseline, sourceChoice.Id, "copy-text", identityHeader, 0, 10);
+        Assert.Contains(targetPage.Targets, item => item.Id == targetChoice.Id);
+    }
+
     [Fact]
     public async Task TemplateMigration_incremental_decision_commands_are_connected_to_the_public_cli()
     {
