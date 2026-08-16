@@ -1039,6 +1039,36 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_business_batch_closes_an_indistinguishable_source_group_as_local_review()
+    {
+        var source = CreateTableMigrationFixture([
+            ["Reviewed by"],
+            ["Reviewed by"],
+            ["Reviewed by"]
+        ]);
+        var baseline = CreateTableMigrationFixture([["Approval owner"]]);
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var group = Assert.Single(catalog.Sources);
+        Assert.Equal("all", group.RequiredCardinality);
+        Assert.Contains("review-source", group.AllowedActions!);
+
+        var resolution = TemplateMigration.ResolveBusinessChoices(
+            source,
+            baseline,
+            new TemplateMigrationBusinessChoiceBatch(
+                "tiwater.docx.template-migration-business-choices/v1",
+                [new TemplateMigrationBusinessChoice(group.Id, "review-source", Cardinality: "all")]));
+
+        Assert.False(resolution.Pass);
+        Assert.Equal("tiwater.docx.template-migration-review-closure/v1", resolution.Schema);
+        Assert.Equal(3, resolution.Plan.Mappings.Count(item => item.Disposition == "review-required"));
+        Assert.Equal(3, resolution.Unresolved.Count);
+        Assert.Equal(
+            resolution.Plan.Mappings.Where(item => item.Disposition == "review-required").Select(item => item.SourceObjectId).Order(),
+            resolution.Unresolved.Select(item => item.SourceObjectId).Order());
+    }
+
+    [Fact]
     public async Task TemplateMigration_business_batch_fails_closed_for_incomplete_unknown_or_extra_input()
     {
         var source = CreateTextMigrationFixture("first current", "second current");
@@ -1291,13 +1321,14 @@ public class AnnotationToolsTests
         var started = TemplateMigration.StartDecisionDraft(source, baseline, draft);
         var catalog = TemplateMigration.ListChoices(source, baseline);
         var plainRun = Assert.Single(catalog.Targets, item => item.Kind == "run");
+        Assert.DoesNotContain("select-template-option", plainRun.AllowedActions!);
         var before = File.ReadAllBytes(draft);
 
         var rejected = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RecordDecision(
             source, baseline, draft,
             new TemplateMigrationDecisionInput("choice-selection", started.NextSource!.Id, plainRun.Id)));
 
-        Assert.Equal("template-migration-choice-target-invalid", rejected.Message);
+        Assert.Equal("template-migration-decision-target-incompatible", rejected.Message);
         Assert.Equal(before, File.ReadAllBytes(draft));
         var current = TemplateMigration.ListCurrentDecisionTargets(source, baseline, draft, "copy-text", null, 0, 100);
         Assert.Equal(started.NextSource.Id, current.SourceChoiceId);
@@ -1312,6 +1343,7 @@ public class AnnotationToolsTests
         var started = TemplateMigration.StartDecisionDraft(source, baseline, draft);
         var catalog = TemplateMigration.ListChoices(source, baseline);
         var label = Assert.Single(catalog.Targets, item => item.Kind == "run" && item.Text == "Unseen northern team");
+        Assert.Contains("select-template-option", label.AllowedActions!);
 
         var complete = TemplateMigration.RecordDecision(source, baseline, draft,
             new TemplateMigrationDecisionInput("choice-selection", started.NextSource!.Id, label.Id));
@@ -1400,11 +1432,11 @@ public class AnnotationToolsTests
         var first = TemplateMigration.ListDecisionTargets(source, baseline, sourceChoice.Id, "choice-selection", null, 0, 2);
         var second = TemplateMigration.ListDecisionTargets(source, baseline, sourceChoice.Id, "choice-selection", null, 2, 2);
         var third = TemplateMigration.ListDecisionTargets(source, baseline, sourceChoice.Id, "choice-selection", null, 4, 2);
-        Assert.Equal(6, first.Total);
+        Assert.Equal(3, first.Total);
         Assert.Equal(2, first.Targets.Count);
-        Assert.Equal(2, second.Targets.Count);
-        Assert.Equal(2, third.Targets.Count);
-        Assert.Equal(6, first.Targets.Concat(second.Targets).Concat(third.Targets).Select(item => item.Id).Distinct().Count());
+        Assert.Single(second.Targets);
+        Assert.Empty(third.Targets);
+        Assert.Equal(3, first.Targets.Concat(second.Targets).Concat(third.Targets).Select(item => item.Id).Distinct().Count());
 
         var copiedSource = Path.Combine(Path.GetTempPath(), $"migration-source-{Guid.NewGuid():N}.docx");
         var copiedBaseline = Path.Combine(Path.GetTempPath(), $"migration-baseline-{Guid.NewGuid():N}.docx");
@@ -2296,8 +2328,9 @@ public class AnnotationToolsTests
         {
             Mappings = [reviewCandidate.Mappings.Single() with { Cardinality = "all" }]
         };
-        var bulkError = Assert.Throws<InvalidOperationException>(() => TemplateMigration.CloseReviews(source, baseline, resolved, bulkReview));
-        Assert.Equal("template-migration-review-candidate-mapping-invalid", bulkError.Message);
+        var bulkResult = TemplateMigration.CloseReviews(source, baseline, resolved, bulkReview);
+        Assert.False(bulkResult.Pass);
+        Assert.Single(bulkResult.Plan.Mappings, item => item.Disposition == "review-required");
 
         var shortcutError = Assert.Throws<InvalidOperationException>(() => TemplateMigration.ResolveSemanticCandidate(source, baseline, reviewCandidate));
         Assert.Equal("template-migration-semantic-candidate-disposition-invalid", shortcutError.Message);

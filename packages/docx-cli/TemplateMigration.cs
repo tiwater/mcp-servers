@@ -339,6 +339,11 @@ public static class TemplateMigration
             .SelectMany(item => new[] { item }.Concat(item.Context?.SelectableChildren ?? []))
             .ToList();
         var baselineInventory = Inventory(baseline);
+        var selectableChoiceLabelObjectIds = SelectableChoiceLabelObjectIds(baseline);
+        var selectableChoiceLabelIds = baselineInventory.Objects
+            .Where(item => selectableChoiceLabelObjectIds.Contains(item.Id) && item.Selector is not null)
+            .Select(item => ChoiceId("target", discovery.BaselineSha256, item.Selector!))
+            .ToHashSet(StringComparer.Ordinal);
         var cleanupProtectedTargetIds = baselineInventory.Objects
             .Where(item => item.Kind == "table-cell" && item.Topology is not null)
             .GroupBy(item => (item.Topology!.ContainerObjectId, item.Topology.Row))
@@ -354,8 +359,10 @@ public static class TemplateMigration
                 group.Key,
                 group.First(),
                 group.Count(),
-                allowedActions: group.First().Kind == "run"
+                allowedActions: group.First().Kind == "run" && selectableChoiceLabelIds.Contains(group.Key)
                     ? ["select-template-option"]
+                    : group.First().Kind == "run"
+                        ? []
                     : group.First().Kind == "media"
                         ? ["place-content"]
                     : group.First().Kind == "table-cell" && !cleanupProtectedTargetIds.Contains(group.Key)
@@ -605,12 +612,7 @@ public static class TemplateMigration
                 throw new InvalidOperationException("template-migration-decision-cardinality-invalid");
             }
             if (sourceChoice.RequiredCardinality == "all"
-                && decision.Disposition == "review-required")
-            {
-                throw new InvalidOperationException("template-migration-decision-review-group-unsupported");
-            }
-            if (sourceChoice.RequiredCardinality == "all"
-                && (decision.Disposition != "out-of-scope" || decision.Cardinality != "all"))
+                && (decision.Disposition is not ("out-of-scope" or "review-required") || decision.Cardinality != "all"))
             {
                 throw new InvalidOperationException("template-migration-decision-cardinality-all-required");
             }
@@ -904,7 +906,6 @@ public static class TemplateMigration
             if (mapping.Disposition is "out-of-scope" or "review-required")
             {
                 if (mapping.TargetChoiceId is not null) throw new InvalidOperationException("template-migration-decision-target-forbidden");
-                if (mapping.Disposition == "review-required" && source.RequiredCardinality == "all") throw new InvalidOperationException("template-migration-decision-review-group-unsupported");
                 if (source.RequiredCardinality == "all" && mapping.Cardinality != "all") throw new InvalidOperationException("template-migration-decision-cardinality-all-required");
                 continue;
             }
@@ -2233,24 +2234,27 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
         foreach (var proposal in candidate.Mappings)
         {
             var sourceMatches = ResolveSelector(analysis.Source.Objects, proposal.Source);
-            if (sourceMatches.Count != 1)
+            var matchesGroup = proposal.Cardinality == "all";
+            if (sourceMatches.Count == 0 || (!matchesGroup && sourceMatches.Count != 1))
             {
                 failures.Add(new TemplateMigrationPlanFailure(sourceMatches.Count == 0
                     ? "template-migration-review-source-missing"
                     : "template-migration-review-source-ambiguous"));
                 continue;
             }
-            var sourceObject = sourceMatches[0];
-            if (!pending.Remove(sourceObject.Id, out var unresolved))
+            foreach (var sourceObject in sourceMatches)
             {
-                failures.Add(new TemplateMigrationPlanFailure("template-migration-review-source-not-unresolved", sourceObject.Id));
-                continue;
+                if (!pending.Remove(sourceObject.Id, out var unresolved))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-review-source-not-unresolved", sourceObject.Id));
+                    continue;
+                }
+                mappings[sourceObject.Id] = new TemplateMigrationMapping(
+                    sourceObject.Id,
+                    null,
+                    "review-required",
+                    unresolved.Reason);
             }
-            mappings[sourceObject.Id] = new TemplateMigrationMapping(
-                sourceObject.Id,
-                null,
-                "review-required",
-                unresolved.Reason);
         }
         failures.AddRange(pending.Values);
 
@@ -2308,7 +2312,7 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
             ValidateSemanticSelector(mapping.Source, "review-source", candidate.Schema);
             if (!string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal)
                 || mapping.Baseline is not null
-                || mapping.Cardinality is not null and not "one")
+                || mapping.Cardinality is not null and not ("one" or "all"))
             {
                 throw new InvalidOperationException("template-migration-review-candidate-mapping-invalid");
             }
@@ -4531,6 +4535,33 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
             ParagraphIndex: int.Parse(match.Groups["paragraph"].Value),
             RunIndex: runIndex - 1,
             Text: "selected");
+    }
+
+    private static HashSet<string> SelectableChoiceLabelObjectIds(string baseline)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        using var document = WordprocessingDocument.Open(Path.GetFullPath(baseline), false);
+        var main = document.MainDocumentPart;
+        var body = main?.Document?.Body;
+        if (main is null || body is null) return result;
+        foreach (var (table, tableIndex) in body.Elements<Table>().Select((item, index) => (item, index)))
+        foreach (var (row, rowIndex) in table.Elements<TableRow>().Select((item, index) => (item, index)))
+        foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((item, index) => (item, index)))
+        foreach (var (paragraph, paragraphIndex) in cell.Elements<Paragraph>().Select((item, index) => (item, index)))
+        {
+            var directRuns = paragraph.Elements<Run>().ToList();
+            var inventoryRuns = paragraph.Descendants<Run>().ToList();
+            if (directRuns.Count != inventoryRuns.Count
+                || !directRuns.SequenceEqual(inventoryRuns, ReferenceEqualityComparer.Instance)) continue;
+            for (var labelIndex = 1; labelIndex < directRuns.Count; labelIndex += 1)
+            {
+                var glyph = directRuns[labelIndex - 1];
+                var blip = glyph.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().SingleOrDefault();
+                if (blip?.Embed?.Value is null || !main.Parts.Any(part => part.RelationshipId == blip.Embed.Value)) continue;
+                result.Add($"body:table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}:paragraph:{paragraphIndex}:run:{labelIndex}");
+            }
+        }
+        return result;
     }
 
     private static bool IndependentlyChoiceSelected(string output, string baselineLabelRunId)
