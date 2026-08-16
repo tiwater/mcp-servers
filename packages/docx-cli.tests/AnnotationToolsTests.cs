@@ -3185,6 +3185,31 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_never_offers_or_applies_cleanup_that_deletes_dynamic_fields()
+    {
+        var source = CreateTextMigrationFixture("Current business fact");
+        var baseline = CreateLabeledHeaderMigrationFixture(
+            "Document code: ", "BASE-1", "Revision: ", "1.0", pageCount: "8");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var headerCellChoice = Assert.Single(catalog.Targets, item => item.Kind == "table-cell" && item.Scope == "header");
+        Assert.DoesNotContain("template-cleanup", headerCellChoice.AllowedActions ?? []);
+
+        var analysis = TemplateMigration.Analyze(source, baseline);
+        var headerCell = Assert.Single(analysis.Baseline.Objects, item => item.Kind == "table-cell" && item.Scope == "header");
+        var plan = new TemplateMigrationPlan(
+            "tiwater.docx.template-migration-plan/v3",
+            analysis.Source.Sha256,
+            analysis.Baseline.Sha256,
+            [new TemplateMigrationMapping("body:paragraph:0", null, "out-of-scope", "declared-exclusion")],
+            BaselineClears: [new TemplateMigrationBaselineClear(headerCell.Id, "cell")]);
+
+        var build = TemplateMigration.BuildOperations(source, baseline, plan);
+        Assert.False(build.Pass);
+        Assert.Contains(build.Failures, item => item.Reason == "template-migration-baseline-clear-protected-content");
+        Assert.Empty(build.Operations);
+    }
+
+    [Fact]
     public void TemplateMigration_row_cleanup_subsumes_cell_cleanup_independent_of_request_order()
     {
         var source = CreateTextMigrationFixture("unresolved current fact");

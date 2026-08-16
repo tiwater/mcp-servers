@@ -338,6 +338,15 @@ public static class TemplateMigration
         var targetObservations = discovery.AvailableTargets
             .SelectMany(item => new[] { item }.Concat(item.Context?.SelectableChildren ?? []))
             .ToList();
+        var baselineInventory = Inventory(baseline);
+        var cleanupProtectedTargetIds = baselineInventory.Objects
+            .Where(item => item.Kind == "table-cell" && item.Topology is not null)
+            .GroupBy(item => (item.Topology!.ContainerObjectId, item.Topology.Row))
+            .Where(group => group.Any(HasProtectedCleanupContent))
+            .SelectMany(group => group)
+            .Where(item => item.Selector is not null)
+            .Select(item => ChoiceId("target", discovery.BaselineSha256, item.Selector!))
+            .ToHashSet(StringComparer.Ordinal);
         var targets = targetObservations
             .GroupBy(item => ChoiceId("target", discovery.BaselineSha256, item.Selector
                 ?? throw new InvalidOperationException("template-migration-choice-target-selector-missing")), StringComparer.Ordinal)
@@ -349,7 +358,7 @@ public static class TemplateMigration
                     ? ["select-template-option"]
                     : group.First().Kind == "media"
                         ? ["place-content"]
-                    : group.First().Kind == "table-cell"
+                    : group.First().Kind == "table-cell" && !cleanupProtectedTargetIds.Contains(group.Key)
                         ? ["place-content", "keep-template-content", "keep-template-label", "template-cleanup"]
                         : ["place-content", "keep-template-content", "keep-template-label"]))
             .ToList();
@@ -2843,6 +2852,14 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-mode-invalid", BaselineObjectId: clear.BaselineObjectId, Detail: clear.Mode));
                 continue;
             }
+            var protectedTarget = targets.FirstOrDefault(HasProtectedCleanupContent);
+            if (protectedTarget is not null)
+            {
+                failures.Add(new TemplateMigrationPlanFailure(
+                    "template-migration-baseline-clear-protected-content",
+                    BaselineObjectId: protectedTarget.Id));
+                continue;
+            }
             foreach (var target in targets)
             {
                 if (!clearTargets.Add(target.Id))
@@ -4254,7 +4271,10 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
             foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((cell, index) => (cell, index)))
             {
                 var cellId = $"{rowId}:cell:{cellIndex}";
-                objects.Add(Object(cellId, "table-cell", scope, rowId, string.Concat(cell.Elements<Paragraph>().SelectMany(paragraph => paragraph.Descendants<Text>()).Select(text => text.Text)).Trim(), null, EmptyProvenance,
+                var provenance = HasProtectedCleanupContent(cell)
+                    ? new Dictionary<string, string>(StringComparer.Ordinal) { ["protectedCleanupContent"] = "true" }
+                    : EmptyProvenance;
+                objects.Add(Object(cellId, "table-cell", scope, rowId, string.Concat(cell.Elements<Paragraph>().SelectMany(paragraph => paragraph.Descendants<Text>()).Select(text => text.Text)).Trim(), null, provenance,
                     new TemplateMigrationTopology(tableId, rowIndex, cellIndex)));
                 foreach (var (paragraph, paragraphIndex) in cell.Elements<Paragraph>().Select((paragraph, index) => (paragraph, index)))
                 {
@@ -4423,6 +4443,18 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
 
     private static TemplateMigrationObject Object(string id, string kind, string scope, string? parentId, string? text, string? style, IReadOnlyDictionary<string, string> provenance, TemplateMigrationTopology? topology = null)
         => new(id, kind, scope, parentId, text, style, provenance, topology);
+
+    private static bool HasProtectedCleanupContent(TemplateMigrationObject item)
+        => item.Provenance.GetValueOrDefault("protectedCleanupContent") == "true";
+
+    private static bool HasProtectedCleanupContent(TableCell cell)
+        => cell.Descendants<FieldCode>().Any()
+            || cell.Descendants<FieldChar>().Any()
+            || cell.Descendants<Drawing>().Any()
+            || cell.Descendants<SdtElement>().Any()
+            || cell.Descendants<Hyperlink>().Any()
+            || cell.Descendants<FootnoteReference>().Any()
+            || cell.Descendants<EndnoteReference>().Any();
 
     private static string? ParagraphStyle(Paragraph paragraph) => paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
 
