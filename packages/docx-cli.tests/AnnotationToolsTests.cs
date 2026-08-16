@@ -2945,6 +2945,69 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_combines_distinct_labeled_values_from_separate_header_paragraphs()
+    {
+        var source = CreateSplitLabeledHeaderMigrationFixture(
+            "Legacy protocol: ", "OMEGA-12", "Issue: ", "07");
+        var baseline = CreateLabeledHeaderMigrationFixture(
+            "Document code: ", "BASE-1", "Revision: ", "1.0", pageCount: "11");
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-split-header-{Guid.NewGuid():N}.json");
+        var progress = TemplateMigration.StartDecisionDraft(source, baseline, draft);
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var target = Assert.Single(catalog.Targets, item => item.Kind == "table-cell"
+            && item.Scope == "header"
+            && item.Text!.Contains("Document code", StringComparison.Ordinal));
+
+        Assert.Empty(TemplateMigration.ListCurrentDecisionTargets(
+            source, baseline, draft, "copy-text", null, 0, 20).Targets);
+        var firstTargets = TemplateMigration.ListCurrentDecisionTargets(
+            source, baseline, draft, "retain-target-label", null, 0, 20);
+        Assert.Contains(firstTargets.Targets, item => item.Id == target.Id);
+        progress = TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", progress.NextSource!.Id, target.Id, "retain-target-label"));
+
+        var secondTargets = TemplateMigration.ListCurrentDecisionTargets(
+            source, baseline, draft, "retain-target-label", null, 0, 20);
+        Assert.Contains(secondTargets.Targets, item => item.Id == target.Id);
+        progress = TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", progress.NextSource!.Id, target.Id, "retain-target-label"));
+        Assert.Equal(0, progress.RemainingSourceCount);
+
+        var resolved = TemplateMigration.ResolveDecisionDraft(source, baseline, draft);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        Assert.Equal(["identifier", "version"], resolved.Plan.ValueProjections!.Select(item => item.ValueKind).Order().ToArray());
+        var output = Path.Combine(Path.GetTempPath(), $"migration-split-header-output-{Guid.NewGuid():N}.docx");
+        Assert.True(TemplateMigration.Apply(source, baseline, resolved.Plan, output).Pass);
+        using var document = WordprocessingDocument.Open(output, false);
+        var text = document.MainDocumentPart!.HeaderParts.Single().Header!.InnerText;
+        Assert.Contains("Document code: OMEGA-12", text, StringComparison.Ordinal);
+        Assert.Contains("Revision: 07", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Legacy protocol", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TemplateMigration_rejects_two_sources_claiming_one_retained_label_value_slot()
+    {
+        var source = CreateSplitLabeledHeaderMigrationFixture(
+            "First issue: ", "03", "Second issue: ", "04");
+        var baseline = CreateLabeledHeaderMigrationFixture(
+            "Document code: ", "BASE-1", "Revision: ", "1.0", pageCount: "11");
+        var draft = Path.Combine(Path.GetTempPath(), $"migration-duplicate-header-value-{Guid.NewGuid():N}.json");
+        var progress = TemplateMigration.StartDecisionDraft(source, baseline, draft);
+        var target = Assert.Single(TemplateMigration.ListChoices(source, baseline).Targets, item => item.Kind == "table-cell"
+            && item.Scope == "header"
+            && item.Text!.Contains("Document code", StringComparison.Ordinal));
+        progress = TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", progress.NextSource!.Id, target.Id, "retain-target-label"));
+
+        var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RecordDecision(source, baseline, draft,
+            new TemplateMigrationDecisionInput("mapping", progress.NextSource!.Id, target.Id, "retain-target-label")));
+        Assert.Equal("template-migration-semantic-value-binding-duplicate", error.Message);
+        using var unchanged = JsonDocument.Parse(File.ReadAllText(draft));
+        Assert.Single(unchanged.RootElement.GetProperty("mappings").EnumerateArray());
+    }
+
+    [Fact]
     public void TemplateMigration_retains_body_label_while_migrating_a_unique_date()
     {
         var source = CreateLabeledRunMigrationFixture("Legacy effective date: ", "2026-08-17");
@@ -6430,6 +6493,27 @@ public class AnnotationToolsTests
             new TableProperties(),
             new TableGrid(new GridColumn { Width = "4800" }),
             new TableRow(cell)));
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("body"))),
+            new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));
+        main.Document.Save();
+        header.Header.Save();
+        return path;
+    }
+
+    private static string CreateSplitLabeledHeaderMigrationFixture(
+        string firstLabel,
+        string firstValue,
+        string secondLabel,
+        string secondValue)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-split-labeled-header-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        header.Header = new Header(
+            new Paragraph(new Run(new Text(firstLabel)), new Run(new Text(firstValue))),
+            new Paragraph(new Run(new Text(secondLabel)), new Run(new Text(secondValue))));
         main.Document = new Document(new Body(
             new Paragraph(new Run(new Text("body"))),
             new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));

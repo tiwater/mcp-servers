@@ -486,9 +486,13 @@ public static class TemplateMigration
 
         IEnumerable<TemplateMigrationChoice> targets = branch switch
         {
-            "copy-text" or "retain-target" or "retain-target-label" => catalog.Targets.Where(item =>
+            "copy-text" or "retain-target" => catalog.Targets.Where(item =>
                 item.AllowedActions?.Contains(PublicActionForDisposition(branch), StringComparer.Ordinal) == true
                 && string.Equals(item.Kind, sourceChoice!.Kind, StringComparison.Ordinal)),
+            "retain-target-label" => catalog.Targets.Where(item =>
+                item.AllowedActions?.Contains("keep-template-label", StringComparer.Ordinal) == true
+                && sourceChoice!.Kind is "paragraph" or "table-cell"
+                && item.Kind is "paragraph" or "table-cell"),
             "copy-media" => catalog.Targets.Where(item => item.AllowedActions?.Contains("place-content", StringComparer.Ordinal) == true
                 && item.Kind == "media" && sourceChoice!.Kind == "media"),
             "choice-selection" => catalog.Targets.Where(item => item.AllowedActions?.Contains("select-template-option", StringComparer.Ordinal) == true),
@@ -538,6 +542,12 @@ public static class TemplateMigration
             .Concat(draft.ChoiceSelections.Select(item => item.TargetChoiceId))
             .Concat(draft.BaselineClears.Select(item => item.TargetChoiceId))
             .ToHashSet(StringComparer.Ordinal);
+        if (string.Equals(branch, "retain-target-label", StringComparison.Ordinal))
+        {
+            usedTargets.ExceptWith(draft.Mappings
+                .Where(item => item.Disposition == "retain-target-label" && item.TargetChoiceId is not null)
+                .Select(item => item.TargetChoiceId!));
+        }
         return ListDecisionTargets(source, baseline, sourceChoiceId, branch, query, offset, limit, usedTargets);
     }
 
@@ -604,14 +614,18 @@ public static class TemplateMigration
                 if (string.IsNullOrWhiteSpace(decision.TargetChoiceId)) throw new InvalidOperationException("template-migration-decision-target-required");
                 var target = catalog.Targets.SingleOrDefault(item => item.Id == decision.TargetChoiceId)
                     ?? throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-                if (target.AllowedActions?.Contains(PublicActionForDisposition(decision.Disposition), StringComparer.Ordinal) != true
-                    || !string.Equals(sourceChoice.Kind, target.Kind, StringComparison.Ordinal)
-                    || (decision.Disposition == "copy-media" && sourceChoice.Kind != "media")
-                    || (decision.Disposition != "copy-media" && sourceChoice.Kind == "media"))
+                if (!MappingChoicesCompatible(sourceChoice, target, decision.Disposition))
                 {
                     throw new InvalidOperationException("template-migration-decision-target-incompatible");
                 }
-                if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+                if (decision.Disposition == "retain-target-label")
+                {
+                    var claimedByOtherUse = mappings.Any(item => item.TargetChoiceId == target.Id && item.Disposition != "retain-target-label")
+                        || selections.Any(item => item.TargetChoiceId == target.Id)
+                        || clears.Any(item => item.TargetChoiceId == target.Id);
+                    if (claimedByOtherUse) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+                }
+                else if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
             }
             mappings.Add(new TemplateMigrationChoiceMapping(
                 sourceChoice.Id,
@@ -821,6 +835,22 @@ public static class TemplateMigration
             _ => throw new InvalidOperationException("template-migration-decision-disposition-invalid")
         };
 
+    private static bool MappingChoicesCompatible(
+        TemplateMigrationChoice source,
+        TemplateMigrationChoice target,
+        string disposition)
+    {
+        if (target.AllowedActions?.Contains(PublicActionForDisposition(disposition), StringComparer.Ordinal) != true) return false;
+        if (disposition == "copy-media") return source.Kind == "media" && target.Kind == "media";
+        if (source.Kind == "media" || target.Kind == "media") return false;
+        if (disposition == "retain-target-label")
+        {
+            return source.Kind is "paragraph" or "table-cell"
+                && target.Kind is "paragraph" or "table-cell";
+        }
+        return string.Equals(source.Kind, target.Kind, StringComparison.Ordinal);
+    }
+
     private static string ChoiceSearchText(TemplateMigrationChoice choice)
         => string.Join("\n", new[]
         {
@@ -870,14 +900,19 @@ public static class TemplateMigration
                 continue;
             }
             if (mapping.TargetChoiceId is null || !targets.TryGetValue(mapping.TargetChoiceId, out var target)) throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-            if (target.AllowedActions?.Contains(PublicActionForDisposition(mapping.Disposition), StringComparer.Ordinal) != true
-                || !string.Equals(source.Kind, target.Kind, StringComparison.Ordinal)
-                || (mapping.Disposition == "copy-media" && source.Kind != "media")
-                || (mapping.Disposition != "copy-media" && source.Kind == "media"))
+            if (!MappingChoicesCompatible(source, target, mapping.Disposition))
             {
                 throw new InvalidOperationException("template-migration-decision-target-incompatible");
             }
-            if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+            if (mapping.Disposition == "retain-target-label")
+            {
+                var claimedByOtherUse = draft.Mappings.Any(item => item.TargetChoiceId == target.Id && item.Disposition != "retain-target-label")
+                    || draft.ChoiceSelections.Any(item => item.TargetChoiceId == target.Id)
+                    || draft.BaselineClears.Any(item => item.TargetChoiceId == target.Id);
+                if (claimedByOtherUse) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+                usedTargets.Add(target.Id);
+            }
+            else if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
         }
         foreach (var selection in draft.ChoiceSelections)
         {
@@ -1994,7 +2029,7 @@ close-template-migration-reviews consumes this resolution as a separate step.
                 || analysis.Source.Objects.FirstOrDefault(item => item.Id == mapping.SourceObjectId) is not { } sourceParent
                 || analysis.Baseline.Objects.FirstOrDefault(item => item.Id == mapping.BaselineObjectId) is not { } baselineParent
                 || sourceParent.Kind is not ("paragraph" or "table-cell")
-                || !string.Equals(sourceParent.Kind, baselineParent.Kind, StringComparison.Ordinal))
+                || baselineParent.Kind is not ("paragraph" or "table-cell"))
             {
                 continue;
             }
@@ -2017,7 +2052,7 @@ close-template-migration-reviews consumes this resolution as a separate step.
                     failures.Add(new TemplateMigrationPlanFailure(targetFailure!, sourceParent.Id, baselineParent.Id, valueKind));
                     continue;
                 }
-                var semantic = RetainedLabelValueSemantic(sourceParent.Id, baselineParent.Id, valueKind);
+                var semantic = RetainedLabelValueSemantic(baselineParent.Id, valueKind);
                 if (!projectionBindings.Add($"{sourceParent.Id}\u001F{baselineParent.Id}\u001F{semantic}")
                     || !projectedSemantics.Add(semantic))
                 {
@@ -4890,9 +4925,9 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         return true;
     }
 
-    private static string RetainedLabelValueSemantic(string sourceParentId, string baselineParentId, string valueKind)
+    private static string RetainedLabelValueSemantic(string baselineParentId, string valueKind)
     {
-        var identity = Encoding.UTF8.GetBytes($"{sourceParentId}\u001F{baselineParentId}\u001F{valueKind}");
+        var identity = Encoding.UTF8.GetBytes($"{baselineParentId}\u001F{valueKind}");
         return $"retained-label-{valueKind}-{Convert.ToHexString(SHA256.HashData(identity)).ToLowerInvariant()[..12]}";
     }
 
