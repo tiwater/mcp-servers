@@ -69,7 +69,11 @@ Cleanup alternatives contain only target-owned text capacity that can be
 removed without deleting dynamic fields, drawings, or other non-text Office
 structure. The Word runtime independently rejects a cleanup whose selected
 cell or row contains such protected content, even if a caller bypasses the
-catalog.
+catalog. Cleanup is conditional baseline capacity: when the same final batch
+assigns a current source to that target, the adapter omits the cleanup before
+calling the Word runtime. The current-source assignment owns the target; the
+Agent does not reconcile opaque target identities across choice and cleanup
+references.
 
 The third operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the
