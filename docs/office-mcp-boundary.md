@@ -60,6 +60,11 @@ choice. Structural label alignment may preserve one target for more than one
 current label observation because it does not claim or rewrite the target's
 business value. Provider-internal parent/value dependencies are not exposed as
 Agent choices.
+An option-selection alternative is returned only when the selected target is
+a provider-recognized selectable control label; ordinary visible text runs are
+not option targets. A local-review terminal may cover every current source in
+one indistinguishable source group. The provider expands that terminal to the
+group's current members and preserves each member in source conservation.
 Cleanup alternatives contain only target-owned text capacity that can be
 removed without deleting dynamic fields, drawings, or other non-text Office
 structure. The Word runtime independently rejects a cleanup whose selected
