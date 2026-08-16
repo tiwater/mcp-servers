@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
@@ -28,6 +29,10 @@ const xlsxCandidates = [
 
 const pptxCandidates = [
   commandCandidate('tiwater-pptx', [], { cwd: invocationCwd }),
+];
+
+const convertCandidates = [
+  commandCandidate('tiwater-convert', [], { cwd: invocationCwd }),
 ];
 
 const pathInput = z.string().trim().min(1);
@@ -134,6 +139,42 @@ const artifact = z.object({
   path: z.string(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   bytes: z.number().int().nonnegative(),
+}).strict();
+
+const renderFileIdentity = z.object({
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  size_bytes: z.number().int().positive(),
+}).strict();
+const nativeRenderReceipt = z.object({
+  status: z.literal('ok'),
+  input: z.string(),
+  input_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  output: z.string(),
+  output_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  source_format: z.enum(['doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp']),
+  target_format: z.literal('pdf'),
+  version: z.string(),
+  backend: z.enum(['wps', 'et', 'wpp']),
+  fallback_reason: z.null(),
+  page_count: z.number().int().positive(),
+  native_render_provenance: z.object({
+    schema: z.literal('tiwater.convert-native-render-provenance/v1'),
+    backend: z.enum(['wps', 'et', 'wpp']),
+    input: renderFileIdentity,
+    output: renderFileIdentity,
+    page_count: z.number().int().positive(),
+  }).passthrough(),
+}).passthrough();
+const nativeRenderOutput = z.object({
+  tool: z.literal('office_render_pdf'),
+  runtime: runtimeIdentity,
+  pdf: artifact,
+  receipt: artifact,
+  summary: z.object({
+    sourceFormat: z.string(),
+    backend: z.enum(['wps', 'et', 'wpp']),
+    pageCount: z.number().int().positive(),
+  }).strict(),
 }).strict();
 
 const migrationCatalogOutput = z.object({
@@ -292,18 +333,22 @@ const tools = [
     handler: docxCompare,
   },
   {
-    name: 'docx_validate_template_transform',
-    description: 'Validate whether a source DOCX template and target DOCX template are structurally compatible.',
-    inputSchema: z.object({ sourceTemplate: pathInput, targetTemplate: pathInput }).strict(),
-    annotations: { readOnlyHint: true, idempotentHint: true },
-    handler: docxValidateTemplateTransform,
-  },
-  {
     name: 'docx_export_json',
     description: 'Export DOCX body content to a new JSON artifact without returning the full document through MCP.',
     inputSchema: artifactInput,
     outputSchema: artifactOutput('docx_export_json'),
     handler: docxExportJson,
+  },
+  {
+    name: 'office_render_pdf',
+    description: 'Render a current Office document to PDF with its required native WPS backend and write the complete provider receipt as evidence. The input extension selects Writer, Spreadsheets, or Presentation; fallback rendering is rejected.',
+    inputSchema: z.object({
+      input: pathInput.describe('Path to the current Office document.'),
+      output: pathInput.describe('New PDF output path. Existing files are never overwritten.'),
+      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
+    }).strict(),
+    outputSchema: nativeRenderOutput,
+    handler: officeRenderPdf,
   },
   {
     name: 'xlsx_inspect',
@@ -658,13 +703,6 @@ async function docxCompare(args) {
   return { tool: 'docx_compare', runtime: commandRuntime(result), report: result.json };
 }
 
-async function docxValidateTemplateTransform(args) {
-  const sourceTemplate = requireString(args.sourceTemplate, 'sourceTemplate');
-  const targetTemplate = requireString(args.targetTemplate, 'targetTemplate');
-  const result = await runJsonCandidateChain(docxCandidates, ['validate-template-transform', sourceTemplate, targetTemplate, '--json']);
-  return { tool: 'docx_validate_template_transform', runtime: commandRuntime(result), report: result.json };
-}
-
 async function docxExportJson(args) {
   const input = requireString(args.input, 'input');
   const result = await runJsonCandidateChain(docxCandidates, ['export-json', input]);
@@ -673,6 +711,64 @@ async function docxExportJson(args) {
     runtime: commandRuntime(result),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
+}
+
+async function officeRenderPdf(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const output = path.resolve(requireString(args.output, 'output'));
+  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
+  const sourceFormat = path.extname(input).slice(1).toLowerCase();
+  const backend = nativeRenderBackend(sourceFormat);
+  if (path.extname(output).toLowerCase() !== '.pdf') {
+    throw Object.assign(new Error(`Office render output must be a PDF: ${output}`), { code: -32602 });
+  }
+  const inputArtifact = await fileArtifact(input);
+  await requireNewFile(output, 'output');
+  await requireNewFile(receiptOutput, 'receiptOutput');
+  await mkdir(path.dirname(output), { recursive: true });
+  try {
+    const result = await runJsonCandidateChain(
+      convertCandidates,
+      [`${sourceFormat}-to-pdf`, input, output],
+      { env: { TIWATER_OFFICE_PDF_BACKEND: backend } });
+    const receipt = nativeRenderReceipt.parse(result.json);
+    const pdf = await fileArtifact(output);
+    if (path.resolve(receipt.input) !== input
+        || path.resolve(receipt.output) !== output
+        || receipt.source_format !== sourceFormat
+        || receipt.backend !== backend
+        || receipt.native_render_provenance.backend !== backend
+        || receipt.page_count !== receipt.native_render_provenance.page_count
+        || receipt.input_sha256 !== inputArtifact.sha256
+        || receipt.native_render_provenance.input.sha256 !== inputArtifact.sha256
+        || receipt.native_render_provenance.input.size_bytes !== inputArtifact.bytes
+        || receipt.output_sha256 !== pdf.sha256
+        || receipt.native_render_provenance.output.sha256 !== pdf.sha256
+        || receipt.native_render_provenance.output.size_bytes !== pdf.bytes) {
+      throw new Error('Native Office render receipt is not bound to the current input and output');
+    }
+    return {
+      tool: 'office_render_pdf',
+      runtime: commandRuntime(result),
+      pdf,
+      receipt: await writeJsonArtifact(receiptOutput, receipt),
+      summary: {
+        sourceFormat,
+        backend,
+        pageCount: receipt.page_count,
+      },
+    };
+  } catch (error) {
+    await rm(output, { force: true });
+    throw error;
+  }
+}
+
+function nativeRenderBackend(sourceFormat) {
+  if (['doc', 'docx', 'odt', 'rtf'].includes(sourceFormat)) return 'wps';
+  if (['xls', 'xlsx', 'ods'].includes(sourceFormat)) return 'et';
+  if (['ppt', 'pptx', 'odp'].includes(sourceFormat)) return 'wpp';
+  throw Object.assign(new Error(`Unsupported Office render input: .${sourceFormat || '(none)'}`), { code: -32602 });
 }
 
 async function xlsxInspect(args) {
@@ -735,6 +831,29 @@ async function writeJsonArtifact(output, payload) {
     sha256: createHash('sha256').update(bytes).digest('hex'),
     bytes: bytes.length,
   };
+}
+
+async function fileArtifact(filePath) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  const file = await stat(filePath);
+  return {
+    path: path.resolve(filePath),
+    sha256: hash.digest('hex'),
+    bytes: file.size,
+  };
+}
+
+async function requireNewFile(filePath, label) {
+  try {
+    await stat(filePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  throw Object.assign(new Error(`${label} already exists: ${filePath}`), { code: -32602 });
 }
 
 function commandRuntime(result) {

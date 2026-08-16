@@ -82,6 +82,19 @@ change which business choice the Agent makes, but malformed prose does not alter
 the tool protocol or cause the Office runtime to guess fields, commands, or JSON
 shapes.
 
+## Native rendering
+
+Office rendering is one public operation. It accepts a current Word, Excel, or
+PowerPoint-family document and a new PDF and receipt path. The input extension
+selects the already published `tiwater-convert` operation and its required WPS
+backend: Writer, Spreadsheets, or Presentation. The adapter rejects fallback
+rendering and independently binds the provider receipt to the current input and
+created PDF by path, format, backend, byte count, page count, and content hash.
+
+The operation does not inspect page appearance, make a delivery decision, or
+interpret scenario requirements. Lucid remains responsible for rendering pages
+from the resulting PDF, visual review, and final workflow closure.
+
 ## Ownership
 
 - The scenario package owns business identity, allowed ambiguity, and terminal
@@ -89,6 +102,8 @@ shapes.
 - The Agent chooses among the tool's typed current alternatives.
 - The published Word runtime owns document observation, including local table
   context, deterministic planning, editing, and readback.
+- The published conversion runtime owns native Office-to-PDF rendering and its
+  provenance receipt.
 - The Office MCP adapter publishes the typed surface, orders complete technical
   alternatives for progressive discovery, and invokes the exact installed
   runtime; it does not interpret scenario rules or choose a target.
