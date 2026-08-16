@@ -24,6 +24,9 @@ const catalogFor = sourcePath => {
   let targets = [choice('target-1')];
   if (sourcePath === '/invalid-output.docx') sources = [{id:'source-1'}];
   if (sourcePath === '/empty.docx') { sources = []; targets = []; }
+  if (sourcePath === '/all.docx') {
+    sources = [choice('source-all', {requiredCardinality:'all',allowedActions:['exclude-source','review-source']})];
+  }
   if (sourcePath === '/multi.docx') {
     sources = [
       choice('source-alpha', {text:'Alpha heading'}),
@@ -80,6 +83,10 @@ if (command === 'find-template-migration-targets') {
 }
 if (command === 'migrate-template' || command === 'verify-template-migration') {
   const payload = JSON.parse(fs.readFileSync(process.argv[5], 'utf8'));
+  if (process.argv[6] === '/silent.docx') {
+    process.stderr.write('typed-migration-refusal');
+    process.exit(1);
+  }
   const failed = process.argv[6] === '/failed.docx';
   process.stdout.write(JSON.stringify({schema:'receipt/v1',toolVersion:'0.12.2',status:failed?'failed':'pass',pass:!failed,reviewRequired:false,outputVerified:!failed,command,payload,output:failed?null:process.argv[6],plan:failed?null:process.argv[6]+'.migration-plan.json',failures:failed?[{reason:'known-failure'}]:[]}));
   process.exit(0);
@@ -139,7 +146,7 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.8.0');
+    assert.equal(initialized.result.serverInfo.version, '0.9.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -170,6 +177,7 @@ process.exit(2);
     assert.equal(listTool.outputSchema.properties.artifact.properties.sha256.type, 'string');
     assert.equal(listTool.outputSchema.properties.summary.properties.sourceCount.type, 'integer');
     assert.equal(migrateTool.inputSchema.required.includes('receiptOutput'), true);
+    assert.equal('cardinality' in migrateTool.inputSchema.properties.choices.items.properties, false);
     assert.equal(migrateTool.outputSchema.properties.artifact.properties.sha256.type, 'string');
     assert.equal(migrateTool.outputSchema.properties.summary.properties.outputVerified.type, 'boolean');
     assert.deepEqual(migrateTool.inputSchema.properties.choices.items.properties.action.enum, [
@@ -492,6 +500,41 @@ process.exit(2);
       schema: 'tiwater.docx.template-migration-business-choices/v1',
       choices,
     });
+
+    const allReceiptPath = path.join(temporary, 'receipts', 'all.json');
+    const all = await request('tools/call', {
+      name: 'docx_migrate_template',
+      arguments: {
+        source: '/all.docx', baseline: '/baseline.docx', output: '/all-output.docx',
+        receiptOutput: allReceiptPath,
+        choices: [{ sourceChoiceId: 'source-all', action: 'exclude-source' }],
+      },
+    });
+    assert.equal(all.result.structuredContent.summary.pass, true);
+    assert.deepEqual(JSON.parse(await readFile(allReceiptPath, 'utf8')).payload.choices, [
+      { sourceChoiceId: 'source-all', action: 'exclude-source', cardinality: 'all' },
+    ]);
+
+    const incomplete = await request('tools/call', {
+      name: 'docx_migrate_template',
+      arguments: {
+        source: '/multi.docx', baseline: '/baseline.docx', output: '/incomplete.docx',
+        receiptOutput: path.join(temporary, 'receipts', 'incomplete.json'),
+        choices: [{ sourceChoiceId: 'source-alpha', action: 'place-content', targetChoiceId: 'target-header' }],
+      },
+    });
+    assert.equal(incomplete.result.isError, true);
+    assert.match(incomplete.result.content[0].text, /migration choices must cover every source id/);
+
+    const silent = await request('tools/call', {
+      name: 'docx_migrate_template',
+      arguments: {
+        source: '/current.docx', baseline: '/baseline.docx', output: '/silent.docx',
+        receiptOutput: path.join(temporary, 'receipts', 'silent.json'), choices,
+      },
+    });
+    assert.equal(silent.result.isError, true);
+    assert.match(silent.result.content[0].text, /typed-migration-refusal/);
 
     const verificationReceiptPath = path.join(temporary, 'receipts', 'verification.json');
     const verified = await request('tools/call', {
