@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -14,9 +14,14 @@ test('published Office MCP exposes one batch migration surface and forwards type
   await writeFile(fakeRuntime, `#!/usr/bin/env node
 const fs = require('node:fs');
 const command = process.argv[2];
+if (command === 'inspect') {
+  process.stdout.write(JSON.stringify({schema:'inspection/v1',file:process.argv[3],tables:[{rows:2}]}));
+  process.exit(0);
+}
 if (command === 'list-template-migration-choices') {
   const choice = id => ({id,kind:'paragraph',scope:'body',text:id,count:1,requiredCardinality:'one',context:null,allowedActions:['place-content']});
-  process.stdout.write(JSON.stringify({schema:'catalog/v1',pass:true,sourceSha256:'a',baselineSha256:'b',sources:[choice('source-1')],targets:[choice('target-1')]}));
+  const sources = process.argv[3] === '/invalid-output.docx' ? [{id:'source-1'}] : [choice('source-1')];
+  process.stdout.write(JSON.stringify({schema:'catalog/v1',pass:true,sourceSha256:'a',baselineSha256:'b',sources,targets:[choice('target-1')]}));
   process.exit(0);
 }
 if (command === 'migrate-template' || command === 'verify-template-migration') {
@@ -59,8 +64,12 @@ process.exit(2);
   });
 
   try {
-    const initialized = await request('initialize', { protocolVersion: '2025-06-18' });
-    assert.equal(initialized.result.serverInfo.version, '0.2.0');
+    const initialized = await request('initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
+    });
+    assert.equal(initialized.result.serverInfo.version, '0.3.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -80,6 +89,8 @@ process.exit(2);
       [],
     );
     assert(!names.some(name => name.includes('record') || name.includes('revise') || name.includes('target_search')));
+    assert(!names.includes('docx_inspect_tables'));
+    assert(!names.includes('pptx_inspect_detail'));
     const migrateTool = listed.result.tools.find(tool => tool.name === 'docx_migrate_template');
     const listTool = listed.result.tools.find(tool => tool.name === 'docx_list_migration_choices');
     assert.equal(listTool.outputSchema.properties.catalog.properties.sources.items.properties.allowedActions.type, 'array');
@@ -94,10 +105,41 @@ process.exit(2);
     ]);
     assert.equal(migrateTool.inputSchema.additionalProperties, false);
 
+    const invalid = await request('tools/call', {
+      name: 'docx_list_migration_choices',
+      arguments: { source: '/current.docx', baseline: '/baseline.docx', invented: true },
+    });
+    assert.equal(invalid.result.isError, true);
+
+    const invalidOutput = await request('tools/call', {
+      name: 'docx_list_migration_choices',
+      arguments: { source: '/invalid-output.docx', baseline: '/baseline.docx' },
+    });
+    assert.equal(invalidOutput.result.isError, true);
+
+    const observationPath = path.join(temporary, 'observations', 'current.docx.json');
+    const observed = await request('tools/call', {
+      name: 'docx_inspect',
+      arguments: { input: '/current.docx', output: observationPath },
+    });
+    assert.equal(observed.result.structuredContent.artifact.path, observationPath);
+    assert.match(observed.result.structuredContent.artifact.sha256, /^[0-9a-f]{64}$/);
+    assert.deepEqual(JSON.parse(await readFile(observationPath, 'utf8')), {
+      schema: 'inspection/v1',
+      file: '/current.docx',
+      tables: [{ rows: 2 }],
+    });
+    const overwrite = await request('tools/call', {
+      name: 'docx_inspect',
+      arguments: { input: '/current.docx', output: observationPath },
+    });
+    assert.equal(overwrite.result.isError, true);
+
     const listedChoices = await request('tools/call', {
       name: 'docx_list_migration_choices',
       arguments: { source: '/current.docx', baseline: '/baseline.docx' },
     });
+    assert.equal(listedChoices.result.structuredContent.runtime.cwd, process.cwd());
     assert.equal(listedChoices.result.structuredContent.catalog.sources[0].id, 'source-1');
 
     const choices = [{ sourceChoiceId: 'source-1', action: 'place-content', targetChoiceId: 'target-1' }];

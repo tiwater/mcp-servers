@@ -15,7 +15,6 @@ Shared stdio MCP server for Office document workflows.
 - `xlsx_export_json`
 - `xlsx_validate`
 - `pptx_inspect`
-- `pptx_inspect_detail`
 - `pptx_export_json`
 
 ## Run
@@ -26,3 +25,8 @@ the consumer, then run `tiwater-office-mcp` as a stdio MCP server.
 The server invokes published `tiwater-docx`, `tiwater-xlsx`, and
 `tiwater-pptx` commands from `PATH`. It does not require a source checkout or
 fall back to local projects.
+
+The official MCP SDK derives the schemas advertised to clients and validates
+tool arguments and structured results before they cross the protocol boundary.
+Large observations and exports are written to a caller-selected new JSON
+artifact. MCP returns only the artifact path, hash, and byte count.
