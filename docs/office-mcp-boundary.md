@@ -36,19 +36,21 @@ The first operation writes every source item that still needs business judgment
 and the current baseline targets to an evidence artifact. The query operation
 re-observes the same current source and baseline, then returns a bounded source
 page, provider-compatible targets for one opaque source identity and business
-action, or cleanup targets. Literal visible-text filtering is optional. The
-query does not rank or recommend a target. The Agent selects identities and
-actions without parsing the artifact format or reconstructing technical target
-compatibility. It does not author document content, selectors, coordinates,
-edit operations, plans, or intermediate files.
+action, or cleanup targets. Literal visible-text filtering is optional.
+Compatible targets remain pageable and complete; their display order uses only
+current visible text and local document context such as neighboring text and
+table headers. That search order is not a business recommendation or selection.
+The Agent selects identities and actions without parsing the artifact format or
+reconstructing technical target compatibility. It does not author document
+content, selectors, coordinates, edit operations, plans, or intermediate files.
 
-The second operation validates the complete batch, derives the technical plan,
+The third operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the
 output and a complete receipt. A missing, stale, duplicate, or incompatible
 choice fails before mutation. Genuine business ambiguity remains local review;
 it does not erase determinate choices or become a guessed mapping.
 
-The third operation independently repeats admission and readback from the
+The fourth operation independently repeats admission and readback from the
 current source, baseline, choices, and output. It does not trust the migration
 operation's embedded verdict.
 
@@ -85,10 +87,11 @@ shapes.
 - The scenario package owns business identity, allowed ambiguity, and terminal
   meaning.
 - The Agent chooses among the tool's typed current alternatives.
-- The published Word runtime owns document observation, deterministic planning,
-  editing, and readback.
-- The Office MCP adapter publishes the typed surface and invokes the exact
-  installed runtime; it does not interpret scenario rules or Word structure.
+- The published Word runtime owns document observation, including local table
+  context, deterministic planning, editing, and readback.
+- The Office MCP adapter publishes the typed surface, orders complete technical
+  alternatives for progressive discovery, and invokes the exact installed
+  runtime; it does not interpret scenario rules or choose a target.
 - Lucid owns workflow ordering, evidence handoff, delivery verification, and
   platform boundaries.
 

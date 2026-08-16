@@ -34,4 +34,5 @@ artifact. MCP returns only the artifact path, hash, and byte count.
 Template-migration choice artifacts are opaque evidence. Query the same current
 source and baseline through `docx_query_migration_choices` to page unresolved
 sources, request targets compatible with one business action, or inspect cleanup
-targets.
+targets. Compatible targets stay pageable and are shown in current text and
+local document-context order; the tool does not choose the business mapping.

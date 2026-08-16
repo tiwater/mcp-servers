@@ -827,7 +827,9 @@ public static class TemplateMigration
             choice.Text,
             choice.Context?.PreviousText,
             choice.Context?.NextText,
-            choice.Context?.SameRowTexts is null ? null : string.Join("\n", choice.Context.SameRowTexts)
+            choice.Context?.SameRowTexts is null ? null : string.Join("\n", choice.Context.SameRowTexts),
+            choice.Context?.ColumnHeaderText,
+            choice.Context?.TableHeaderTexts is null ? null : string.Join("\n", choice.Context.TableHeaderTexts)
         }.Where(item => !string.IsNullOrWhiteSpace(item))!);
 
     private static void ValidateDecisionDraftIdentity(TemplateMigrationChoiceCatalog catalog, TemplateMigrationDecisionDraft draft)
@@ -1320,7 +1322,9 @@ public static class TemplateMigration
                 : new TemplateMigrationSemanticContext(
                     observation.Context.PreviousText,
                     observation.Context.NextText,
-                    observation.Context.SameRowTexts),
+                    observation.Context.SameRowTexts,
+                    ColumnHeaderText: observation.Context.ColumnHeaderText,
+                    TableHeaderTexts: observation.Context.TableHeaderTexts),
             allowedActions);
 
     private static string ChoiceId(string role, string documentSha256, TemplateMigrationSemanticSelector selector)
@@ -1524,17 +1528,31 @@ public static class TemplateMigration
 
         IReadOnlyList<string>? sameRowTexts = null;
         IReadOnlyList<TemplateMigrationSemanticObservation>? selectableChildren = null;
+        string? columnHeaderText = null;
+        IReadOnlyList<string>? tableHeaderTexts = null;
         if (item.Kind == "table-cell" && item.Topology is not null)
         {
-            sameRowTexts = objects
+            var tableCells = objects
                 .Where(candidate => candidate.Kind == "table-cell"
-                    && candidate.Id != item.Id
-                    && candidate.Topology?.ContainerObjectId == item.Topology.ContainerObjectId
-                    && candidate.Topology.Row == item.Topology.Row
+                    && candidate.Topology?.ContainerObjectId == item.Topology.ContainerObjectId)
+                .ToList();
+            sameRowTexts = tableCells
+                .Where(candidate => candidate.Id != item.Id
+                    && candidate.Topology!.Row == item.Topology.Row
                     && !string.IsNullOrWhiteSpace(candidate.Text))
                 .OrderBy(candidate => candidate.Topology!.Column)
                 .Select(candidate => candidate.Text!)
                 .ToList();
+            var headerRow = tableCells.Min(candidate => candidate.Topology!.Row);
+            var headerCells = tableCells
+                .Where(candidate => candidate.Topology!.Row == headerRow
+                    && !string.IsNullOrWhiteSpace(candidate.Text))
+                .OrderBy(candidate => candidate.Topology!.Column)
+                .ToList();
+            columnHeaderText = headerCells
+                .FirstOrDefault(candidate => candidate.Topology!.Column == item.Topology.Column)
+                ?.Text;
+            tableHeaderTexts = headerCells.Select(candidate => candidate.Text!).ToList();
         }
         if (item.Kind is "paragraph" or "table-cell") selectableChildren = objects
             .Where(candidate => candidate.Kind == "run"
@@ -1549,12 +1567,16 @@ public static class TemplateMigration
             && string.IsNullOrWhiteSpace(nextText)
             && (sameRowTexts is null || sameRowTexts.Count == 0)
             && (selectableChildren is null || selectableChildren.Count == 0)
+            && string.IsNullOrWhiteSpace(columnHeaderText)
+            && (tableHeaderTexts is null || tableHeaderTexts.Count == 0)
                 ? null
                 : new TemplateMigrationSemanticContext(
                     string.IsNullOrWhiteSpace(previousText) ? null : previousText,
                     string.IsNullOrWhiteSpace(nextText) ? null : nextText,
                     sameRowTexts is { Count: > 0 } ? sameRowTexts : null,
-                    selectableChildren is { Count: > 0 } ? selectableChildren : null);
+                    selectableChildren is { Count: > 0 } ? selectableChildren : null,
+                    string.IsNullOrWhiteSpace(columnHeaderText) ? null : columnHeaderText,
+                    tableHeaderTexts is { Count: > 0 } ? tableHeaderTexts : null);
         return new TemplateMigrationSemanticObservation(item.Kind, item.Scope, item.Text, item.Selector, context);
     }
 

@@ -74,7 +74,7 @@ const templateMigrationInput = z.object({
   baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
   output: pathInput.describe('Path to the migrated output DOCX.'),
   receiptOutput: pathInput.describe('New JSON receipt artifact path. Existing files are never overwritten.'),
-  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id returned by docx_list_migration_choices.'),
+  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id: place-content writes the source fact; keep-template-content or keep-template-label preserves the matching baseline-owned content or label; select-template-option carries an option identity; exclude-source requires declared exclusion; review-source is limited to genuine local ambiguity.'),
   templateCleanup: z.array(templateCleanupInput).optional().describe('Optional baseline-owned placeholders or example rows to clear.'),
 }).strict();
 
@@ -194,7 +194,7 @@ const migrationChoiceQueryInput = z.discriminatedUnion('view', [
     ...migrationQueryDocuments,
     view: z.literal('targets'),
     sourceChoiceId: z.string().trim().min(1).describe('Opaque current source id returned by the sources view.'),
-    action: migrationTargetAction.describe('Business action whose technically compatible current baseline targets are requested.'),
+    action: migrationTargetAction.describe('Business action: place-content writes the current source fact; keep-template-content keeps baseline-owned fixed content; keep-template-label keeps the baseline label for the same source meaning; select-template-option carries a selected source option into the matching baseline option.'),
     text: z.string().trim().min(1).optional().describe('Optional literal case-insensitive text to find in target visible text or context.'),
     offset: boundedOffset,
     limit: boundedLimit,
@@ -264,7 +264,7 @@ const tools = [
   },
   {
     name: 'docx_query_migration_choices',
-    description: 'Query current template-migration alternatives without reading the catalog artifact. Page unresolved sources, request provider-compatible targets for one source and business action, or inspect cleanup targets. This tool does not rank, recommend, or make a business choice.',
+    description: 'Query current template-migration alternatives without reading the catalog artifact. Page unresolved sources, request provider-compatible targets for one source and business action, or inspect cleanup targets. Target results are ordered by literal and local document-context relevance; that order helps discovery but does not make the business choice.',
     inputSchema: migrationChoiceQueryInput,
     outputSchema: migrationChoiceQueryOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -438,37 +438,145 @@ async function docxQueryMigrationChoices(args) {
     branch = migrationTargetBranch(action, source.kind);
   }
 
-  const targetResult = await runJsonCandidateChain(docxCandidates, [
-    'find-template-migration-targets',
+  const targetResult = await loadMigrationTargets({
     sourcePath,
     baselinePath,
     sourceChoiceId,
     branch,
-    args.text ?? '-',
-    String(offset),
-    String(limit),
-  ]);
-  const targetPage = migrationTargetPage.parse(targetResult.json);
-  if (targetPage.sourceChoiceId !== (args.view === 'cleanup' ? null : sourceChoiceId) || targetPage.branch !== branch) {
-    throw new Error('Migration target page identity does not match the requested current source and action');
-  }
+    text: args.text,
+  });
   const catalogTargets = new Map(catalog.targets.map(item => [item.id, item]));
-  for (const target of targetPage.targets) {
+  for (const target of targetResult.targets) {
     const current = catalogTargets.get(target.id);
     if (!current || !isDeepStrictEqual(current, target)) {
       throw new Error(`Migration target ${target.id} is not bound to the current catalog`);
     }
   }
+  const catalogOrder = new Map(catalog.targets.map((item, index) => [item.id, index]));
+  const orderedTargets = source
+    ? [...targetResult.targets].sort((left, right) => {
+      const relevance = compareRelevance(
+        migrationChoiceRelevance(source, right),
+        migrationChoiceRelevance(source, left));
+      return relevance || catalogOrder.get(left.id) - catalogOrder.get(right.id);
+    })
+    : [...targetResult.targets].sort((left, right) => catalogOrder.get(left.id) - catalogOrder.get(right.id));
+  const items = orderedTargets.slice(offset, offset + limit);
   return migrationQueryResult({
-    runtime: commandRuntime(targetResult),
+    runtime: targetResult.runtime,
     catalog,
     view: args.view,
     action,
     source,
-    items: targetPage.targets,
-    offset: targetPage.offset,
-    total: targetPage.total,
+    items,
+    offset,
+    total: orderedTargets.length,
   });
+}
+
+async function loadMigrationTargets({ sourcePath, baselinePath, sourceChoiceId, branch, text }) {
+  const targets = [];
+  let offset = 0;
+  let total = null;
+  let runtime = null;
+  do {
+    const result = await runJsonCandidateChain(docxCandidates, [
+      'find-template-migration-targets',
+      sourcePath,
+      baselinePath,
+      sourceChoiceId,
+      branch,
+      text ?? '-',
+      String(offset),
+      '100',
+    ]);
+    const page = migrationTargetPage.parse(result.json);
+    if (page.sourceChoiceId !== (sourceChoiceId === '-' ? null : sourceChoiceId) || page.branch !== branch) {
+      throw new Error('Migration target page identity does not match the requested current source and action');
+    }
+    if (total !== null && page.total !== total) {
+      throw new Error('Migration target page total changed while reading current alternatives');
+    }
+    if (page.offset !== offset || page.targets.length === 0 && offset < page.total) {
+      throw new Error('Migration target pagination did not advance');
+    }
+    runtime ??= commandRuntime(result);
+    total = page.total;
+    targets.push(...page.targets);
+    offset += page.targets.length;
+  } while (offset < total);
+  return { runtime, targets };
+}
+
+function migrationChoiceRelevance(source, target) {
+  const sourceContext = source.context ?? {};
+  const targetContext = target.context ?? {};
+  const sourceRows = sourceContext.sameRowTexts ?? [];
+  const targetRows = targetContext.sameRowTexts ?? [];
+  const sourceHeaders = sourceContext.tableHeaderTexts ?? [];
+  const targetHeaders = targetContext.tableHeaderTexts ?? [];
+  const mainText = textSimilarity(source.text, target.text);
+  const tableIdentity = Math.max(
+    textSimilarity(sourceContext.columnHeaderText, targetContext.columnHeaderText),
+    maximumPairSimilarity(sourceHeaders, targetHeaders));
+  const neighborhood = Math.max(
+    textSimilarity(sourceContext.previousText, targetContext.previousText),
+    textSimilarity(sourceContext.nextText, targetContext.nextText),
+    maximumPairSimilarity(sourceRows, targetRows),
+    maximumPairSimilarity([source.text], targetRows),
+    maximumPairSimilarity(sourceRows, [target.text]));
+  return source.kind === 'table-cell' && target.kind === 'table-cell'
+    ? [tableIdentity, mainText, neighborhood]
+    : [mainText, neighborhood, tableIdentity];
+}
+
+function compareRelevance(left, right) {
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+function maximumPairSimilarity(leftValues, rightValues) {
+  let maximum = 0;
+  for (const left of leftValues ?? []) {
+    for (const right of rightValues ?? []) {
+      maximum = Math.max(maximum, textSimilarity(left, right));
+    }
+  }
+  return maximum;
+}
+
+function textSimilarity(leftValue, rightValue) {
+  const left = normalizeSearchText(leftValue);
+  const right = normalizeSearchText(rightValue);
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  if (Math.min(left.length, right.length) >= 3 && (left.includes(right) || right.includes(left))) {
+    return Math.min(left.length, right.length) / Math.max(left.length, right.length);
+  }
+  const leftPairs = characterPairs(left);
+  const rightPairs = characterPairs(right);
+  if (leftPairs.size === 0 || rightPairs.size === 0) return 0;
+  let shared = 0;
+  for (const pair of leftPairs) if (rightPairs.has(pair)) shared += 1;
+  return 2 * shared / (leftPairs.size + rightPairs.size);
+}
+
+function normalizeSearchText(value) {
+  return typeof value === 'string'
+    ? value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    : '';
+}
+
+function characterPairs(value) {
+  const characters = [...value];
+  if (characters.length < 2) return new Set(value ? [value] : []);
+  const pairs = new Set();
+  for (let index = 0; index + 1 < characters.length; index += 1) {
+    pairs.add(characters[index] + characters[index + 1]);
+  }
+  return pairs;
 }
 
 function migrationTargetBranch(action, sourceKind) {

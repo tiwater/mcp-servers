@@ -359,7 +359,9 @@ public sealed record TemplateMigrationSemanticContext(
     string? PreviousText = null,
     string? NextText = null,
     IReadOnlyList<string>? SameRowTexts = null,
-    IReadOnlyList<TemplateMigrationSemanticObservation>? SelectableChildren = null);
+    IReadOnlyList<TemplateMigrationSemanticObservation>? SelectableChildren = null,
+    string? ColumnHeaderText = null,
+    IReadOnlyList<string>? TableHeaderTexts = null);
 
 public sealed record TemplateMigrationRequiredDecision(
     TemplateMigrationSemanticObservation Source,
