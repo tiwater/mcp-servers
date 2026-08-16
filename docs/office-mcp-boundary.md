@@ -35,19 +35,23 @@ Template migration has four public operations:
 The first operation writes every source item that still needs business judgment
 and the current baseline targets to an evidence artifact. The query operation
 re-observes the same current source and baseline, then returns a bounded source
-page, provider-compatible targets for one opaque source identity and business
-action, or cleanup targets. Literal visible-text filtering is optional.
-Compatible targets remain pageable and complete; their display order uses only
-current visible text and local document context such as neighboring text and
-table headers. That search order is not a business recommendation or selection.
+page, provider-validated action-and-target alternatives for one source identity,
+or cleanup targets. Literal visible-text and action filtering are optional.
+Alternatives remain pageable and complete; their display order uses only current
+visible text and local document context such as neighboring text and table
+headers. That search order is not a business recommendation or selection.
 The Agent selects identities and actions without parsing the artifact format or
 reconstructing technical target compatibility. It does not author document
 content, selectors, coordinates, edit operations, plans, or intermediate files.
-Query results give each current catalog item a short reference such as
-`S1-a1b2c3d4` or `T1-a1b2c3d4`. Its suffix binds the reference to the freshly
-observed source and baseline;
-the adapter deterministically restores the provider identity before invoking
-the Word runtime. Legacy provider identities remain accepted for compatibility.
+Query results give sources and cleanup targets short references such as
+`S1-a1b2c3d4` and `T1-a1b2c3d4`. A targeted alternative additionally binds its
+source, action, and target. Reference suffixes bind these identities to the
+freshly observed source and baseline; the adapter deterministically restores
+the provider identity before invoking the Word runtime. Legacy provider
+identities remain accepted for compatibility.
+The final batch selects a returned alternative as one unit. It does not combine
+an action from one alternative with a target from another. Source exclusions
+and genuine local review remain explicit target-free terminal choices.
 
 The third operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the
