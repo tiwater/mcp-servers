@@ -1921,6 +1921,9 @@ close-template-migration-reviews consumes this resolution as a separate step.
             }
             baselineClears.Add(new TemplateMigrationBaselineClear(matches[0].Id, proposal.Mode));
         }
+        var normalizedBaselineClears = NormalizeBaselineClears(analysis.Baseline.Objects, baselineClears);
+        baselineClears.Clear();
+        baselineClears.AddRange(normalizedBaselineClears);
 
         var projectedSources = new HashSet<string>(StringComparer.Ordinal);
         var projectionBindings = new HashSet<string>(StringComparer.Ordinal);
@@ -2029,6 +2032,44 @@ close-template-migration-reviews consumes this resolution as a separate step.
             failures.Count == 0,
             plan,
             failures);
+    }
+
+    private static IReadOnlyList<TemplateMigrationBaselineClear> NormalizeBaselineClears(
+        IReadOnlyList<TemplateMigrationObject> baselineObjects,
+        IReadOnlyList<TemplateMigrationBaselineClear> clears)
+    {
+        var byId = baselineObjects.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var rowClears = clears
+            .Where(item => string.Equals(item.Mode, "row", StringComparison.Ordinal))
+            .Select(item => byId.TryGetValue(item.BaselineObjectId, out var target) ? target : null)
+            .Where(target => target?.Kind == "table-cell" && target.Topology is not null)
+            .GroupBy(target => (target!.Topology!.ContainerObjectId, target.Topology.Row))
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderBy(target => target!.Topology!.Column).First()!);
+        var coveredCells = rowClears.Keys.ToHashSet();
+        var normalized = rowClears.Values
+            .Select(target => new TemplateMigrationBaselineClear(target.Id, "row"))
+            .ToList();
+        normalized.AddRange(clears.Where(clear =>
+            string.Equals(clear.Mode, "row", StringComparison.Ordinal)
+            && (!byId.TryGetValue(clear.BaselineObjectId, out var target)
+                || target.Kind != "table-cell"
+                || target.Topology is null)));
+        normalized.AddRange(clears.Where(clear =>
+        {
+            if (!string.Equals(clear.Mode, "cell", StringComparison.Ordinal)
+                || !byId.TryGetValue(clear.BaselineObjectId, out var target)
+                || target.Topology is null)
+            {
+                return !string.Equals(clear.Mode, "row", StringComparison.Ordinal);
+            }
+            return !coveredCells.Contains((target.Topology.ContainerObjectId, target.Topology.Row));
+        }));
+        return normalized
+            .OrderBy(item => item.BaselineObjectId, StringComparer.Ordinal)
+            .ThenBy(item => item.Mode, StringComparer.Ordinal)
+            .ToList();
     }
 
     public static int RunCloseReviews(string[] args)
