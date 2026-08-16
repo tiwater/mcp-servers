@@ -2895,6 +2895,58 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_aligns_a_current_paragraph_label_to_a_target_table_cell_without_claiming_its_value_slot()
+    {
+        var source = CreateTextMigrationFixture("Legacy approval label");
+        var baseline = CreateSemanticValueProjectionFixture(["Approval role"], useTableCell: true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Legacy approval label"),
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "Approval role"),
+                    "retain-target-label")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Empty(build.Operations);
+
+        var output = Path.Combine(Path.GetTempPath(), $"migration-cross-kind-label-output-{Guid.NewGuid():N}.docx");
+        var applied = TemplateMigration.Apply(source, baseline, resolved.Plan, output);
+        Assert.True(applied.Pass, string.Join("; ", applied.Readback!.Failures.Select(item => item.Reason)));
+        using var document = WordprocessingDocument.Open(output, false);
+        Assert.Equal("Approval role", document.MainDocumentPart!.Document!.Body!.Descendants<TableCell>().Single().InnerText);
+    }
+
+    [Fact]
+    public void TemplateMigration_allows_multiple_current_structural_labels_to_align_to_one_target_label()
+    {
+        var source = CreateTextMigrationFixture("Legacy approval heading", "Legacy signature heading");
+        var baseline = CreateSemanticValueProjectionFixture(["Approval and signature"], useTableCell: true);
+        var candidate = new TemplateMigrationSemanticCandidate(
+            "tiwater.docx.template-migration-semantic-candidate/v5",
+            [
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Legacy approval heading"),
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "Approval and signature"),
+                    "retain-target-label"),
+                new TemplateMigrationSemanticCandidateMapping(
+                    new TemplateMigrationSemanticSelector("paragraph", "body", "Legacy signature heading"),
+                    new TemplateMigrationSemanticSelector("table-cell", "body", "Approval and signature"),
+                    "retain-target-label")
+            ]);
+
+        var resolved = TemplateMigration.ResolveSemanticCandidate(source, baseline, candidate);
+        Assert.True(resolved.Pass, string.Join("; ", resolved.Unresolved.Select(item => item.Reason)));
+        var build = TemplateMigration.BuildOperations(source, baseline, resolved.Plan);
+        Assert.True(build.Pass, string.Join("; ", build.Failures.Select(item => item.Reason)));
+        Assert.Empty(build.Operations);
+    }
+
+    [Fact]
     public void TemplateMigration_retains_header_labels_and_fields_while_migrating_unique_typed_values()
     {
         var source = CreateLabeledHeaderMigrationFixture(

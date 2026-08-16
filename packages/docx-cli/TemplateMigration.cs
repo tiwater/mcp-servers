@@ -3106,14 +3106,10 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-unknown", mapping.SourceObjectId, mapping.BaselineObjectId));
                     continue;
                 }
-                if (sourceObject.Kind is not ("paragraph" or "table-cell") || !string.Equals(sourceObject.Kind, baselineObject.Kind, StringComparison.Ordinal))
+                if (sourceObject.Kind is not ("paragraph" or "table-cell") || baselineObject.Kind is not ("paragraph" or "table-cell"))
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-retain-target-parent-required", mapping.SourceObjectId, mapping.BaselineObjectId));
                     continue;
-                }
-                if (!copyTargets.Add(mapping.BaselineObjectId))
-                {
-                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-duplicate", mapping.SourceObjectId, mapping.BaselineObjectId));
                 }
             }
             else if (string.Equals(disposition, "unresolved", StringComparison.Ordinal))

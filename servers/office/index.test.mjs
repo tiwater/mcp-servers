@@ -343,8 +343,15 @@ process.exit(2);
       arguments: { source: '/current.docx', baseline: '/baseline.docx', view: 'targets', sourceRef },
     });
     assert.deepEqual(allAlternatives.result.structuredContent.items.map(item => item.action), [
-      'place-content', 'keep-template-content', 'keep-template-label',
+      'place-content', 'keep-template-label',
     ]);
+    assert.equal(allAlternatives.result.structuredContent.source.allowedActions.includes('keep-template-content'), false);
+
+    const hiddenDependentAction = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { source: '/current.docx', baseline: '/baseline.docx', view: 'targets', sourceRef, action: 'keep-template-content' },
+    });
+    assert.equal(hiddenDependentAction.result.isError, true);
 
     const unknownSource = await request('tools/call', {
       name: 'docx_query_migration_choices',
@@ -534,6 +541,18 @@ process.exit(2);
       schema: 'tiwater.docx.template-migration-business-choices/v1',
       choices,
     });
+
+    const legacyDependentReceiptPath = path.join(temporary, 'receipts', 'legacy-dependent.json');
+    const legacyDependent = await request('tools/call', {
+      name: 'docx_migrate_template',
+      arguments: {
+        source: '/current.docx', baseline: '/baseline.docx', output: '/legacy-dependent.docx',
+        receiptOutput: legacyDependentReceiptPath,
+        choices: [{ sourceChoiceId: 'source-1', action: 'keep-template-content', targetChoiceId: 'target-1' }],
+      },
+    });
+    assert.equal(legacyDependent.result.structuredContent.summary.pass, true);
+    assert.equal(JSON.parse(await readFile(legacyDependentReceiptPath, 'utf8')).payload.choices[0].action, 'keep-template-content');
 
     const referencedCleanupReceiptPath = path.join(temporary, 'receipts', 'referenced-cleanup.json');
     const referencedCleanup = await request('tools/call', {

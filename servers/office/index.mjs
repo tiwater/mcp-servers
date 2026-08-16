@@ -42,12 +42,12 @@ const migrationTargetAction = z.enum([
   'keep-template-label',
   'select-template-option',
 ]);
-const targetActions = new Set([
+const migrationQueryTargetAction = z.enum([
   'place-content',
-  'keep-template-content',
   'keep-template-label',
   'select-template-option',
 ]);
+const targetActions = new Set(migrationQueryTargetAction.options);
 
 const choiceReference = z.string().trim().regex(/^[ST][1-9][0-9]*-[0-9a-f]{8}$/);
 const alternativeReference = z.string().trim().regex(/^S[1-9][0-9]*-[PKLO][1-9][0-9]*-[0-9a-f]{8}$/);
@@ -87,7 +87,7 @@ const templateMigrationInput = z.object({
   baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
   output: pathInput.describe('Path to the migrated output DOCX.'),
   receiptOutput: pathInput.describe('New JSON receipt artifact path. Existing files are never overwritten.'),
-  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id: place-content writes the source fact; keep-template-content preserves matching baseline-owned content; keep-template-label preserves the matching baseline label and fields while the provider migrates uniquely delimited identifier, version, and date facts; select-template-option carries an option identity; exclude-source requires declared exclusion; review-source is limited to genuine local ambiguity.'),
+  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id. New targeted choices use an alternativeRef returned by the query tool. Terminal exclusions and genuine local review use a source reference. Legacy full-id choices remain accepted.'),
   templateCleanup: z.array(templateCleanupInput).optional().describe('Optional baseline-owned placeholders or example rows to clear.'),
 }).strict();
 
@@ -113,7 +113,7 @@ const migrationPublicChoiceOutput = migrationChoiceOutput.omit({ id: true }).ext
 
 const migrationAlternativeOutput = z.object({
   ref: alternativeReference,
-  action: migrationTargetAction,
+  action: migrationQueryTargetAction,
   target: migrationPublicChoiceOutput,
 }).strict();
 
@@ -247,7 +247,7 @@ const migrationChoiceQueryInput = z.union([
     view: z.literal('targets'),
     sourceRef: choiceReference.optional().describe('Short source reference returned by the sources view.'),
     sourceChoiceId: z.string().trim().min(1).optional().describe('Legacy opaque source id from the durable catalog.'),
-    action: migrationTargetAction.optional().describe('Optional action filter. Omit it to inspect every provider-compatible action-and-target alternative for the source.'),
+    action: migrationQueryTargetAction.optional().describe('Optional action filter. Omit it to inspect every independently valid action-and-target alternative for the source.'),
     text: z.string().trim().min(1).optional().describe('Optional literal case-insensitive text to find in target visible text or context.'),
     offset: boundedOffset,
     limit: boundedLimit,
@@ -271,7 +271,7 @@ const migrationChoiceQueryOutput = z.object({
   sourceSha256: z.string(),
   baselineSha256: z.string(),
   view: z.enum(['sources', 'targets', 'cleanup']),
-  action: migrationTargetAction.nullable(),
+  action: migrationQueryTargetAction.nullable(),
   source: migrationPublicChoiceOutput.nullable(),
   items: z.array(z.union([migrationPublicChoiceOutput, migrationAlternativeOutput])),
   page: migrationQueryPage,
@@ -531,11 +531,22 @@ async function docxQueryMigrationChoices(args) {
       targets: validateAndOrderMigrationTargets(catalog, source, result.targets),
     };
   }));
-  const alternatives = pages.flatMap(page => page.targets.map(target => ({
-    ref: migrationAlternativeRef(catalog, source, page.action, target),
-    action: page.action,
-    target: publicMigrationChoice(catalog, target, 'T'),
-  })));
+  const catalogOrder = new Map(catalog.targets.map((item, index) => [item.id, index]));
+  const actionOrder = new Map([...targetActions].map((item, index) => [item, index]));
+  const alternatives = pages.flatMap(page => page.targets.map(target => ({ action: page.action, target })))
+    .sort((left, right) => {
+      const relevance = compareRelevance(
+        migrationChoiceRelevance(source, right.target),
+        migrationChoiceRelevance(source, left.target));
+      return relevance
+        || catalogOrder.get(left.target.id) - catalogOrder.get(right.target.id)
+        || actionOrder.get(left.action) - actionOrder.get(right.action);
+    })
+    .map(item => ({
+      ref: migrationAlternativeRef(catalog, source, item.action, item.target),
+      action: item.action,
+      target: publicMigrationChoice(catalog, item.target, 'T'),
+    }));
   return migrationQueryResult({
     runtime: pages[0]?.runtime ?? commandRuntime(catalogResult),
     catalog,
@@ -752,6 +763,7 @@ function publicMigrationChoice(catalog, choice, prefix) {
   const items = prefix === 'S' ? catalog.sources : catalog.targets;
   return {
     ...visible,
+    allowedActions: visible.allowedActions.filter(action => action !== 'keep-template-content'),
     ref: choiceRef(catalog, items, id, prefix),
   };
 }
