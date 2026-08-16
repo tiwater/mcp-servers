@@ -2053,10 +2053,14 @@ close-template-migration-reviews consumes this resolution as a separate step.
                     continue;
                 }
                 var semantic = RetainedLabelValueSemantic(baselineParent.Id, valueKind);
-                if (!projectionBindings.Add($"{sourceParent.Id}\u001F{baselineParent.Id}\u001F{semantic}")
-                    || !projectedSemantics.Add(semantic))
+                if (!projectionBindings.Add($"{sourceParent.Id}\u001F{baselineParent.Id}\u001F{semantic}"))
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-value-binding-duplicate", sourceParent.Id, baselineParent.Id, semantic));
+                    continue;
+                }
+                if (!projectedSemantics.Add(semantic))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-value-identity-duplicate", sourceParent.Id, baselineParent.Id, semantic));
                     continue;
                 }
                 projectedSources.Add(sourceParent.Id);
@@ -4878,8 +4882,11 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
-            var spans = ProjectionRunGroups(runs)
-                .SelectMany(group => DelimitedValueSpans(string.Concat(group.Select(item => item.Text ?? string.Empty)), valueKind, allowPlaceholder: false))
+            var visibleGroups = parent.Kind == "paragraph" && !string.IsNullOrEmpty(parent.Text)
+                ? [parent.Text]
+                : ProjectionRunGroups(runs).Select(group => string.Concat(group.Select(item => item.Text ?? string.Empty)));
+            var spans = visibleGroups
+                .SelectMany(text => DelimitedValueSpans(text, valueKind, allowPlaceholder: false))
                 .Where(span => ProjectionValueKindMatches(span.Value, valueKind)).ToList();
             if (spans.Count == 0)
             {
@@ -5133,9 +5140,13 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
             var delimitedCandidates = new List<string>();
-            foreach (var group in runs.GroupBy(run => Regex.Replace(run.Id, ":run:[0-9]+$", string.Empty, RegexOptions.CultureInvariant), StringComparer.Ordinal))
+            var parent = objects.FirstOrDefault(item => string.Equals(item.Id, parentId, StringComparison.Ordinal));
+            var visibleGroups = parent?.Kind == "paragraph" && !string.IsNullOrEmpty(parent.Text)
+                ? [parent.Text]
+                : runs.GroupBy(run => Regex.Replace(run.Id, ":run:[0-9]+$", string.Empty, RegexOptions.CultureInvariant), StringComparer.Ordinal)
+                    .Select(group => string.Concat(group.Select(run => run.Text ?? string.Empty)));
+            foreach (var text in visibleGroups)
             {
-                var text = string.Concat(group.Select(run => run.Text ?? string.Empty));
                 for (var delimiter = 0; delimiter < text.Length; delimiter += 1)
                 {
                     if (text[delimiter] is not (':' or '：')) continue;

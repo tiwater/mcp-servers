@@ -2948,7 +2948,7 @@ public class AnnotationToolsTests
     public void TemplateMigration_combines_distinct_labeled_values_from_separate_header_paragraphs()
     {
         var source = CreateSplitLabeledHeaderMigrationFixture(
-            "Legacy protocol: ", "OMEGA-12", "Issue: ", "07");
+            "Legacy protocol: ", "OMEGA-12", "Issue: ", "07", appendPageField: true);
         var baseline = CreateLabeledHeaderMigrationFixture(
             "Document code: ", "BASE-1", "Revision: ", "1.0", pageCount: "11");
         var draft = Path.Combine(Path.GetTempPath(), $"migration-split-header-{Guid.NewGuid():N}.json");
@@ -3002,7 +3002,7 @@ public class AnnotationToolsTests
 
         var error = Assert.Throws<InvalidOperationException>(() => TemplateMigration.RecordDecision(source, baseline, draft,
             new TemplateMigrationDecisionInput("mapping", progress.NextSource!.Id, target.Id, "retain-target-label")));
-        Assert.Equal("template-migration-semantic-value-binding-duplicate", error.Message);
+        Assert.Equal("template-migration-semantic-value-identity-duplicate", error.Message);
         using var unchanged = JsonDocument.Parse(File.ReadAllText(draft));
         Assert.Single(unchanged.RootElement.GetProperty("mappings").EnumerateArray());
     }
@@ -6505,15 +6505,21 @@ public class AnnotationToolsTests
         string firstLabel,
         string firstValue,
         string secondLabel,
-        string secondValue)
+        string secondValue,
+        bool appendPageField = false)
     {
         var path = Path.Combine(Path.GetTempPath(), $"migration-split-labeled-header-{Guid.NewGuid():N}.docx");
         using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var main = document.AddMainDocumentPart();
         var header = main.AddNewPart<HeaderPart>();
+        var second = new Paragraph(new Run(new Text(secondLabel)), new Run(new Text(secondValue)));
+        if (appendPageField)
+        {
+            second.Append(new Run(new TabChar()), new Run(new Text("Page: 1 / 1")));
+        }
         header.Header = new Header(
             new Paragraph(new Run(new Text(firstLabel)), new Run(new Text(firstValue))),
-            new Paragraph(new Run(new Text(secondLabel)), new Run(new Text(secondValue))));
+            second);
         main.Document = new Document(new Body(
             new Paragraph(new Run(new Text("body"))),
             new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));
