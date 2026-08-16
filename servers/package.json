@@ -4,6 +4,11 @@
   "description": "Published MCP server for Tiwater Office document capabilities",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tiwater/mcp-servers",
+    "directory": "servers"
+  },
   "bin": {
     "tiwater-office-mcp": "office/index.mjs"
   },
