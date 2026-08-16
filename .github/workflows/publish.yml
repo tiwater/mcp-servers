@@ -161,6 +161,7 @@ jobs:
       - name: Verify package and server contract
         run: |
           cd servers
+          npm ci
           npm test
           npm pack --dry-run
 
