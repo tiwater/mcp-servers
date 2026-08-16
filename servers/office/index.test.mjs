@@ -396,6 +396,7 @@ process.exit(2);
     });
     assert.deepEqual(contextMatch.result.structuredContent.items.map(item => item.target.ref.split('-')[0]), ['T2']);
     const revisionTargetRef = contextMatch.result.structuredContent.items[0].target.ref;
+    const revisionAlternativeRef = contextMatch.result.structuredContent.items[0].ref;
     const alphaTarget = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'targets', sourceRef: firstMultiSourceRef, action: 'place-content' },
@@ -591,6 +592,28 @@ process.exit(2);
         { sourceChoiceId: 'source-beta', action: 'place-content', targetChoiceId: 'target-body' },
       ],
       templateCleanup: [{ targetChoiceId: 'target-revision', scope: 'row' }],
+    });
+
+    const claimedCleanupReceiptPath = path.join(temporary, 'receipts', 'claimed-cleanup.json');
+    const claimedCleanup = await request('tools/call', {
+      name: 'docx_migrate_template',
+      arguments: {
+        source: '/multi.docx', baseline: '/baseline.docx', output: '/claimed-cleanup.docx',
+        receiptOutput: claimedCleanupReceiptPath,
+        choices: [
+          { alternativeRef: headerAlternativeRef },
+          { alternativeRef: revisionAlternativeRef },
+        ],
+        templateCleanup: [{ targetRef: revisionTargetRef, scope: 'cell' }],
+      },
+    });
+    assert.equal(claimedCleanup.result.structuredContent.summary.pass, true);
+    assert.deepEqual(JSON.parse(await readFile(claimedCleanupReceiptPath, 'utf8')).payload, {
+      schema: 'tiwater.docx.template-migration-business-choices/v1',
+      choices: [
+        { sourceChoiceId: 'source-alpha', action: 'place-content', targetChoiceId: 'target-header' },
+        { sourceChoiceId: 'source-beta', action: 'place-content', targetChoiceId: 'target-revision' },
+      ],
     });
 
     const invalidReferenceReceipt = path.join(temporary, 'receipts', 'invalid-reference.json');

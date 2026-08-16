@@ -801,11 +801,18 @@ function completeMigrationChoices(catalog, choices) {
   return completed;
 }
 
-function completeTemplateCleanup(catalog, cleanup) {
-  return cleanup.map(rawCleanup => ({
-    targetChoiceId: choiceIdFromRef(catalog, catalog.targets, rawCleanup.targetRef, 'T', 'target'),
-    scope: rawCleanup.scope,
-  }));
+function completeTemplateCleanup(catalog, cleanup, choices) {
+  const targets = new Map(catalog.targets.map(target => [target.id, target]));
+  const claimedTargets = new Set(choices.flatMap(choice => choice.targetChoiceId ? [choice.targetChoiceId] : []));
+  const seen = new Set();
+  return cleanup.map(rawCleanup => {
+    const targetChoiceId = choiceIdFromRef(catalog, catalog.targets, rawCleanup.targetRef, 'T', 'target');
+    if (!seen.add(targetChoiceId)) throw invalidMigrationInput(`duplicate migration cleanup target id: ${targetChoiceId}`);
+    if (!targets.get(targetChoiceId)?.allowedActions.includes('template-cleanup')) {
+      throw invalidMigrationInput(`migration cleanup is not allowed for target id: ${targetChoiceId}`);
+    }
+    return { targetChoiceId, scope: rawCleanup.scope };
+  }).filter(cleanupChoice => !claimedTargets.has(cleanupChoice.targetChoiceId));
 }
 
 async function runTemplateMigrationCommand(tool, command, args) {
@@ -817,10 +824,14 @@ async function runTemplateMigrationCommand(tool, command, args) {
   }
   const catalogResult = await runJsonCandidateChain(docxCandidates, ['list-template-migration-choices', source, baseline]);
   const catalog = migrationCatalog.parse(catalogResult.json);
+  const choices = completeMigrationChoices(catalog, args.choices);
+  const templateCleanup = Array.isArray(args.templateCleanup)
+    ? completeTemplateCleanup(catalog, args.templateCleanup, choices)
+    : [];
   const payload = {
     schema: 'tiwater.docx.template-migration-business-choices/v1',
-    choices: completeMigrationChoices(catalog, args.choices),
-    ...(Array.isArray(args.templateCleanup) ? { templateCleanup: completeTemplateCleanup(catalog, args.templateCleanup) } : {}),
+    choices,
+    ...(templateCleanup.length > 0 ? { templateCleanup } : {}),
   };
   return withTempJsonFile(payload, async choicesPath => {
     const result = await runJsonCandidateChain(
