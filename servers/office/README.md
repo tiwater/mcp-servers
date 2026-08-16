@@ -31,8 +31,9 @@ The official MCP SDK derives the schemas advertised to clients and validates
 tool arguments and structured results before they cross the protocol boundary.
 Large observations and exports are written to a caller-selected new JSON
 artifact. MCP returns only the artifact path, hash, and byte count.
-Template-migration choice artifacts are opaque evidence. Query the same current
-source and baseline through `docx_query_migration_choices` to page unresolved
-sources, request targets compatible with one business action, or inspect cleanup
-targets. Compatible targets stay pageable and are shown in current text and
-local document-context order; the tool does not choose the business mapping.
+Template-migration choice artifacts are opaque evidence. List the choices once,
+then query the same current source and baseline to page sources, request targets
+for a business action, or inspect cleanup targets. Query results expose short
+catalog-bound references. Submit one complete batch to migrate, then verify the
+output independently from the same inputs and batch. The tool does not choose
+the business mapping.

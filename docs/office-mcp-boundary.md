@@ -43,6 +43,11 @@ table headers. That search order is not a business recommendation or selection.
 The Agent selects identities and actions without parsing the artifact format or
 reconstructing technical target compatibility. It does not author document
 content, selectors, coordinates, edit operations, plans, or intermediate files.
+Query results give each current catalog item a short reference such as
+`S1-a1b2c3d4` or `T1-a1b2c3d4`. Its suffix binds the reference to the freshly
+observed source and baseline;
+the adapter deterministically restores the provider identity before invoking
+the Word runtime. Legacy provider identities remain accepted for compatibility.
 
 The third operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the
@@ -105,7 +110,7 @@ from the resulting PDF, visual review, and final workflow closure.
 - The published conversion runtime owns native Office-to-PDF rendering and its
   provenance receipt.
 - The Office MCP adapter publishes the typed surface, orders complete technical
-  alternatives for progressive discovery, and invokes the exact installed
+  alternatives for bounded discovery, and invokes the exact installed
   runtime; it does not interpret scenario rules or choose a target.
 - Lucid owns workflow ordering, evidence handoff, delivery verification, and
   platform boundaries.
