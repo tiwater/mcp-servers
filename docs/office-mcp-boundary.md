@@ -60,6 +60,11 @@ choice. Structural label alignment may preserve one target for more than one
 current label observation because it does not claim or rewrite the target's
 business value. Provider-internal parent/value dependencies are not exposed as
 Agent choices.
+Cleanup alternatives contain only target-owned text capacity that can be
+removed without deleting dynamic fields, drawings, or other non-text Office
+structure. The Word runtime independently rejects a cleanup whose selected
+cell or row contains such protected content, even if a caller bypasses the
+catalog.
 
 The third operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the
