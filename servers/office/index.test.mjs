@@ -177,17 +177,23 @@ process.exit(2);
     assert.equal(listTool.outputSchema.properties.artifact.properties.sha256.type, 'string');
     assert.equal(listTool.outputSchema.properties.summary.properties.sourceCount.type, 'integer');
     assert.equal(migrateTool.inputSchema.required.includes('receiptOutput'), true);
-    assert.equal('cardinality' in migrateTool.inputSchema.properties.choices.items.properties, false);
+    const migrationChoiceSchemas = migrateTool.inputSchema.properties.choices.items.anyOf;
+    assert.equal(migrationChoiceSchemas.length, 3);
+    assert.equal(migrationChoiceSchemas.some(schema => schema.required?.includes('alternativeRef')), true);
+    assert.equal(migrationChoiceSchemas.every(schema => !('cardinality' in (schema.properties ?? {}))), true);
     assert.equal(migrateTool.outputSchema.properties.artifact.properties.sha256.type, 'string');
     assert.equal(migrateTool.outputSchema.properties.summary.properties.outputVerified.type, 'boolean');
-    assert.deepEqual(migrateTool.inputSchema.properties.choices.items.properties.action.enum, [
-      'place-content',
+    const publicActions = migrationChoiceSchemas
+      .flatMap(schema => schema.properties?.action?.enum ?? [])
+      .sort();
+    assert.deepEqual(publicActions, [
+      'exclude-source',
       'keep-template-content',
       'keep-template-label',
-      'select-template-option',
-      'exclude-source',
+      'place-content',
       'review-source',
-    ]);
+      'select-template-option',
+    ].sort());
     assert.equal(migrateTool.inputSchema.additionalProperties, false);
 
     const renderInput = path.join(temporary, 'render-current.docx');
@@ -323,11 +329,22 @@ process.exit(2);
     assert.equal(targetPage.result.structuredContent.view, 'targets');
     assert.equal(targetPage.result.structuredContent.action, 'place-content');
     assert.equal(targetPage.result.structuredContent.source.ref, sourceRef);
-    assert.match(targetPage.result.structuredContent.items[0].ref, /^T1-[0-9a-f]{8}$/);
-    const targetRef = targetPage.result.structuredContent.items[0].ref;
+    assert.equal(targetPage.result.structuredContent.items[0].action, 'place-content');
+    assert.match(targetPage.result.structuredContent.items[0].ref, /^S1-P1-[0-9a-f]{8}$/);
+    assert.match(targetPage.result.structuredContent.items[0].target.ref, /^T1-[0-9a-f]{8}$/);
+    const alternativeRef = targetPage.result.structuredContent.items[0].ref;
+    const targetRef = targetPage.result.structuredContent.items[0].target.ref;
     assert.deepEqual(targetPage.result.structuredContent.page, {
       offset: 0, returned: 1, total: 1, hasMore: false,
     });
+
+    const allAlternatives = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { source: '/current.docx', baseline: '/baseline.docx', view: 'targets', sourceRef },
+    });
+    assert.deepEqual(allAlternatives.result.structuredContent.items.map(item => item.action), [
+      'place-content', 'keep-template-content', 'keep-template-label',
+    ]);
 
     const unknownSource = await request('tools/call', {
       name: 'docx_query_migration_choices',
@@ -372,33 +389,33 @@ process.exit(2);
         text: 'REVISION',
       },
     });
-    assert.deepEqual(contextMatch.result.structuredContent.items.map(item => item.ref.split('-')[0]), ['T2']);
-    const revisionTargetRef = contextMatch.result.structuredContent.items[0].ref;
+    assert.deepEqual(contextMatch.result.structuredContent.items.map(item => item.target.ref.split('-')[0]), ['T2']);
+    const revisionTargetRef = contextMatch.result.structuredContent.items[0].target.ref;
     const alphaTarget = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'targets', sourceRef: firstMultiSourceRef, action: 'place-content' },
     });
-    const headerTargetRef = alphaTarget.result.structuredContent.items[0].ref;
+    const headerAlternativeRef = alphaTarget.result.structuredContent.items[0].ref;
     const betaTarget = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'targets', sourceRef: secondMultiSourceRef, action: 'place-content', text: 'destination' },
     });
-    const bodyTargetRef = betaTarget.result.structuredContent.items[0].ref;
+    const bodyAlternativeRef = betaTarget.result.structuredContent.items[0].ref;
     const structurallyRelated = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: { source: '/context.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-context', action: 'place-content' },
     });
-    assert.deepEqual(structurallyRelated.result.structuredContent.items.map(item => item.ref.split('-')[0]), ['T2', 'T1']);
+    assert.deepEqual(structurallyRelated.result.structuredContent.items.map(item => item.target.ref.split('-')[0]), ['T2', 'T1']);
     const headerSearch = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: { source: '/context.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-context', action: 'place-content', text: 'Release identifier' },
     });
-    assert.deepEqual(headerSearch.result.structuredContent.items.map(item => item.ref.split('-')[0]), ['T2']);
+    assert.deepEqual(headerSearch.result.structuredContent.items.map(item => item.target.ref.split('-')[0]), ['T2']);
     const changedContextChangesOrder = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: { source: '/context-mutated.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-context', action: 'place-content' },
     });
-    assert.deepEqual(changedContextChangesOrder.result.structuredContent.items.map(item => item.ref.split('-')[0]), ['T1', 'T2']);
+    assert.deepEqual(changedContextChangesOrder.result.structuredContent.items.map(item => item.target.ref.split('-')[0]), ['T1', 'T2']);
     const noMatches = await request('tools/call', {
       name: 'docx_query_migration_choices',
       arguments: { source: '/multi.docx', baseline: '/baseline.docx', view: 'targets', sourceChoiceId: 'source-beta', action: 'place-content', text: 'not present' },
@@ -444,7 +461,7 @@ process.exit(2);
       ...boundedTargets.result.structuredContent.items,
       ...nextTargets.result.structuredContent.items,
       ...finalTargets.result.structuredContent.items,
-    ].map(item => item.ref)).size, 25);
+    ].map(item => item.target.ref)).size, 25);
 
     const invalidCatalogSource = await request('tools/call', {
       name: 'docx_query_migration_choices',
@@ -496,7 +513,7 @@ process.exit(2);
     });
     assert.equal(overwriteCatalog.result.isError, true);
 
-    const referencedChoices = [{ sourceRef, action: 'place-content', targetRef }];
+    const referencedChoices = [{ alternativeRef }];
     const choices = [{ sourceChoiceId: 'source-1', action: 'place-content', targetChoiceId: 'target-1' }];
     const migrationReceiptPath = path.join(temporary, 'receipts', 'migration.json');
     const migrated = await request('tools/call', {
@@ -525,8 +542,8 @@ process.exit(2);
         source: '/multi.docx', baseline: '/baseline.docx', output: '/multi-output.docx',
         receiptOutput: referencedCleanupReceiptPath,
         choices: [
-          { sourceRef: firstMultiSourceRef, action: 'place-content', targetRef: headerTargetRef },
-          { sourceRef: secondMultiSourceRef, action: 'place-content', targetRef: bodyTargetRef },
+          { alternativeRef: headerAlternativeRef },
+          { alternativeRef: bodyAlternativeRef },
         ],
         templateCleanup: [{ targetRef: revisionTargetRef, scope: 'row' }],
       },
@@ -547,7 +564,7 @@ process.exit(2);
       arguments: {
         source: '/current.docx', baseline: '/baseline.docx', output: '/invalid-reference.docx',
         receiptOutput: invalidReferenceReceipt,
-        choices: [{ sourceRef, action: 'place-content', targetRef: targetRef.replace(/^T1-/, 'T99-') }],
+        choices: [{ alternativeRef: alternativeRef.replace(/-P1-/, '-P99-') }],
       },
     });
     assert.equal(invalidReference.result.isError, true);
@@ -563,15 +580,28 @@ process.exit(2);
       },
     });
     assert.equal(staleReference.result.isError, true);
-    assert.match(staleReference.result.content[0].text, /stale migration source ref/);
+    assert.match(staleReference.result.content[0].text, /stale or invalid migration alternative ref/);
     await assert.rejects(readFile(staleReferenceReceipt, 'utf8'));
+
+    const recombinedReferenceReceipt = path.join(temporary, 'receipts', 'recombined-reference.json');
+    const recombinedReference = await request('tools/call', {
+      name: 'docx_migrate_template',
+      arguments: {
+        source: '/current.docx', baseline: '/baseline.docx', output: '/recombined-reference.docx',
+        receiptOutput: recombinedReferenceReceipt,
+        choices: [{ alternativeRef: alternativeRef.replace('-P1-', '-K1-') }],
+      },
+    });
+    assert.equal(recombinedReference.result.isError, true);
+    assert.match(recombinedReference.result.content[0].text, /stale or invalid migration alternative ref/);
+    await assert.rejects(readFile(recombinedReferenceReceipt, 'utf8'));
 
     const mixedIdentity = await request('tools/call', {
       name: 'docx_migrate_template',
       arguments: {
         source: '/current.docx', baseline: '/baseline.docx', output: '/mixed.docx',
         receiptOutput: path.join(temporary, 'receipts', 'mixed.json'),
-        choices: [{ sourceRef, sourceChoiceId: 'source-1', action: 'place-content', targetRef }],
+        choices: [{ alternativeRef, sourceRef }],
       },
     });
     assert.equal(mixedIdentity.result.isError, true);

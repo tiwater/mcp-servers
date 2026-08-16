@@ -33,7 +33,8 @@ Large observations and exports are written to a caller-selected new JSON
 artifact. MCP returns only the artifact path, hash, and byte count.
 Template-migration choice artifacts are opaque evidence. List the choices once,
 then query the same current source and baseline to page sources, request targets
-for a business action, or inspect cleanup targets. Query results expose short
-catalog-bound references. Submit one complete batch to migrate, then verify the
-output independently from the same inputs and batch. The tool does not choose
-the business mapping.
+for a source, or inspect cleanup targets. Target queries return complete
+provider-compatible action-and-target alternatives under short catalog-bound
+references. Submit selected alternatives and target-free terminal choices as
+one batch, then verify the output independently from the same inputs and batch.
+The tool does not choose the business mapping.
