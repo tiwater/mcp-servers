@@ -2976,6 +2976,43 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void TemplateMigration_row_cleanup_subsumes_cell_cleanup_independent_of_request_order()
+    {
+        var source = CreateTextMigrationFixture("unresolved current fact");
+        var baseline = CreateBaselineClearFixture("keep", "remove me");
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var sourceChoice = Assert.Single(catalog.Sources);
+        var rowCell = Assert.Single(catalog.Targets, item => item.Kind == "table-cell" && item.Text == "remove me");
+        var siblingCell = Assert.Single(catalog.Targets, item => item.Kind == "table-cell" && item.Text == "baseline default");
+
+        TemplateMigrationMappingDerivation Resolve(params TemplateMigrationTemplateCleanup[] cleanup)
+            => TemplateMigration.ResolveBusinessChoices(
+                source,
+                baseline,
+                new TemplateMigrationBusinessChoiceBatch(
+                    "tiwater.docx.template-migration-business-choices/v1",
+                    [new TemplateMigrationBusinessChoice(sourceChoice.Id, "review-source")],
+                    cleanup));
+
+        var cellThenRow = Resolve(
+            new TemplateMigrationTemplateCleanup(siblingCell.Id, "cell"),
+            new TemplateMigrationTemplateCleanup(rowCell.Id, "row"));
+        var rowThenCell = Resolve(
+            new TemplateMigrationTemplateCleanup(rowCell.Id, "row"),
+            new TemplateMigrationTemplateCleanup(siblingCell.Id, "cell"));
+
+        Assert.Equal("tiwater.docx.template-migration-review-closure/v1", cellThenRow.Schema);
+        Assert.Equal("tiwater.docx.template-migration-review-closure/v1", rowThenCell.Schema);
+        var firstClear = Assert.Single(cellThenRow.Plan.BaselineClears!);
+        var secondClear = Assert.Single(rowThenCell.Plan.BaselineClears!);
+        Assert.Equal("row", firstClear.Mode);
+        Assert.Equal(firstClear, secondClear);
+        Assert.DoesNotContain(
+            TemplateMigration.BuildOperations(source, baseline, cellThenRow.Plan).Failures,
+            item => item.Reason == "template-migration-baseline-clear-duplicate");
+    }
+
+    [Fact]
     public void TemplateMigration_rejects_unbound_or_conflicting_baseline_clear()
     {
         var source = CreateTextMigrationFixture("source fact");
