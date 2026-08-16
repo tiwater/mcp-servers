@@ -11,6 +11,7 @@ Shared stdio MCP server for Office document workflows.
 - `docx_verify_migration`
 - `docx_compare`
 - `docx_export_json`
+- `office_render_pdf`
 - `xlsx_inspect`
 - `xlsx_export_json`
 - `xlsx_validate`
@@ -22,9 +23,9 @@ Shared stdio MCP server for Office document workflows.
 Install `@tiwater/office-mcp` together with the runtime versions required by
 the consumer, then run `tiwater-office-mcp` as a stdio MCP server.
 
-The server invokes published `tiwater-docx`, `tiwater-xlsx`, and
-`tiwater-pptx` commands from `PATH`. It does not require a source checkout or
-fall back to local projects.
+The server invokes published `tiwater-docx`, `tiwater-xlsx`,
+`tiwater-pptx`, and `tiwater-convert` commands from `PATH`. It does not require
+a source checkout or fall back to local projects.
 
 The official MCP SDK derives the schemas advertised to clients and validates
 tool arguments and structured results before they cross the protocol boundary.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -16,6 +16,7 @@ test('published Office MCP exposes one batch migration surface and forwards type
   await chmod(fakeDotnet, 0o755);
   await writeFile(fakeRuntime, `#!${process.execPath}
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const command = process.argv[2];
 const choice = (id, options={}) => ({id,kind:options.kind??'paragraph',scope:options.scope??'body',text:options.text??id,count:1,requiredCardinality:options.requiredCardinality??'one',context:options.context??null,allowedActions:options.allowedActions??['place-content','keep-template-content','keep-template-label']});
 const catalogFor = sourcePath => {
@@ -83,10 +84,25 @@ if (command === 'migrate-template' || command === 'verify-template-migration') {
   process.stdout.write(JSON.stringify({schema:'receipt/v1',toolVersion:'0.12.2',status:failed?'failed':'pass',pass:!failed,reviewRequired:false,outputVerified:!failed,command,payload,output:failed?null:process.argv[6],plan:failed?null:process.argv[6]+'.migration-plan.json',failures:failed?[{reason:'known-failure'}]:[]}));
   process.exit(0);
 }
+if (command.endsWith('-to-pdf')) {
+  const input = process.argv[3];
+  const output = process.argv[4];
+  const sourceFormat = command.slice(0, -'-to-pdf'.length);
+  const backend = ['doc','docx','odt','rtf'].includes(sourceFormat)?'wps':['xls','xlsx','ods'].includes(sourceFormat)?'et':'wpp';
+  if (process.env.TIWATER_OFFICE_PDF_BACKEND !== backend) process.exit(3);
+  const inputBytes = fs.readFileSync(input);
+  const outputBytes = Buffer.from('%PDF-1.7 fake native render');
+  fs.writeFileSync(output, outputBytes);
+  const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+  const reportedOutputHash = input.includes('wrong-hash') ? '0'.repeat(64) : sha(outputBytes);
+  process.stdout.write(JSON.stringify({status:'ok',input, input_sha256:sha(inputBytes),output,output_sha256:reportedOutputHash,source_format:sourceFormat,target_format:'pdf',version:'0.9.22',backend,fallback_reason:input.includes('fallback')?'non-native':null,page_count:1,native_render_provenance:{schema:'tiwater.convert-native-render-provenance/v1',backend,input:{sha256:sha(inputBytes),size_bytes:inputBytes.length},output:{sha256:reportedOutputHash,size_bytes:outputBytes.length},page_count:1}}));
+  process.exit(0);
+}
 process.stderr.write('unexpected command: ' + command);
 process.exit(2);
 `, 'utf8');
   await chmod(fakeRuntime, 0o755);
+  await symlink(fakeRuntime, path.join(temporary, 'tiwater-convert'));
 
   const child = spawn(process.execPath, [path.join(officeDir, 'index.mjs')], {
     env: { ...process.env, PATH: temporary, DOTNET_ROOT: '', DOTNET_ROOT_ARM64: '', DOTNET_ROOT_X64: '' },
@@ -123,13 +139,14 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.7.0');
+    assert.equal(initialized.result.serverInfo.version, '0.8.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
     assert(names.includes('docx_query_migration_choices'));
     assert(names.includes('docx_migrate_template'));
     assert(names.includes('docx_verify_migration'));
+    assert(names.includes('office_render_pdf'));
     assert.deepEqual(
       names.filter(name => [
         'docx_edit',
@@ -164,6 +181,63 @@ process.exit(2);
       'review-source',
     ]);
     assert.equal(migrateTool.inputSchema.additionalProperties, false);
+
+    const renderInput = path.join(temporary, 'render-current.docx');
+    const renderOutput = path.join(temporary, 'rendered', 'current.pdf');
+    const renderReceipt = path.join(temporary, 'rendered', 'current.receipt.json');
+    await writeFile(renderInput, 'current document bytes', 'utf8');
+    const rendered = await request('tools/call', {
+      name: 'office_render_pdf',
+      arguments: { input: renderInput, output: renderOutput, receiptOutput: renderReceipt },
+    });
+    assert.notEqual(rendered.result.isError, true, JSON.stringify(rendered.result));
+    assert.equal(rendered.result.structuredContent.summary.backend, 'wps');
+    assert.equal(rendered.result.structuredContent.summary.pageCount, 1);
+    assert.equal(rendered.result.structuredContent.pdf.path, renderOutput);
+    assert.equal(rendered.result.structuredContent.receipt.path, renderReceipt);
+    assert.equal(JSON.parse(await readFile(renderReceipt, 'utf8')).backend, 'wps');
+    for (const [extension, expectedBackend] of [['xlsx', 'et'], ['pptx', 'wpp']]) {
+      const formatInput = path.join(temporary, `render-current.${extension}`);
+      await writeFile(formatInput, `${extension} bytes`, 'utf8');
+      const formatRender = await request('tools/call', {
+        name: 'office_render_pdf',
+        arguments: {
+          input: formatInput,
+          output: path.join(temporary, 'rendered', `${extension}.pdf`),
+          receiptOutput: path.join(temporary, 'rendered', `${extension}.receipt.json`),
+        },
+      });
+      assert.notEqual(formatRender.result.isError, true, JSON.stringify(formatRender.result));
+      assert.equal(formatRender.result.structuredContent.summary.backend, expectedBackend);
+    }
+    const replayedRender = await request('tools/call', {
+      name: 'office_render_pdf',
+      arguments: { input: renderInput, output: renderOutput, receiptOutput: path.join(temporary, 'rendered', 'replay.receipt.json') },
+    });
+    assert.equal(replayedRender.result.isError, true);
+    const unsupportedRender = await request('tools/call', {
+      name: 'office_render_pdf',
+      arguments: { input: path.join(temporary, 'current.txt'), output: path.join(temporary, 'rendered', 'invalid.pdf'), receiptOutput: path.join(temporary, 'rendered', 'invalid.receipt.json') },
+    });
+    assert.equal(unsupportedRender.result.isError, true);
+    const nonPdfRender = await request('tools/call', {
+      name: 'office_render_pdf',
+      arguments: { input: renderInput, output: path.join(temporary, 'rendered', 'invalid.txt'), receiptOutput: path.join(temporary, 'rendered', 'invalid-output.receipt.json') },
+    });
+    assert.equal(nonPdfRender.result.isError, true);
+    for (const invalidReceipt of ['fallback', 'wrong-hash']) {
+      const invalidInput = path.join(temporary, `${invalidReceipt}.docx`);
+      const invalidPdf = path.join(temporary, 'rendered', `${invalidReceipt}.pdf`);
+      const invalidReceiptOutput = path.join(temporary, 'rendered', `${invalidReceipt}.receipt.json`);
+      await writeFile(invalidInput, `${invalidReceipt} bytes`, 'utf8');
+      const rejected = await request('tools/call', {
+        name: 'office_render_pdf',
+        arguments: { input: invalidInput, output: invalidPdf, receiptOutput: invalidReceiptOutput },
+      });
+      assert.equal(rejected.result.isError, true);
+      await assert.rejects(readFile(invalidPdf));
+      await assert.rejects(readFile(invalidReceiptOutput));
+    }
 
     const invalid = await request('tools/call', {
       name: 'docx_list_migration_choices',
