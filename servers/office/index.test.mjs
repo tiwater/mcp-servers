@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -22,9 +22,25 @@ if (command === 'inspect') {
   process.exit(0);
 }
 if (command === 'list-template-migration-choices') {
-  const choice = id => ({id,kind:'paragraph',scope:'body',text:id,count:1,requiredCardinality:'one',context:null,allowedActions:['place-content']});
-  const sources = process.argv[3] === '/invalid-output.docx' ? [{id:'source-1'}] : process.argv[3] === '/empty.docx' ? [] : [choice('source-1')];
-  const targets = process.argv[3] === '/empty.docx' ? [] : [choice('target-1')];
+  const choice = (id, options={}) => ({id,kind:options.kind??'paragraph',scope:options.scope??'body',text:options.text??id,count:1,requiredCardinality:options.requiredCardinality??'one',context:options.context??null,allowedActions:['place-content']});
+  let sources = [choice('source-1')];
+  let targets = [choice('target-1')];
+  if (process.argv[3] === '/invalid-output.docx') sources = [{id:'source-1'}];
+  if (process.argv[3] === '/empty.docx') { sources = []; targets = []; }
+  if (process.argv[3] === '/multi.docx') {
+    sources = [
+      choice('source-alpha', {text:'Alpha heading'}),
+      choice('source-beta', {text:'Beta value',kind:'table-cell'}),
+    ];
+    targets = [
+      choice('target-header', {text:'Current heading',scope:'header'}),
+      choice('target-revision', {text:'',kind:'table-cell',context:{sameRowTexts:['Revision history','01']}}),
+      choice('target-body', {text:'Beta destination',kind:'table-cell'}),
+    ];
+  }
+  if (process.argv[3] === '/many.docx') {
+    targets = Array.from({length:25}, (_, index) => choice('target-' + String(index + 1).padStart(2, '0')));
+  }
   process.stdout.write(JSON.stringify({schema:'catalog/v1',pass:true,sourceSha256:'a',baselineSha256:'b',sources,targets}));
   process.exit(0);
 }
@@ -74,10 +90,11 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.4.0');
+    assert.equal(initialized.result.serverInfo.version, '0.5.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
+    assert(names.includes('docx_query_migration_choices'));
     assert(names.includes('docx_migrate_template'));
     assert(names.includes('docx_verify_migration'));
     assert.deepEqual(
@@ -159,6 +176,137 @@ process.exit(2);
     assert.equal(listedChoices.result.structuredContent.summary.targetCount, 1);
     assert.equal('catalog' in listedChoices.result.structuredContent, false);
     assert.equal(JSON.parse(await readFile(catalogPath, 'utf8')).sources[0].id, 'source-1');
+
+    const sourcePage = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: catalogPath, view: 'sources', offset: 0, limit: 10 },
+    });
+    assert.equal(sourcePage.result.structuredContent.view, 'sources');
+    assert.deepEqual(sourcePage.result.structuredContent.items.map(item => item.id), ['source-1']);
+    assert.deepEqual(sourcePage.result.structuredContent.page, {
+      offset: 0, returned: 1, total: 1, hasMore: false,
+    });
+    assert.match(sourcePage.result.structuredContent.catalogSha256, /^[0-9a-f]{64}$/);
+
+    const targetPage = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: {
+        catalog: catalogPath,
+        view: 'targets',
+        sourceChoiceId: 'source-1',
+        text: 'TARGET',
+        kinds: ['paragraph'],
+        scopes: ['body'],
+        offset: 0,
+        limit: 10,
+      },
+    });
+    assert.equal(targetPage.result.structuredContent.view, 'targets');
+    assert.equal(targetPage.result.structuredContent.source.id, 'source-1');
+    assert.deepEqual(targetPage.result.structuredContent.items.map(item => item.id), ['target-1']);
+    assert.deepEqual(targetPage.result.structuredContent.page, {
+      offset: 0, returned: 1, total: 1, hasMore: false,
+    });
+
+    const unknownSource = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: catalogPath, view: 'targets', sourceChoiceId: 'missing-source' },
+    });
+    assert.equal(unknownSource.result.isError, true);
+
+    const oversizedPage = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: catalogPath, view: 'sources', limit: 11 },
+    });
+    assert.equal(oversizedPage.result.isError, true);
+
+    const multiCatalogPath = path.join(temporary, 'catalogs', 'multi.json');
+    await request('tools/call', {
+      name: 'docx_list_migration_choices',
+      arguments: { source: '/multi.docx', baseline: '/baseline.docx', output: multiCatalogPath },
+    });
+    const firstSource = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: multiCatalogPath, view: 'sources', limit: 1 },
+    });
+    assert.deepEqual(firstSource.result.structuredContent.items.map(item => item.id), ['source-alpha']);
+    assert.equal(firstSource.result.structuredContent.page.hasMore, true);
+    const secondSource = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: multiCatalogPath, view: 'sources', offset: 1, limit: 1 },
+    });
+    assert.deepEqual(secondSource.result.structuredContent.items.map(item => item.id), ['source-beta']);
+    assert.equal(secondSource.result.structuredContent.page.hasMore, false);
+
+    const contextMatch = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: {
+        catalog: multiCatalogPath,
+        view: 'targets',
+        sourceChoiceId: 'source-beta',
+        text: 'REVISION',
+        kinds: ['table-cell'],
+      },
+    });
+    assert.deepEqual(contextMatch.result.structuredContent.items.map(item => item.id), ['target-revision']);
+    const noMatches = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: multiCatalogPath, view: 'targets', sourceChoiceId: 'source-beta', text: 'not present' },
+    });
+    assert.deepEqual(noMatches.result.structuredContent.items, []);
+    assert.equal(noMatches.result.structuredContent.page.total, 0);
+    const opaqueIdIsNotVisibleText = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: multiCatalogPath, view: 'targets', sourceChoiceId: 'source-beta', text: 'target-header' },
+    });
+    assert.deepEqual(opaqueIdIsNotVisibleText.result.structuredContent.items, []);
+
+    const copiedMultiCatalogPath = path.join(temporary, 'copied', 'arbitrary-name.json');
+    await mkdir(path.dirname(copiedMultiCatalogPath), { recursive: true });
+    await writeFile(copiedMultiCatalogPath, await readFile(multiCatalogPath));
+    const relocatedQuery = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: copiedMultiCatalogPath, view: 'targets', sourceChoiceId: 'source-beta', scopes: ['header'] },
+    });
+    assert.deepEqual(relocatedQuery.result.structuredContent.items.map(item => item.id), ['target-header']);
+    assert.equal(relocatedQuery.result.structuredContent.catalogSha256, contextMatch.result.structuredContent.catalogSha256);
+
+    const manyCatalogPath = path.join(temporary, 'catalogs', 'many.json');
+    await request('tools/call', {
+      name: 'docx_list_migration_choices',
+      arguments: { source: '/many.docx', baseline: '/baseline.docx', output: manyCatalogPath },
+    });
+    const boundedTargets = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: manyCatalogPath, view: 'targets', sourceChoiceId: 'source-1', limit: 10 },
+    });
+    assert.equal(boundedTargets.result.structuredContent.items.length, 10);
+    assert.equal(boundedTargets.result.structuredContent.page.total, 25);
+    assert.equal(boundedTargets.result.structuredContent.page.hasMore, true);
+
+    const malformedCatalogPath = path.join(temporary, 'catalogs', 'malformed.json');
+    await writeFile(malformedCatalogPath, JSON.stringify({schema:'catalog/v1',pass:true,sourceSha256:'a',baselineSha256:'b',sources:[{id:'source-only'}],targets:[]}));
+    const malformedCatalog = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: malformedCatalogPath, view: 'sources' },
+    });
+    assert.equal(malformedCatalog.result.isError, true);
+
+    const duplicateCatalogPath = path.join(temporary, 'catalogs', 'duplicate.json');
+    const duplicateCatalog = JSON.parse(await readFile(catalogPath, 'utf8'));
+    duplicateCatalog.sources.push(duplicateCatalog.sources[0]);
+    await writeFile(duplicateCatalogPath, JSON.stringify(duplicateCatalog));
+    const duplicatedSource = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: duplicateCatalogPath, view: 'sources' },
+    });
+    assert.equal(duplicatedSource.result.isError, true);
+
+    const inventedQueryField = await request('tools/call', {
+      name: 'docx_query_migration_choices',
+      arguments: { catalog: catalogPath, view: 'sources', recommendation: true },
+    });
+    assert.equal(inventedQueryField.result.isError, true);
 
     const relocatedCatalogPath = path.join(temporary, 'relocated', 'record.json');
     const relocated = await request('tools/call', {
@@ -242,8 +390,10 @@ process.exit(2);
     });
     assert.equal(receiptOverwrite.result.isError, true);
   } finally {
-    child.kill('SIGTERM');
-    await new Promise(resolve => child.once('exit', resolve));
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await new Promise(resolve => child.once('exit', resolve));
+    }
     await rm(temporary, { recursive: true, force: true });
   }
 });

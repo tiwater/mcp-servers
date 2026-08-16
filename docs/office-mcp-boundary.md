@@ -14,8 +14,9 @@ hand-written validator for the same contract.
 
 Large observations are durable artifacts, not model messages. The caller
 chooses a new run-local JSON path; the adapter writes the complete provider
-result once and returns only its path, hash, and size. A compact business choice
-catalog may remain structured MCP content because the Agent must act on it.
+result once and returns only its path, hash, and size. A choice catalog remains
+a durable artifact. The Agent reads it through a bounded semantic query instead
+of parsing its storage shape.
 
 Command-line programs remain implementation and compatibility surfaces. They
 may expose diagnostic commands, but those commands do not become an Agent
@@ -23,17 +24,20 @@ workflow.
 
 ## Template migration
 
-Template migration has three public operations:
+Template migration has four public operations:
 
 - list the current migration choices;
+- query a bounded source page or the targets for one source choice;
 - migrate the current document after receiving one typed batch of choices;
 - independently verify the result from the same current inputs and choices.
 
-The first operation returns every source item that still needs business
-judgment, the current baseline targets, opaque current-document identities, and
-the allowed business actions. The Agent selects identities and actions. It does
-not author document content, selectors, coordinates, edit operations, plans, or
-intermediate files.
+The first operation writes every source item that still needs business judgment
+and the current baseline targets to an artifact. The query operation returns a
+bounded source page or targets for one opaque source identity, optionally
+filtered by literal visible text, kind, and scope. It does not rank or recommend
+a target. The Agent selects identities and actions without parsing the artifact
+format. It does not author document content, selectors, coordinates, edit
+operations, plans, or intermediate files.
 
 The second operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the

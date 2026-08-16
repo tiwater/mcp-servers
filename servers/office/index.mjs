@@ -100,7 +100,17 @@ const migrationCatalog = z.object({
   baselineSha256: z.string(),
   sources: z.array(migrationChoiceOutput),
   targets: z.array(migrationChoiceOutput),
-}).strict();
+}).strict().superRefine((catalog, context) => {
+  for (const key of ['sources', 'targets']) {
+    const seen = new Set();
+    for (const [index, choice] of catalog[key].entries()) {
+      if (seen.has(choice.id)) {
+        context.addIssue({ code: 'custom', path: [key, index, 'id'], message: `duplicate ${key} choice id: ${choice.id}` });
+      }
+      seen.add(choice.id);
+    }
+  }
+});
 
 const migrationReceipt = z.object({
   schema: z.string(),
@@ -137,6 +147,41 @@ const migrationCatalogOutput = z.object({
     sourceCount: z.number().int().nonnegative(),
     targetCount: z.number().int().nonnegative(),
   }).strict(),
+}).strict();
+
+const migrationQueryPage = z.object({
+  offset: z.number().int().nonnegative(),
+  returned: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+}).strict();
+
+const migrationChoiceQueryInput = z.discriminatedUnion('view', [
+  z.object({
+    catalog: pathInput.describe('Path returned by docx_list_migration_choices.'),
+    view: z.literal('sources'),
+    offset: z.number().int().nonnegative().optional(),
+    limit: z.number().int().min(1).max(10).optional(),
+  }).strict(),
+  z.object({
+    catalog: pathInput.describe('Path returned by docx_list_migration_choices.'),
+    view: z.literal('targets'),
+    sourceChoiceId: z.string().trim().min(1),
+    text: z.string().trim().min(1).optional().describe('Literal case-insensitive text to find in target text or visible context.'),
+    kinds: z.array(z.string().trim().min(1)).min(1).optional(),
+    scopes: z.array(z.string().trim().min(1)).min(1).optional(),
+    offset: z.number().int().nonnegative().optional(),
+    limit: z.number().int().min(1).max(10).optional(),
+  }).strict(),
+]);
+
+const migrationChoiceQueryOutput = z.object({
+  tool: z.literal('docx_query_migration_choices'),
+  catalogSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  view: z.enum(['sources', 'targets']),
+  source: migrationChoiceOutput.nullable(),
+  items: z.array(migrationChoiceOutput),
+  page: migrationQueryPage,
 }).strict();
 
 function migrationReceiptOutput(tool) {
@@ -180,6 +225,14 @@ const tools = [
     }).strict(),
     outputSchema: migrationCatalogOutput,
     handler: docxListMigrationChoices,
+  },
+  {
+    name: 'docx_query_migration_choices',
+    description: 'Read one bounded page from a migration-choice catalog. List source choices, or inspect targets for one source using literal text, kind, and scope filters. This tool does not recommend or make a business choice.',
+    inputSchema: migrationChoiceQueryInput,
+    outputSchema: migrationChoiceQueryOutput,
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: docxQueryMigrationChoices,
   },
   {
     name: 'docx_migrate_template',
@@ -307,6 +360,62 @@ async function docxListMigrationChoices(args) {
       targetCount: catalog.targets.length,
     },
   };
+}
+
+async function docxQueryMigrationChoices(args) {
+  const catalogPath = requireString(args.catalog, 'catalog');
+  const bytes = await readFile(catalogPath);
+  const catalog = migrationCatalog.parse(JSON.parse(bytes.toString('utf8')));
+  const offset = args.offset ?? 0;
+  const limit = args.limit ?? 10;
+  let source = null;
+  let matches;
+
+  if (args.view === 'sources') {
+    matches = catalog.sources;
+  } else {
+    source = catalog.sources.find(item => item.id === args.sourceChoiceId) ?? null;
+    if (!source) {
+      throw Object.assign(new Error(`Unknown sourceChoiceId: ${args.sourceChoiceId}`), { code: -32602 });
+    }
+    const kinds = args.kinds ? new Set(args.kinds) : null;
+    const scopes = args.scopes ? new Set(args.scopes) : null;
+    const textQuery = args.text?.toLocaleLowerCase();
+    matches = catalog.targets.filter(item =>
+      (!kinds || kinds.has(item.kind)) &&
+      (!scopes || scopes.has(item.scope)) &&
+      (!textQuery || migrationChoiceSearchText(item).includes(textQuery)));
+  }
+
+  const items = matches.slice(offset, offset + limit);
+  return {
+    tool: 'docx_query_migration_choices',
+    catalogSha256: createHash('sha256').update(bytes).digest('hex'),
+    view: args.view,
+    source,
+    items,
+    page: {
+      offset,
+      returned: items.length,
+      total: matches.length,
+      hasMore: offset + items.length < matches.length,
+    },
+  };
+}
+
+function migrationChoiceSearchText(choice) {
+  return collectVisibleStrings({ text: choice.text, context: choice.context })
+    .join('\n')
+    .toLocaleLowerCase();
+}
+
+function collectVisibleStrings(value, fieldName = '') {
+  if (typeof value === 'string') return /text/i.test(fieldName) ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap(item => collectVisibleStrings(item, fieldName));
+  if (value && typeof value === 'object') {
+    return Object.entries(value).flatMap(([key, item]) => collectVisibleStrings(item, key));
+  }
+  return [];
 }
 
 async function docxMigrateTemplate(args) {
