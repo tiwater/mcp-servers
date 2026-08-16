@@ -72,6 +72,7 @@ const templateMigrationInput = z.object({
   source: pathInput.describe('Path to the current source DOCX.'),
   baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
   output: pathInput.describe('Path to the migrated output DOCX.'),
+  receiptOutput: pathInput.describe('New JSON receipt artifact path. Existing files are never overwritten.'),
   choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id returned by docx_list_migration_choices.'),
   templateCleanup: z.array(templateCleanupInput).optional().describe('Optional baseline-owned placeholders or example rows to clear.'),
 }).strict();
@@ -92,36 +93,26 @@ const migrationChoiceOutput = z.object({
   allowedActions: z.array(z.string()),
 }).strict();
 
-const migrationCatalogOutput = z.object({
-  tool: z.literal('docx_list_migration_choices'),
-  runtime: runtimeIdentity,
-  catalog: z.object({
-    schema: z.string(),
-    pass: z.boolean(),
-    sourceSha256: z.string(),
-    baselineSha256: z.string(),
-    sources: z.array(migrationChoiceOutput),
-    targets: z.array(migrationChoiceOutput),
-  }).strict(),
+const migrationCatalog = z.object({
+  schema: z.string(),
+  pass: z.boolean(),
+  sourceSha256: z.string(),
+  baselineSha256: z.string(),
+  sources: z.array(migrationChoiceOutput),
+  targets: z.array(migrationChoiceOutput),
 }).strict();
 
-function migrationReceiptOutput(tool) {
-  return z.object({
-    tool: z.literal(tool),
-    runtime: runtimeIdentity,
-    receipt: z.object({
-      schema: z.string(),
-      toolVersion: z.string(),
-      status: z.enum(['pass', 'review-required', 'failed']),
-      pass: z.boolean(),
-      reviewRequired: z.boolean(),
-      outputVerified: z.boolean(),
-      output: z.string().nullable(),
-      plan: z.string().nullable(),
-      failures: z.array(z.unknown()),
-    }).passthrough(),
-  }).strict();
-}
+const migrationReceipt = z.object({
+  schema: z.string(),
+  toolVersion: z.string(),
+  status: z.enum(['pass', 'review-required', 'failed']),
+  pass: z.boolean(),
+  reviewRequired: z.boolean(),
+  outputVerified: z.boolean(),
+  output: z.string().nullable(),
+  plan: z.string().nullable(),
+  failures: z.array(z.unknown()),
+}).passthrough();
 
 const inputOnly = z.object({ input: pathInput }).strict();
 const artifactInput = z.object({
@@ -133,6 +124,39 @@ const artifact = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   bytes: z.number().int().nonnegative(),
 }).strict();
+
+const migrationCatalogOutput = z.object({
+  tool: z.literal('docx_list_migration_choices'),
+  runtime: runtimeIdentity,
+  artifact,
+  summary: z.object({
+    schema: z.string(),
+    pass: z.boolean(),
+    sourceSha256: z.string(),
+    baselineSha256: z.string(),
+    sourceCount: z.number().int().nonnegative(),
+    targetCount: z.number().int().nonnegative(),
+  }).strict(),
+}).strict();
+
+function migrationReceiptOutput(tool) {
+  return z.object({
+    tool: z.literal(tool),
+    runtime: runtimeIdentity,
+    artifact,
+    summary: z.object({
+      schema: z.string(),
+      toolVersion: z.string(),
+      status: z.enum(['pass', 'review-required', 'failed']),
+      pass: z.boolean(),
+      reviewRequired: z.boolean(),
+      outputVerified: z.boolean(),
+      output: z.string().nullable(),
+      plan: z.string().nullable(),
+      failureCount: z.number().int().nonnegative(),
+    }).strict(),
+  }).strict();
+}
 
 function artifactOutput(tool) {
   return z.object({ tool: z.literal(tool), runtime: runtimeIdentity, artifact }).strict();
@@ -148,13 +172,13 @@ const tools = [
   },
   {
     name: 'docx_list_migration_choices',
-    description: 'List every current source item that still needs a business choice and the selectable current baseline targets. Returns opaque ids and context; it does not recommend a choice.',
+    description: 'Write every current source item that still needs a business choice and the selectable current baseline targets to a run-local JSON artifact. Returns only artifact metadata and counts; it does not recommend a choice.',
     inputSchema: z.object({
       source: pathInput.describe('Path to the current source DOCX.'),
       baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
+      output: pathInput.describe('New JSON artifact path. Existing files are never overwritten.'),
     }).strict(),
     outputSchema: migrationCatalogOutput,
-    annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxListMigrationChoices,
   },
   {
@@ -169,7 +193,6 @@ const tools = [
     description: 'Independently re-resolve the same business choices and verify a migrated DOCX against the current source and baseline. This does not trust the migration receipt.',
     inputSchema: templateMigrationInput,
     outputSchema: migrationReceiptOutput('docx_verify_migration'),
-    annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxVerifyMigration,
   },
   {
@@ -270,7 +293,20 @@ async function docxListMigrationChoices(args) {
   const source = requireString(args.source, 'source');
   const baseline = requireString(args.baseline, 'baseline');
   const result = await runJsonCandidateChain(docxCandidates, ['list-template-migration-choices', source, baseline]);
-  return { tool: 'docx_list_migration_choices', runtime: commandRuntime(result), catalog: result.json };
+  const catalog = migrationCatalog.parse(result.json);
+  return {
+    tool: 'docx_list_migration_choices',
+    runtime: commandRuntime(result),
+    artifact: await writeJsonArtifact(requireString(args.output, 'output'), catalog),
+    summary: {
+      schema: catalog.schema,
+      pass: catalog.pass,
+      sourceSha256: catalog.sourceSha256,
+      baselineSha256: catalog.baselineSha256,
+      sourceCount: catalog.sources.length,
+      targetCount: catalog.targets.length,
+    },
+  };
 }
 
 async function docxMigrateTemplate(args) {
@@ -298,7 +334,23 @@ async function runTemplateMigrationCommand(tool, command, args) {
       docxCandidates,
       [command, source, baseline, choicesPath, output],
       { allowedExitCodes: [0, 1] });
-    return { tool, runtime: commandRuntime(result), receipt: result.json };
+    const receipt = migrationReceipt.parse(result.json);
+    return {
+      tool,
+      runtime: commandRuntime(result),
+      artifact: await writeJsonArtifact(requireString(args.receiptOutput, 'receiptOutput'), receipt),
+      summary: {
+        schema: receipt.schema,
+        toolVersion: receipt.toolVersion,
+        status: receipt.status,
+        pass: receipt.pass,
+        reviewRequired: receipt.reviewRequired,
+        outputVerified: receipt.outputVerified,
+        output: receipt.output,
+        plan: receipt.plan,
+        failureCount: receipt.failures.length,
+      },
+    };
   });
 }
 
