@@ -56,16 +56,12 @@ const migrationChoiceInput = z.object({
   sourceChoiceId: z.string().trim().min(1),
   action: migrationAction,
   targetChoiceId: z.string().trim().min(1).optional(),
-  cardinality: z.enum(['one', 'all']).optional(),
 }).strict().superRefine((choice, context) => {
   if (targetActions.has(choice.action) && !choice.targetChoiceId) {
     context.addIssue({ code: 'custom', path: ['targetChoiceId'], message: `${choice.action} requires targetChoiceId` });
   }
   if (terminalActions.has(choice.action) && choice.targetChoiceId) {
     context.addIssue({ code: 'custom', path: ['targetChoiceId'], message: `${choice.action} forbids targetChoiceId` });
-  }
-  if (choice.cardinality === 'all' && !terminalActions.has(choice.action)) {
-    context.addIssue({ code: 'custom', path: ['cardinality'], message: 'cardinality all is limited to terminal actions' });
   }
 });
 
@@ -659,6 +655,32 @@ async function docxVerifyMigration(args) {
   return runTemplateMigrationCommand('docx_verify_migration', 'verify-template-migration', args);
 }
 
+function invalidMigrationInput(message) {
+  return Object.assign(new Error(message), { code: -32602 });
+}
+
+function completeMigrationChoices(catalog, choices) {
+  const sources = new Map(catalog.sources.map(source => [source.id, source]));
+  const seen = new Set();
+  const completed = choices.map(choice => {
+    const source = sources.get(choice.sourceChoiceId);
+    if (!source) throw invalidMigrationInput(`unknown migration source id: ${choice.sourceChoiceId}`);
+    if (seen.has(choice.sourceChoiceId)) throw invalidMigrationInput(`duplicate migration source id: ${choice.sourceChoiceId}`);
+    seen.add(choice.sourceChoiceId);
+    if (!source.allowedActions.includes(choice.action)) {
+      throw invalidMigrationInput(`migration action ${choice.action} is not allowed for source id: ${choice.sourceChoiceId}`);
+    }
+    return source.requiredCardinality === 'all'
+      ? { ...choice, cardinality: 'all' }
+      : choice;
+  });
+  const missing = [...sources.keys()].filter(sourceChoiceId => !seen.has(sourceChoiceId));
+  if (missing.length > 0) {
+    throw invalidMigrationInput(`migration choices must cover every source id; missing ${missing.length}`);
+  }
+  return completed;
+}
+
 async function runTemplateMigrationCommand(tool, command, args) {
   const source = requireString(args.source, 'source');
   const baseline = requireString(args.baseline, 'baseline');
@@ -666,9 +688,11 @@ async function runTemplateMigrationCommand(tool, command, args) {
   if (!Array.isArray(args.choices)) {
     throw Object.assign(new Error('choices must be an array'), { code: -32602 });
   }
+  const catalogResult = await runJsonCandidateChain(docxCandidates, ['list-template-migration-choices', source, baseline]);
+  const catalog = migrationCatalog.parse(catalogResult.json);
   const payload = {
     schema: 'tiwater.docx.template-migration-business-choices/v1',
-    choices: args.choices,
+    choices: completeMigrationChoices(catalog, args.choices),
     ...(Array.isArray(args.templateCleanup) ? { templateCleanup: args.templateCleanup } : {}),
   };
   return withTempJsonFile(payload, async choicesPath => {
@@ -676,6 +700,10 @@ async function runTemplateMigrationCommand(tool, command, args) {
       docxCandidates,
       [command, source, baseline, choicesPath, output],
       { allowedExitCodes: [0, 1] });
+    if (result.json === null) {
+      const detail = result.stderr.trim() || result.stdout.trim() || 'no diagnostic output';
+      throw new Error(`${result.command} ${command} returned no JSON receipt (exit ${result.code}): ${detail}`);
+    }
     const receipt = migrationReceipt.parse(result.json);
     return {
       tool,
