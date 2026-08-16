@@ -36,12 +36,6 @@ const convertCandidates = [
 ];
 
 const pathInput = z.string().trim().min(1);
-const migrationTargetAction = z.enum([
-  'place-content',
-  'keep-template-content',
-  'keep-template-label',
-  'select-template-option',
-]);
 const migrationQueryTargetAction = z.enum([
   'place-content',
   'keep-template-label',
@@ -50,44 +44,29 @@ const migrationQueryTargetAction = z.enum([
 const targetActions = new Set(migrationQueryTargetAction.options);
 
 const choiceReference = z.string().trim().regex(/^[ST][1-9][0-9]*-[0-9a-f]{8}$/);
-const alternativeReference = z.string().trim().regex(/^S[1-9][0-9]*-[PKLO][1-9][0-9]*-[0-9a-f]{8}$/);
+const alternativeReference = z.string().trim().regex(/^S[1-9][0-9]*-[PLO][1-9][0-9]*-[0-9a-f]{8}$/);
 
 const terminalMigrationChoiceInput = z.object({
-  sourceRef: choiceReference.optional(),
-  sourceChoiceId: z.string().trim().min(1).optional(),
+  sourceRef: choiceReference,
   action: z.enum(['exclude-source', 'review-source']),
-}).strict().superRefine((choice, context) => {
-  if ((choice.sourceRef ? 1 : 0) + (choice.sourceChoiceId ? 1 : 0) !== 1) {
-    context.addIssue({ code: 'custom', path: ['sourceRef'], message: 'exactly one of sourceRef or sourceChoiceId is required' });
-  }
-});
+}).strict();
 
 const migrationChoiceInput = z.union([
   z.object({ alternativeRef: alternativeReference }).strict(),
   terminalMigrationChoiceInput,
-  z.object({
-    sourceChoiceId: z.string().trim().min(1),
-    action: migrationTargetAction,
-    targetChoiceId: z.string().trim().min(1),
-  }).strict(),
 ]);
 
 const templateCleanupInput = z.object({
-  targetRef: choiceReference.optional(),
-  targetChoiceId: z.string().trim().min(1).optional(),
+  targetRef: choiceReference,
   scope: z.enum(['cell', 'row']),
-}).strict().superRefine((cleanup, context) => {
-  if ((cleanup.targetRef ? 1 : 0) + (cleanup.targetChoiceId ? 1 : 0) !== 1) {
-    context.addIssue({ code: 'custom', path: ['targetRef'], message: 'exactly one of targetRef or targetChoiceId is required' });
-  }
-});
+}).strict();
 
 const templateMigrationInput = z.object({
   source: pathInput.describe('Path to the current source DOCX.'),
   baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
   output: pathInput.describe('Path to the migrated output DOCX.'),
   receiptOutput: pathInput.describe('New JSON receipt artifact path. Existing files are never overwritten.'),
-  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id. New targeted choices use an alternativeRef returned by the query tool. Terminal exclusions and genuine local review use a source reference. Legacy full-id choices remain accepted.'),
+  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source ref. Targeted choices use an alternativeRef returned by the query tool. Terminal exclusions and genuine local review use a sourceRef.'),
   templateCleanup: z.array(templateCleanupInput).optional().describe('Optional baseline-owned placeholders or example rows to clear.'),
 }).strict();
 
@@ -245,17 +224,12 @@ const migrationChoiceQueryInput = z.union([
   z.object({
     ...migrationQueryDocuments,
     view: z.literal('targets'),
-    sourceRef: choiceReference.optional().describe('Short source reference returned by the sources view.'),
-    sourceChoiceId: z.string().trim().min(1).optional().describe('Legacy opaque source id from the durable catalog.'),
+    sourceRef: choiceReference.describe('Short source reference returned by the sources view.'),
     action: migrationQueryTargetAction.optional().describe('Optional action filter. Omit it to inspect every independently valid action-and-target alternative for the source.'),
     text: z.string().trim().min(1).optional().describe('Optional literal case-insensitive text to find in target visible text or context.'),
     offset: boundedOffset,
     limit: boundedLimit,
-  }).strict().superRefine((query, context) => {
-    if ((query.sourceRef ? 1 : 0) + (query.sourceChoiceId ? 1 : 0) !== 1) {
-      context.addIssue({ code: 'custom', path: ['sourceRef'], message: 'exactly one of sourceRef or sourceChoiceId is required' });
-    }
-  }),
+  }).strict(),
   z.object({
     ...migrationQueryDocuments,
     view: z.literal('cleanup'),
@@ -329,7 +303,7 @@ const tools = [
   },
   {
     name: 'docx_migrate_template',
-    description: 'Migrate a current DOCX into the selected baseline from one complete batch of business choices. For targeted choices, submit one alternativeRef returned by docx_query_migration_choices. Exclusion and local review use a sourceRef plus their terminal action. Legacy catalog ids remain accepted. The tool derives all document values, coordinates, plans, and edits.',
+    description: 'Migrate a current DOCX into the selected baseline from one complete batch of business choices. For targeted choices, submit one alternativeRef returned by docx_query_migration_choices. Exclusion and local review use a sourceRef plus their terminal action. The tool derives all document values, coordinates, plans, and edits.',
     inputSchema: templateMigrationInput,
     outputSchema: migrationReceiptOutput('docx_migrate_template'),
     handler: docxMigrateTemplate,
@@ -503,12 +477,10 @@ async function docxQueryMigrationChoices(args) {
     });
   }
 
-  const requestedSourceId = args.sourceRef
-    ? choiceIdFromRef(catalog, catalog.sources, args.sourceRef, 'S', 'source')
-    : args.sourceChoiceId;
+  const requestedSourceId = choiceIdFromRef(catalog, catalog.sources, args.sourceRef, 'S', 'source');
   source = catalog.sources.find(item => item.id === requestedSourceId) ?? null;
   if (!source) {
-    throw Object.assign(new Error(`Unknown migration source: ${args.sourceRef ?? args.sourceChoiceId}`), { code: -32602 });
+    throw Object.assign(new Error(`Unknown migration source: ${args.sourceRef}`), { code: -32602 });
   }
   action = args.action ?? null;
   const actions = action
@@ -720,7 +692,6 @@ function choiceIdFromRef(catalog, items, ref, prefix, label) {
 
 const migrationActionCodes = new Map([
   ['place-content', 'P'],
-  ['keep-template-content', 'K'],
   ['keep-template-label', 'L'],
   ['select-template-option', 'O'],
 ]);
@@ -744,7 +715,7 @@ function migrationAlternativeToken(catalog, source, action, target) {
 }
 
 function migrationChoiceFromAlternativeRef(catalog, ref) {
-  const match = /^S([1-9][0-9]*)-([PKLO])([1-9][0-9]*)-([0-9a-f]{8})$/.exec(ref);
+  const match = /^S([1-9][0-9]*)-([PLO])([1-9][0-9]*)-([0-9a-f]{8})$/.exec(ref);
   if (!match) throw invalidMigrationInput(`invalid migration alternative ref: ${ref}`);
   const source = catalog.sources[Number(match[1]) - 1];
   const target = catalog.targets[Number(match[3]) - 1];
@@ -808,11 +779,8 @@ function completeMigrationChoices(catalog, choices) {
     const choice = rawChoice.alternativeRef
       ? migrationChoiceFromAlternativeRef(catalog, rawChoice.alternativeRef)
       : {
-          sourceChoiceId: rawChoice.sourceRef
-            ? choiceIdFromRef(catalog, catalog.sources, rawChoice.sourceRef, 'S', 'source')
-            : rawChoice.sourceChoiceId,
+          sourceChoiceId: choiceIdFromRef(catalog, catalog.sources, rawChoice.sourceRef, 'S', 'source'),
           action: rawChoice.action,
-          ...(rawChoice.targetChoiceId ? { targetChoiceId: rawChoice.targetChoiceId } : {}),
         };
     const { sourceChoiceId } = choice;
     const source = sources.get(sourceChoiceId);
@@ -835,9 +803,7 @@ function completeMigrationChoices(catalog, choices) {
 
 function completeTemplateCleanup(catalog, cleanup) {
   return cleanup.map(rawCleanup => ({
-    targetChoiceId: rawCleanup.targetRef
-      ? choiceIdFromRef(catalog, catalog.targets, rawCleanup.targetRef, 'T', 'target')
-      : rawCleanup.targetChoiceId,
+    targetChoiceId: choiceIdFromRef(catalog, catalog.targets, rawCleanup.targetRef, 'T', 'target'),
     scope: rawCleanup.scope,
   }));
 }
