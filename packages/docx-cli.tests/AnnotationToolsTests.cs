@@ -5273,13 +5273,16 @@ public class AnnotationToolsTests
         File.Copy(output, changedBreak);
         using (var document = WordprocessingDocument.Open(changedBreak, true))
         {
-            var pageBreak = document.MainDocumentPart!.Document!.Body!.Descendants<Break>().Single(item => item.Type?.Value == BreakValues.Page);
-            pageBreak.Type = BreakValues.Column;
+            var sectionBreak = document.MainDocumentPart!.Document!.Body!
+                .Elements<Paragraph>().Single().ParagraphProperties!
+                .GetFirstChild<SectionProperties>()!;
+            sectionBreak.RemoveAllChildren<SectionType>();
+            sectionBreak.Append(new SectionType { Val = SectionMarkValues.Continuous });
             document.MainDocumentPart.Document.Save();
         }
         var changedBreakValidation = TemplateMigration.ValidateReadback(source, baseline, changedBreak, resolved.Plan);
         Assert.False(changedBreakValidation.Pass);
-        Assert.Contains(changedBreakValidation.Failures, item => item.Reason == "template-migration-readback-baseline-content-drift");
+        Assert.Contains(changedBreakValidation.Failures, item => item.Reason == "template-migration-readback-baseline-structure-drift");
     }
 
     [Fact]
