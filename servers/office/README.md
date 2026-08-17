@@ -23,6 +23,15 @@ Shared stdio MCP server for Office document workflows.
 Install `@tiwater/office-mcp` together with the runtime versions required by
 the consumer, then run `tiwater-office-mcp` as a stdio MCP server.
 
+Office MCP 0.10 requires these minimum published runtimes on `PATH`:
+
+| Command | Package | Minimum version |
+| --- | --- | --- |
+| `tiwater-docx` | NuGet `tiwater.docx.cli` | 0.15.0 |
+| `tiwater-xlsx` | NuGet `tiwater.xlsx.cli` | 0.2.55 |
+| `tiwater-pptx` | NuGet `tiwater.pptx.cli` | 0.2.22 |
+| `tiwater-convert` | NuGet `tiwater.convert.cli` | 0.9.22 |
+
 The server invokes published `tiwater-docx`, `tiwater-xlsx`,
 `tiwater-pptx`, and `tiwater-convert` commands from `PATH`. It does not require
 a source checkout or fall back to local projects.
