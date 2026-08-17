@@ -40,7 +40,7 @@ const migrationQueryTargetAction = z.enum([
   'place-content',
   'keep-template-label',
   'select-template-option',
-]);
+]).describe('Business action: place-content moves the current source content into a target content position; keep-template-label preserves the target label and structure while migrating a uniquely identified current field value; select-template-option marks the target option represented by the current source fact.');
 const targetActions = new Set(migrationQueryTargetAction.options);
 
 const choiceReference = z.string().trim().regex(/^[ST][1-9][0-9]*-[0-9a-f]{8}$/);
@@ -225,7 +225,7 @@ const migrationChoiceQueryInput = z.union([
     ...migrationQueryDocuments,
     view: z.literal('targets'),
     sourceRef: choiceReference.describe('Short source reference returned by the sources view.'),
-    action: migrationQueryTargetAction.optional().describe('Optional action filter. Omit it to inspect every independently valid action-and-target alternative for the source.'),
+    action: migrationQueryTargetAction.optional().describe('Optional business-action filter. Choose the action from scenario meaning, then use this filter to inspect only compatible targets. Omit it only when comparing the three documented action meanings.'),
     text: z.string().trim().min(1).optional().describe('Optional literal case-insensitive text to find in target visible text or context.'),
     offset: boundedOffset,
     limit: boundedLimit,
@@ -295,7 +295,7 @@ const tools = [
   },
   {
     name: 'docx_query_migration_choices',
-    description: 'Query current template-migration alternatives without reading the catalog artifact. Source and cleanup results use short catalog-bound refs. Target results bind one provider-compatible action and target into a single alternativeRef; select that ref without reconstructing the pair. Action and text filters are optional. Result order helps discovery but does not make the business choice.',
+    description: 'Query current template-migration alternatives without reading the catalog artifact. place-content moves current content into a target content position; keep-template-label preserves the target label and structure while migrating a uniquely identified current field value; select-template-option marks a target option represented by the current source fact. Choose the action from scenario meaning and filter by it before paging compatible targets. Target results bind the action and target into one alternativeRef; result order helps discovery but never makes the business choice.',
     inputSchema: migrationChoiceQueryInput,
     outputSchema: migrationChoiceQueryOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
