@@ -112,6 +112,10 @@ if (command === 'edit') {
   }));
   process.exit(failed ? 1 : 0);
 }
+if (command === 'validate') {
+  process.stdout.write(JSON.stringify({file:process.argv[3],valid:true,errors:[],warnings:[],dotnetRoot:process.env.DOTNET_ROOT}));
+  process.exit(0);
+}
 if (command.endsWith('-to-pdf')) {
   const input = process.argv[3];
   const output = process.argv[4];
@@ -168,7 +172,7 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.11.0');
+    assert.equal(initialized.result.serverInfo.version, '0.11.1');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -275,6 +279,13 @@ process.exit(2);
     assert.equal(wrongBinding.result.isError, true);
     await assert.rejects(readFile(wrongBindingOutput));
     await assert.rejects(readFile(wrongBindingReceipt));
+    const validatedXlsx = await request('tools/call', {
+      name: 'xlsx_validate',
+      arguments: { input: xlsxInput },
+    });
+    assert.notEqual(validatedXlsx.result.isError, true, JSON.stringify(validatedXlsx.result));
+    assert.equal(validatedXlsx.result.structuredContent.result.valid, true);
+    assert.equal(validatedXlsx.result.structuredContent.result.dotnetRoot, temporary);
 
     const renderInput = path.join(temporary, 'render-current.docx');
     const renderOutput = path.join(temporary, 'rendered', 'current.pdf');
