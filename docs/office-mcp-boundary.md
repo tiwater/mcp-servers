@@ -35,14 +35,45 @@ Template migration has four public operations:
 The first operation writes every source item that still needs business judgment
 and the current baseline targets to an evidence artifact. The query operation
 re-observes the same current source and baseline, then returns a bounded source
-page, provider-compatible targets for one opaque source identity and business
-action, or cleanup targets. Literal visible-text filtering is optional.
-Compatible targets remain pageable and complete; their display order uses only
-current visible text and local document context such as neighboring text and
-table headers. That search order is not a business recommendation or selection.
+page, provider-validated action-and-target alternatives for one source identity,
+or cleanup targets. Literal visible-text and action filtering are optional.
+Alternatives remain pageable and complete; their display order uses only current
+visible text and local document context such as neighboring text and table
+headers. That search order is not a business recommendation or selection.
 The Agent selects identities and actions without parsing the artifact format or
 reconstructing technical target compatibility. It does not author document
 content, selectors, coordinates, edit operations, plans, or intermediate files.
+Query results give sources and cleanup targets short references such as
+`S1-a1b2c3d4` and `T1-a1b2c3d4`. A targeted alternative additionally binds its
+source, action, and target. Reference suffixes bind these identities to the
+freshly observed source and baseline; the adapter deterministically restores
+the provider identity before invoking the Word runtime. The MCP surface accepts
+only references returned by the current query. Legacy provider identities
+remain command-line compatibility inputs and are not a second Agent-facing
+identity branch.
+The final batch selects a returned alternative as one unit. It does not combine
+an action from one alternative with a target from another. Source exclusions
+and genuine local review remain explicit target-free terminal choices.
+Every returned alternative is independently valid for that source and target;
+an alternative never requires the Agent to add a second, hidden companion
+choice. Structural label alignment may preserve one target for more than one
+current label observation because it does not claim or rewrite the target's
+business value. Provider-internal parent/value dependencies are not exposed as
+Agent choices.
+An option-selection alternative is returned only when the selected target is
+a provider-recognized selectable control label; ordinary visible text runs are
+not option targets. A local-review terminal may cover every current source in
+one indistinguishable source group. The provider expands that terminal to the
+group's current members and preserves each member in source conservation.
+Cleanup alternatives contain only target-owned text capacity that can be
+removed without deleting dynamic fields, drawings, or other non-text Office
+structure. The Word runtime independently rejects a cleanup whose selected
+cell or row contains such protected content, even if a caller bypasses the
+catalog. Cleanup is conditional baseline capacity: when the same final batch
+assigns a current source to that target, the adapter omits the cleanup before
+calling the Word runtime. The current-source assignment owns the target; the
+Agent does not reconcile opaque target identities across choice and cleanup
+references.
 
 The third operation validates the complete batch, derives the technical plan,
 edits a temporary copy of the baseline, reads the result back, and returns the
@@ -54,7 +85,7 @@ The fourth operation independently repeats admission and readback from the
 current source, baseline, choices, and output. It does not trust the migration
 operation's embedded verdict.
 
-All three operations publish MCP input and output schemas and return structured
+All four operations publish MCP input and output schemas and return structured
 content. Text content is a human-readable projection of the same result, not a
 second contract.
 
@@ -105,7 +136,7 @@ from the resulting PDF, visual review, and final workflow closure.
 - The published conversion runtime owns native Office-to-PDF rendering and its
   provenance receipt.
 - The Office MCP adapter publishes the typed surface, orders complete technical
-  alternatives for progressive discovery, and invokes the exact installed
+  alternatives for bounded discovery, and invokes the exact installed
   runtime; it does not interpret scenario rules or choose a target.
 - Lucid owns workflow ordering, evidence handoff, delivery verification, and
   platform boundaries.

@@ -36,37 +36,28 @@ const convertCandidates = [
 ];
 
 const pathInput = z.string().trim().min(1);
-const migrationAction = z.enum([
+const migrationQueryTargetAction = z.enum([
   'place-content',
-  'keep-template-content',
   'keep-template-label',
   'select-template-option',
-  'exclude-source',
-  'review-source',
-]);
-const targetActions = new Set([
-  'place-content',
-  'keep-template-content',
-  'keep-template-label',
-  'select-template-option',
-]);
-const terminalActions = new Set(['exclude-source', 'review-source']);
+]).describe('Business action: place-content moves the current source content into a target content position; keep-template-label preserves the target label and structure while migrating a uniquely identified current field value; select-template-option marks the target option represented by the current source fact.');
+const targetActions = new Set(migrationQueryTargetAction.options);
 
-const migrationChoiceInput = z.object({
-  sourceChoiceId: z.string().trim().min(1),
-  action: migrationAction,
-  targetChoiceId: z.string().trim().min(1).optional(),
-}).strict().superRefine((choice, context) => {
-  if (targetActions.has(choice.action) && !choice.targetChoiceId) {
-    context.addIssue({ code: 'custom', path: ['targetChoiceId'], message: `${choice.action} requires targetChoiceId` });
-  }
-  if (terminalActions.has(choice.action) && choice.targetChoiceId) {
-    context.addIssue({ code: 'custom', path: ['targetChoiceId'], message: `${choice.action} forbids targetChoiceId` });
-  }
-});
+const choiceReference = z.string().trim().regex(/^[ST][1-9][0-9]*-[0-9a-f]{8}$/);
+const alternativeReference = z.string().trim().regex(/^S[1-9][0-9]*-[PLO][1-9][0-9]*-[0-9a-f]{8}$/);
+
+const terminalMigrationChoiceInput = z.object({
+  sourceRef: choiceReference,
+  action: z.enum(['exclude-source', 'review-source']),
+}).strict();
+
+const migrationChoiceInput = z.union([
+  z.object({ alternativeRef: alternativeReference }).strict(),
+  terminalMigrationChoiceInput,
+]);
 
 const templateCleanupInput = z.object({
-  targetChoiceId: z.string().trim().min(1),
+  targetRef: choiceReference,
   scope: z.enum(['cell', 'row']),
 }).strict();
 
@@ -75,7 +66,7 @@ const templateMigrationInput = z.object({
   baseline: pathInput.describe('Path to the selected current baseline DOCX.'),
   output: pathInput.describe('Path to the migrated output DOCX.'),
   receiptOutput: pathInput.describe('New JSON receipt artifact path. Existing files are never overwritten.'),
-  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source id: place-content writes the source fact; keep-template-content or keep-template-label preserves the matching baseline-owned content or label; select-template-option carries an option identity; exclude-source requires declared exclusion; review-source is limited to genuine local ambiguity.'),
+  choices: z.array(migrationChoiceInput).describe('Exactly one business choice for every source ref. Targeted choices use an alternativeRef returned by the query tool. Terminal exclusions and genuine local review use a sourceRef.'),
   templateCleanup: z.array(templateCleanupInput).optional().describe('Optional baseline-owned placeholders or example rows to clear.'),
 }).strict();
 
@@ -93,6 +84,16 @@ const migrationChoiceOutput = z.object({
   requiredCardinality: z.string().nullable(),
   context: z.record(z.string(), z.unknown()).nullable(),
   allowedActions: z.array(z.string()),
+}).strict();
+
+const migrationPublicChoiceOutput = migrationChoiceOutput.omit({ id: true }).extend({
+  ref: choiceReference,
+}).strict();
+
+const migrationAlternativeOutput = z.object({
+  ref: alternativeReference,
+  action: migrationQueryTargetAction,
+  target: migrationPublicChoiceOutput,
 }).strict();
 
 const migrationCatalog = z.object({
@@ -205,13 +206,6 @@ const migrationTargetPage = z.object({
   targets: z.array(migrationChoiceOutput),
 }).strict();
 
-const migrationTargetAction = z.enum([
-  'place-content',
-  'keep-template-content',
-  'keep-template-label',
-  'select-template-option',
-]);
-
 const migrationQueryDocuments = {
   source: pathInput.describe('Path to the current source DOCX used by docx_list_migration_choices.'),
   baseline: pathInput.describe('Path to the same selected current baseline DOCX used by docx_list_migration_choices.'),
@@ -220,7 +214,7 @@ const migrationQueryDocuments = {
 const boundedOffset = z.number().int().nonnegative().optional().describe('Zero-based result offset. Defaults to 0.');
 const boundedLimit = z.number().int().min(1).max(10).optional().describe('Maximum results to return. Defaults to 10 and cannot exceed 10.');
 
-const migrationChoiceQueryInput = z.discriminatedUnion('view', [
+const migrationChoiceQueryInput = z.union([
   z.object({
     ...migrationQueryDocuments,
     view: z.literal('sources'),
@@ -230,8 +224,8 @@ const migrationChoiceQueryInput = z.discriminatedUnion('view', [
   z.object({
     ...migrationQueryDocuments,
     view: z.literal('targets'),
-    sourceChoiceId: z.string().trim().min(1).describe('Opaque current source id returned by the sources view.'),
-    action: migrationTargetAction.describe('Business action: place-content writes the current source fact; keep-template-content keeps baseline-owned fixed content; keep-template-label keeps the baseline label for the same source meaning; select-template-option carries a selected source option into the matching baseline option.'),
+    sourceRef: choiceReference.describe('Short source reference returned by the sources view.'),
+    action: migrationQueryTargetAction.optional().describe('Optional business-action filter. Choose the action from scenario meaning, then use this filter to inspect only compatible targets. Omit it only when comparing the three documented action meanings.'),
     text: z.string().trim().min(1).optional().describe('Optional literal case-insensitive text to find in target visible text or context.'),
     offset: boundedOffset,
     limit: boundedLimit,
@@ -251,9 +245,9 @@ const migrationChoiceQueryOutput = z.object({
   sourceSha256: z.string(),
   baselineSha256: z.string(),
   view: z.enum(['sources', 'targets', 'cleanup']),
-  action: migrationTargetAction.nullable(),
-  source: migrationChoiceOutput.nullable(),
-  items: z.array(migrationChoiceOutput),
+  action: migrationQueryTargetAction.nullable(),
+  source: migrationPublicChoiceOutput.nullable(),
+  items: z.array(z.union([migrationPublicChoiceOutput, migrationAlternativeOutput])),
   page: migrationQueryPage,
 }).strict();
 
@@ -301,7 +295,7 @@ const tools = [
   },
   {
     name: 'docx_query_migration_choices',
-    description: 'Query current template-migration alternatives without reading the catalog artifact. Page unresolved sources, request provider-compatible targets for one source and business action, or inspect cleanup targets. Target results are ordered by literal and local document-context relevance; that order helps discovery but does not make the business choice.',
+    description: 'Query current template-migration alternatives without reading the catalog artifact. place-content moves current content into a target content position; keep-template-label preserves the target label and structure while migrating a uniquely identified current field value; select-template-option marks a target option represented by the current source fact. Choose the action from scenario meaning and filter by it before paging compatible targets. Target results bind the action and target into one alternativeRef; result order helps discovery but never makes the business choice.',
     inputSchema: migrationChoiceQueryInput,
     outputSchema: migrationChoiceQueryOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -309,7 +303,7 @@ const tools = [
   },
   {
     name: 'docx_migrate_template',
-    description: 'Migrate a current DOCX into the selected baseline from one complete batch of business choices. Choices reference only opaque ids returned by docx_list_migration_choices; the tool derives all document values, coordinates, plans, and edits.',
+    description: 'Migrate a current DOCX into the selected baseline from one complete batch of business choices. For targeted choices, submit one alternativeRef returned by docx_query_migration_choices. Exclusion and local review use a sourceRef plus their terminal action. The tool derives all document values, coordinates, plans, and edits.',
     inputSchema: templateMigrationInput,
     outputSchema: migrationReceiptOutput('docx_migrate_template'),
     handler: docxMigrateTemplate,
@@ -462,57 +456,99 @@ async function docxQueryMigrationChoices(args) {
 
   let source = null;
   let action = null;
-  let branch;
-  let sourceChoiceId = '-';
   if (args.view === 'cleanup') {
-    branch = 'baseline-clear';
-  } else {
-    source = catalog.sources.find(item => item.id === args.sourceChoiceId) ?? null;
-    if (!source) {
-      throw Object.assign(new Error(`Unknown sourceChoiceId: ${args.sourceChoiceId}`), { code: -32602 });
-    }
-    action = args.action;
-    if (!source.allowedActions.includes(action)) {
-      throw Object.assign(new Error(`Action ${action} is not allowed for ${source.id}`), { code: -32602 });
-    }
-    sourceChoiceId = source.id;
-    branch = migrationTargetBranch(action, source.kind);
+    const targetResult = await loadMigrationTargets({
+      sourcePath,
+      baselinePath,
+      sourceChoiceId: '-',
+      branch: 'baseline-clear',
+      text: args.text,
+    });
+    const orderedTargets = validateAndOrderMigrationTargets(catalog, null, targetResult.targets);
+    return migrationQueryResult({
+      runtime: targetResult.runtime,
+      catalog,
+      view: 'cleanup',
+      action: null,
+      source: null,
+      items: orderedTargets.slice(offset, offset + limit),
+      offset,
+      total: orderedTargets.length,
+    });
   }
 
-  const targetResult = await loadMigrationTargets({
-    sourcePath,
-    baselinePath,
-    sourceChoiceId,
-    branch,
-    text: args.text,
+  const requestedSourceId = choiceIdFromRef(catalog, catalog.sources, args.sourceRef, 'S', 'source');
+  source = catalog.sources.find(item => item.id === requestedSourceId) ?? null;
+  if (!source) {
+    throw Object.assign(new Error(`Unknown migration source: ${args.sourceRef}`), { code: -32602 });
+  }
+  action = args.action ?? null;
+  const actions = action
+    ? [action]
+    : [...targetActions].filter(candidate => source.allowedActions.includes(candidate));
+  const pages = await Promise.all(actions.map(async candidate => {
+    if (!source.allowedActions.includes(candidate)) {
+      throw Object.assign(new Error(`Action ${candidate} is not allowed for ${source.id}`), { code: -32602 });
+    }
+    const result = await loadMigrationTargets({
+      sourcePath,
+      baselinePath,
+      sourceChoiceId: source.id,
+      branch: migrationTargetBranch(candidate, source.kind),
+      text: args.text,
+    });
+    return {
+      action: candidate,
+      runtime: result.runtime,
+      targets: validateAndOrderMigrationTargets(catalog, source, result.targets),
+    };
+  }));
+  const catalogOrder = new Map(catalog.targets.map((item, index) => [item.id, index]));
+  const actionOrder = new Map([...targetActions].map((item, index) => [item, index]));
+  const alternatives = pages.flatMap(page => page.targets.map(target => ({ action: page.action, target })))
+    .sort((left, right) => {
+      const relevance = compareRelevance(
+        migrationChoiceRelevance(source, right.target),
+        migrationChoiceRelevance(source, left.target));
+      return relevance
+        || catalogOrder.get(left.target.id) - catalogOrder.get(right.target.id)
+        || actionOrder.get(left.action) - actionOrder.get(right.action);
+    })
+    .map(item => ({
+      ref: migrationAlternativeRef(catalog, source, item.action, item.target),
+      action: item.action,
+      target: publicMigrationChoice(catalog, item.target, 'T'),
+    }));
+  return migrationQueryResult({
+    runtime: pages[0]?.runtime ?? commandRuntime(catalogResult),
+    catalog,
+    view: 'targets',
+    action,
+    source,
+    items: alternatives.slice(offset, offset + limit),
+    offset,
+    total: alternatives.length,
+    alternatives: true,
   });
+}
+
+function validateAndOrderMigrationTargets(catalog, source, targets) {
   const catalogTargets = new Map(catalog.targets.map(item => [item.id, item]));
-  for (const target of targetResult.targets) {
+  for (const target of targets) {
     const current = catalogTargets.get(target.id);
     if (!current || !isDeepStrictEqual(current, target)) {
       throw new Error(`Migration target ${target.id} is not bound to the current catalog`);
     }
   }
   const catalogOrder = new Map(catalog.targets.map((item, index) => [item.id, index]));
-  const orderedTargets = source
-    ? [...targetResult.targets].sort((left, right) => {
+  return source
+    ? [...targets].sort((left, right) => {
       const relevance = compareRelevance(
         migrationChoiceRelevance(source, right),
         migrationChoiceRelevance(source, left));
       return relevance || catalogOrder.get(left.id) - catalogOrder.get(right.id);
     })
-    : [...targetResult.targets].sort((left, right) => catalogOrder.get(left.id) - catalogOrder.get(right.id));
-  const items = orderedTargets.slice(offset, offset + limit);
-  return migrationQueryResult({
-    runtime: targetResult.runtime,
-    catalog,
-    view: args.view,
-    action,
-    source,
-    items,
-    offset,
-    total: orderedTargets.length,
-  });
+    : [...targets].sort((left, right) => catalogOrder.get(left.id) - catalogOrder.get(right.id));
 }
 
 async function loadMigrationTargets({ sourcePath, baselinePath, sourceChoiceId, branch, text }) {
@@ -628,7 +664,82 @@ function migrationTargetBranch(action, sourceKind) {
   throw new Error(`Unsupported migration target action: ${action}`);
 }
 
-function migrationQueryResult({ runtime, catalog, view, action, source, items, offset, total }) {
+function catalogReferenceToken(catalog) {
+  return createHash('sha256')
+    .update(`${catalog.sourceSha256}\n${catalog.baselineSha256}`)
+    .digest('hex')
+    .slice(0, 8);
+}
+
+function choiceRef(catalog, items, id, prefix) {
+  const index = items.findIndex(item => item.id === id);
+  if (index < 0) throw new Error(`Migration choice is not bound to the current catalog: ${id}`);
+  return `${prefix}${index + 1}-${catalogReferenceToken(catalog)}`;
+}
+
+function choiceIdFromRef(catalog, items, ref, prefix, label) {
+  if (!ref.startsWith(prefix)) {
+    throw invalidMigrationInput(`invalid migration ${label} ref: ${ref}`);
+  }
+  const [ordinal, token] = ref.slice(1).split('-');
+  if (token !== catalogReferenceToken(catalog)) {
+    throw invalidMigrationInput(`stale migration ${label} ref: ${ref}`);
+  }
+  const item = items[Number(ordinal) - 1];
+  if (!item) throw invalidMigrationInput(`unknown migration ${label} ref: ${ref}`);
+  return item.id;
+}
+
+const migrationActionCodes = new Map([
+  ['place-content', 'P'],
+  ['keep-template-label', 'L'],
+  ['select-template-option', 'O'],
+]);
+const migrationActionsByCode = new Map([...migrationActionCodes].map(([action, code]) => [code, action]));
+
+function migrationAlternativeRef(catalog, source, action, target) {
+  const sourceOrdinal = catalog.sources.findIndex(item => item.id === source.id) + 1;
+  const targetOrdinal = catalog.targets.findIndex(item => item.id === target.id) + 1;
+  const code = migrationActionCodes.get(action);
+  if (sourceOrdinal < 1 || targetOrdinal < 1 || !code) {
+    throw new Error('Migration alternative is not bound to the current catalog');
+  }
+  return `S${sourceOrdinal}-${code}${targetOrdinal}-${migrationAlternativeToken(catalog, source, action, target)}`;
+}
+
+function migrationAlternativeToken(catalog, source, action, target) {
+  return createHash('sha256')
+    .update(`${catalog.sourceSha256}\n${catalog.baselineSha256}\n${source.id}\n${action}\n${target.id}`)
+    .digest('hex')
+    .slice(0, 8);
+}
+
+function migrationChoiceFromAlternativeRef(catalog, ref) {
+  const match = /^S([1-9][0-9]*)-([PLO])([1-9][0-9]*)-([0-9a-f]{8})$/.exec(ref);
+  if (!match) throw invalidMigrationInput(`invalid migration alternative ref: ${ref}`);
+  const source = catalog.sources[Number(match[1]) - 1];
+  const target = catalog.targets[Number(match[3]) - 1];
+  const action = migrationActionsByCode.get(match[2]);
+  if (!source || !target || !action) {
+    throw invalidMigrationInput(`unknown migration alternative ref: ${ref}`);
+  }
+  if (match[4] !== migrationAlternativeToken(catalog, source, action, target)) {
+    throw invalidMigrationInput(`stale or invalid migration alternative ref: ${ref}`);
+  }
+  return { sourceChoiceId: source.id, action, targetChoiceId: target.id };
+}
+
+function publicMigrationChoice(catalog, choice, prefix) {
+  const { id, ...visible } = choice;
+  const items = prefix === 'S' ? catalog.sources : catalog.targets;
+  return {
+    ...visible,
+    allowedActions: visible.allowedActions.filter(action => action !== 'keep-template-content'),
+    ref: choiceRef(catalog, items, id, prefix),
+  };
+}
+
+function migrationQueryResult({ runtime, catalog, view, action, source, items, offset, total, alternatives = false }) {
   return {
     tool: 'docx_query_migration_choices',
     runtime,
@@ -636,8 +747,10 @@ function migrationQueryResult({ runtime, catalog, view, action, source, items, o
     baselineSha256: catalog.baselineSha256,
     view,
     action,
-    source,
-    items,
+    source: source ? publicMigrationChoice(catalog, source, 'S') : null,
+    items: alternatives
+      ? items
+      : items.map(item => publicMigrationChoice(catalog, item, view === 'sources' ? 'S' : 'T')),
     page: {
       offset,
       returned: items.length,
@@ -662,13 +775,20 @@ function invalidMigrationInput(message) {
 function completeMigrationChoices(catalog, choices) {
   const sources = new Map(catalog.sources.map(source => [source.id, source]));
   const seen = new Set();
-  const completed = choices.map(choice => {
-    const source = sources.get(choice.sourceChoiceId);
-    if (!source) throw invalidMigrationInput(`unknown migration source id: ${choice.sourceChoiceId}`);
-    if (seen.has(choice.sourceChoiceId)) throw invalidMigrationInput(`duplicate migration source id: ${choice.sourceChoiceId}`);
-    seen.add(choice.sourceChoiceId);
+  const completed = choices.map(rawChoice => {
+    const choice = rawChoice.alternativeRef
+      ? migrationChoiceFromAlternativeRef(catalog, rawChoice.alternativeRef)
+      : {
+          sourceChoiceId: choiceIdFromRef(catalog, catalog.sources, rawChoice.sourceRef, 'S', 'source'),
+          action: rawChoice.action,
+        };
+    const { sourceChoiceId } = choice;
+    const source = sources.get(sourceChoiceId);
+    if (!source) throw invalidMigrationInput(`unknown migration source id: ${sourceChoiceId}`);
+    if (seen.has(sourceChoiceId)) throw invalidMigrationInput(`duplicate migration source id: ${sourceChoiceId}`);
+    seen.add(sourceChoiceId);
     if (!source.allowedActions.includes(choice.action)) {
-      throw invalidMigrationInput(`migration action ${choice.action} is not allowed for source id: ${choice.sourceChoiceId}`);
+      throw invalidMigrationInput(`migration action ${choice.action} is not allowed for source id: ${sourceChoiceId}`);
     }
     return source.requiredCardinality === 'all'
       ? { ...choice, cardinality: 'all' }
@@ -681,6 +801,20 @@ function completeMigrationChoices(catalog, choices) {
   return completed;
 }
 
+function completeTemplateCleanup(catalog, cleanup, choices) {
+  const targets = new Map(catalog.targets.map(target => [target.id, target]));
+  const claimedTargets = new Set(choices.flatMap(choice => choice.targetChoiceId ? [choice.targetChoiceId] : []));
+  const seen = new Set();
+  return cleanup.map(rawCleanup => {
+    const targetChoiceId = choiceIdFromRef(catalog, catalog.targets, rawCleanup.targetRef, 'T', 'target');
+    if (!seen.add(targetChoiceId)) throw invalidMigrationInput(`duplicate migration cleanup target id: ${targetChoiceId}`);
+    if (!targets.get(targetChoiceId)?.allowedActions.includes('template-cleanup')) {
+      throw invalidMigrationInput(`migration cleanup is not allowed for target id: ${targetChoiceId}`);
+    }
+    return { targetChoiceId, scope: rawCleanup.scope };
+  }).filter(cleanupChoice => !claimedTargets.has(cleanupChoice.targetChoiceId));
+}
+
 async function runTemplateMigrationCommand(tool, command, args) {
   const source = requireString(args.source, 'source');
   const baseline = requireString(args.baseline, 'baseline');
@@ -690,10 +824,14 @@ async function runTemplateMigrationCommand(tool, command, args) {
   }
   const catalogResult = await runJsonCandidateChain(docxCandidates, ['list-template-migration-choices', source, baseline]);
   const catalog = migrationCatalog.parse(catalogResult.json);
+  const choices = completeMigrationChoices(catalog, args.choices);
+  const templateCleanup = Array.isArray(args.templateCleanup)
+    ? completeTemplateCleanup(catalog, args.templateCleanup, choices)
+    : [];
   const payload = {
     schema: 'tiwater.docx.template-migration-business-choices/v1',
-    choices: completeMigrationChoices(catalog, args.choices),
-    ...(Array.isArray(args.templateCleanup) ? { templateCleanup: args.templateCleanup } : {}),
+    choices,
+    ...(templateCleanup.length > 0 ? { templateCleanup } : {}),
   };
   return withTempJsonFile(payload, async choicesPath => {
     const result = await runJsonCandidateChain(

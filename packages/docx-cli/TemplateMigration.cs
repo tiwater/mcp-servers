@@ -338,20 +338,52 @@ public static class TemplateMigration
         var targetObservations = discovery.AvailableTargets
             .SelectMany(item => new[] { item }.Concat(item.Context?.SelectableChildren ?? []))
             .ToList();
+        var baselineInventory = Inventory(baseline);
+        var selectableChoiceLabelObjectIds = SelectableChoiceLabelObjectIds(baseline);
+        var selectableChoiceLabelIds = baselineInventory.Objects
+            .Where(item => selectableChoiceLabelObjectIds.Contains(item.Id) && item.Selector is not null)
+            .Select(item => ChoiceId("target", discovery.BaselineSha256, item.Selector!))
+            .ToHashSet(StringComparer.Ordinal);
+        var cleanupProtectedTargetIds = baselineInventory.Objects
+            .Where(item => item.Kind == "table-cell" && item.Topology is not null)
+            .GroupBy(item => (item.Topology!.ContainerObjectId, item.Topology.Row))
+            .Where(group => group.Any(HasProtectedCleanupContent))
+            .SelectMany(group => group)
+            .Where(item => item.Selector is not null)
+            .Select(item => ChoiceId("target", discovery.BaselineSha256, item.Selector!))
+            .ToHashSet(StringComparer.Ordinal);
         var targets = targetObservations
             .GroupBy(item => ChoiceId("target", discovery.BaselineSha256, item.Selector
                 ?? throw new InvalidOperationException("template-migration-choice-target-selector-missing")), StringComparer.Ordinal)
-            .Select(group => ToChoice(
-                group.Key,
-                group.First(),
-                group.Count(),
-                allowedActions: group.First().Kind == "run"
-                    ? ["select-template-option"]
-                    : group.First().Kind == "media"
-                        ? ["place-content"]
-                    : group.First().Kind == "table-cell"
-                        ? ["place-content", "keep-template-content", "keep-template-label", "template-cleanup"]
-                        : ["place-content", "keep-template-content", "keep-template-label"]))
+            .Select(group =>
+            {
+                var target = group.First();
+                IReadOnlyList<string> allowedActions;
+                if (target.Kind == "run")
+                {
+                    allowedActions = selectableChoiceLabelIds.Contains(group.Key) ? ["select-template-option"] : [];
+                }
+                else if (target.Kind == "media")
+                {
+                    allowedActions = ["place-content"];
+                }
+                else if (target.Kind == "table-cell")
+                {
+                    var actions = new List<string> { "keep-template-content" };
+                    if (!cleanupProtectedTargetIds.Contains(group.Key))
+                    {
+                        actions.Add("place-content");
+                        actions.Add("template-cleanup");
+                    }
+                    if (!string.IsNullOrWhiteSpace(target.Text)) actions.Add("keep-template-label");
+                    allowedActions = actions;
+                }
+                else
+                {
+                    allowedActions = ["place-content", "keep-template-content", "keep-template-label"];
+                }
+                return ToChoice(group.Key, target, group.Count(), allowedActions: allowedActions);
+            })
             .ToList();
 
         return new TemplateMigrationChoiceCatalog(
@@ -486,9 +518,13 @@ public static class TemplateMigration
 
         IEnumerable<TemplateMigrationChoice> targets = branch switch
         {
-            "copy-text" or "retain-target" or "retain-target-label" => catalog.Targets.Where(item =>
+            "copy-text" or "retain-target" => catalog.Targets.Where(item =>
                 item.AllowedActions?.Contains(PublicActionForDisposition(branch), StringComparer.Ordinal) == true
                 && string.Equals(item.Kind, sourceChoice!.Kind, StringComparison.Ordinal)),
+            "retain-target-label" => catalog.Targets.Where(item =>
+                item.AllowedActions?.Contains("keep-template-label", StringComparer.Ordinal) == true
+                && sourceChoice!.Kind is "paragraph" or "table-cell"
+                && item.Kind is "paragraph" or "table-cell"),
             "copy-media" => catalog.Targets.Where(item => item.AllowedActions?.Contains("place-content", StringComparer.Ordinal) == true
                 && item.Kind == "media" && sourceChoice!.Kind == "media"),
             "choice-selection" => catalog.Targets.Where(item => item.AllowedActions?.Contains("select-template-option", StringComparer.Ordinal) == true),
@@ -538,6 +574,12 @@ public static class TemplateMigration
             .Concat(draft.ChoiceSelections.Select(item => item.TargetChoiceId))
             .Concat(draft.BaselineClears.Select(item => item.TargetChoiceId))
             .ToHashSet(StringComparer.Ordinal);
+        if (string.Equals(branch, "retain-target-label", StringComparison.Ordinal))
+        {
+            usedTargets.ExceptWith(draft.Mappings
+                .Where(item => item.Disposition == "retain-target-label" && item.TargetChoiceId is not null)
+                .Select(item => item.TargetChoiceId!));
+        }
         return ListDecisionTargets(source, baseline, sourceChoiceId, branch, query, offset, limit, usedTargets);
     }
 
@@ -586,12 +628,7 @@ public static class TemplateMigration
                 throw new InvalidOperationException("template-migration-decision-cardinality-invalid");
             }
             if (sourceChoice.RequiredCardinality == "all"
-                && decision.Disposition == "review-required")
-            {
-                throw new InvalidOperationException("template-migration-decision-review-group-unsupported");
-            }
-            if (sourceChoice.RequiredCardinality == "all"
-                && (decision.Disposition != "out-of-scope" || decision.Cardinality != "all"))
+                && (decision.Disposition is not ("out-of-scope" or "review-required") || decision.Cardinality != "all"))
             {
                 throw new InvalidOperationException("template-migration-decision-cardinality-all-required");
             }
@@ -604,14 +641,18 @@ public static class TemplateMigration
                 if (string.IsNullOrWhiteSpace(decision.TargetChoiceId)) throw new InvalidOperationException("template-migration-decision-target-required");
                 var target = catalog.Targets.SingleOrDefault(item => item.Id == decision.TargetChoiceId)
                     ?? throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-                if (target.AllowedActions?.Contains(PublicActionForDisposition(decision.Disposition), StringComparer.Ordinal) != true
-                    || !string.Equals(sourceChoice.Kind, target.Kind, StringComparison.Ordinal)
-                    || (decision.Disposition == "copy-media" && sourceChoice.Kind != "media")
-                    || (decision.Disposition != "copy-media" && sourceChoice.Kind == "media"))
+                if (!MappingChoicesCompatible(sourceChoice, target, decision.Disposition))
                 {
                     throw new InvalidOperationException("template-migration-decision-target-incompatible");
                 }
-                if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+                if (decision.Disposition == "retain-target-label")
+                {
+                    var claimedByOtherUse = mappings.Any(item => item.TargetChoiceId == target.Id && item.Disposition != "retain-target-label")
+                        || selections.Any(item => item.TargetChoiceId == target.Id)
+                        || clears.Any(item => item.TargetChoiceId == target.Id);
+                    if (claimedByOtherUse) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+                }
+                else if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
             }
             mappings.Add(new TemplateMigrationChoiceMapping(
                 sourceChoice.Id,
@@ -821,6 +862,22 @@ public static class TemplateMigration
             _ => throw new InvalidOperationException("template-migration-decision-disposition-invalid")
         };
 
+    private static bool MappingChoicesCompatible(
+        TemplateMigrationChoice source,
+        TemplateMigrationChoice target,
+        string disposition)
+    {
+        if (target.AllowedActions?.Contains(PublicActionForDisposition(disposition), StringComparer.Ordinal) != true) return false;
+        if (disposition == "copy-media") return source.Kind == "media" && target.Kind == "media";
+        if (source.Kind == "media" || target.Kind == "media") return false;
+        if (disposition == "retain-target-label")
+        {
+            return source.Kind is "paragraph" or "table-cell"
+                && target.Kind is "paragraph" or "table-cell";
+        }
+        return string.Equals(source.Kind, target.Kind, StringComparison.Ordinal);
+    }
+
     private static string ChoiceSearchText(TemplateMigrationChoice choice)
         => string.Join("\n", new[]
         {
@@ -865,19 +922,23 @@ public static class TemplateMigration
             if (mapping.Disposition is "out-of-scope" or "review-required")
             {
                 if (mapping.TargetChoiceId is not null) throw new InvalidOperationException("template-migration-decision-target-forbidden");
-                if (mapping.Disposition == "review-required" && source.RequiredCardinality == "all") throw new InvalidOperationException("template-migration-decision-review-group-unsupported");
                 if (source.RequiredCardinality == "all" && mapping.Cardinality != "all") throw new InvalidOperationException("template-migration-decision-cardinality-all-required");
                 continue;
             }
             if (mapping.TargetChoiceId is null || !targets.TryGetValue(mapping.TargetChoiceId, out var target)) throw new InvalidOperationException("template-migration-decision-target-unknown-or-stale");
-            if (target.AllowedActions?.Contains(PublicActionForDisposition(mapping.Disposition), StringComparer.Ordinal) != true
-                || !string.Equals(source.Kind, target.Kind, StringComparison.Ordinal)
-                || (mapping.Disposition == "copy-media" && source.Kind != "media")
-                || (mapping.Disposition != "copy-media" && source.Kind == "media"))
+            if (!MappingChoicesCompatible(source, target, mapping.Disposition))
             {
                 throw new InvalidOperationException("template-migration-decision-target-incompatible");
             }
-            if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+            if (mapping.Disposition == "retain-target-label")
+            {
+                var claimedByOtherUse = draft.Mappings.Any(item => item.TargetChoiceId == target.Id && item.Disposition != "retain-target-label")
+                    || draft.ChoiceSelections.Any(item => item.TargetChoiceId == target.Id)
+                    || draft.BaselineClears.Any(item => item.TargetChoiceId == target.Id);
+                if (claimedByOtherUse) throw new InvalidOperationException("template-migration-decision-target-duplicate");
+                usedTargets.Add(target.Id);
+            }
+            else if (!usedTargets.Add(target.Id)) throw new InvalidOperationException("template-migration-decision-target-duplicate");
         }
         foreach (var selection in draft.ChoiceSelections)
         {
@@ -1986,6 +2047,60 @@ close-template-migration-reviews consumes this resolution as a separate step.
                 proposal.Extraction));
         }
 
+        foreach (var mapping in mappings.Values
+                     .Where(item => string.Equals(item.Disposition, "retain-target-label", StringComparison.Ordinal))
+                     .ToList())
+        {
+            if (string.IsNullOrWhiteSpace(mapping.BaselineObjectId)
+                || analysis.Source.Objects.FirstOrDefault(item => item.Id == mapping.SourceObjectId) is not { } sourceParent
+                || analysis.Baseline.Objects.FirstOrDefault(item => item.Id == mapping.BaselineObjectId) is not { } baselineParent
+                || sourceParent.Kind is not ("paragraph" or "table-cell")
+                || baselineParent.Kind is not ("paragraph" or "table-cell"))
+            {
+                continue;
+            }
+
+            var addedProjection = false;
+            foreach (var valueKind in new[] { "identifier", "version", "date" })
+            {
+                if (!TryDeriveProjectionValue(analysis.Source.Objects, sourceParent, valueKind, "unique-delimited-value", out _, out var sourceFailure))
+                {
+                    if (sourceFailure is not ("template-migration-semantic-value-source-kind-mismatch"
+                        or "template-migration-semantic-value-source-empty"
+                        or "template-migration-semantic-value-source-runs-missing"))
+                    {
+                        failures.Add(new TemplateMigrationPlanFailure(sourceFailure!, sourceParent.Id, baselineParent.Id, valueKind));
+                    }
+                    continue;
+                }
+                if (!TryLocateProjectionTarget(analysis.Baseline.Objects, baselineParent, valueKind, "unique-delimited-value", out _, out var targetFailure))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure(targetFailure!, sourceParent.Id, baselineParent.Id, valueKind));
+                    continue;
+                }
+                var semantic = RetainedLabelValueSemantic(baselineParent.Id, valueKind);
+                if (!projectionBindings.Add($"{sourceParent.Id}\u001F{baselineParent.Id}\u001F{semantic}"))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-value-binding-duplicate", sourceParent.Id, baselineParent.Id, semantic));
+                    continue;
+                }
+                if (!projectedSemantics.Add(semantic))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-semantic-value-identity-duplicate", sourceParent.Id, baselineParent.Id, semantic));
+                    continue;
+                }
+                projectedSources.Add(sourceParent.Id);
+                valueProjections.Add(new TemplateMigrationValueProjection(
+                    sourceParent.Id,
+                    baselineParent.Id,
+                    semantic,
+                    valueKind,
+                    "unique-delimited-value"));
+                addedProjection = true;
+            }
+            if (addedProjection) mappings.Remove(mapping.SourceObjectId);
+        }
+
         var copiedMediaRelationships = DeriveCoveredDrawingRelationships(analysis, mappings.Values);
         foreach (var drawing in analysis.Source.Objects.Where(item => item.Kind == "drawing"))
         {
@@ -2135,24 +2250,27 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
         foreach (var proposal in candidate.Mappings)
         {
             var sourceMatches = ResolveSelector(analysis.Source.Objects, proposal.Source);
-            if (sourceMatches.Count != 1)
+            var matchesGroup = proposal.Cardinality == "all";
+            if (sourceMatches.Count == 0 || (!matchesGroup && sourceMatches.Count != 1))
             {
                 failures.Add(new TemplateMigrationPlanFailure(sourceMatches.Count == 0
                     ? "template-migration-review-source-missing"
                     : "template-migration-review-source-ambiguous"));
                 continue;
             }
-            var sourceObject = sourceMatches[0];
-            if (!pending.Remove(sourceObject.Id, out var unresolved))
+            foreach (var sourceObject in sourceMatches)
             {
-                failures.Add(new TemplateMigrationPlanFailure("template-migration-review-source-not-unresolved", sourceObject.Id));
-                continue;
+                if (!pending.Remove(sourceObject.Id, out var unresolved))
+                {
+                    failures.Add(new TemplateMigrationPlanFailure("template-migration-review-source-not-unresolved", sourceObject.Id));
+                    continue;
+                }
+                mappings[sourceObject.Id] = new TemplateMigrationMapping(
+                    sourceObject.Id,
+                    null,
+                    "review-required",
+                    unresolved.Reason);
             }
-            mappings[sourceObject.Id] = new TemplateMigrationMapping(
-                sourceObject.Id,
-                null,
-                "review-required",
-                unresolved.Reason);
         }
         failures.AddRange(pending.Values);
 
@@ -2210,7 +2328,7 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
             ValidateSemanticSelector(mapping.Source, "review-source", candidate.Schema);
             if (!string.Equals(mapping.Disposition, "review-required", StringComparison.Ordinal)
                 || mapping.Baseline is not null
-                || mapping.Cardinality is not null and not "one")
+                || mapping.Cardinality is not null and not ("one" or "all"))
             {
                 throw new InvalidOperationException("template-migration-review-candidate-mapping-invalid");
             }
@@ -2754,6 +2872,14 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
                 failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-clear-mode-invalid", BaselineObjectId: clear.BaselineObjectId, Detail: clear.Mode));
                 continue;
             }
+            var protectedTarget = targets.FirstOrDefault(HasProtectedCleanupContent);
+            if (protectedTarget is not null)
+            {
+                failures.Add(new TemplateMigrationPlanFailure(
+                    "template-migration-baseline-clear-protected-content",
+                    BaselineObjectId: protectedTarget.Id));
+                continue;
+            }
             foreach (var target in targets)
             {
                 if (!clearTargets.Add(target.Id))
@@ -3017,14 +3143,10 @@ Usage: close-template-migration-reviews <source.docx> <baseline.docx> <resolutio
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-unknown", mapping.SourceObjectId, mapping.BaselineObjectId));
                     continue;
                 }
-                if (sourceObject.Kind is not ("paragraph" or "table-cell") || !string.Equals(sourceObject.Kind, baselineObject.Kind, StringComparison.Ordinal))
+                if (sourceObject.Kind is not ("paragraph" or "table-cell") || baselineObject.Kind is not ("paragraph" or "table-cell"))
                 {
                     failures.Add(new TemplateMigrationPlanFailure("template-migration-retain-target-parent-required", mapping.SourceObjectId, mapping.BaselineObjectId));
                     continue;
-                }
-                if (!copyTargets.Add(mapping.BaselineObjectId))
-                {
-                    failures.Add(new TemplateMigrationPlanFailure("template-migration-baseline-object-duplicate", mapping.SourceObjectId, mapping.BaselineObjectId));
                 }
             }
             else if (string.Equals(disposition, "unresolved", StringComparison.Ordinal))
@@ -4169,7 +4291,10 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
             foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((cell, index) => (cell, index)))
             {
                 var cellId = $"{rowId}:cell:{cellIndex}";
-                objects.Add(Object(cellId, "table-cell", scope, rowId, string.Concat(cell.Elements<Paragraph>().SelectMany(paragraph => paragraph.Descendants<Text>()).Select(text => text.Text)).Trim(), null, EmptyProvenance,
+                var provenance = HasProtectedCleanupContent(cell)
+                    ? new Dictionary<string, string>(StringComparer.Ordinal) { ["protectedCleanupContent"] = "true" }
+                    : EmptyProvenance;
+                objects.Add(Object(cellId, "table-cell", scope, rowId, string.Concat(cell.Elements<Paragraph>().SelectMany(paragraph => paragraph.Descendants<Text>()).Select(text => text.Text)).Trim(), null, provenance,
                     new TemplateMigrationTopology(tableId, rowIndex, cellIndex)));
                 foreach (var (paragraph, paragraphIndex) in cell.Elements<Paragraph>().Select((paragraph, index) => (paragraph, index)))
                 {
@@ -4339,6 +4464,18 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
     private static TemplateMigrationObject Object(string id, string kind, string scope, string? parentId, string? text, string? style, IReadOnlyDictionary<string, string> provenance, TemplateMigrationTopology? topology = null)
         => new(id, kind, scope, parentId, text, style, provenance, topology);
 
+    private static bool HasProtectedCleanupContent(TemplateMigrationObject item)
+        => item.Provenance.GetValueOrDefault("protectedCleanupContent") == "true";
+
+    private static bool HasProtectedCleanupContent(TableCell cell)
+        => cell.Descendants<FieldCode>().Any()
+            || cell.Descendants<FieldChar>().Any()
+            || cell.Descendants<Drawing>().Any()
+            || cell.Descendants<SdtElement>().Any()
+            || cell.Descendants<Hyperlink>().Any()
+            || cell.Descendants<FootnoteReference>().Any()
+            || cell.Descendants<EndnoteReference>().Any();
+
     private static string? ParagraphStyle(Paragraph paragraph) => paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
 
     private static bool IsContentBearing(TemplateMigrationObject item)
@@ -4414,6 +4551,33 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
             ParagraphIndex: int.Parse(match.Groups["paragraph"].Value),
             RunIndex: runIndex - 1,
             Text: "selected");
+    }
+
+    private static HashSet<string> SelectableChoiceLabelObjectIds(string baseline)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        using var document = WordprocessingDocument.Open(Path.GetFullPath(baseline), false);
+        var main = document.MainDocumentPart;
+        var body = main?.Document?.Body;
+        if (main is null || body is null) return result;
+        foreach (var (table, tableIndex) in body.Elements<Table>().Select((item, index) => (item, index)))
+        foreach (var (row, rowIndex) in table.Elements<TableRow>().Select((item, index) => (item, index)))
+        foreach (var (cell, cellIndex) in row.Elements<TableCell>().Select((item, index) => (item, index)))
+        foreach (var (paragraph, paragraphIndex) in cell.Elements<Paragraph>().Select((item, index) => (item, index)))
+        {
+            var directRuns = paragraph.Elements<Run>().ToList();
+            var inventoryRuns = paragraph.Descendants<Run>().ToList();
+            if (directRuns.Count != inventoryRuns.Count
+                || !directRuns.SequenceEqual(inventoryRuns, ReferenceEqualityComparer.Instance)) continue;
+            for (var labelIndex = 1; labelIndex < directRuns.Count; labelIndex += 1)
+            {
+                var glyph = directRuns[labelIndex - 1];
+                var blip = glyph.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().SingleOrDefault();
+                if (blip?.Embed?.Value is null || !main.Parts.Any(part => part.RelationshipId == blip.Embed.Value)) continue;
+                result.Add($"body:table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}:paragraph:{paragraphIndex}:run:{labelIndex}");
+            }
+        }
+        return result;
     }
 
     private static bool IndependentlyChoiceSelected(string output, string baselineLabelRunId)
@@ -4793,8 +4957,11 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         }
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
-            var spans = ProjectionRunGroups(runs)
-                .SelectMany(group => DelimitedValueSpans(string.Concat(group.Select(item => item.Text ?? string.Empty)), valueKind, allowPlaceholder: false))
+            var visibleGroups = parent.Kind == "paragraph" && !string.IsNullOrEmpty(parent.Text)
+                ? [parent.Text]
+                : ProjectionRunGroups(runs).Select(group => string.Concat(group.Select(item => item.Text ?? string.Empty)));
+            var spans = visibleGroups
+                .SelectMany(text => DelimitedValueSpans(text, valueKind, allowPlaceholder: false))
                 .Where(span => ProjectionValueKindMatches(span.Value, valueKind)).ToList();
             if (spans.Count == 0)
             {
@@ -4838,6 +5005,12 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         }
         value = candidates[0];
         return true;
+    }
+
+    private static string RetainedLabelValueSemantic(string baselineParentId, string valueKind)
+    {
+        var identity = Encoding.UTF8.GetBytes($"{baselineParentId}\u001F{valueKind}");
+        return $"retained-label-{valueKind}-{Convert.ToHexString(SHA256.HashData(identity)).ToLowerInvariant()[..12]}";
     }
 
     private static bool TryLocateProjectionTarget(
@@ -5042,9 +5215,13 @@ Usage: preview-template-migration <source.docx> <baseline.docx> <closed-review-o
         if (string.Equals(extraction, "unique-delimited-value", StringComparison.Ordinal))
         {
             var delimitedCandidates = new List<string>();
-            foreach (var group in runs.GroupBy(run => Regex.Replace(run.Id, ":run:[0-9]+$", string.Empty, RegexOptions.CultureInvariant), StringComparer.Ordinal))
+            var parent = objects.FirstOrDefault(item => string.Equals(item.Id, parentId, StringComparison.Ordinal));
+            var visibleGroups = parent?.Kind == "paragraph" && !string.IsNullOrEmpty(parent.Text)
+                ? [parent.Text]
+                : runs.GroupBy(run => Regex.Replace(run.Id, ":run:[0-9]+$", string.Empty, RegexOptions.CultureInvariant), StringComparer.Ordinal)
+                    .Select(group => string.Concat(group.Select(run => run.Text ?? string.Empty)));
+            foreach (var text in visibleGroups)
             {
-                var text = string.Concat(group.Select(run => run.Text ?? string.Empty));
                 for (var delimiter = 0; delimiter < text.Length; delimiter += 1)
                 {
                     if (text[delimiter] is not (':' or '：')) continue;
