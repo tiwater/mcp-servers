@@ -355,19 +355,35 @@ public static class TemplateMigration
         var targets = targetObservations
             .GroupBy(item => ChoiceId("target", discovery.BaselineSha256, item.Selector
                 ?? throw new InvalidOperationException("template-migration-choice-target-selector-missing")), StringComparer.Ordinal)
-            .Select(group => ToChoice(
-                group.Key,
-                group.First(),
-                group.Count(),
-                allowedActions: group.First().Kind == "run" && selectableChoiceLabelIds.Contains(group.Key)
-                    ? ["select-template-option"]
-                    : group.First().Kind == "run"
-                        ? []
-                    : group.First().Kind == "media"
-                        ? ["place-content"]
-                    : group.First().Kind == "table-cell" && !cleanupProtectedTargetIds.Contains(group.Key)
-                        ? ["place-content", "keep-template-content", "keep-template-label", "template-cleanup"]
-                        : ["place-content", "keep-template-content", "keep-template-label"]))
+            .Select(group =>
+            {
+                var target = group.First();
+                IReadOnlyList<string> allowedActions;
+                if (target.Kind == "run")
+                {
+                    allowedActions = selectableChoiceLabelIds.Contains(group.Key) ? ["select-template-option"] : [];
+                }
+                else if (target.Kind == "media")
+                {
+                    allowedActions = ["place-content"];
+                }
+                else if (target.Kind == "table-cell")
+                {
+                    var actions = new List<string> { "keep-template-content" };
+                    if (!cleanupProtectedTargetIds.Contains(group.Key))
+                    {
+                        actions.Add("place-content");
+                        actions.Add("template-cleanup");
+                    }
+                    if (!string.IsNullOrWhiteSpace(target.Text)) actions.Add("keep-template-label");
+                    allowedActions = actions;
+                }
+                else
+                {
+                    allowedActions = ["place-content", "keep-template-content", "keep-template-label"];
+                }
+                return ToChoice(group.Key, target, group.Count(), allowedActions: allowedActions);
+            })
             .ToList();
 
         return new TemplateMigrationChoiceCatalog(

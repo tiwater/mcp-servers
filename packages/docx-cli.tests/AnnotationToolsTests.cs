@@ -3226,6 +3226,8 @@ public class AnnotationToolsTests
         var catalog = TemplateMigration.ListChoices(source, baseline);
         var headerCellChoice = Assert.Single(catalog.Targets, item => item.Kind == "table-cell" && item.Scope == "header");
         Assert.DoesNotContain("template-cleanup", headerCellChoice.AllowedActions ?? []);
+        Assert.DoesNotContain("place-content", headerCellChoice.AllowedActions ?? []);
+        Assert.Contains("keep-template-label", headerCellChoice.AllowedActions ?? []);
 
         var analysis = TemplateMigration.Analyze(source, baseline);
         var headerCell = Assert.Single(analysis.Baseline.Objects, item => item.Kind == "table-cell" && item.Scope == "header");
@@ -3240,6 +3242,22 @@ public class AnnotationToolsTests
         Assert.False(build.Pass);
         Assert.Contains(build.Failures, item => item.Reason == "template-migration-baseline-clear-protected-content");
         Assert.Empty(build.Operations);
+    }
+
+    [Fact]
+    public void TemplateMigration_hides_nested_structural_container_cells_from_targeted_business_actions()
+    {
+        var source = CreateTextMigrationFixture("Current release: A-17");
+        var baseline = CreateNestedLabeledHeaderMigrationFixture();
+
+        var catalog = TemplateMigration.ListChoices(source, baseline);
+        var headerCells = catalog.Targets.Where(item => item.Kind == "table-cell" && item.Scope == "header").ToList();
+        var outer = Assert.Single(headerCells, item => string.IsNullOrWhiteSpace(item.Text));
+        var inner = Assert.Single(headerCells, item => item.Text?.Contains("BASE-9", StringComparison.Ordinal) == true);
+
+        Assert.Equal(["keep-template-content"], outer.AllowedActions);
+        Assert.DoesNotContain("place-content", inner.AllowedActions ?? []);
+        Assert.Contains("keep-template-label", inner.AllowedActions ?? []);
     }
 
     [Fact]
@@ -6611,6 +6629,29 @@ public class AnnotationToolsTests
             new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));
         main.Document.Save();
         header.Header.Save();
+        return path;
+    }
+
+    private static string CreateNestedLabeledHeaderMigrationFixture()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"migration-nested-labeled-header-{Guid.NewGuid():N}.docx");
+        using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+        var main = document.AddMainDocumentPart();
+        var header = main.AddNewPart<HeaderPart>();
+        var innerCell = new TableCell(new Paragraph(
+            new Run(new Text("Release: ")),
+            new Run(new Text("BASE-9")),
+            new Run(new Text(" Page: ")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+            new Run(new FieldCode(" PAGE ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End })));
+        var outerCell = new TableCell(new Paragraph(), new Table(new TableRow(innerCell)));
+        header.Header = new Header(new Table(new TableRow(outerCell)));
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("baseline body"))),
+            new SectionProperties(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) })));
+        header.Header.Save();
+        main.Document.Save();
         return path;
     }
 
