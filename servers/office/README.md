@@ -14,6 +14,7 @@ Shared stdio MCP server for Office document workflows.
 - `office_render_pdf`
 - `xlsx_inspect`
 - `xlsx_export_json`
+- `xlsx_apply`
 - `xlsx_validate`
 - `pptx_inspect`
 - `pptx_export_json`
@@ -23,7 +24,7 @@ Shared stdio MCP server for Office document workflows.
 Install `@tiwater/office-mcp` together with the runtime versions required by
 the consumer, then run `tiwater-office-mcp` as a stdio MCP server.
 
-Office MCP 0.10 requires these minimum published runtimes on `PATH`:
+Office MCP 0.11 requires these minimum published runtimes on `PATH`:
 
 | Command | Package | Minimum version |
 | --- | --- | --- |
@@ -40,6 +41,16 @@ The official MCP SDK derives the schemas advertised to clients and validates
 tool arguments and structured results before they cross the protocol boundary.
 Large observations and exports are written to a caller-selected new JSON
 artifact. MCP returns only the artifact path, hash, and byte count.
+
+## Workbook editing
+
+`xlsx_apply` executes one existing `tiwater.xlsx-edit/v1` artifact against a
+current `.xlsx` workbook. The caller's deterministic builder owns all values,
+coordinates, and operation selection. Office MCP binds the current input,
+operations artifact, and created output by path and content hash and records the
+complete runtime result in a new receipt artifact. It does not interpret
+scenario knowledge or derive workbook edits. Callers independently inspect and
+validate the resulting workbook before delivery.
 
 ## Template migration
 
