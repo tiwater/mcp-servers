@@ -138,6 +138,39 @@ const artifact = z.object({
   bytes: z.number().int().nonnegative(),
 }).strict();
 
+const xlsxAppliedOperation = z.object({
+  type: z.string().min(1),
+  applied: z.boolean(),
+  detail: z.string(),
+  sheet: z.string().nullable().optional(),
+  changedRange: z.string().nullable().optional(),
+  warnings: z.array(z.string()).nullable().optional(),
+}).strict();
+const xlsxEditResult = z.object({
+  input: z.string().min(1),
+  output: z.string().min(1),
+  appliedOperations: z.array(xlsxAppliedOperation),
+}).strict();
+const xlsxApplyReceipt = z.object({
+  schema: z.literal('tiwater.office.xlsx-apply-receipt/v1'),
+  pass: z.boolean(),
+  input: artifact,
+  operations: artifact,
+  output: artifact.nullable(),
+  appliedOperations: z.array(xlsxAppliedOperation),
+}).strict();
+const xlsxApplyOutput = z.object({
+  tool: z.literal('xlsx_apply'),
+  runtime: runtimeIdentity,
+  receipt: artifact,
+  output: artifact.nullable(),
+  summary: z.object({
+    pass: z.boolean(),
+    operationCount: z.number().int().nonnegative(),
+    appliedCount: z.number().int().nonnegative(),
+  }).strict(),
+}).strict();
+
 const renderFileIdentity = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   size_bytes: z.number().int().positive(),
@@ -357,6 +390,18 @@ const tools = [
     }).strict(),
     outputSchema: artifactOutput('xlsx_export_json'),
     handler: xlsxExportJson,
+  },
+  {
+    name: 'xlsx_apply',
+    description: 'Apply one deterministic XLSX operations artifact to a current workbook. This tool executes published workbook edits; it does not derive values, coordinates, or business decisions.',
+    inputSchema: z.object({
+      input: pathInput.describe('Path to the current XLSX workbook.'),
+      operations: pathInput.describe('Path to the deterministic tiwater.xlsx-edit/v1 operations artifact.'),
+      output: pathInput.describe('New XLSX output path. Existing files are never overwritten.'),
+      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
+    }).strict(),
+    outputSchema: xlsxApplyOutput,
+    handler: xlsxApply,
   },
   {
     name: 'xlsx_validate',
@@ -959,6 +1004,56 @@ async function xlsxExportJson(args) {
     runtime: commandRuntime(result),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
+}
+
+async function xlsxApply(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const operations = path.resolve(requireString(args.operations, 'operations'));
+  const output = path.resolve(requireString(args.output, 'output'));
+  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
+  if (path.extname(input).toLowerCase() !== '.xlsx' || path.extname(output).toLowerCase() !== '.xlsx') {
+    throw Object.assign(new Error('XLSX apply input and output must use the .xlsx extension'), { code: -32602 });
+  }
+  await requireNewFile(output, 'output');
+  await requireNewFile(receiptOutput, 'receiptOutput');
+  const inputArtifact = await fileArtifact(input);
+  const operationsArtifact = await fileArtifact(operations);
+  await mkdir(path.dirname(output), { recursive: true });
+  try {
+    const result = await runJsonCandidateChain(
+      xlsxCandidates,
+      ['edit', input, operations, output],
+      { allowedExitCodes: [0, 1] });
+    const edit = xlsxEditResult.parse(result.json);
+    if (path.resolve(edit.input) !== input || path.resolve(edit.output) !== output) {
+      throw new Error('XLSX edit receipt is not bound to the current input and output');
+    }
+    const pass = edit.appliedOperations.every(operation => operation.applied);
+    const outputArtifact = pass ? await fileArtifact(output) : null;
+    if (!pass) await rm(output, { force: true });
+    const receipt = xlsxApplyReceipt.parse({
+      schema: 'tiwater.office.xlsx-apply-receipt/v1',
+      pass,
+      input: inputArtifact,
+      operations: operationsArtifact,
+      output: outputArtifact,
+      appliedOperations: edit.appliedOperations,
+    });
+    return {
+      tool: 'xlsx_apply',
+      runtime: commandRuntime(result),
+      receipt: await writeJsonArtifact(receiptOutput, receipt),
+      output: outputArtifact,
+      summary: {
+        pass,
+        operationCount: edit.appliedOperations.length,
+        appliedCount: edit.appliedOperations.filter(operation => operation.applied).length,
+      },
+    };
+  } catch (error) {
+    await rm(output, { force: true });
+    throw error;
+  }
 }
 
 async function xlsxValidate(args) {

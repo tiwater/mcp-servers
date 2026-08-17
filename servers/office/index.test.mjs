@@ -91,6 +91,27 @@ if (command === 'migrate-template' || command === 'verify-template-migration') {
   process.stdout.write(JSON.stringify({schema:'receipt/v1',toolVersion:'0.12.2',status:failed?'failed':'pass',pass:!failed,reviewRequired:false,outputVerified:!failed,command,payload,output:failed?null:process.argv[6],plan:failed?null:process.argv[6]+'.migration-plan.json',failures:failed?[{reason:'known-failure'}]:[]}));
   process.exit(0);
 }
+if (command === 'edit') {
+  const input = process.argv[3];
+  const operationsPath = process.argv[4];
+  const output = process.argv[5];
+  const operations = JSON.parse(fs.readFileSync(operationsPath, 'utf8')).operations;
+  const failed = input.includes('failed');
+  if (!failed) fs.writeFileSync(output, Buffer.from('edited xlsx bytes'));
+  process.stdout.write(JSON.stringify({
+    input: input.includes('wrong-binding') ? '/different.xlsx' : input,
+    output,
+    appliedOperations: operations.map((operation, index) => ({
+      type: operation.type,
+      applied: !failed,
+      detail: failed ? 'known failure' : 'applied',
+      sheet: operation.sheet ?? null,
+      changedRange: operation.cell ?? null,
+      warnings: null,
+    })),
+  }));
+  process.exit(failed ? 1 : 0);
+}
 if (command.endsWith('-to-pdf')) {
   const input = process.argv[3];
   const output = process.argv[4];
@@ -110,6 +131,7 @@ process.exit(2);
 `, 'utf8');
   await chmod(fakeRuntime, 0o755);
   await symlink(fakeRuntime, path.join(temporary, 'tiwater-convert'));
+  await symlink(fakeRuntime, path.join(temporary, 'tiwater-xlsx'));
 
   const child = spawn(process.execPath, [path.join(officeDir, 'index.mjs')], {
     env: { ...process.env, PATH: temporary, DOTNET_ROOT: '', DOTNET_ROOT_ARM64: '', DOTNET_ROOT_X64: '' },
@@ -146,7 +168,7 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.10.1');
+    assert.equal(initialized.result.serverInfo.version, '0.11.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -154,6 +176,7 @@ process.exit(2);
     assert(names.includes('docx_migrate_template'));
     assert(names.includes('docx_verify_migration'));
     assert(names.includes('office_render_pdf'));
+    assert(names.includes('xlsx_apply'));
     assert.deepEqual(
       names.filter(name => [
         'docx_edit',
@@ -198,6 +221,60 @@ process.exit(2);
       'review-source',
     ].sort());
     assert.equal(migrateTool.inputSchema.additionalProperties, false);
+
+    const xlsxApplyTool = listed.result.tools.find(tool => tool.name === 'xlsx_apply');
+    assert.deepEqual(xlsxApplyTool.inputSchema.required.sort(), ['input', 'operations', 'output', 'receiptOutput'].sort());
+    assert.match(xlsxApplyTool.description, /does not derive values, coordinates, or business decisions/u);
+    const xlsxInput = path.join(temporary, 'current.xlsx');
+    const xlsxOperations = path.join(temporary, 'operations.json');
+    const xlsxOutput = path.join(temporary, 'edited', 'result.xlsx');
+    const xlsxReceipt = path.join(temporary, 'edited', 'result.receipt.json');
+    await writeFile(xlsxInput, 'current xlsx bytes', 'utf8');
+    await writeFile(xlsxOperations, JSON.stringify({ operations: [{ type: 'setCellValue', sheet: 'Sheet1', cell: 'B2', value: 'current value' }] }), 'utf8');
+    const applied = await request('tools/call', {
+      name: 'xlsx_apply',
+      arguments: { input: xlsxInput, operations: xlsxOperations, output: xlsxOutput, receiptOutput: xlsxReceipt },
+    });
+    assert.notEqual(applied.result.isError, true, JSON.stringify(applied.result));
+    assert.equal(applied.result.structuredContent.summary.pass, true);
+    assert.equal(applied.result.structuredContent.summary.operationCount, 1);
+    assert.equal(applied.result.structuredContent.summary.appliedCount, 1);
+    assert.equal(applied.result.structuredContent.output.path, xlsxOutput);
+    const applyReceipt = JSON.parse(await readFile(xlsxReceipt, 'utf8'));
+    assert.equal(applyReceipt.schema, 'tiwater.office.xlsx-apply-receipt/v1');
+    assert.equal(applyReceipt.pass, true);
+    assert.match(applyReceipt.input.sha256, /^[0-9a-f]{64}$/);
+    assert.match(applyReceipt.operations.sha256, /^[0-9a-f]{64}$/);
+    assert.match(applyReceipt.output.sha256, /^[0-9a-f]{64}$/);
+    const replayedApply = await request('tools/call', {
+      name: 'xlsx_apply',
+      arguments: { input: xlsxInput, operations: xlsxOperations, output: xlsxOutput, receiptOutput: path.join(temporary, 'edited', 'replay.receipt.json') },
+    });
+    assert.equal(replayedApply.result.isError, true);
+    const failedInput = path.join(temporary, 'failed.xlsx');
+    await writeFile(failedInput, 'failed xlsx bytes', 'utf8');
+    const failedOutput = path.join(temporary, 'edited', 'failed.xlsx');
+    const failedReceipt = path.join(temporary, 'edited', 'failed.receipt.json');
+    const failedApply = await request('tools/call', {
+      name: 'xlsx_apply',
+      arguments: { input: failedInput, operations: xlsxOperations, output: failedOutput, receiptOutput: failedReceipt },
+    });
+    assert.notEqual(failedApply.result.isError, true, JSON.stringify(failedApply.result));
+    assert.equal(failedApply.result.structuredContent.summary.pass, false);
+    assert.equal(failedApply.result.structuredContent.output, null);
+    await assert.rejects(readFile(failedOutput));
+    assert.equal(JSON.parse(await readFile(failedReceipt, 'utf8')).pass, false);
+    const wrongBindingInput = path.join(temporary, 'wrong-binding.xlsx');
+    await writeFile(wrongBindingInput, 'wrong binding bytes', 'utf8');
+    const wrongBindingOutput = path.join(temporary, 'edited', 'wrong-binding.xlsx');
+    const wrongBindingReceipt = path.join(temporary, 'edited', 'wrong-binding.receipt.json');
+    const wrongBinding = await request('tools/call', {
+      name: 'xlsx_apply',
+      arguments: { input: wrongBindingInput, operations: xlsxOperations, output: wrongBindingOutput, receiptOutput: wrongBindingReceipt },
+    });
+    assert.equal(wrongBinding.result.isError, true);
+    await assert.rejects(readFile(wrongBindingOutput));
+    await assert.rejects(readFile(wrongBindingReceipt));
 
     const renderInput = path.join(temporary, 'render-current.docx');
     const renderOutput = path.join(temporary, 'rendered', 'current.pdf');

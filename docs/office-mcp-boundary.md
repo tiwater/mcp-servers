@@ -126,6 +126,19 @@ The operation does not inspect page appearance, make a delivery decision, or
 interpret scenario requirements. Lucid remains responsible for rendering pages
 from the resulting PDF, visual review, and final workflow closure.
 
+## Workbook editing
+
+Workbook editing is one public execution operation. Its primary input is a
+current `.xlsx` workbook plus one durable `tiwater.xlsx-edit/v1` artifact from a
+deterministic caller. Its machine output is a new workbook and a receipt binding
+the current input, operation artifact, output, and every applied operation.
+
+The operation invokes the published workbook runtime and does not choose values,
+coordinates, business meaning, or delivery status. Independent workbook
+inspection, business readback, native rendering, and delivery closure remain
+outside this operation. Existing workbook inspection, export, and validation
+tools remain separate read-only capabilities.
+
 ## Ownership
 
 - The scenario package owns business identity, allowed ambiguity, and terminal
