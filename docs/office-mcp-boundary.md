@@ -85,7 +85,7 @@ The fourth operation independently repeats admission and readback from the
 current source, baseline, choices, and output. It does not trust the migration
 operation's embedded verdict.
 
-All three operations publish MCP input and output schemas and return structured
+All four operations publish MCP input and output schemas and return structured
 content. Text content is a human-readable projection of the same result, not a
 second contract.
 
