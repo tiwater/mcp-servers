@@ -99,6 +99,15 @@ This keeps source evidence stable when an OCR model represents repeated visual
 rows either as separate markdown rows or as `<br>`-separated values in one
 cell.
 
+Each `table_cell_units[]` entry also exposes any visible checkbox choices in
+that semantic unit as `options`, `selected_options`, and `selection_status`.
+The status is `selected` for exactly one checked choice, `unselected` for no
+checked choice, `ambiguous` for multiple checked choices, and `not-applicable`
+when the unit contains no checkbox choice. The original `text` and source line
+ids remain unchanged. This evidence reports visible selection only; it does not
+interpret Yes/No, translate labels, choose a report value, or infer a missing
+mark.
+
 Non-tabular labeled values and checkbox conclusions are exposed as
 `form_fields[]`. Each field retains a stable page-local `field_id`, label,
 value, raw visible text, every declared option, selected options, and a

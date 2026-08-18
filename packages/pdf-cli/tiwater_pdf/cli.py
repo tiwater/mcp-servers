@@ -831,6 +831,35 @@ def _is_measurement_unit_continuation(text: str) -> bool:
     return bool(has_measurement_marker and _MEASUREMENT_UNIT_CONTINUATION.fullmatch(compact))
 
 
+_TABLE_OPTION_MARK = re.compile(
+    r"(?<!\S)(☑|☒|✓|✔|□|☐|√(?=\s|[^\W\d_]))\s*",
+    re.UNICODE,
+)
+_SELECTED_TABLE_OPTION_MARKS = frozenset(("☑", "☒", "✓", "✔", "√"))
+
+
+def _table_unit_choices(text: str) -> dict:
+    matches = list(_TABLE_OPTION_MARK.finditer(text))
+    options = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        label = text[match.end():end].strip()
+        if label:
+            options.append({"label": label, "selected": match.group(1) in _SELECTED_TABLE_OPTION_MARKS})
+    selected_options = [option["label"] for option in options if option["selected"]]
+    selection_status = (
+        "not-applicable" if not options
+        else "selected" if len(selected_options) == 1
+        else "unselected" if not selected_options
+        else "ambiguous"
+    )
+    return {
+        "options": options,
+        "selected_options": selected_options,
+        "selection_status": selection_status,
+    }
+
+
 def _extract_table_cell_units(rows: list[dict]) -> list[dict]:
     """Expose stable semantic cell units while retaining their source line ids.
 
@@ -858,6 +887,7 @@ def _extract_table_cell_units(rows: list[dict]) -> list[dict]:
                 else:
                     grouped.append([line])
             for unit_index, group in enumerate(grouped):
+                text = " ".join(line["text"] for line in group)
                 units.append({
                     "unit_id": f"{row['row_id']}-cell-{cell_index}-unit-{unit_index}",
                     "row_id": row["row_id"],
@@ -867,7 +897,8 @@ def _extract_table_cell_units(rows: list[dict]) -> list[dict]:
                     "cell_index": cell_index,
                     "unit_index": unit_index,
                     "source_line_ids": [line["line_id"] for line in group],
-                    "text": " ".join(line["text"] for line in group),
+                    "text": text,
+                    **_table_unit_choices(text),
                 })
     return units
 

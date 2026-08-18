@@ -114,6 +114,45 @@ class OcrTableRowsTest(unittest.TestCase):
         ])
         self.assertTrue(all(len(unit["source_line_ids"]) == 1 for unit in units))
 
+    def test_exposes_table_checkbox_choices_without_deciding_their_business_meaning(self):
+        rows = _extract_markdown_table_rows([
+            """| Item | Result |
+|---|---|
+| Novel assay | ☑Accepted now □Rejected now<br>√ Unseen selected observation<br>□ Unseen alternative |"""
+        ], 4)
+
+        units = [unit for unit in _extract_table_cell_units(rows) if unit["cell_index"] == 1 and unit["row_index"] == 1]
+
+        self.assertEqual(units[0]["options"], [
+            {"label": "Accepted now", "selected": True},
+            {"label": "Rejected now", "selected": False},
+        ])
+        self.assertEqual(units[0]["selected_options"], ["Accepted now"])
+        self.assertEqual(units[0]["selection_status"], "selected")
+        self.assertEqual(units[1]["selected_options"], ["Unseen selected observation"])
+        self.assertEqual(units[1]["selection_status"], "selected")
+        self.assertEqual(units[2]["selection_status"], "unselected")
+
+    def test_marks_multiple_checked_choices_in_one_table_unit_ambiguous(self):
+        rows = _extract_markdown_table_rows([
+            "| Item | Result |\n|---|---|\n| Novel assay | ✓First ✔Second □Third |"
+        ], 2)
+
+        unit = next(unit for unit in _extract_table_cell_units(rows) if unit["cell_index"] == 1 and unit["row_index"] == 1)
+
+        self.assertEqual(unit["selected_options"], ["First", "Second"])
+        self.assertEqual(unit["selection_status"], "ambiguous")
+
+    def test_does_not_misclassify_plain_text_or_a_mathematical_square_root_as_a_choice(self):
+        rows = _extract_markdown_table_rows([
+            "| Item | Result |\n|---|---|\n| Calculation | √2 equals approximately 1.414<br>Plain observation |"
+        ], 3)
+
+        units = [unit for unit in _extract_table_cell_units(rows) if unit["cell_index"] == 1 and unit["row_index"] == 1]
+
+        self.assertTrue(all(unit["options"] == [] for unit in units))
+        self.assertTrue(all(unit["selection_status"] == "not-applicable" for unit in units))
+
     def test_joins_a_wrapped_measurement_unit_to_the_preceding_value(self):
         rows = _extract_markdown_table_rows([
             """| Item | Criterion |
