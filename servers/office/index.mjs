@@ -170,6 +170,87 @@ const xlsxApplyOutput = z.object({
   }).strict(),
 }).strict();
 
+const pptxTemplateApplyResult = z.object({
+  input: z.string().min(1),
+  template: z.string().min(1),
+  output: z.string().min(1),
+  changedSlideCount: z.number().int().nonnegative(),
+  issues: z.array(z.object({
+    slideNumber: z.number().int().positive().nullable(),
+    message: z.string(),
+  }).strict()),
+  materializedLayoutShapes: z.array(z.object({
+    slideNumber: z.number().int().positive(),
+    sourceLayoutPath: z.string().min(1),
+    sourceShapeId: z.number().int().nonnegative().max(0xffffffff),
+    outputShapeId: z.number().int().nonnegative().max(0xffffffff),
+  }).strict()),
+  frozenPlaceholderCount: z.number().int().nonnegative(),
+  removedSystemPlaceholders: z.array(z.object({
+    slideNumber: z.number().int().positive(),
+    shapeId: z.number().int().nonnegative().max(0xffffffff),
+    placeholderType: z.string().min(1),
+  }).strict()),
+}).strict();
+const pptxFormatApplyResult = z.object({
+  input: z.string().min(1),
+  output: z.string().min(1),
+  operationCount: z.number().int().nonnegative(),
+  changedCount: z.number().int().nonnegative(),
+  changes: z.array(z.object({
+    slideNumber: z.number().int().positive(),
+    shapeId: z.number().int().nonnegative().max(0xffffffff),
+    runIndex: z.number().int().nonnegative(),
+    properties: z.array(z.string()),
+  }).strict()),
+  issues: z.array(z.object({
+    slideNumber: z.number().int().positive(),
+    shapeId: z.number().int().nonnegative().max(0xffffffff),
+    runIndex: z.number().int().nonnegative(),
+    message: z.string(),
+  }).strict()),
+}).strict();
+const pptxTemplateApplyReceipt = z.object({
+  schema: z.literal('tiwater.office.pptx-template-apply-receipt/v1'),
+  pass: z.boolean(),
+  input: artifact,
+  template: artifact,
+  plan: artifact,
+  output: artifact.nullable(),
+  providerResult: pptxTemplateApplyResult,
+}).strict();
+const pptxFormatApplyReceipt = z.object({
+  schema: z.literal('tiwater.office.pptx-format-apply-receipt/v1'),
+  pass: z.boolean(),
+  input: artifact,
+  operations: artifact,
+  output: artifact.nullable(),
+  providerResult: pptxFormatApplyResult,
+}).strict();
+const pptxTemplateApplyOutput = z.object({
+  tool: z.literal('pptx_apply_template'),
+  runtime: runtimeIdentity,
+  receipt: artifact,
+  output: artifact.nullable(),
+  summary: z.object({
+    pass: z.boolean(),
+    changedSlideCount: z.number().int().nonnegative(),
+    issueCount: z.number().int().nonnegative(),
+  }).strict(),
+}).strict();
+const pptxFormatApplyOutput = z.object({
+  tool: z.literal('pptx_apply_format'),
+  runtime: runtimeIdentity,
+  receipt: artifact,
+  output: artifact.nullable(),
+  summary: z.object({
+    pass: z.boolean(),
+    operationCount: z.number().int().nonnegative(),
+    changedCount: z.number().int().nonnegative(),
+    issueCount: z.number().int().nonnegative(),
+  }).strict(),
+}).strict();
+
 const renderFileIdentity = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   size_bytes: z.number().int().positive(),
@@ -422,6 +503,31 @@ const tools = [
     inputSchema: artifactInput,
     outputSchema: artifactOutput('pptx_export_json'),
     handler: pptxExportJson,
+  },
+  {
+    name: 'pptx_apply_template',
+    description: 'Apply one deterministic PPTX template-application plan to a current presentation. This tool executes the published plan; it does not select a template or derive business content, slide mappings, geometry, or formatting decisions.',
+    inputSchema: z.object({
+      input: pathInput.describe('Path to the current source PPTX.'),
+      template: pathInput.describe('Path to the selected current template PPTX.'),
+      plan: pathInput.describe('Path to the deterministic template-application plan artifact.'),
+      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
+      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
+    }).strict(),
+    outputSchema: pptxTemplateApplyOutput,
+    handler: pptxApplyTemplate,
+  },
+  {
+    name: 'pptx_apply_format',
+    description: 'Apply one deterministic PPTX formatting plan to a current presentation. This tool executes published formatting operations; it does not derive values, coordinates, or business decisions.',
+    inputSchema: z.object({
+      input: pathInput.describe('Path to the current PPTX.'),
+      operations: pathInput.describe('Path to the deterministic formatting operations artifact.'),
+      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
+      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
+    }).strict(),
+    outputSchema: pptxFormatApplyOutput,
+    handler: pptxApplyFormat,
   },
 ];
 
@@ -1079,6 +1185,81 @@ async function pptxExportJson(args) {
     runtime: commandRuntime(result),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
+}
+
+async function pptxApplyTemplate(args) {
+  return pptxApply('pptx_apply_template', args, true);
+}
+
+async function pptxApplyFormat(args) {
+  return pptxApply('pptx_apply_format', args, false);
+}
+
+async function pptxApply(tool, args, templateMode) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const template = templateMode ? path.resolve(requireString(args.template, 'template')) : null;
+  const plan = path.resolve(requireString(templateMode ? args.plan : args.operations, templateMode ? 'plan' : 'operations'));
+  const output = path.resolve(requireString(args.output, 'output'));
+  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
+  for (const [label, candidate] of [['input', input], ['output', output], ...(template ? [['template', template]] : [])]) {
+    if (path.extname(candidate).toLowerCase() !== '.pptx') {
+      throw Object.assign(new Error(`${label} must use the .pptx extension`), { code: -32602 });
+    }
+  }
+  await requireNewFile(output, 'output');
+  await requireNewFile(receiptOutput, 'receiptOutput');
+  const inputArtifact = await fileArtifact(input);
+  const templateArtifact = template ? await fileArtifact(template) : null;
+  const planArtifact = await fileArtifact(plan);
+  await mkdir(path.dirname(output), { recursive: true });
+  try {
+    const command = templateMode ? 'apply-template' : 'apply-format-edits';
+    const commandArgs = templateMode
+      ? [command, input, template, plan, output]
+      : [command, input, plan, output];
+    const result = await runJsonCandidateChain(pptxCandidates, commandArgs, { allowedExitCodes: [0, 1] });
+    await requireArtifactUnchanged(inputArtifact, 'PPTX apply input');
+    if (templateArtifact) await requireArtifactUnchanged(templateArtifact, 'PPTX apply template');
+    await requireArtifactUnchanged(planArtifact, 'PPTX apply plan');
+    const providerResult = (templateMode ? pptxTemplateApplyResult : pptxFormatApplyResult).parse(result.json);
+    if (path.resolve(providerResult.input) !== input
+        || path.resolve(providerResult.output) !== output
+        || (templateMode && path.resolve(providerResult.template) !== template)) {
+      throw new Error('PPTX apply receipt is not bound to the current inputs and output');
+    }
+    const pass = providerResult.issues.length === 0;
+    const outputArtifact = pass ? await fileArtifact(output) : null;
+    if (!pass) await rm(output, { force: true });
+    const receiptSchema = templateMode ? pptxTemplateApplyReceipt : pptxFormatApplyReceipt;
+    const receipt = receiptSchema.parse({
+      schema: templateMode
+        ? 'tiwater.office.pptx-template-apply-receipt/v1'
+        : 'tiwater.office.pptx-format-apply-receipt/v1',
+      pass,
+      input: inputArtifact,
+      ...(templateMode ? { template: templateArtifact } : {}),
+      ...(templateMode ? { plan: planArtifact } : { operations: planArtifact }),
+      output: outputArtifact,
+      providerResult,
+    });
+    return {
+      tool,
+      runtime: commandRuntime(result),
+      receipt: await writeJsonArtifact(receiptOutput, receipt),
+      output: outputArtifact,
+      summary: templateMode
+        ? { pass, changedSlideCount: providerResult.changedSlideCount, issueCount: providerResult.issues.length }
+        : { pass, operationCount: providerResult.operationCount, changedCount: providerResult.changedCount, issueCount: providerResult.issues.length },
+    };
+  } catch (error) {
+    await rm(output, { force: true });
+    throw error;
+  }
+}
+
+async function requireArtifactUnchanged(expected, label) {
+  const current = await fileArtifact(expected.path);
+  if (!isDeepStrictEqual(current, expected)) throw new Error(`${label} changed during provider execution`);
 }
 
 async function writeJsonArtifact(output, payload) {
