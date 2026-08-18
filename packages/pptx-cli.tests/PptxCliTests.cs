@@ -564,6 +564,163 @@ public class PptxCliTests
     }
 
     [Fact]
+    public void ApplyTemplate_freezes_all_published_placeholder_shape_kinds()
+    {
+        var source = CreateAllShapeKindsFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            var slidePart = presentation.PresentationPart!.SlideParts.First();
+            var slideTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
+            var sourceFrame = slideTree.Elements<P.GraphicFrame>().Single();
+            sourceFrame.Transform!.Remove();
+            sourceFrame.NonVisualGraphicFrameProperties!.ApplicationNonVisualDrawingProperties!.PlaceholderShape!.Index = null;
+            slideTree.Append(new P.GraphicFrame(
+                new P.NonVisualGraphicFrameProperties(
+                    new P.NonVisualDrawingProperties { Id = 9U, Name = "System footer frame" },
+                    new P.NonVisualGraphicFrameDrawingProperties(),
+                    new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Footer })),
+                new P.Transform(),
+                new A.Graphic(new A.GraphicData { Uri = "urn:tiwater:system" })));
+            slidePart.Slide.Save();
+
+            var layout = slidePart.SlideLayoutPart!;
+            var layoutTree = layout.SlideLayout.CommonSlideData!.ShapeTree!;
+            layoutTree.Append(CreatePlaceholderShapeWithTransform(61U, "Picture placeholder", 32U, 320L, 321L, 322L, 323L, P.PlaceholderValues.Object));
+            layoutTree.Append(CreatePlaceholderShapeWithTransform(71U, "Frame placeholder", 0U, 330L, 331L, 332L, 333L, P.PlaceholderValues.Object));
+            layoutTree.Append(new P.GroupShape(
+                new P.NonVisualGroupShapeProperties(
+                    new P.NonVisualDrawingProperties { Id = 80U, Name = "Layout group without geometry" },
+                    new P.NonVisualGroupShapeDrawingProperties(),
+                    new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Index = 34U })),
+                new P.GroupShapeProperties(), new P.ShapeTree()));
+            var masterTree = layout.SlideMasterPart!.SlideMaster.CommonSlideData!.ShapeTree!;
+            masterTree.Append(CreatePlaceholderShapeWithTransform(60U, "Lower-priority picture geometry", 32U, 900L, 901L, 902L, 903L, P.PlaceholderValues.Object));
+            masterTree.Append(new P.GroupShape(
+                new P.NonVisualGroupShapeProperties(
+                    new P.NonVisualDrawingProperties { Id = 81U, Name = "Inherited group" },
+                    new P.NonVisualGroupShapeDrawingProperties(),
+                    new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Object, Index = 34U })),
+                new P.GroupShapeProperties(new A.TransformGroup(
+                    new A.Offset { X = 340L, Y = 341L }, new A.Extents { Cx = 342L, Cy = 343L },
+                    new A.ChildOffset { X = 44L, Y = 45L }, new A.ChildExtents { Cx = 46L, Cy = 47L })),
+                new P.ShapeTree()));
+            layout.SlideLayout.Save();
+            layout.SlideMasterPart.SlideMaster.Save();
+        }
+
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)],
+                "target-template"), output);
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(4, result.FrozenPlaceholderCount);
+        var removed = Assert.Single(result.RemovedSystemPlaceholders!);
+        Assert.Equal((1, 9U, "ftr"), (removed.SlideNumber, removed.ShapeId, removed.PlaceholderType));
+        var shapes = Inspector.InspectDetail(output).Slides[0].Shapes;
+        foreach (var item in new (string Kind, uint? Index)[] { ("shape", 31U), ("picture", 32U), ("graphicFrame", null), ("groupShape", 34U) })
+        {
+            var shape = Assert.Single(shapes, value => value.Kind == item.Kind && value.PlaceholderIndex == item.Index);
+            Assert.True(shape.PlaceholderPresent);
+        }
+        Assert.Equal(new TransformInfo(320L, 321L, 322L, 323L), shapes.Single(value => value.Kind == "picture").Transform);
+        Assert.Equal(new TransformInfo(330L, 331L, 332L, 333L), shapes.Single(value => value.Kind == "graphicFrame").Transform);
+        Assert.Equal(new TransformInfo(340L, 341L, 342L, 343L), shapes.Single(value => value.Kind == "groupShape").Transform);
+        Assert.DoesNotContain(shapes, value => value.ShapeId == 9U);
+        using (var applied = PresentationDocument.Open(output, false))
+        {
+            var groupTransform = applied.PresentationPart!.SlideParts.First().Slide.Descendants<P.GroupShape>().Single().GroupShapeProperties!.TransformGroup!;
+            Assert.Equal((44L, 45L, 46L, 47L), (groupTransform.ChildOffset!.X!.Value, groupTransform.ChildOffset.Y!.Value,
+                groupTransform.ChildExtents!.Cx!.Value, groupTransform.ChildExtents.Cy!.Value));
+        }
+    }
+
+    [Fact]
+    public void ApplyTemplate_non_shape_without_placeholder_identity_is_not_frozen()
+    {
+        var source = CreateAllShapeKindsFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            var picture = presentation.PresentationPart!.SlideParts.First().Slide.CommonSlideData!.ShapeTree!.Elements<P.Picture>().Single();
+            picture.NonVisualPictureProperties!.ApplicationNonVisualDrawingProperties!.PlaceholderShape!.Remove();
+            picture.Ancestors<P.Slide>().Single().Save();
+        }
+
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)]), output);
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(3, result.FrozenPlaceholderCount);
+        var outputPicture = Inspector.InspectDetail(output).Slides[0].Shapes.Single(value => value.Kind == "picture");
+        Assert.False(outputPicture.PlaceholderPresent);
+        Assert.Null(outputPicture.PlaceholderIndex);
+    }
+
+    [Fact]
+    public void ApplyTemplate_rejects_ambiguous_effective_placeholder_identity_before_layout_reassignment()
+    {
+        var source = CreateAllShapeKindsFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            var layout = presentation.PresentationPart!.SlideParts.First().SlideLayoutPart!;
+            var layoutTree = layout.SlideLayout.CommonSlideData!.ShapeTree!;
+            layoutTree.Append(CreatePlaceholderShapeWithTransform(61U, "First object", 32U, 10L, 11L, 12L, 13L, P.PlaceholderValues.Object));
+            layoutTree.Append(CreatePlaceholderShapeWithTransform(62U, "Second object", 32U, 20L, 21L, 22L, 23L));
+            layout.SlideLayout.Save();
+        }
+
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetEvidence.Masters.Single().Layouts.Single().Path)]), output);
+
+        Assert.Equal(0, result.ChangedSlideCount);
+        var issue = Assert.Single(result.Issues).Message;
+        Assert.StartsWith("source placeholder identity is ambiguous in layout:", issue);
+        Assert.EndsWith("/32", issue);
+    }
+
+    [Fact]
+    public void ApplyTemplate_rejects_ambiguous_master_geometry_when_layout_identity_has_no_geometry()
+    {
+        var source = CreateAllShapeKindsFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            var slide = presentation.PresentationPart!.SlideParts.First();
+            var layoutTree = slide.SlideLayoutPart!.SlideLayout.CommonSlideData!.ShapeTree!;
+            layoutTree.Append(CreatePlaceholderShape(61U, "Layout without geometry", new P.PlaceholderShape { Index = 32U }));
+            slide.SlideLayoutPart.SlideLayout.Save();
+            var masterTree = slide.SlideLayoutPart.SlideMasterPart!.SlideMaster.CommonSlideData!.ShapeTree!;
+            masterTree.Append(CreatePlaceholderShapeWithTransform(71U, "First master object", 32U, 10L, 11L, 12L, 13L));
+            masterTree.Append(CreatePlaceholderShapeWithTransform(72U, "Second master object", 32U, 20L, 21L, 22L, 23L, P.PlaceholderValues.Object));
+            slide.SlideLayoutPart.SlideMasterPart.SlideMaster.Save();
+        }
+
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetEvidence.Masters.Single().Layouts.Single().Path)]), output);
+
+        Assert.Equal(0, result.ChangedSlideCount);
+        var issue = Assert.Single(result.Issues).Message;
+        Assert.StartsWith("source placeholder identity is ambiguous in master:", issue);
+        Assert.EndsWith("/32", issue);
+    }
+
+    [Fact]
     public void ApplyTemplate_default_preserve_keeps_system_placeholders_and_rejects_invalid_policy()
     {
         var source = CreateFixture();
@@ -592,7 +749,7 @@ public class PptxCliTests
                 [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)]), preserveOutput);
 
         Assert.Empty(preserved.Issues);
-        Assert.Equal(2, preserved.FrozenPlaceholderCount);
+        Assert.Equal(0, preserved.FrozenPlaceholderCount);
         Assert.Empty(preserved.RemovedSystemPlaceholders!);
         Assert.Equal(2, Inspector.InspectDetail(preserveOutput).Slides.Count(slide => slide.Shapes.Any(shape => shape.Text == "Footer")));
 
@@ -834,6 +991,14 @@ public class PptxCliTests
                 app),
             new P.ShapeProperties(),
             new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text(text)))));
+    }
+
+    private static P.Shape CreatePlaceholderShapeWithTransform(uint id, string text, uint index, long x, long y, long cx, long cy, P.PlaceholderValues? type = null)
+    {
+        var shape = CreatePlaceholderShape(id, text, new P.PlaceholderShape { Index = index, Type = type });
+        shape.ShapeProperties!.Transform2D = new A.Transform2D(
+            new A.Offset { X = x, Y = y }, new A.Extents { Cx = cx, Cy = cy });
+        return shape;
     }
 
     private static string CreateInheritedFormattingFixture(string? directColor = null, bool useLocalStyle = true)

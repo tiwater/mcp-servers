@@ -82,7 +82,15 @@ public static class TemplateApplicator
                 try { FitSlideContent(slide, contentBounds, assignment.ContentShapeIds!); }
                 catch (InvalidOperationException error) { issues.Add(new(assignment.SlideNumber, error.Message)); continue; }
             }
-            frozenPlaceholderCount += FreezeSlidePlaceholders(slide, sourceEvidence.Slides[assignment.SlideNumber - 1], assignment.SlideNumber, plan.SystemPlaceholderPolicy, removedSystemPlaceholders);
+            try
+            {
+                frozenPlaceholderCount += FreezeSlidePlaceholders(slide, sourceEvidence.Slides[assignment.SlideNumber - 1], assignment.SlideNumber, plan.SystemPlaceholderPolicy, removedSystemPlaceholders);
+            }
+            catch (InvalidOperationException error)
+            {
+                issues.Add(new(assignment.SlideNumber, error.Message));
+                continue;
+            }
             foreach (var sourceShapeId in preserveIds)
             {
                 var outputShapeId = MaterializeLayoutShape(slide, sourceLayout!, sourceLayoutElements[sourceShapeId]);
@@ -109,28 +117,36 @@ public static class TemplateApplicator
 
     private static int FreezeSlidePlaceholders(SlidePart slidePart, SlideDetailReport sourceEvidence, int slideNumber, string systemPlaceholderPolicy, List<RemovedSystemPlaceholder> removed)
     {
-        var slideShapes = VisualChildren(slidePart.Slide?.CommonSlideData?.ShapeTree).OfType<Shape>().GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
-        var layoutShapes = VisualChildren(slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree).OfType<Shape>().GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
-        var masterShapes = VisualChildren(slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree).OfType<Shape>().GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
+        var slideShapes = VisualChildren(slidePart.Slide?.CommonSlideData?.ShapeTree).Where(element => ShapeIdFor(element) is not null).GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
+        var layoutShapes = VisualChildren(slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree).Where(element => ShapeIdFor(element) is not null).GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
+        var masterShapes = VisualChildren(slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree).Where(element => ShapeIdFor(element) is not null).GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
+        var inheritedByShape = new Dictionary<OpenXmlElement, (OpenXmlElement? Style, OpenXmlElement? Geometry)>();
+        foreach (var shape in slideShapes)
+        {
+            var placeholder = PlaceholderFor(shape);
+            if (placeholder is null || systemPlaceholderPolicy == "target-template" && IsSystemPlaceholder(placeholder)) continue;
+            var layoutMatch = FindPlaceholder(layoutShapes, placeholder, "layout");
+            OpenXmlElement? masterMatch = null;
+            if (layoutMatch is null || GeometryFor(layoutMatch) is null)
+                masterMatch = FindPlaceholder(masterShapes, placeholder, "master");
+            inheritedByShape[shape] = (layoutMatch ?? masterMatch,
+                layoutMatch is not null && GeometryFor(layoutMatch) is not null ? layoutMatch : masterMatch);
+        }
         var changed = 0;
         foreach (var shape in slideShapes)
         {
-            var placeholder = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape;
+            var placeholder = PlaceholderFor(shape);
             if (placeholder is not null && systemPlaceholderPolicy == "target-template" && IsSystemPlaceholder(placeholder))
             {
                 removed.Add(new(slideNumber, ShapeIdFor(shape) ?? throw new InvalidOperationException("system placeholder has no shape identity"), PlaceholderToken(placeholder)));
                 shape.Remove();
                 continue;
             }
-            Shape? inherited = null;
-            if (placeholder is not null) inherited = FindPlaceholder(layoutShapes, placeholder) ?? FindPlaceholder(masterShapes, placeholder);
-            if (placeholder is not null && shape.ShapeProperties?.Transform2D is null && inherited?.ShapeProperties?.Transform2D is { } transform)
-            {
-                shape.ShapeProperties ??= new ShapeProperties();
-                shape.ShapeProperties.Transform2D = (A.Transform2D)transform.CloneNode(true);
-            }
-            MaterializeTextStyle(slidePart, shape, inherited, sourceEvidence.Shapes.Single(item => item.ShapeId == ShapeIdFor(shape)));
-            if (placeholder is not null) changed++;
+            inheritedByShape.TryGetValue(shape, out var inherited);
+            if (placeholder is not null) MaterializeInheritedTransform(shape, inherited.Geometry);
+            if (shape is Shape textShape)
+                MaterializeTextStyle(slidePart, textShape, inherited.Style as Shape, sourceEvidence.Shapes.Single(item => item.ShapeId == ShapeIdFor(shape)));
+            if (placeholder is not null && !IsSystemPlaceholder(placeholder)) changed++;
         }
         slidePart.Slide?.Save();
         return changed;
@@ -226,17 +242,96 @@ public static class TemplateApplicator
         return placeholder.Type?.InnerText ?? "object";
     }
 
-    private static Shape? FindPlaceholder(IEnumerable<Shape> shapes, PlaceholderShape requested)
+    private static PlaceholderShape? PlaceholderFor(OpenXmlElement element) => element switch
     {
-        var requestedType = requested.Type?.Value;
-        var requestedIndex = requested.Index?.Value;
-        return shapes.FirstOrDefault(shape =>
+        Shape shape => shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape,
+        Picture picture => picture.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape,
+        GraphicFrame frame => frame.NonVisualGraphicFrameProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape,
+        GroupShape group => group.NonVisualGroupShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape,
+        _ => null,
+    };
+
+    private static OpenXmlElement? FindPlaceholder(IEnumerable<OpenXmlElement> shapes, PlaceholderShape requested, string scope)
+    {
+        var requestedType = requested.Type?.Value ?? PlaceholderValues.Object;
+        var requestedIndex = requested.Index?.Value ?? 0U;
+        var matches = shapes.Where(shape =>
         {
-            var candidate = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape;
-            if (candidate is null || candidate.Type?.Value != requestedType) return false;
-            return requestedIndex is null || candidate.Index?.Value == requestedIndex;
-        });
+            var candidate = PlaceholderFor(shape);
+            return candidate is not null
+                && (candidate.Type?.Value ?? PlaceholderValues.Object) == requestedType
+                && (candidate.Index?.Value ?? 0U) == requestedIndex;
+        }).ToList();
+        if (matches.Count > 1)
+            throw new InvalidOperationException($"source placeholder identity is ambiguous in {scope}: {requestedType}/{requestedIndex}");
+        return matches.SingleOrDefault();
     }
+
+    private static void MaterializeInheritedTransform(OpenXmlElement target, OpenXmlElement? inherited)
+    {
+        switch (target, inherited)
+        {
+            case (Shape current, Shape source) when current.ShapeProperties?.Transform2D is null && source.ShapeProperties?.Transform2D is { } transform:
+                current.ShapeProperties ??= new ShapeProperties();
+                current.ShapeProperties.Transform2D = (A.Transform2D)transform.CloneNode(true);
+                return;
+            case (Picture current, Picture source) when current.ShapeProperties?.Transform2D is null && source.ShapeProperties?.Transform2D is { } transform:
+                current.ShapeProperties ??= new ShapeProperties();
+                current.ShapeProperties.Transform2D = (A.Transform2D)transform.CloneNode(true);
+                return;
+            case (GraphicFrame current, GraphicFrame source) when current.Transform is null && source.Transform is { } transform:
+                current.Transform = (Transform)transform.CloneNode(true);
+                return;
+            case (GroupShape current, GroupShape source) when current.GroupShapeProperties?.TransformGroup is null && source.GroupShapeProperties?.TransformGroup is { } transform:
+                current.GroupShapeProperties ??= new GroupShapeProperties();
+                current.GroupShapeProperties.TransformGroup = (A.TransformGroup)transform.CloneNode(true);
+                return;
+        }
+        var geometry = inherited is null ? null : GeometryFor(inherited);
+        if (geometry is null) return;
+        var (x, y, cx, cy) = geometry.Value;
+        switch (target)
+        {
+            case Shape current when current.ShapeProperties?.Transform2D is null:
+                current.ShapeProperties ??= new ShapeProperties();
+                current.ShapeProperties.Transform2D = Transform2D(x, y, cx, cy);
+                break;
+            case Picture current when current.ShapeProperties?.Transform2D is null:
+                current.ShapeProperties ??= new ShapeProperties();
+                current.ShapeProperties.Transform2D = Transform2D(x, y, cx, cy);
+                break;
+            case GraphicFrame current when current.Transform is null:
+                current.Transform = new Transform(new A.Offset { X = x, Y = y }, new A.Extents { Cx = cx, Cy = cy });
+                break;
+            case GroupShape current when current.GroupShapeProperties?.TransformGroup is null:
+                current.GroupShapeProperties ??= new GroupShapeProperties();
+                current.GroupShapeProperties.TransformGroup = new A.TransformGroup(
+                    new A.Offset { X = x, Y = y }, new A.Extents { Cx = cx, Cy = cy },
+                    new A.ChildOffset { X = 0L, Y = 0L }, new A.ChildExtents { Cx = cx, Cy = cy });
+                break;
+        }
+    }
+
+    private static (long X, long Y, long Cx, long Cy)? GeometryFor(OpenXmlElement element) => element switch
+    {
+        Shape shape when shape.ShapeProperties?.Transform2D is { } transform => GeometryFor(transform),
+        Picture picture when picture.ShapeProperties?.Transform2D is { } transform => GeometryFor(transform),
+        GraphicFrame frame when frame.Transform is { } transform => GeometryFor(transform),
+        GroupShape group when group.GroupShapeProperties?.TransformGroup is { } transform => GeometryFor(transform),
+        _ => null,
+    };
+
+    private static (long X, long Y, long Cx, long Cy)? GeometryFor(OpenXmlCompositeElement transform)
+    {
+        var offset = transform.GetFirstChild<A.Offset>();
+        var extents = transform.GetFirstChild<A.Extents>();
+        return offset is null || extents is null
+            ? null
+            : (offset.X?.Value ?? 0L, offset.Y?.Value ?? 0L, extents.Cx?.Value ?? 0L, extents.Cy?.Value ?? 0L);
+    }
+
+    private static A.Transform2D Transform2D(long x, long y, long cx, long cy)
+        => new(new A.Offset { X = x, Y = y }, new A.Extents { Cx = cx, Cy = cy });
 
     private static uint MaterializeLayoutShape(SlidePart slidePart, SlideLayoutPart sourceLayout, DocumentFormat.OpenXml.OpenXmlElement sourceElement)
     {
