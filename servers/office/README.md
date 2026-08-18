@@ -18,19 +18,21 @@ Shared stdio MCP server for Office document workflows.
 - `xlsx_validate`
 - `pptx_inspect`
 - `pptx_export_json`
+- `pptx_apply_template`
+- `pptx_apply_format`
 
 ## Run
 
 Install `@tiwater/office-mcp` together with the runtime versions required by
 the consumer, then run `tiwater-office-mcp` as a stdio MCP server.
 
-Office MCP 0.11 requires these minimum published runtimes on `PATH`:
+Office MCP 0.12 requires these minimum published runtimes on `PATH`:
 
 | Command | Package | Minimum version |
 | --- | --- | --- |
 | `tiwater-docx` | NuGet `tiwater.docx.cli` | 0.15.0 |
 | `tiwater-xlsx` | NuGet `tiwater.xlsx.cli` | 0.2.55 |
-| `tiwater-pptx` | NuGet `tiwater.pptx.cli` | 0.2.22 |
+| `tiwater-pptx` | NuGet `tiwater.pptx.cli` | 0.3.1 |
 | `tiwater-convert` | NuGet `tiwater.convert.cli` | 0.9.22 |
 
 The server invokes published `tiwater-docx`, `tiwater-xlsx`,
@@ -51,6 +53,21 @@ operations artifact, and created output by path and content hash and records the
 complete runtime result in a new receipt artifact. It does not interpret
 scenario knowledge or derive workbook edits. Callers independently inspect and
 validate the resulting workbook before delivery.
+
+## Presentation editing
+
+`pptx_apply_template` and `pptx_apply_format` are orthogonal execution
+operations. The first applies a deterministic template plan to a current
+presentation and selected current template. The second applies deterministic
+format operations to a current presentation. Both bind their inputs, created
+output, and complete runtime result by path and content hash. They do not select
+templates, interpret scenario knowledge, or derive business content, slide
+mappings, geometry, coordinates, or formatting decisions.
+
+Callers apply a template first, inspect and validate that intermediate result,
+then build and apply formatting against the intermediate presentation. Final
+inspection, independent readback, native rendering, and delivery closure remain
+separate operations.
 
 ## Template migration
 

@@ -139,6 +139,19 @@ inspection, business readback, native rendering, and delivery closure remain
 outside this operation. Existing workbook inspection, export, and validation
 tools remain separate read-only capabilities.
 
+## Presentation editing
+
+Presentation editing exposes two public execution operations. Template
+application consumes a current presentation, a selected current template, and a
+deterministic plan. Formatting consumes a current presentation and deterministic
+format operations. Each produces a new presentation plus a receipt binding the
+input artifacts, output, and published runtime result.
+
+These operations do not choose a template, derive business content, infer slide
+mapping or geometry, or decide delivery. Template application and formatting
+remain separate so each intermediate presentation can be freshly inspected and
+independently validated before the next mutation.
+
 ## Ownership
 
 - The scenario package owns business identity, allowed ambiguity, and terminal

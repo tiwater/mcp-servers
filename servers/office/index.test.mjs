@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020.js';
 
 const officeDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -112,6 +113,55 @@ if (command === 'edit') {
   }));
   process.exit(failed ? 1 : 0);
 }
+if (command === 'apply-template') {
+  const input = process.argv[3];
+  const template = process.argv[4];
+  const plan = process.argv[5];
+  const output = process.argv[6];
+  const failed = input.includes('failed');
+  if (input.includes('mutate-input')) fs.appendFileSync(input, ' mutated');
+  if (template.includes('mutate-template')) fs.appendFileSync(template, ' mutated');
+  if (plan.includes('mutate-plan')) fs.appendFileSync(plan, ' ');
+  if (!failed) fs.writeFileSync(output, Buffer.from('template-applied pptx bytes'));
+  const response = {
+    input: input.includes('wrong-binding') ? '/different.pptx' : input,
+    template: template.includes('wrong-template-binding') ? '/different-template.pptx' : template,
+    output: input.includes('wrong-output-binding') ? '/different-output.pptx' : output,
+    changedSlideCount: JSON.parse(fs.readFileSync(plan, 'utf8')).slides.length,
+    issues: failed ? [{slideNumber:1,message:'known template failure'}] : [],
+    materializedLayoutShapes: [{slideNumber:1,sourceLayoutPath:'/ppt/slideLayouts/slideLayout1.xml',sourceShapeId:4,outputShapeId:12}],
+    frozenPlaceholderCount: 1,
+    removedSystemPlaceholders: [{slideNumber:1,shapeId:9,placeholderType:'sldNum'}],
+    ...(input.includes('schema-drift') ? {unexpected:true} : {}),
+  };
+  if (input.includes('missing-field')) delete response.changedSlideCount;
+  if (input.includes('wrong-type')) response.changedSlideCount = 'two';
+  process.stdout.write(JSON.stringify(response));
+  process.exit(failed ? 1 : 0);
+}
+if (command === 'apply-format-edits') {
+  const input = process.argv[3];
+  const operationsPath = process.argv[4];
+  const output = process.argv[5];
+  const operations = JSON.parse(fs.readFileSync(operationsPath, 'utf8')).operations;
+  const failed = input.includes('failed');
+  if (input.includes('mutate-input')) fs.appendFileSync(input, ' mutated');
+  if (operationsPath.includes('mutate-plan')) fs.appendFileSync(operationsPath, ' ');
+  if (!failed) fs.writeFileSync(output, Buffer.from('format-applied pptx bytes'));
+  const response = {
+    input: input.includes('wrong-binding') ? '/different.pptx' : input,
+    output,
+    operationCount: operations.length,
+    changedCount: failed ? 0 : operations.length,
+    changes: failed ? [] : operations.map((operation, index) => ({slideNumber:index+1,shapeId:index+10,runIndex:0,properties:[operation.type]})),
+    issues: failed ? [{slideNumber:1,shapeId:10,runIndex:0,message:'known format failure'}] : [],
+    ...(input.includes('schema-drift') ? {unexpected:true} : {}),
+  };
+  if (input.includes('missing-field')) delete response.changes;
+  if (input.includes('wrong-type')) response.changes = [{slideNumber:1,shapeId:'ten',runIndex:0,properties:[]}];
+  process.stdout.write(JSON.stringify(response));
+  process.exit(failed ? 1 : 0);
+}
 if (command === 'validate') {
   process.stdout.write(JSON.stringify({file:process.argv[3],valid:true,errors:[],warnings:[],dotnetRoot:process.env.DOTNET_ROOT}));
   process.exit(0);
@@ -136,6 +186,7 @@ process.exit(2);
   await chmod(fakeRuntime, 0o755);
   await symlink(fakeRuntime, path.join(temporary, 'tiwater-convert'));
   await symlink(fakeRuntime, path.join(temporary, 'tiwater-xlsx'));
+  await symlink(fakeRuntime, path.join(temporary, 'tiwater-pptx'));
 
   const child = spawn(process.execPath, [path.join(officeDir, 'index.mjs')], {
     env: { ...process.env, PATH: temporary, DOTNET_ROOT: '', DOTNET_ROOT_ARM64: '', DOTNET_ROOT_X64: '' },
@@ -172,7 +223,7 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.11.1');
+    assert.equal(initialized.result.serverInfo.version, '0.12.0');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -181,6 +232,8 @@ process.exit(2);
     assert(names.includes('docx_verify_migration'));
     assert(names.includes('office_render_pdf'));
     assert(names.includes('xlsx_apply'));
+    assert(names.includes('pptx_apply_template'));
+    assert(names.includes('pptx_apply_format'));
     assert.deepEqual(
       names.filter(name => [
         'docx_edit',
@@ -229,6 +282,13 @@ process.exit(2);
     const xlsxApplyTool = listed.result.tools.find(tool => tool.name === 'xlsx_apply');
     assert.deepEqual(xlsxApplyTool.inputSchema.required.sort(), ['input', 'operations', 'output', 'receiptOutput'].sort());
     assert.match(xlsxApplyTool.description, /does not derive values, coordinates, or business decisions/u);
+    const pptxTemplateTool = listed.result.tools.find(tool => tool.name === 'pptx_apply_template');
+    const pptxFormatTool = listed.result.tools.find(tool => tool.name === 'pptx_apply_format');
+    assert.deepEqual(pptxTemplateTool.inputSchema.required.sort(), ['input', 'template', 'plan', 'output', 'receiptOutput'].sort());
+    assert.deepEqual(pptxFormatTool.inputSchema.required.sort(), ['input', 'operations', 'output', 'receiptOutput'].sort());
+    assert.equal(pptxTemplateTool.outputSchema.properties.tool.const, 'pptx_apply_template');
+    assert.equal(pptxFormatTool.outputSchema.properties.tool.const, 'pptx_apply_format');
+    assert.match(pptxTemplateTool.description, /does not select a template or derive business content/u);
     const xlsxInput = path.join(temporary, 'current.xlsx');
     const xlsxOperations = path.join(temporary, 'operations.json');
     const xlsxOutput = path.join(temporary, 'edited', 'result.xlsx');
@@ -286,6 +346,232 @@ process.exit(2);
     assert.notEqual(validatedXlsx.result.isError, true, JSON.stringify(validatedXlsx.result));
     assert.equal(validatedXlsx.result.structuredContent.result.valid, true);
     assert.equal(validatedXlsx.result.structuredContent.result.dotnetRoot, temporary);
+
+    const pptxInput = path.join(temporary, 'current.pptx');
+    const pptxTemplate = path.join(temporary, 'template.pptx');
+    const pptxPlan = path.join(temporary, 'template-plan.json');
+    const pptxOperations = path.join(temporary, 'format-plan.json');
+    await writeFile(pptxInput, 'current pptx bytes', 'utf8');
+    await writeFile(pptxTemplate, 'template pptx bytes', 'utf8');
+    await writeFile(pptxPlan, JSON.stringify({ slides: [{ sourceSlideIndex: 0, targetLayoutIndex: 2 }, { sourceSlideIndex: 1, targetLayoutIndex: 4 }] }), 'utf8');
+    await writeFile(pptxOperations, JSON.stringify({ operations: [{ type: 'setShapePosition' }, { type: 'setRunFont' }] }), 'utf8');
+    const templateOutput = path.join(temporary, 'pptx', 'templated.pptx');
+    const templateReceipt = path.join(temporary, 'pptx', 'templated.receipt.json');
+    const templated = await request('tools/call', {
+      name: 'pptx_apply_template',
+      arguments: { input: pptxInput, template: pptxTemplate, plan: pptxPlan, output: templateOutput, receiptOutput: templateReceipt },
+    });
+    assert.notEqual(templated.result.isError, true, JSON.stringify(templated.result));
+    assert.deepEqual(templated.result.structuredContent.summary, { pass: true, changedSlideCount: 2, issueCount: 0 });
+    const templateReceiptJson = JSON.parse(await readFile(templateReceipt, 'utf8'));
+    assert.equal(templateReceiptJson.schema, 'tiwater.office.pptx-template-apply-receipt/v1');
+    assert.match(templateReceiptJson.input.sha256, /^[0-9a-f]{64}$/);
+    assert.match(templateReceiptJson.template.sha256, /^[0-9a-f]{64}$/);
+    assert.match(templateReceiptJson.plan.sha256, /^[0-9a-f]{64}$/);
+    assert.match(templateReceiptJson.output.sha256, /^[0-9a-f]{64}$/);
+    assert.deepEqual(templateReceiptJson.providerResult.materializedLayoutShapes[0], {
+      slideNumber: 1,
+      sourceLayoutPath: '/ppt/slideLayouts/slideLayout1.xml',
+      sourceShapeId: 4,
+      outputShapeId: 12,
+    });
+    assert.equal(templateReceiptJson.providerResult.removedSystemPlaceholders[0].placeholderType, 'sldNum');
+    assert.equal(await readFile(pptxInput, 'utf8'), 'current pptx bytes');
+    assert.equal(await readFile(pptxTemplate, 'utf8'), 'template pptx bytes');
+    assert.equal(JSON.parse(await readFile(pptxPlan, 'utf8')).slides.length, 2);
+
+    const formatOutput = path.join(temporary, 'pptx', 'formatted.pptx');
+    const formatReceipt = path.join(temporary, 'pptx', 'formatted.receipt.json');
+    const formatted = await request('tools/call', {
+      name: 'pptx_apply_format',
+      arguments: { input: templateOutput, operations: pptxOperations, output: formatOutput, receiptOutput: formatReceipt },
+    });
+    assert.notEqual(formatted.result.isError, true, JSON.stringify(formatted.result));
+    assert.deepEqual(formatted.result.structuredContent.summary, { pass: true, operationCount: 2, changedCount: 2, issueCount: 0 });
+    assert.equal(JSON.parse(await readFile(formatReceipt, 'utf8')).schema, 'tiwater.office.pptx-format-apply-receipt/v1');
+    const formatReceiptJson = JSON.parse(await readFile(formatReceipt, 'utf8'));
+    assert.equal(Object.hasOwn(formatReceiptJson, 'operations'), true);
+    assert.equal(Object.hasOwn(formatReceiptJson, 'plan'), false);
+    assert.deepEqual(formatReceiptJson.providerResult.changes[1], {
+      slideNumber: 2,
+      shapeId: 11,
+      runIndex: 0,
+      properties: ['setRunFont'],
+    });
+
+    const emptyOperations = path.join(temporary, 'empty-format-plan.json');
+    await writeFile(emptyOperations, JSON.stringify({ operations: [] }), 'utf8');
+    const emptyFormatted = await request('tools/call', {
+      name: 'pptx_apply_format',
+      arguments: {
+        input: pptxInput,
+        operations: emptyOperations,
+        output: path.join(temporary, 'pptx', 'empty-format.pptx'),
+        receiptOutput: path.join(temporary, 'pptx', 'empty-format.receipt.json'),
+      },
+    });
+    assert.equal(emptyFormatted.result.structuredContent.summary.operationCount, 0);
+    assert.equal(emptyFormatted.result.structuredContent.summary.pass, true);
+    const replayedPptx = await request('tools/call', {
+      name: 'pptx_apply_template',
+      arguments: { input: pptxInput, template: pptxTemplate, plan: pptxPlan, output: templateOutput, receiptOutput: path.join(temporary, 'pptx', 'replay.receipt.json') },
+    });
+    assert.equal(replayedPptx.result.isError, true);
+    const replayedPptxReceipt = await request('tools/call', {
+      name: 'pptx_apply_template',
+      arguments: {
+        input: pptxInput,
+        template: pptxTemplate,
+        plan: pptxPlan,
+        output: path.join(temporary, 'pptx', 'receipt-replay-output.pptx'),
+        receiptOutput: templateReceipt,
+      },
+    });
+    assert.equal(replayedPptxReceipt.result.isError, true);
+    const failedPptxInput = path.join(temporary, 'failed.pptx');
+    await writeFile(failedPptxInput, 'failed pptx bytes', 'utf8');
+    const failedPptxOutput = path.join(temporary, 'pptx', 'failed.pptx');
+    const failedPptxReceipt = path.join(temporary, 'pptx', 'failed.receipt.json');
+    const failedPptx = await request('tools/call', {
+      name: 'pptx_apply_format',
+      arguments: { input: failedPptxInput, operations: pptxOperations, output: failedPptxOutput, receiptOutput: failedPptxReceipt },
+    });
+    assert.notEqual(failedPptx.result.isError, true, JSON.stringify(failedPptx.result));
+    assert.equal(failedPptx.result.structuredContent.summary.pass, false);
+    assert.equal(failedPptx.result.structuredContent.output, null);
+    await assert.rejects(readFile(failedPptxOutput));
+    assert.equal(JSON.parse(await readFile(failedPptxReceipt, 'utf8')).pass, false);
+    const failedTemplateInput = path.join(temporary, 'failed-template-input.pptx');
+    await writeFile(failedTemplateInput, 'failed template input bytes', 'utf8');
+    const failedTemplateOutput = path.join(temporary, 'pptx', 'failed-template.pptx');
+    const failedTemplateReceipt = path.join(temporary, 'pptx', 'failed-template.receipt.json');
+    const failedTemplate = await request('tools/call', {
+      name: 'pptx_apply_template',
+      arguments: { input: failedTemplateInput, template: pptxTemplate, plan: pptxPlan, output: failedTemplateOutput, receiptOutput: failedTemplateReceipt },
+    });
+    assert.notEqual(failedTemplate.result.isError, true, JSON.stringify(failedTemplate.result));
+    assert.equal(failedTemplate.result.structuredContent.summary.pass, false);
+    assert.equal(JSON.parse(await readFile(failedTemplateReceipt, 'utf8')).providerResult.issues[0].slideNumber, 1);
+    await assert.rejects(readFile(failedTemplateOutput));
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    const templateReceiptSchema = JSON.parse(await readFile(path.join(officeDir, 'contracts', 'tiwater.office.pptx-template-apply-receipt-v1.schema.json'), 'utf8'));
+    const formatReceiptSchema = JSON.parse(await readFile(path.join(officeDir, 'contracts', 'tiwater.office.pptx-format-apply-receipt-v1.schema.json'), 'utf8'));
+    const validateTemplateReceipt = ajv.compile(templateReceiptSchema);
+    const validateFormatReceipt = ajv.compile(formatReceiptSchema);
+    assert.equal(validateTemplateReceipt(templateReceiptJson), true, JSON.stringify(validateTemplateReceipt.errors));
+    assert.equal(validateTemplateReceipt(JSON.parse(await readFile(failedTemplateReceipt, 'utf8'))), true, JSON.stringify(validateTemplateReceipt.errors));
+    assert.equal(validateFormatReceipt(formatReceiptJson), true, JSON.stringify(validateFormatReceipt.errors));
+    assert.equal(validateFormatReceipt(JSON.parse(await readFile(failedPptxReceipt, 'utf8'))), true, JSON.stringify(validateFormatReceipt.errors));
+    assert.equal(validateTemplateReceipt(formatReceiptJson), false);
+    assert.equal(validateFormatReceipt(templateReceiptJson), false);
+    const wrongPptxInput = path.join(temporary, 'wrong-binding.pptx');
+    await writeFile(wrongPptxInput, 'wrong pptx bytes', 'utf8');
+    const wrongPptxOutput = path.join(temporary, 'pptx', 'wrong-binding.pptx');
+    const wrongPptxReceipt = path.join(temporary, 'pptx', 'wrong-binding.receipt.json');
+    const wrongPptx = await request('tools/call', {
+      name: 'pptx_apply_template',
+      arguments: { input: wrongPptxInput, template: pptxTemplate, plan: pptxPlan, output: wrongPptxOutput, receiptOutput: wrongPptxReceipt },
+    });
+    assert.equal(wrongPptx.result.isError, true);
+    await assert.rejects(readFile(wrongPptxOutput));
+    await assert.rejects(readFile(wrongPptxReceipt));
+    const wrongOutputInput = path.join(temporary, 'wrong-output-binding.pptx');
+    await writeFile(wrongOutputInput, 'wrong output binding bytes', 'utf8');
+    const wrongOutputPath = path.join(temporary, 'pptx', 'wrong-output-binding.pptx');
+    const wrongOutputReceipt = path.join(temporary, 'pptx', 'wrong-output-binding.receipt.json');
+    const wrongOutput = await request('tools/call', {
+      name: 'pptx_apply_template',
+      arguments: { input: wrongOutputInput, template: pptxTemplate, plan: pptxPlan, output: wrongOutputPath, receiptOutput: wrongOutputReceipt },
+    });
+    assert.equal(wrongOutput.result.isError, true);
+    await assert.rejects(readFile(wrongOutputPath));
+    await assert.rejects(readFile(wrongOutputReceipt));
+    const wrongTemplate = path.join(temporary, 'wrong-template-binding.pptx');
+    await writeFile(wrongTemplate, 'wrong template binding bytes', 'utf8');
+    const wrongTemplateResult = await request('tools/call', {
+      name: 'pptx_apply_template',
+      arguments: {
+        input: pptxInput,
+        template: wrongTemplate,
+        plan: pptxPlan,
+        output: path.join(temporary, 'pptx', 'wrong-template-output.pptx'),
+        receiptOutput: path.join(temporary, 'pptx', 'wrong-template-output.receipt.json'),
+      },
+    });
+    assert.equal(wrongTemplateResult.result.isError, true);
+    const schemaDriftInput = path.join(temporary, 'schema-drift.pptx');
+    await writeFile(schemaDriftInput, 'schema drift input bytes', 'utf8');
+    const schemaDriftOutput = path.join(temporary, 'pptx', 'schema-drift.pptx');
+    const schemaDriftReceipt = path.join(temporary, 'pptx', 'schema-drift.receipt.json');
+    const schemaDrift = await request('tools/call', {
+      name: 'pptx_apply_format',
+      arguments: { input: schemaDriftInput, operations: pptxOperations, output: schemaDriftOutput, receiptOutput: schemaDriftReceipt },
+    });
+    assert.equal(schemaDrift.result.isError, true);
+    await assert.rejects(readFile(schemaDriftOutput));
+    await assert.rejects(readFile(schemaDriftReceipt));
+    for (const drift of ['missing-field', 'wrong-type']) {
+      const driftInput = path.join(temporary, `${drift}.pptx`);
+      const driftOutput = path.join(temporary, 'pptx', `${drift}.pptx`);
+      const driftReceipt = path.join(temporary, 'pptx', `${drift}.receipt.json`);
+      await writeFile(driftInput, `${drift} bytes`, 'utf8');
+      const rejected = await request('tools/call', {
+        name: 'pptx_apply_format',
+        arguments: { input: driftInput, operations: pptxOperations, output: driftOutput, receiptOutput: driftReceipt },
+      });
+      assert.equal(rejected.result.isError, true);
+      await assert.rejects(readFile(driftOutput));
+      await assert.rejects(readFile(driftReceipt));
+    }
+    const mutationCases = [
+      {
+        label: 'input',
+        input: path.join(temporary, 'mutate-input.pptx'),
+        template: pptxTemplate,
+        plan: pptxPlan,
+      },
+      {
+        label: 'template',
+        input: pptxInput,
+        template: path.join(temporary, 'mutate-template.pptx'),
+        plan: pptxPlan,
+      },
+      {
+        label: 'plan',
+        input: pptxInput,
+        template: pptxTemplate,
+        plan: path.join(temporary, 'mutate-plan.json'),
+      },
+    ];
+    await writeFile(mutationCases[0].input, 'mutation input bytes', 'utf8');
+    await writeFile(mutationCases[1].template, 'mutation template bytes', 'utf8');
+    await writeFile(mutationCases[2].plan, JSON.stringify({ slides: [{ sourceSlideIndex: 0, targetLayoutIndex: 1 }] }), 'utf8');
+    for (const mutation of mutationCases) {
+      const mutationOutput = path.join(temporary, 'pptx', `mutated-${mutation.label}.pptx`);
+      const mutationReceipt = path.join(temporary, 'pptx', `mutated-${mutation.label}.receipt.json`);
+      const rejected = await request('tools/call', {
+        name: 'pptx_apply_template',
+        arguments: { input: mutation.input, template: mutation.template, plan: mutation.plan, output: mutationOutput, receiptOutput: mutationReceipt },
+      });
+      assert.equal(rejected.result.isError, true);
+      await assert.rejects(readFile(mutationOutput));
+      await assert.rejects(readFile(mutationReceipt));
+    }
+    const missingTemplate = await request('tools/call', {
+      name: 'pptx_apply_template',
+      arguments: { input: pptxInput, plan: pptxPlan, output: path.join(temporary, 'pptx', 'missing-template.pptx'), receiptOutput: path.join(temporary, 'pptx', 'missing-template.receipt.json') },
+    });
+    assert.equal(missingTemplate.result.isError, true);
+    const extraFormatField = await request('tools/call', {
+      name: 'pptx_apply_format',
+      arguments: { input: pptxInput, operations: pptxOperations, output: path.join(temporary, 'pptx', 'extra.pptx'), receiptOutput: path.join(temporary, 'pptx', 'extra.receipt.json'), template: pptxTemplate },
+    });
+    assert.equal(extraFormatField.result.isError, true);
+    const wrongExtension = await request('tools/call', {
+      name: 'pptx_apply_format',
+      arguments: { input: path.join(temporary, 'current.txt'), operations: pptxOperations, output: path.join(temporary, 'pptx', 'wrong-extension.pptx'), receiptOutput: path.join(temporary, 'pptx', 'wrong-extension.receipt.json') },
+    });
+    assert.equal(wrongExtension.result.isError, true);
 
     const renderInput = path.join(temporary, 'render-current.docx');
     const renderOutput = path.join(temporary, 'rendered', 'current.pdf');

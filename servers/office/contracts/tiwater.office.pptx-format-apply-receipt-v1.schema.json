@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office.pptx-format-apply-receipt/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "pass", "input", "operations", "output", "providerResult"],
+  "properties": {
+    "schema": { "const": "tiwater.office.pptx-format-apply-receipt/v1" },
+    "pass": { "type": "boolean" },
+    "input": { "$ref": "#/$defs/artifact" },
+    "operations": { "$ref": "#/$defs/artifact" },
+    "output": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+    "providerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output", "operationCount", "changedCount", "changes", "issues"],
+      "properties": {
+        "input": { "type": "string", "minLength": 1 },
+        "output": { "type": "string", "minLength": 1 },
+        "operationCount": { "type": "integer", "minimum": 0 },
+        "changedCount": { "type": "integer", "minimum": 0 },
+        "changes": { "type": "array", "items": { "$ref": "#/$defs/change" } },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } }
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slideNumber", "shapeId", "runIndex", "properties"],
+      "properties": {
+        "slideNumber": { "type": "integer", "minimum": 1 },
+        "shapeId": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "runIndex": { "type": "integer", "minimum": 0 },
+        "properties": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slideNumber", "shapeId", "runIndex", "message"],
+      "properties": {
+        "slideNumber": { "type": "integer", "minimum": 1 },
+        "shapeId": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "runIndex": { "type": "integer", "minimum": 0 },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}
