@@ -95,7 +95,13 @@ public sealed record ShapeDetail(
     IReadOnlyList<ParagraphDetail> Paragraphs,
     IReadOnlyList<TextRunDetail> Runs,
     TableDetail? Table = null
-);
+)
+{
+    // Keep the original public positional constructor and Deconstruct signature.
+    // New inspect evidence is additive object state, not a positional API change.
+    public bool PlaceholderPresent { get; init; }
+    public uint? PlaceholderIndex { get; init; }
+}
 
 public sealed record TableDetail(
     IReadOnlyList<long> ColumnWidths,

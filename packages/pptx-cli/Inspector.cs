@@ -168,7 +168,11 @@ public static class Inspector
                     GetAttributeValue(app?.PlaceholderShape, "type"), null, null,
                     string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody, layoutTextStyle, masterTextStyle),
                     ExtractRuns(shape.TextBody, layoutTextStyle, masterTextStyle, slideContext?.SlideLayoutPart?.SlideMasterPart?.ThemePart,
-                        slideContext?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.ColorMap)));
+                        slideContext?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.ColorMap))
+                {
+                    PlaceholderPresent = placeholder is not null,
+                    PlaceholderIndex = placeholder?.Index?.Value
+                });
             }
             else if (child is Picture picture)
             {
@@ -181,31 +185,47 @@ public static class Inspector
                     mediaPath = NormalizePartPath(media.Uri); using var stream = media.GetStream(); mediaHash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
                 }
                 var app = picture.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties;
+                var placeholder = app?.PlaceholderShape;
                 shapes.Add(new ShapeDetail(shapeId,
                     picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "picture", zOrder++,
-                    GetAttributeValue(app?.PlaceholderShape, "type"), mediaPath, mediaHash, string.Empty,
-                    ExtractTransform(picture.ShapeProperties?.Transform2D), [], []));
+                    GetAttributeValue(placeholder, "type"), mediaPath, mediaHash, string.Empty,
+                    ExtractTransform(picture.ShapeProperties?.Transform2D), [], [])
+                {
+                    PlaceholderPresent = placeholder is not null,
+                    PlaceholderIndex = placeholder?.Index?.Value
+                });
             }
             else if (child is GraphicFrame frame)
             {
                 var app = frame.NonVisualGraphicFrameProperties?.ApplicationNonVisualDrawingProperties;
+                var placeholder = app?.PlaceholderShape;
                 var shapeId = frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
                 if (!seen.Add(("graphicFrame", shapeId))) continue;
                 shapes.Add(new ShapeDetail(shapeId,
                     frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "graphicFrame", zOrder++,
-                    GetAttributeValue(app?.PlaceholderShape, "type"), null, null,
+                    GetAttributeValue(placeholder, "type"), null, null,
                     string.Concat(frame.Descendants<A.Text>().Select(value => value.Text)), ExtractTransform(frame.Transform),
-                    ExtractDescendantParagraphs(frame), ExtractDescendantRuns(frame), ExtractTable(frame)));
+                    ExtractDescendantParagraphs(frame), ExtractDescendantRuns(frame), ExtractTable(frame))
+                {
+                    PlaceholderPresent = placeholder is not null,
+                    PlaceholderIndex = placeholder?.Index?.Value
+                });
             }
             else if (child is GroupShape group)
             {
+                var app = group.NonVisualGroupShapeProperties?.ApplicationNonVisualDrawingProperties;
+                var placeholder = app?.PlaceholderShape;
                 var shapeId = group.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0U;
                 if (!seen.Add(("groupShape", shapeId))) continue;
                 shapes.Add(new ShapeDetail(shapeId,
                     group.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "groupShape", zOrder++,
-                    null, null, null, string.Concat(group.Descendants<A.Text>().Select(value => value.Text)),
+                    GetAttributeValue(placeholder, "type"), null, null, string.Concat(group.Descendants<A.Text>().Select(value => value.Text)),
                     ExtractTransform(group.GroupShapeProperties?.TransformGroup),
-                    ExtractDescendantParagraphs(group), ExtractDescendantRuns(group)));
+                    ExtractDescendantParagraphs(group), ExtractDescendantRuns(group))
+                {
+                    PlaceholderPresent = placeholder is not null,
+                    PlaceholderIndex = placeholder?.Index?.Value
+                });
             }
         }
         return shapes;

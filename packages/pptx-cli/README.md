@@ -30,10 +30,18 @@ Placeholders are matched as exact inline tokens like `{{title}}`.
 
 `inspect --json --detail` emits slide size, slide paths, shape ids/names/kinds,
 master/layout/theme paths, placeholder roles, native z-order, media path/hash
-bindings, shape transforms, paragraph alignment, and direct run formatting. Font size is
+bindings, shape transforms, paragraph alignment, and direct run formatting. Each shape
+also reports `placeholderPresent` and the nullable `placeholderIndex` directly from its
+OpenXML `p:ph` element; `placeholderType` remains the existing nullable type field.
+Font size is
 reported in points. Shape coordinates remain in EMU so callers can compare
 native PPTX positions without lossy conversion. The detail report includes
 `artifactSha256`, computed directly from the inspected PPTX bytes.
+
+The machine-readable shape evidence contract is
+[`contracts/tiwater.pptx-inspect-shape-v1.schema.json`](contracts/tiwater.pptx-inspect-shape-v1.schema.json).
+`placeholderPresent` is false only when the shape has no `p:ph` element; text that
+looks like a placeholder and a missing `type` attribute do not change that result.
 
 ## Format Edit Plan
 
@@ -82,6 +90,12 @@ slide may explicitly materialize visible, inspected source-layout shapes through
 `sourceLayoutShapeIdsToPreserve`; every imported shape is reported with both its
 source and output identity. The operation never guesses which layout content is
 business content.
+
+The result receipt reports `frozenPlaceholderCount` as the number of non-system
+source-slide placeholder elements processed, including placeholders identified
+only by an `idx` without an explicit `type`. System placeholders removed under
+`target-template` are excluded from that count and are listed in
+`removedSystemPlaceholders`; a `preserve` run leaves that list empty.
 
 Optional content fitting is scoped, never slide-wide. When `contentBounds` is
 present, `contentShapeIds` must explicitly identify the current-slide shapes to

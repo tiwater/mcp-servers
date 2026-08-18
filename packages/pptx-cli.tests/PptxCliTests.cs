@@ -130,6 +130,163 @@ public class PptxCliTests
     }
 
     [Fact]
+    public void InspectDetail_reports_placeholder_presence_and_index_without_inferring_from_type_or_text()
+    {
+        var path = CreatePlaceholderEvidenceFixture();
+
+        var report = Inspector.InspectDetail(path);
+        var shapes = report.Slides[0].Shapes;
+
+        var indexed = shapes.Single(shape => shape.ShapeId == 3U);
+        Assert.True(indexed.PlaceholderPresent);
+        Assert.Null(indexed.PlaceholderType);
+        Assert.Equal(12U, indexed.PlaceholderIndex);
+
+        var typed = shapes.Single(shape => shape.ShapeId == 4U);
+        Assert.True(typed.PlaceholderPresent);
+        Assert.Equal("title", typed.PlaceholderType);
+        Assert.Null(typed.PlaceholderIndex);
+
+        var textOnly = shapes.Single(shape => shape.ShapeId == 5U);
+        Assert.False(textOnly.PlaceholderPresent);
+        Assert.Null(textOnly.PlaceholderIndex);
+    }
+
+    [Fact]
+    public void InspectDetail_placeholder_evidence_is_stable_and_tracks_openxml_mutation()
+    {
+        var path = CreatePlaceholderEvidenceFixture();
+
+        var before = Inspector.InspectDetail(path).Slides[0].Shapes.Single(shape => shape.ShapeId == 3U);
+        var repeat = Inspector.InspectDetail(path).Slides[0].Shapes.Single(shape => shape.ShapeId == 3U);
+        Assert.Equal((before.PlaceholderPresent, before.PlaceholderIndex), (repeat.PlaceholderPresent, repeat.PlaceholderIndex));
+
+        using (var presentation = PresentationDocument.Open(path, true))
+        {
+            var shape = presentation.PresentationPart!.SlideParts.First().Slide.CommonSlideData!.ShapeTree!
+                .Elements<P.Shape>().Single(shape => shape.NonVisualShapeProperties!.NonVisualDrawingProperties!.Id!.Value == 3U);
+            shape.NonVisualShapeProperties!.ApplicationNonVisualDrawingProperties!.PlaceholderShape!.Type = P.PlaceholderValues.Body;
+            shape.TextBody!.Descendants<A.Text>().Single().Text = "mutated visible text";
+            presentation.PresentationPart.SlideParts.First().Slide.Save();
+        }
+
+        var after = Inspector.InspectDetail(path).Slides[0].Shapes.Single(shape => shape.ShapeId == 3U);
+        Assert.True(after.PlaceholderPresent);
+        Assert.Equal(12U, after.PlaceholderIndex);
+        Assert.Equal("body", after.PlaceholderType);
+    }
+
+    [Fact]
+    public void InspectDetail_serializes_all_shape_kinds_against_the_published_shape_schema()
+    {
+        var path = CreateAllShapeKindsFixture();
+        var report = Inspector.InspectDetail(path);
+        var json = JsonDocument.Parse(JsonSerializer.Serialize(report, Json.Options));
+        var schema = JsonDocument.Parse(File.ReadAllText(RepositoryPath("packages/pptx-cli/contracts/tiwater.pptx-inspect-shape-v1.schema.json")));
+        var slideShapes = json.RootElement.GetProperty("slides")[0].GetProperty("shapes");
+        var expected = new[]
+        {
+            (Kind: "shape", Index: (uint?)31U),
+            (Kind: "picture", Index: (uint?)32U),
+            (Kind: "graphicFrame", Index: (uint?)33U),
+            (Kind: "groupShape", Index: (uint?)34U),
+        };
+
+        foreach (var item in expected)
+        {
+            var shape = Assert.Single(report.Slides[0].Shapes, value => value.Kind == item.Kind && value.PlaceholderIndex == item.Index);
+            Assert.True(shape.PlaceholderPresent);
+            Assert.Equal(item.Index, shape.PlaceholderIndex);
+            var serialized = Assert.Single(slideShapes.EnumerateArray(), value => value.GetProperty("kind").GetString() == item.Kind
+                && value.GetProperty("placeholderIndex").ValueKind == JsonValueKind.Number
+                && value.GetProperty("placeholderIndex").GetUInt32() == item.Index);
+            AssertShapeEvidenceMatchesSchema(serialized, schema.RootElement);
+            Assert.Contains(serialized.GetProperty("placeholderPresent").ValueKind, new[] { JsonValueKind.True, JsonValueKind.False });
+            Assert.Equal(JsonValueKind.Number, serialized.GetProperty("placeholderIndex").ValueKind);
+        }
+    }
+
+    [Fact]
+    public void InspectDetail_placeholder_mutations_remove_and_change_index_evidence()
+    {
+        var path = CreatePlaceholderEvidenceFixture();
+        var shapeId = 3U;
+
+        using (var presentation = PresentationDocument.Open(path, true))
+        {
+            var shape = presentation.PresentationPart!.SlideParts.First().Slide.CommonSlideData!.ShapeTree!
+                .Elements<P.Shape>().Single(value => value.NonVisualShapeProperties!.NonVisualDrawingProperties!.Id!.Value == shapeId);
+            shape.NonVisualShapeProperties!.ApplicationNonVisualDrawingProperties!.PlaceholderShape!.Index = 0U;
+            presentation.PresentationPart.SlideParts.First().Slide.Save();
+        }
+
+        var zeroIndex = Inspector.InspectDetail(path).Slides[0].Shapes.Single(value => value.ShapeId == shapeId);
+        Assert.True(zeroIndex.PlaceholderPresent);
+        Assert.Equal(0U, zeroIndex.PlaceholderIndex);
+
+        using (var presentation = PresentationDocument.Open(path, true))
+        {
+            var shape = presentation.PresentationPart!.SlideParts.First().Slide.CommonSlideData!.ShapeTree!
+                .Elements<P.Shape>().Single(value => value.NonVisualShapeProperties!.NonVisualDrawingProperties!.Id!.Value == shapeId);
+            shape.NonVisualShapeProperties!.ApplicationNonVisualDrawingProperties!.PlaceholderShape!.Remove();
+            presentation.PresentationPart.SlideParts.First().Slide.Save();
+        }
+
+        var removed = Inspector.InspectDetail(path).Slides[0].Shapes.Single(value => value.ShapeId == shapeId);
+        Assert.False(removed.PlaceholderPresent);
+        Assert.Null(removed.PlaceholderIndex);
+        Assert.Null(removed.PlaceholderType);
+    }
+
+    [Fact]
+    public void InspectDetail_deserializes_legacy_shape_json_with_additive_placeholder_fields_absent()
+    {
+        const string legacy = """
+            {
+              "shapeId": 2,
+              "name": "legacy",
+              "kind": "shape",
+              "zOrder": 0,
+              "placeholderType": null,
+              "mediaPartPath": null,
+              "mediaSha256": null,
+              "text": "legacy text",
+              "transform": null,
+              "paragraphs": [],
+              "runs": [],
+              "table": null
+            }
+            """;
+
+        var shape = JsonSerializer.Deserialize<ShapeDetail>(legacy, Json.Options);
+
+        Assert.NotNull(shape);
+        Assert.Equal(2U, shape!.ShapeId);
+        Assert.False(shape.PlaceholderPresent);
+        Assert.Null(shape.PlaceholderIndex);
+        Assert.Null(shape.PlaceholderType);
+    }
+
+    [Fact]
+    public void ShapeDetail_preserves_the_legacy_public_constructor_and_deconstruct_arity()
+    {
+        var legacyParameters = new[]
+        {
+            typeof(uint), typeof(string), typeof(string), typeof(int), typeof(string), typeof(string),
+            typeof(string), typeof(string), typeof(TransformInfo), typeof(IReadOnlyList<ParagraphDetail>),
+            typeof(IReadOnlyList<TextRunDetail>), typeof(TableDetail),
+        };
+
+        Assert.NotNull(typeof(ShapeDetail).GetConstructor(legacyParameters));
+        Assert.Contains(typeof(ShapeDetail).GetMethods(BindingFlags.Public | BindingFlags.Instance), method =>
+            method.Name == "Deconstruct" && method.GetParameters().Length == legacyParameters.Length);
+
+        var shape = new ShapeDetail(2U, "legacy", "shape", 0, null, null, null, "text", null, [], [], null);
+        shape.Deconstruct(out var id, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+        Assert.Equal(2U, id);
+    }
+
+    [Fact]
     public void InspectDetail_resolves_the_current_paragraph_level_without_fabricating_direct_formatting()
     {
         var path = CreateInheritedFormattingFixture();
@@ -352,6 +509,104 @@ public class PptxCliTests
     }
 
     [Fact]
+    public void ApplyTemplate_counts_untyped_placeholders_and_excludes_system_placeholders()
+    {
+        var source = CreateFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            foreach (var slide in presentation.PresentationPart!.SlideParts)
+            {
+                slide.Slide.CommonSlideData!.ShapeTree!.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 3U, Name = "Indexed body" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Index = 12U })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Indexed body"))))));
+                slide.Slide.CommonSlideData.ShapeTree.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 4U, Name = "Title" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Title })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Title"))))));
+                slide.Slide.CommonSlideData.ShapeTree.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 5U, Name = "Footer" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Footer })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Footer"))))));
+                slide.Slide.Save();
+            }
+        }
+
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)],
+                "target-template"), output);
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(4, result.FrozenPlaceholderCount);
+        Assert.Equal(2, result.RemovedSystemPlaceholders?.Count);
+        Assert.All(result.RemovedSystemPlaceholders!, entry => Assert.Equal("ftr", entry.PlaceholderType));
+        var outputEvidence = Inspector.InspectDetail(output);
+        Assert.Equal(2, outputEvidence.Slides.Count(slide => slide.Shapes.Any(shape => shape.Text == "Indexed body")));
+        Assert.Equal(2, outputEvidence.Slides.Count(slide => slide.Shapes.Any(shape => shape.Text == "Title")));
+        Assert.DoesNotContain(outputEvidence.Slides.SelectMany(slide => slide.Shapes), shape => shape.Text == "Footer");
+    }
+
+    [Fact]
+    public void ApplyTemplate_default_preserve_keeps_system_placeholders_and_rejects_invalid_policy()
+    {
+        var source = CreateFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            foreach (var slide in presentation.PresentationPart!.SlideParts)
+            {
+                slide.Slide.CommonSlideData!.ShapeTree!.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 3U, Name = "Footer" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Footer })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Footer"))))));
+                slide.Slide.Save();
+            }
+        }
+
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var preserveOutput = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var preserved = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)]), preserveOutput);
+
+        Assert.Empty(preserved.Issues);
+        Assert.Equal(2, preserved.FrozenPlaceholderCount);
+        Assert.Empty(preserved.RemovedSystemPlaceholders!);
+        Assert.Equal(2, Inspector.InspectDetail(preserveOutput).Slides.Count(slide => slide.Shapes.Any(shape => shape.Text == "Footer")));
+
+        var invalidOutput = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var invalid = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)],
+                "remove-all-placeholders"), invalidOutput);
+
+        Assert.Equal(0, invalid.ChangedSlideCount);
+        Assert.Equal("system placeholder policy is invalid", Assert.Single(invalid.Issues).Message);
+    }
+
+    [Fact]
     public void ApplyTemplate_rejects_unknown_or_duplicate_source_layout_shape_ids()
     {
         var source = CreateFixture();
@@ -485,6 +740,100 @@ public class PptxCliTests
         presentationPart.Presentation.Save();
 
         return path;
+    }
+
+    private static string CreatePlaceholderEvidenceFixture()
+    {
+        var path = CreateFixture();
+        using var presentation = PresentationDocument.Open(path, true);
+        var shapeTree = presentation.PresentationPart!.SlideParts.First().Slide.CommonSlideData!.ShapeTree!;
+        shapeTree.Append(CreatePlaceholderShape(3U, "Indexed body", new P.PlaceholderShape { Index = 12U }));
+        shapeTree.Append(CreatePlaceholderShape(4U, "Typed title", new P.PlaceholderShape { Type = P.PlaceholderValues.Title }));
+        shapeTree.Append(CreatePlaceholderShape(5U, "Text {{looks-like-placeholder}}", null));
+        presentation.PresentationPart.SlideParts.First().Slide.Save();
+        return path;
+    }
+
+    private static string CreateAllShapeKindsFixture()
+    {
+        var path = CreateFixture();
+        using var presentation = PresentationDocument.Open(path, true);
+        var slidePart = presentation.PresentationPart!.SlideParts.First();
+        var shapeTree = slidePart.Slide.CommonSlideData!.ShapeTree!;
+        shapeTree.Append(CreatePlaceholderShape(3U, "Indexed shape", new P.PlaceholderShape { Index = 31U }));
+
+        var imagePart = slidePart.AddImagePart(ImagePartType.Png, "rIdImageEvidence");
+        imagePart.FeedData(new MemoryStream([137, 80, 78, 71, 13, 10, 26, 10]));
+        shapeTree.Append(new P.Picture(
+            new P.NonVisualPictureProperties(
+                new P.NonVisualDrawingProperties { Id = 6U, Name = "Indexed picture" },
+                new P.NonVisualPictureDrawingProperties(),
+                new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Index = 32U })),
+            new A.BlipFill(new A.Blip { Embed = "rIdImageEvidence" }, new A.Stretch(new A.FillRectangle())),
+            new P.ShapeProperties()));
+
+        shapeTree.Append(new P.GraphicFrame(
+            new P.NonVisualGraphicFrameProperties(
+                new P.NonVisualDrawingProperties { Id = 7U, Name = "Indexed graphic frame" },
+                new P.NonVisualGraphicFrameDrawingProperties(),
+                new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Index = 33U })),
+            new P.Transform(),
+            new A.Graphic(new A.GraphicData { Uri = "urn:tiwater:test" })));
+
+        shapeTree.Append(new P.GroupShape(
+            new P.NonVisualGroupShapeProperties(
+                new P.NonVisualDrawingProperties { Id = 8U, Name = "Indexed group" },
+                new P.NonVisualGroupShapeDrawingProperties(),
+                new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Index = 34U })),
+            new P.GroupShapeProperties(),
+            new P.ShapeTree()));
+
+        slidePart.Slide.Save();
+        return path;
+    }
+
+    private static void AssertShapeEvidenceMatchesSchema(JsonElement shape, JsonElement schema)
+    {
+        var required = schema.GetProperty("required").EnumerateArray().Select(value => value.GetString()!).ToList();
+        var properties = schema.GetProperty("properties").EnumerateObject().Select(value => value.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var property in required)
+            Assert.True(shape.TryGetProperty(property, out _), $"published shape schema requires {property}");
+        foreach (var property in shape.EnumerateObject())
+            Assert.Contains(property.Name, properties);
+        Assert.Equal(JsonValueKind.Number, shape.GetProperty("shapeId").ValueKind);
+        Assert.Equal(JsonValueKind.String, shape.GetProperty("name").ValueKind);
+        Assert.Equal(JsonValueKind.String, shape.GetProperty("kind").ValueKind);
+        Assert.Equal(JsonValueKind.Number, shape.GetProperty("zOrder").ValueKind);
+        Assert.Contains(shape.GetProperty("placeholderType").ValueKind, new[] { JsonValueKind.String, JsonValueKind.Null });
+        Assert.Contains(shape.GetProperty("placeholderPresent").ValueKind, new[] { JsonValueKind.True, JsonValueKind.False });
+        Assert.Contains(shape.GetProperty("placeholderIndex").ValueKind, new[] { JsonValueKind.Number, JsonValueKind.Null });
+        Assert.Equal(JsonValueKind.Array, shape.GetProperty("paragraphs").ValueKind);
+        Assert.Equal(JsonValueKind.Array, shape.GetProperty("runs").ValueKind);
+    }
+
+    private static string RepositoryPath(string relativePath)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var candidate = Path.Combine(directory.FullName, relativePath);
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        throw new FileNotFoundException(relativePath);
+    }
+
+    private static P.Shape CreatePlaceholderShape(uint id, string text, P.PlaceholderShape? placeholder)
+    {
+        var app = placeholder is null
+            ? new P.ApplicationNonVisualDrawingProperties()
+            : new P.ApplicationNonVisualDrawingProperties(placeholder);
+        return new P.Shape(
+            new P.NonVisualShapeProperties(
+                new P.NonVisualDrawingProperties { Id = id, Name = text },
+                new P.NonVisualShapeDrawingProperties(),
+                app),
+            new P.ShapeProperties(),
+            new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text(text)))));
     }
 
     private static string CreateInheritedFormattingFixture(string? directColor = null, bool useLocalStyle = true)
