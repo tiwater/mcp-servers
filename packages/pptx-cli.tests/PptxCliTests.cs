@@ -352,6 +352,104 @@ public class PptxCliTests
     }
 
     [Fact]
+    public void ApplyTemplate_counts_untyped_placeholders_and_excludes_system_placeholders()
+    {
+        var source = CreateFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            foreach (var slide in presentation.PresentationPart!.SlideParts)
+            {
+                slide.Slide.CommonSlideData!.ShapeTree!.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 3U, Name = "Indexed body" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Index = 12U })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Indexed body"))))));
+                slide.Slide.CommonSlideData.ShapeTree.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 4U, Name = "Title" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Title })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Title"))))));
+                slide.Slide.CommonSlideData.ShapeTree.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 5U, Name = "Footer" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Footer })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Footer"))))));
+                slide.Slide.Save();
+            }
+        }
+
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var output = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var result = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)],
+                "target-template"), output);
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(4, result.FrozenPlaceholderCount);
+        Assert.Equal(2, result.RemovedSystemPlaceholders?.Count);
+        Assert.All(result.RemovedSystemPlaceholders!, entry => Assert.Equal("ftr", entry.PlaceholderType));
+        var outputEvidence = Inspector.InspectDetail(output);
+        Assert.Equal(2, outputEvidence.Slides.Count(slide => slide.Shapes.Any(shape => shape.Text == "Indexed body")));
+        Assert.Equal(2, outputEvidence.Slides.Count(slide => slide.Shapes.Any(shape => shape.Text == "Title")));
+        Assert.DoesNotContain(outputEvidence.Slides.SelectMany(slide => slide.Shapes), shape => shape.Text == "Footer");
+    }
+
+    [Fact]
+    public void ApplyTemplate_default_preserve_keeps_system_placeholders_and_rejects_invalid_policy()
+    {
+        var source = CreateFixture();
+        using (var presentation = PresentationDocument.Open(source, true))
+        {
+            foreach (var slide in presentation.PresentationPart!.SlideParts)
+            {
+                slide.Slide.CommonSlideData!.ShapeTree!.Append(
+                    new P.Shape(
+                        new P.NonVisualShapeProperties(
+                            new P.NonVisualDrawingProperties { Id = 3U, Name = "Footer" },
+                            new P.NonVisualShapeDrawingProperties(),
+                            new P.ApplicationNonVisualDrawingProperties(new P.PlaceholderShape { Type = P.PlaceholderValues.Footer })),
+                        new P.ShapeProperties(),
+                        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text("Footer"))))));
+                slide.Slide.Save();
+            }
+        }
+
+        var template = CreateFixture();
+        var targetEvidence = Inspector.InspectDetail(template);
+        var targetLayout = targetEvidence.Masters.Single().Layouts.Single().Path;
+        var preserveOutput = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var preserved = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)]), preserveOutput);
+
+        Assert.Empty(preserved.Issues);
+        Assert.Equal(2, preserved.FrozenPlaceholderCount);
+        Assert.Empty(preserved.RemovedSystemPlaceholders!);
+        Assert.Equal(2, Inspector.InspectDetail(preserveOutput).Slides.Count(slide => slide.Shapes.Any(shape => shape.Text == "Footer")));
+
+        var invalidOutput = Path.Combine(Path.GetTempPath(), $"pptx-template-{Guid.NewGuid():N}.pptx");
+        var invalid = TemplateApplicator.Apply(source, template,
+            new TemplateApplicationPlan(targetEvidence.Masters.Single().Path,
+                [new SlideLayoutAssignment(1, targetLayout), new SlideLayoutAssignment(2, targetLayout)],
+                "remove-all-placeholders"), invalidOutput);
+
+        Assert.Equal(0, invalid.ChangedSlideCount);
+        Assert.Equal("system placeholder policy is invalid", Assert.Single(invalid.Issues).Message);
+    }
+
+    [Fact]
     public void ApplyTemplate_rejects_unknown_or_duplicate_source_layout_shape_ids()
     {
         var source = CreateFixture();

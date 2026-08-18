@@ -83,6 +83,12 @@ slide may explicitly materialize visible, inspected source-layout shapes through
 source and output identity. The operation never guesses which layout content is
 business content.
 
+The result receipt reports `frozenPlaceholderCount` as the number of non-system
+source-slide placeholder elements processed, including placeholders identified
+only by an `idx` without an explicit `type`. System placeholders removed under
+`target-template` are excluded from that count and are listed in
+`removedSystemPlaceholders`; a `preserve` run leaves that list empty.
+
 Optional content fitting is scoped, never slide-wide. When `contentBounds` is
 present, `contentShapeIds` must explicitly identify the current-slide shapes to
 fit. Supplying either field without the other is rejected before that slide is

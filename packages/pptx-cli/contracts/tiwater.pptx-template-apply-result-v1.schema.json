@@ -23,7 +23,11 @@
         }
       }
     },
-    "frozenPlaceholderCount": { "type": "integer", "minimum": 0 },
+    "frozenPlaceholderCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of non-system source-slide placeholder elements processed, including placeholders with an idx but no explicit type. Placeholders removed as date/footer/header/slide-number system placeholders are excluded."
+    },
     "removedSystemPlaceholders": {
       "type": "array",
       "items": {
