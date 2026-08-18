@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.pptx-inspect-shape/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "shapeId", "name", "kind", "zOrder", "placeholderType",
+    "placeholderPresent", "placeholderIndex", "mediaPartPath", "mediaSha256",
+    "text", "transform", "paragraphs", "runs", "table"
+  ],
+  "properties": {
+    "shapeId": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "name": { "type": "string" },
+    "kind": { "type": "string", "minLength": 1 },
+    "zOrder": { "type": "integer", "minimum": 0 },
+    "placeholderType": {
+      "type": ["string", "null"],
+      "description": "The existing placeholder type value, when OpenXML provides one; null does not imply that no p:ph element exists."
+    },
+    "placeholderPresent": {
+      "type": "boolean",
+      "description": "True exactly when this shape's OpenXML application non-visual drawing properties contain a p:ph element. It is not inferred from text or placeholderType."
+    },
+    "placeholderIndex": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 4294967295,
+      "description": "The OpenXML p:ph idx value, or null when the p:ph element has no idx."
+    },
+    "mediaPartPath": { "type": ["string", "null"] },
+    "mediaSha256": { "type": ["string", "null"] },
+    "text": { "type": "string" },
+    "transform": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["x", "y", "cx", "cy"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "cx": { "type": "integer" },
+        "cy": { "type": "integer" }
+      }
+    },
+    "paragraphs": { "type": "array", "items": { "type": "object" } },
+    "runs": { "type": "array", "items": { "type": "object" } },
+    "table": { "type": ["object", "null"] }
+  }
+}
