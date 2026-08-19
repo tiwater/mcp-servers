@@ -455,7 +455,7 @@ const tools = [
   },
   {
     name: 'xlsx_inspect',
-    description: 'Inspect an XLSX workbook and write one JSON observation containing workbook structure, exported values, formulas, styles, merged ranges, and conversion evidence.',
+    description: 'Inspect a current XLSX workbook or legacy XLS workbook and write one JSON observation containing workbook structure, exported values, formulas, styles, merged ranges, and any published legacy-format conversion evidence.',
     inputSchema: artifactInput,
     outputSchema: artifactOutput('xlsx_inspect'),
     handler: xlsxInspect,

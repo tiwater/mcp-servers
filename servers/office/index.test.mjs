@@ -223,7 +223,7 @@ process.exit(2);
       capabilities: {},
       clientInfo: { name: 'office-mcp-contract-test', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.12.0');
+    assert.equal(initialized.result.serverInfo.version, '0.12.1');
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
     assert(names.includes('docx_list_migration_choices'));
@@ -251,6 +251,9 @@ process.exit(2);
     assert(!names.includes('docx_inspect_tables'));
     assert(!names.includes('pptx_inspect_detail'));
     assert(!names.includes('docx_validate_template_transform'));
+    const xlsxInspectTool = listed.result.tools.find(tool => tool.name === 'xlsx_inspect');
+    assert.match(xlsxInspectTool.description, /XLSX workbook or legacy XLS workbook/u);
+    assert.match(xlsxInspectTool.description, /published legacy-format conversion evidence/u);
     const migrateTool = listed.result.tools.find(tool => tool.name === 'docx_migrate_template');
     const listTool = listed.result.tools.find(tool => tool.name === 'docx_list_migration_choices');
     const queryTool = listed.result.tools.find(tool => tool.name === 'docx_query_migration_choices');
