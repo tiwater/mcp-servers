@@ -46,6 +46,20 @@ class _VisionResponseFormatError(ValueError):
     """The gateway rejected or aborted structured JSON response generation."""
 
 
+def _is_response_format_exception(error: Exception) -> bool:
+    """Recognize provider HTTP errors raised before a response object exists."""
+    status = getattr(error, "status_code", None)
+    if status != 400:
+        return False
+    text = str(error).lower()
+    return "response_format" in text and any(marker in text for marker in (
+        "invalid_parameter_error",
+        "invalid_request_error",
+        "model output became abnormal",
+        "json generation failed",
+    ))
+
+
 def _is_retryable_vision_error(error: Exception) -> bool:
     status = getattr(error, "status_code", None)
     text = str(error).lower()
@@ -102,6 +116,11 @@ def _call_vision_page_with_retry(
         except ValueError:
             if on_malformed_response is not None:
                 on_malformed_response()
+            raise
+        except Exception as error:
+            if use_response_format and _is_response_format_exception(error):
+                use_response_format = False
+                return parse(request(False))
             raise
 
     return _call_vision_with_retry(
