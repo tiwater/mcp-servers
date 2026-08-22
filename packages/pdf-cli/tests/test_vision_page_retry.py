@@ -19,6 +19,34 @@ def response_with(content):
 
 
 class VisionPageRetryTest(unittest.TestCase):
+    def test_raised_response_format_gateway_error_falls_back_without_format(self):
+        uses_response_format = []
+
+        class GatewayBadRequest(Exception):
+            status_code = 400
+
+            def __str__(self):
+                return (
+                    "400 invalid_parameter_error: Model output became abnormal "
+                    "while generating a JSON response for response_format"
+                )
+
+        def request(use_response_format):
+            uses_response_format.append(use_response_format)
+            if use_response_format:
+                raise GatewayBadRequest()
+            return response_with(json.dumps({"text": "251", "tables": [], "warnings": []}))
+
+        page, attempts = _call_vision_page_with_retry(
+            request,
+            lambda response: _parse_vision_page_response(response, 2),
+            sleep_fn=lambda _seconds: None,
+        )
+
+        self.assertEqual(uses_response_format, [True, False])
+        self.assertEqual(attempts, 1)
+        self.assertEqual(page["text"], "251")
+
     def test_response_format_gateway_error_is_classified_for_compatible_retry(self):
         response = SimpleNamespace(
             choices=None,
