@@ -109,6 +109,8 @@ public static class Editor
             "setTableRowCantSplit" => SetTableRowCantSplit(body, operation),
             "setTableRowKeepNext" => SetTableRowKeepNext(body, operation),
             "setBodyParagraphKeepNext" => SetBodyParagraphKeepNext(body, operation),
+            "setBodyParagraphKeepLines" => SetBodyParagraphKeepLines(body, operation),
+            "setHeaderParagraphFontSize" => SetHeaderParagraphFontSize(doc, operation),
             "collapseTrailingEmptySection" => CollapseTrailingEmptySection(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
             "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
@@ -1070,6 +1072,55 @@ public static class Editor
 
         return new DocxEditAppliedOperation(operation.Type, true,
             $"Updated body paragraph[{operation.ParagraphIndex}] keepNext={operation.KeepNext.Value.ToString().ToLowerInvariant()}");
+    }
+
+    private static DocxEditAppliedOperation SetBodyParagraphKeepLines(Body body, DocxEditOperation operation)
+    {
+        if (operation.ParagraphIndex is null || operation.KeepLines is null)
+            return new DocxEditAppliedOperation(operation.Type, false, "paragraphIndex and keepLines are required");
+
+        var paragraphs = body.Elements<Paragraph>().ToList();
+        if (operation.ParagraphIndex.Value < 0 || operation.ParagraphIndex.Value >= paragraphs.Count)
+            return new DocxEditAppliedOperation(operation.Type, false, $"paragraphIndex {operation.ParagraphIndex} is out of range");
+
+        var paragraph = paragraphs[operation.ParagraphIndex.Value];
+        var properties = paragraph.ParagraphProperties ?? paragraph.PrependChild(new ParagraphProperties());
+        properties.RemoveAllChildren<KeepLines>();
+        if (operation.KeepLines.Value) properties.AddChild(new KeepLines(), true);
+
+        return new DocxEditAppliedOperation(operation.Type, true,
+            $"Updated body paragraph[{operation.ParagraphIndex}] keepLines={operation.KeepLines.Value.ToString().ToLowerInvariant()}");
+    }
+
+    private static DocxEditAppliedOperation SetHeaderParagraphFontSize(WordprocessingDocument doc, DocxEditOperation operation)
+    {
+        if (operation.HeaderIndex is null || operation.ParagraphIndex is null || string.IsNullOrWhiteSpace(operation.FontSize))
+            return new DocxEditAppliedOperation(operation.Type, false, "headerIndex, paragraphIndex, and fontSize are required");
+        if (!uint.TryParse(operation.FontSize, out var halfPoints) || halfPoints == 0)
+            return new DocxEditAppliedOperation(operation.Type, false, $"Invalid fontSize: {operation.FontSize}");
+
+        var headers = doc.MainDocumentPart?.HeaderParts.ToList() ?? [];
+        if (operation.HeaderIndex.Value < 0 || operation.HeaderIndex.Value >= headers.Count)
+            return new DocxEditAppliedOperation(operation.Type, false, $"headerIndex {operation.HeaderIndex} is out of range");
+
+        var paragraphs = headers[operation.HeaderIndex.Value].Header?.Elements<Paragraph>().ToList() ?? [];
+        if (operation.ParagraphIndex.Value < 0 || operation.ParagraphIndex.Value >= paragraphs.Count)
+            return new DocxEditAppliedOperation(operation.Type, false, $"paragraphIndex {operation.ParagraphIndex} is out of range for header {operation.HeaderIndex}");
+
+        var runs = paragraphs[operation.ParagraphIndex.Value].Descendants<Run>().ToList();
+        if (runs.Count == 0)
+            return new DocxEditAppliedOperation(operation.Type, false, $"header[{operation.HeaderIndex}].paragraph[{operation.ParagraphIndex}] has no runs");
+        foreach (var run in runs)
+        {
+            var properties = run.RunProperties ?? run.PrependChild(new RunProperties());
+            properties.RemoveAllChildren<FontSize>();
+            properties.RemoveAllChildren<FontSizeComplexScript>();
+            properties.AddChild(new FontSize { Val = operation.FontSize }, true);
+            properties.AddChild(new FontSizeComplexScript { Val = operation.FontSize }, true);
+        }
+
+        return new DocxEditAppliedOperation(operation.Type, true,
+            $"Updated header[{operation.HeaderIndex}].paragraph[{operation.ParagraphIndex}] fontSize={halfPoints}");
     }
 
     private static DocxEditAppliedOperation CollapseTrailingEmptySection(Body body, DocxEditOperation operation)

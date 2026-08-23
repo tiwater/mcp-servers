@@ -606,6 +606,7 @@ public sealed record DocxEditOperation(
     bool? NoWrap = null,
     bool? CantSplit = null,
     bool? KeepNext = null,
+    bool? KeepLines = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null,
     DocxFontPolicy? FontPolicy = null,
     IReadOnlyList<string>? ParagraphTexts = null);

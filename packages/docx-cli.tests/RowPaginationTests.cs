@@ -8,6 +8,122 @@ namespace Dockit.Docx.Tests;
 public sealed class RowPaginationTests
 {
     [Fact]
+    public void Body_paragraph_keep_lines_is_set_without_changing_paragraph_content()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"docx-paragraph-keep-lines-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var input = Path.Combine(root, "input.docx");
+        var output = Path.Combine(root, "output.docx");
+        try
+        {
+            using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(new Run(new Text("a long semantic conclusion"))),
+                    new Paragraph(new Run(new Text("following note")))));
+                main.Document.Save();
+            }
+
+            var result = Editor.Apply(
+                input,
+                output,
+                [new DocxEditOperation("setBodyParagraphKeepLines", ParagraphIndex: 0, KeepLines: true)]);
+
+            Assert.True(Assert.Single(result.AppliedOperations).Applied);
+            var validation = OpenXmlValidation.Validate(output);
+            Assert.True(validation.Pass, string.Join(Environment.NewLine, validation.Errors.Select(error => error.Description)));
+            using var edited = WordprocessingDocument.Open(output, false);
+            var paragraphs = edited.MainDocumentPart!.Document!.Body!.Elements<Paragraph>().ToList();
+            Assert.Equal("a long semantic conclusion", paragraphs[0].InnerText);
+            Assert.NotNull(paragraphs[0].ParagraphProperties?.GetFirstChild<KeepLines>());
+            Assert.Null(paragraphs[1].ParagraphProperties?.GetFirstChild<KeepLines>());
+            var flowJson = System.Text.Json.JsonSerializer.Serialize(Inspector.InspectDocumentFlow(output));
+            Assert.Contains("\"keepLines\":true", flowJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Header_paragraph_font_size_updates_all_runs_and_preserves_tabs_and_text()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"docx-header-font-size-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var input = Path.Combine(root, "input.docx");
+        var output = Path.Combine(root, "output.docx");
+        try
+        {
+            using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(new Paragraph(new Run(new Text("body")))));
+                var header = main.AddNewPart<HeaderPart>();
+                header.Header = new Header(new Paragraph(
+                    new Run(new RunProperties(new FontSize { Val = "24" }), new Text("Record")),
+                    new Run(new TabChar()),
+                    new Run(new RunProperties(new FontSize { Val = "22" }), new Text("R-0042"))));
+                var section = main.Document.Body!.AppendChild(new SectionProperties());
+                section.AppendChild(new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) });
+                main.Document.Save();
+                header.Header.Save();
+            }
+
+            var result = Editor.Apply(
+                input,
+                output,
+                [new DocxEditOperation("setHeaderParagraphFontSize", HeaderIndex: 0, ParagraphIndex: 0, FontSize: "20")]);
+
+            Assert.True(Assert.Single(result.AppliedOperations).Applied);
+            var validation = OpenXmlValidation.Validate(output);
+            Assert.True(validation.Pass, string.Join(Environment.NewLine, validation.Errors.Select(error => error.Description)));
+            using var edited = WordprocessingDocument.Open(output, false);
+            var paragraph = edited.MainDocumentPart!.HeaderParts.Single().Header!.Elements<Paragraph>().Single();
+            Assert.Equal("RecordR-0042", paragraph.InnerText);
+            Assert.Single(paragraph.Descendants<TabChar>());
+            Assert.All(paragraph.Descendants<Run>(), run =>
+            {
+                Assert.Equal("20", run.RunProperties?.FontSize?.Val?.Value);
+                Assert.Equal("20", run.RunProperties?.FontSizeComplexScript?.Val?.Value);
+            });
+            var flowJson = System.Text.Json.JsonSerializer.Serialize(Inspector.InspectDocumentFlow(output));
+            Assert.Contains("\"fontSizes\":[\"20\"]", flowJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("setBodyParagraphKeepLines")]
+    [InlineData("setHeaderParagraphFontSize")]
+    public void Paragraph_layout_operations_fail_closed_when_required_values_are_missing(string type)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"docx-paragraph-layout-negative-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var input = Path.Combine(root, "input.docx");
+        var output = Path.Combine(root, "output.docx");
+        try
+        {
+            using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(new Paragraph(new Run(new Text("neutral")))));
+                main.Document.Save();
+            }
+            var result = Editor.Apply(input, output, [new DocxEditOperation(type)]);
+            Assert.False(Assert.Single(result.AppliedOperations).Applied);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Body_paragraph_keep_next_is_set_without_changing_paragraph_content()
     {
         var root = Path.Combine(Path.GetTempPath(), $"docx-paragraph-pagination-{Guid.NewGuid():N}");

@@ -53,6 +53,8 @@
             "setTableRowCantSplit",
             "setTableRowKeepNext",
             "setBodyParagraphKeepNext",
+            "setBodyParagraphKeepLines",
+            "setHeaderParagraphFontSize",
             "collapseTrailingEmptySection",
             "mergeTableCells",
             "unmergeTableRowHorizontalCells",
@@ -125,6 +127,7 @@
         "noWrap": { "type": ["boolean", "null"] },
         "cantSplit": { "type": ["boolean", "null"] },
         "keepNext": { "type": ["boolean", "null"] },
+        "keepLines": { "type": ["boolean", "null"] },
         "richText": {
           "oneOf": [
             { "type": "null" },
