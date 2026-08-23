@@ -127,7 +127,13 @@ public static class Inspector
             {
                 var text = GetParagraphText(paragraph).Trim();
                 var style = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-                if (!string.IsNullOrEmpty(text)) nodes.Add(new { type = "headerParagraph", headerIndex, paragraphIndex, style, text });
+                var fontSizes = paragraph.Descendants<Run>()
+                    .Select(run => run.RunProperties?.FontSize?.Val?.Value)
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct()
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .ToArray();
+                if (!string.IsNullOrEmpty(text)) nodes.Add(new { type = "headerParagraph", headerIndex, paragraphIndex, style, fontSizes, text });
                 paragraphIndex += 1;
             }
             headerIndex += 1;
@@ -145,11 +151,12 @@ public static class Inspector
                 var numberingId = numbering?.NumberingId?.Val?.Value;
                 var numberingLevel = numbering?.NumberingLevelReference?.Val?.Value;
                 var keepNext = paragraph.ParagraphProperties?.GetFirstChild<KeepNext>() is not null;
+                var keepLines = paragraph.ParagraphProperties?.GetFirstChild<KeepLines>() is not null;
                 var drawingCount = paragraph.Descendants<Drawing>().Count();
                 if (drawingCount > 0)
-                    nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, drawingCount, text });
+                    nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, keepLines, drawingCount, text });
                 else if (!string.IsNullOrEmpty(text) || numberingId is not null)
-                    nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, text });
+                    nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, keepLines, text });
                 bodyParagraphIndex += 1;
             }
             else if (element is Table table)
