@@ -56,6 +56,7 @@
             "setBodyParagraphKeepLines",
             "setHeaderParagraphFontSize",
             "collapseTrailingEmptySection",
+            "collapseTrailingEmptyBodyParagraphs",
             "mergeTableCells",
             "unmergeTableRowHorizontalCells",
             "unmergeTableColumnVerticalCells",
@@ -128,6 +129,7 @@
         "cantSplit": { "type": ["boolean", "null"] },
         "keepNext": { "type": ["boolean", "null"] },
         "keepLines": { "type": ["boolean", "null"] },
+        "expectedCount": { "type": ["integer", "null"], "minimum": 1 },
         "richText": {
           "oneOf": [
             { "type": "null" },

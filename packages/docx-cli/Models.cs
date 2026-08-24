@@ -16,6 +16,7 @@ public sealed record ContentSummary(
     int TableCount,
     int SectionCount,
     bool HasTrailingEmptySection,
+    int TrailingEmptyBodyParagraphCount,
     int HeaderPartCount,
     int FooterPartCount,
     IReadOnlyList<HeadingInfo> Headings,
@@ -609,7 +610,8 @@ public sealed record DocxEditOperation(
     bool? KeepLines = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null,
     DocxFontPolicy? FontPolicy = null,
-    IReadOnlyList<string>? ParagraphTexts = null);
+    IReadOnlyList<string>? ParagraphTexts = null,
+    int? ExpectedCount = null);
 
 public sealed record DocxFontRule(string EastAsia, string Latin, string Size);
 

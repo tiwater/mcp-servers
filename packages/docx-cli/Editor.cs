@@ -112,6 +112,7 @@ public static class Editor
             "setBodyParagraphKeepLines" => SetBodyParagraphKeepLines(body, operation),
             "setHeaderParagraphFontSize" => SetHeaderParagraphFontSize(doc, operation),
             "collapseTrailingEmptySection" => CollapseTrailingEmptySection(body, operation),
+            "collapseTrailingEmptyBodyParagraphs" => CollapseTrailingEmptyBodyParagraphs(body, operation),
             "mergeTableCells" => MergeTableCells(body, operation),
             "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
             "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
@@ -1139,6 +1140,45 @@ public static class Editor
 
     internal static bool HasTrailingEmptySection(Body body)
         => TryFindTrailingEmptySection(body, out _, out _, out _);
+
+    private static DocxEditAppliedOperation CollapseTrailingEmptyBodyParagraphs(Body body, DocxEditOperation operation)
+    {
+        if (operation.ExpectedCount is null or <= 0)
+            return new DocxEditAppliedOperation(operation.Type, false, "expectedCount must be greater than zero");
+
+        var trailingParagraphs = GetTrailingEmptyBodyParagraphs(body);
+        if (trailingParagraphs.Count != operation.ExpectedCount.Value)
+            return new DocxEditAppliedOperation(operation.Type, false,
+                $"Expected {operation.ExpectedCount.Value} trailing empty body paragraph(s), found {trailingParagraphs.Count}");
+
+        foreach (var paragraph in trailingParagraphs) paragraph.Remove();
+        return new DocxEditAppliedOperation(operation.Type, true,
+            $"Collapsed {trailingParagraphs.Count} trailing empty body paragraph(s)");
+    }
+
+    internal static IReadOnlyList<Paragraph> GetTrailingEmptyBodyParagraphs(Body body)
+    {
+        var children = body.ChildElements.ToList();
+        if (children.LastOrDefault() is not SectionProperties) return [];
+
+        var result = new List<Paragraph>();
+        for (var index = children.Count - 2; index >= 0; index--)
+        {
+            if (children[index] is not Paragraph paragraph || !IsRemovableEmptyBodyParagraph(paragraph)) break;
+            result.Add(paragraph);
+        }
+        result.Reverse();
+        return result;
+    }
+
+    private static bool IsRemovableEmptyBodyParagraph(Paragraph paragraph)
+    {
+        if (!string.IsNullOrWhiteSpace(paragraph.InnerText)) return false;
+        return !paragraph.Descendants().Any(element => element is
+            Drawing or Break or TabChar or CarriageReturn or FieldChar or FieldCode
+            or FootnoteReference or EndnoteReference or CommentReference
+            or BookmarkStart or BookmarkEnd or Hyperlink);
+    }
 
     private static bool TryFindTrailingEmptySection(
         Body body,
