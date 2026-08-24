@@ -374,10 +374,31 @@ public class ConvertCliTests
 
     [Theory]
     [InlineData("getWpsApplication failed: 0x80000008")]
+    [InlineData("get_Documents failed: 0x80000008")]
     [InlineData("Fatal IO error on X server :101")]
     public void Wps_writer_recognizes_transient_rpc_startup_failures(string message)
     {
         Assert.True(WpsPdfConverter.IsTransientStartupFailure(message));
+    }
+
+    [Fact]
+    public void Wps_writer_retries_one_transient_rpc_startup_failure()
+    {
+        var attempts = 0;
+        var cleanups = 0;
+
+        WpsPdfConverter.RunWithTransientStartupRetry(
+            () =>
+            {
+                attempts++;
+                if (attempts == 1)
+                    throw new InvalidOperationException("get_Documents failed: 0x80000008");
+            },
+            () => cleanups++,
+            () => { });
+
+        Assert.Equal(2, attempts);
+        Assert.Equal(1, cleanups);
     }
 
     [Fact]
