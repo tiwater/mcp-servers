@@ -55,6 +55,23 @@ internal static class Program
                         fallback_reason = recalculated.FallbackReason,
                     }));
                     return 0;
+                case "refresh-docx-fields":
+                    var refreshed = DocumentFieldRefresher.RefreshDocxFields(args[1], args[2]);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        schema = "tiwater.convert-refresh-docx-fields/v1",
+                        status = "ok",
+                        input = Path.GetFullPath(args[1]),
+                        input_sha256 = FileSha256(args[1]),
+                        output = Path.GetFullPath(args[2]),
+                        output_sha256 = FileSha256(args[2]),
+                        source_format = "docx",
+                        target_format = "docx",
+                        version = ToolVersion,
+                        backend = refreshed.Backend,
+                        refresh_scope = new[] { "table-of-contents", "table-of-figures" },
+                    }));
+                    return 0;
                 default:
                     if (args[0].EndsWith("-to-pdf", StringComparison.OrdinalIgnoreCase))
                     {
@@ -95,6 +112,7 @@ internal static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>");
         Console.WriteLine("  tiwater-convert recalculate-xlsx <input.xlsx> <output.xlsx>");
+        Console.WriteLine("  tiwater-convert refresh-docx-fields <input.docx> <output.docx>");
         Console.WriteLine("  tiwater-convert <docx|xlsx|pptx|doc|xls|ppt|odt|ods|odp|rtf>-to-pdf <input> <output.pdf>");
     }
 
