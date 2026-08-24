@@ -42,23 +42,9 @@ public static class WpsPdfConverter
         try
         {
             using var lease = AcquireRuntimeLease();
-            Exception? lastError = null;
-            for (var attempt = 1; attempt <= 2; attempt++)
-            {
-                try
-                {
-                    RunWpsHelper(xvfb, dbusRunSession, python, helperPath, input, output, tempRoot);
-                    lastError = null;
-                    break;
-                }
-                catch (InvalidOperationException error) when (attempt == 1 && IsTransientStartupFailure(error.Message))
-                {
-                    lastError = error;
-                    if (File.Exists(output)) File.Delete(output);
-                    Thread.Sleep(1000);
-                }
-            }
-            if (lastError is not null) throw lastError;
+            RunWithTransientStartupRetry(
+                () => RunWpsHelper(xvfb, dbusRunSession, python, helperPath, input, output, tempRoot),
+                () => { if (File.Exists(output)) File.Delete(output); });
         }
         finally
         {
@@ -90,26 +76,34 @@ public static class WpsPdfConverter
         try
         {
             using var lease = AcquireRuntimeLease();
-            var completionMarker = Path.Combine(tempRoot, "writer-output-complete");
-            var startInfo = CreateProcessStartInfo(xvfb, tempRoot);
-            foreach (var arg in CreateHelperArguments(dbusRunSession, python, helperPath, input, output, completionMarker))
-                startInfo.ArgumentList.Add(arg);
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Failed to start WPS RPC document field refresh.");
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
-                process, completionMarker, () => IsDocx(output), TimeSpan.FromMinutes(3),
-                "WPS RPC document field refresh timed out after 180 seconds.");
-            var details = WpsRpcSession.CollectDiagnosticOutput(stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
-            if ((!completedOutput && process.ExitCode != 0) || !IsDocx(output))
-                throw new InvalidOperationException($"WPS RPC failed to refresh document fields for {input}." +
-                    (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+            RunWithTransientStartupRetry(
+                () => RunFieldRefreshHelper(xvfb, dbusRunSession, python, helperPath, input, output, tempRoot),
+                () => { if (File.Exists(output)) File.Delete(output); });
         }
         finally
         {
             try { Directory.Delete(tempRoot, recursive: true); } catch { }
         }
+    }
+
+    private static void RunFieldRefreshHelper(string xvfb, string dbusRunSession, string python, string helperPath, string input, string output, string tempRoot)
+    {
+        var completionMarker = Path.Combine(tempRoot, "writer-output-complete");
+        if (File.Exists(completionMarker)) File.Delete(completionMarker);
+        var startInfo = CreateProcessStartInfo(xvfb, tempRoot);
+        foreach (var arg in CreateHelperArguments(dbusRunSession, python, helperPath, input, output, completionMarker))
+            startInfo.ArgumentList.Add(arg);
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start WPS RPC document field refresh.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
+            process, completionMarker, () => IsDocx(output), TimeSpan.FromMinutes(3),
+            "WPS RPC document field refresh timed out after 180 seconds.");
+        var details = WpsRpcSession.CollectDiagnosticOutput(stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
+        if ((!completedOutput && process.ExitCode != 0) || !IsDocx(output))
+            throw new InvalidOperationException($"WPS RPC failed to refresh document fields for {input}." +
+                (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
     }
 
     private static void RunWpsHelper(string xvfb, string dbusRunSession, string python, string helperPath, string input, string output, string tempRoot)
@@ -171,7 +165,22 @@ public static class WpsPdfConverter
 
     public static bool IsTransientStartupFailure(string message)
         => message.Contains("getWpsApplication failed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("get_Documents failed", StringComparison.OrdinalIgnoreCase)
             || message.Contains("Fatal IO error on X server", StringComparison.OrdinalIgnoreCase);
+
+    internal static void RunWithTransientStartupRetry(Action operation, Action cleanup, Action? delay = null)
+    {
+        try
+        {
+            operation();
+        }
+        catch (InvalidOperationException error) when (IsTransientStartupFailure(error.Message))
+        {
+            cleanup();
+            (delay ?? (() => Thread.Sleep(1000)))();
+            operation();
+        }
+    }
 
     private static bool IsPdf(string path)
     {
