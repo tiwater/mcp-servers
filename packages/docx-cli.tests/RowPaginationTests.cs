@@ -8,6 +8,109 @@ namespace Dockit.Docx.Tests;
 public sealed class RowPaginationTests
 {
     [Fact]
+    public void Trailing_empty_body_paragraphs_are_counted_and_removed_with_an_exact_precondition()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"docx-trailing-empty-paragraphs-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var input = Path.Combine(root, "input.docx");
+        var output = Path.Combine(root, "output.docx");
+        try
+        {
+            using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(new Run(new Text("approval block"))),
+                    new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "120" })),
+                    new Paragraph(new Run(new RunProperties(new FontSize { Val = "24" }))),
+                    new SectionProperties()));
+                main.Document.Save();
+            }
+
+            Assert.Equal(2, Inspector.Inspect(input).Content.TrailingEmptyBodyParagraphCount);
+            var result = Editor.Apply(input, output,
+                [new DocxEditOperation("collapseTrailingEmptyBodyParagraphs", ExpectedCount: 2)]);
+
+            Assert.True(Assert.Single(result.AppliedOperations).Applied);
+            Assert.Equal(0, Inspector.Inspect(output).Content.TrailingEmptyBodyParagraphCount);
+            using var edited = WordprocessingDocument.Open(output, false);
+            var body = edited.MainDocumentPart!.Document!.Body!;
+            Assert.Single(body.Elements<Paragraph>());
+            Assert.Equal("approval block", body.Elements<Paragraph>().Single().InnerText);
+            var validation = OpenXmlValidation.Validate(output);
+            Assert.True(validation.Pass, string.Join(Environment.NewLine, validation.Errors.Select(error => error.Description)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Trailing_empty_body_paragraph_collapse_fails_closed_on_count_drift_or_meaningful_content()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"docx-trailing-empty-paragraph-negative-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var input = Path.Combine(root, "input.docx");
+        var mismatch = Path.Combine(root, "mismatch.docx");
+        var noTrailingEmpty = Path.Combine(root, "no-trailing-empty.docx");
+        try
+        {
+            using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(new Run(new Text("content"))),
+                    new Paragraph(),
+                    new SectionProperties()));
+                main.Document.Save();
+            }
+
+            var countDrift = Editor.Apply(input, mismatch,
+                [new DocxEditOperation("collapseTrailingEmptyBodyParagraphs", ExpectedCount: 2)]);
+            Assert.False(Assert.Single(countDrift.AppliedOperations).Applied);
+            Assert.Equal(1, Inspector.Inspect(mismatch).Content.TrailingEmptyBodyParagraphCount);
+
+            var missingPrecondition = Editor.Apply(input, Path.Combine(root, "missing-precondition.docx"),
+                [new DocxEditOperation("collapseTrailingEmptyBodyParagraphs")]);
+            Assert.False(Assert.Single(missingPrecondition.AppliedOperations).Applied);
+
+            using (var document = WordprocessingDocument.Create(noTrailingEmpty, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(),
+                    new Paragraph(new Run(new Text("final content"))),
+                    new SectionProperties()));
+                main.Document.Save();
+            }
+            Assert.Equal(0, Inspector.Inspect(noTrailingEmpty).Content.TrailingEmptyBodyParagraphCount);
+            var noCandidate = Editor.Apply(noTrailingEmpty, Path.Combine(root, "no-candidate-output.docx"),
+                [new DocxEditOperation("collapseTrailingEmptyBodyParagraphs", ExpectedCount: 1)]);
+            Assert.False(Assert.Single(noCandidate.AppliedOperations).Applied);
+
+            var pageBreak = Path.Combine(root, "page-break.docx");
+            using (var document = WordprocessingDocument.Create(pageBreak, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(new Run(new Text("content"))),
+                    new Paragraph(new Run(new Break { Type = BreakValues.Page })),
+                    new SectionProperties()));
+                main.Document.Save();
+            }
+            Assert.Equal(0, Inspector.Inspect(pageBreak).Content.TrailingEmptyBodyParagraphCount);
+            var preservesPageBreak = Editor.Apply(pageBreak, Path.Combine(root, "page-break-output.docx"),
+                [new DocxEditOperation("collapseTrailingEmptyBodyParagraphs", ExpectedCount: 1)]);
+            Assert.False(Assert.Single(preservesPageBreak.AppliedOperations).Applied);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Body_paragraph_keep_lines_is_set_without_changing_paragraph_content()
     {
         var root = Path.Combine(Path.GetTempPath(), $"docx-paragraph-keep-lines-{Guid.NewGuid():N}");

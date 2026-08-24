@@ -426,6 +426,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `deleteBodyParagraph`
 - `deleteBodyDrawingBeforeParagraph`
 - `deleteBodyRange`
+- `collapseTrailingEmptyBodyParagraphs`
 - `startSectionBeforeParagraph`
 - `replaceAllHeaderParagraphText`
 - `replaceHeaderParagraphText`
@@ -460,6 +461,7 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 `deleteBodyParagraph` removes exactly one body descendant paragraph selected by `findText`. `matchMode` is `exact` by default and may be `startsWith`; optional `paragraphStyle` binds the selector to the current paragraph style id. Missing or ambiguous matches fail the operation.
 `deleteBodyDrawingBeforeParagraph` removes the direct body paragraph immediately before a uniquely selected direct body paragraph. The removed paragraph must contain exactly one drawing and no text. `findText`, `matchMode`, and optional `paragraphStyle` select the retained anchor paragraph; missing or ambiguous anchors, non-paragraph boundaries, text-bearing drawing paragraphs, and zero or multiple drawings fail the operation.
 `deleteBodyRange` removes direct body elements beginning with the uniquely selected `findText` paragraph and ending immediately before the uniquely selected following `endFindText` paragraph. Use `deleteToBodyEnd: true` instead of `endFindText` for a final body range; the document-level final section properties are preserved. A final range may set `removePrecedingPageBreak: true` to remove the single explicit page break that separated the deleted range from the preceding retained content; missing or ambiguous boundary breaks fail the operation. `matchMode` and `endMatchMode` accept `exact` or `startsWith`; optional `paragraphStyle` and `endParagraphStyle` bind each selector to a paragraph style id. All missing, ambiguous, reversed, or unsafe ranges fail the operation.
+`collapseTrailingEmptyBodyParagraphs` removes contiguous empty direct-body paragraphs immediately before the final section properties. `expectedCount` is required and must exactly match the current inspection value `Content.TrailingEmptyBodyParagraphCount`; count drift or any text, drawing, break, field, reference, bookmark, or hyperlink fails closed.
 `startSectionBeforeParagraph` accepts `findText` and `orientation` (`landscape` or `portrait`); it inserts a section break before the matching direct body paragraph and applies the requested orientation to the following section.
 `replaceTableCellRichText` accepts `richText` segments with `text`, optional `color`, `underline`, `bold`, and `fontName`.
 An explicit `bold: false` writes an off override for both Latin and complex-script bold so paragraph- or style-level bold is not inherited.
