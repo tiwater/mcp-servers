@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-convert</ToolCommandName>
     <PackageId>tiwater.convert.cli</PackageId>
-    <Version>0.9.22</Version>
+    <Version>0.9.23</Version>
     <Authors>Tiwater</Authors>
     <Description>Generic office format conversion CLI.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <None Update="schemas/native-render-provenance-v1.schema.json" Pack="true" PackagePath="schemas/native-render-provenance-v1.schema.json" />
+    <None Update="schemas/refresh-docx-fields-v1.schema.json" Pack="true" PackagePath="schemas/refresh-docx-fields-v1.schema.json" />
   </ItemGroup>
 
   <ItemGroup>

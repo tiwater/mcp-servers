@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiwater.com/schemas/convert/refresh-docx-fields-v1.schema.json",
+  "title": "Tiwater DOCX field refresh receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "status", "input", "input_sha256", "output", "output_sha256",
+    "source_format", "target_format", "version", "backend", "refresh_scope"
+  ],
+  "properties": {
+    "schema": { "const": "tiwater.convert-refresh-docx-fields/v1" },
+    "status": { "const": "ok" },
+    "input": { "type": "string", "minLength": 1 },
+    "input_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "output": { "type": "string", "minLength": 1 },
+    "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "source_format": { "const": "docx" },
+    "target_format": { "const": "docx" },
+    "version": { "type": "string", "minLength": 1 },
+    "backend": { "const": "wps" },
+    "refresh_scope": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        { "const": "table-of-contents" },
+        { "const": "table-of-figures" }
+      ],
+      "items": false
+    }
+  }
+}

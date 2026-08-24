@@ -15,10 +15,18 @@ A generic CLI for loss-aware office format conversion.
 ```bash
 tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>
 tiwater-convert recalculate-xlsx <input.xlsx> <output.xlsx>
+tiwater-convert refresh-docx-fields <input.docx> <output.docx>
 tiwater-convert docx-to-pdf <input.docx> <output.pdf>
 tiwater-convert xlsx-to-pdf <input.xlsx> <output.pdf>
 tiwater-convert pptx-to-pdf <input.pptx> <output.pdf>
 ```
+
+`refresh-docx-fields` opens the current DOCX in WPS Writer, refreshes every
+table of contents and table of figures, repaginates the document, and saves a
+distinct DOCX. Its JSON receipt conforms to
+`tiwater.convert-refresh-docx-fields/v1` and binds the input and output bytes by
+SHA-256. It fails closed when native WPS Writer is unavailable; no auxiliary
+renderer is accepted for this layout-dependent operation.
 
 Successful native WPS PDF conversions include
 `native_render_provenance` conforming to

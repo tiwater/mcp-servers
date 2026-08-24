@@ -435,6 +435,35 @@ public class ConvertCliTests
         Assert.DoesNotContain("ExportAsFixedFormat", helperScript);
     }
 
+    [Fact]
+    public void Wps_writer_refreshes_layout_dependent_indexes_and_saves_a_distinct_docx()
+    {
+        var script = WpsPdfConverter.RefreshFieldsHelperScript;
+        Assert.Contains("document.get_TablesOfContents()", script);
+        Assert.Contains("toc.Update()", script);
+        Assert.Contains("document.get_TablesOfFigures()", script);
+        Assert.Contains("figure.Update()", script);
+        Assert.Contains("document.Repaginate()", script);
+        Assert.Contains("toc.UpdatePageNumbers()", script);
+        Assert.Contains("figure.UpdatePageNumbers()", script);
+        Assert.Contains("document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatXMLDocument)", script);
+        Assert.DoesNotContain("document.get_Fields()", script);
+    }
+
+    [Fact]
+    public void Document_field_refresh_rejects_invalid_identity_before_runtime_selection()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.docx");
+        Assert.Contains("Input file not found", Assert.Throws<InvalidOperationException>(
+            () => DocumentFieldRefresher.RefreshDocxFields(missing, missing + ".out.docx")).Message);
+
+        var input = CreateDocxFixture();
+        Assert.Contains("distinct input and output", Assert.Throws<InvalidOperationException>(
+            () => DocumentFieldRefresher.RefreshDocxFields(input, input)).Message);
+        Assert.Contains("output must be a DOCX", Assert.Throws<InvalidOperationException>(
+            () => DocumentFieldRefresher.RefreshDocxFields(input, input + ".pdf")).Message);
+    }
+
     private static Process StartLeaseProbe(string route, string lockPath, string eventLog, int holdMilliseconds, int timeoutMilliseconds)
     {
         var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent?.Name
