@@ -22,8 +22,10 @@ tiwater-convert pptx-to-pdf <input.pptx> <output.pdf>
 ```
 
 `refresh-docx-fields` opens the current DOCX in WPS Writer, refreshes every
-table of contents and table of figures, repaginates the document, and saves a
-distinct DOCX. Its JSON receipt conforms to
+table of contents and table of figures, and repaginates the document. The
+distinct output imports only those refreshed index results and their referenced
+internal bookmarks into the input package; unrelated body content and package
+parts remain input-authoritative. Its JSON receipt conforms to
 `tiwater.convert-refresh-docx-fields/v1` and binds the input and output bytes by
 SHA-256. It fails closed when native WPS Writer is unavailable; no auxiliary
 renderer is accepted for this layout-dependent operation.

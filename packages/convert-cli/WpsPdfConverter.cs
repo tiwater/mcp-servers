@@ -71,14 +71,16 @@ public static class WpsPdfConverter
         var tempRoot = Path.Combine(Path.GetTempPath(), $"tiwater-convert-wps-refresh-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
         var helperPath = Path.Combine(tempRoot, "refresh_docx_fields_wps.py");
+        var refreshedPath = Path.Combine(tempRoot, "wps-refreshed.docx");
         File.WriteAllText(helperPath, RefreshFieldsHelperScript);
 
         try
         {
             using var lease = AcquireRuntimeLease();
             RunWithTransientStartupRetry(
-                () => RunFieldRefreshHelper(xvfb, dbusRunSession, python, helperPath, input, output, tempRoot),
-                () => { if (File.Exists(output)) File.Delete(output); });
+                () => RunFieldRefreshHelper(xvfb, dbusRunSession, python, helperPath, input, refreshedPath, tempRoot),
+                () => { if (File.Exists(refreshedPath)) File.Delete(refreshedPath); });
+            DocxFieldResultMerger.Merge(input, refreshedPath, output);
         }
         finally
         {
