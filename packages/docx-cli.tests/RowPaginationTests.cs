@@ -8,6 +8,38 @@ namespace Dockit.Docx.Tests;
 public sealed class RowPaginationTests
 {
     [Fact]
+    public void Document_flow_reports_empty_body_paragraphs_with_stable_identity_and_pagination_state()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"docx-empty-flow-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var input = Path.Combine(root, "input.docx");
+        try
+        {
+            using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+            {
+                var main = document.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(new Run(new Text("unseen heading"))),
+                    new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Spacer" })),
+                    new Paragraph(new ParagraphProperties(new KeepNext()), new Run(new Text("unseen caption"))),
+                    new SectionProperties()));
+                main.Document.Save();
+            }
+
+            var flow = System.Text.Json.JsonSerializer.SerializeToElement(Inspector.InspectDocumentFlow(input));
+            var empty = flow.EnumerateArray().Single(item => item.GetProperty("type").GetString() == "paragraph"
+                && item.GetProperty("paragraphIndex").GetInt32() == 1);
+            Assert.Equal("", empty.GetProperty("text").GetString());
+            Assert.Equal("Spacer", empty.GetProperty("style").GetString());
+            Assert.False(empty.GetProperty("keepNext").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Trailing_empty_body_paragraphs_are_counted_and_removed_with_an_exact_precondition()
     {
         var root = Path.Combine(Path.GetTempPath(), $"docx-trailing-empty-paragraphs-{Guid.NewGuid():N}");
