@@ -480,10 +480,12 @@ public static class Cli
     private static void RenderInspectTables(TableInspectionReport report)
     {
         Console.WriteLine($"File: {report.File}");
-        Console.WriteLine($"Tables: {report.Tables.Count}");
-        foreach (var table in report.Tables)
+        var tables = report.Tables.Concat(report.StoryTables ?? []).ToList();
+        Console.WriteLine($"Tables: {tables.Count}");
+        foreach (var table in tables)
         {
-            Console.WriteLine($"Table {table.TableIndex}: {table.RowCount} row(s), {table.ColumnCount} column(s)");
+            var story = table.Story?.Kind ?? "body";
+            Console.WriteLine($"Table {table.TableIndex} ({story}): {table.RowCount} row(s), {table.ColumnCount} column(s)");
             foreach (var row in table.Rows.Take(5))
             {
                 var cells = row.Cells

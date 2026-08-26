@@ -24,7 +24,7 @@ tiwater-docx inspect <input.docx> [--json]
 `--json` includes the document report, table details, document flow, and font inspection in one result.
 
 ### 1a. Inspect Table Details
-Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. Tables are traversed depth-first from the body through arbitrarily nested table cells; every table carries a containment path, declared `Width`/`WidthType`, and nested tables carry their parent-cell runtime address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, and cells expose mutation address, grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
+Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. The existing `Tables` collection remains the body-and-nested depth-first view. The additive `StoryTables` collection traverses header/footer stories and their arbitrarily nested table cells. Every table carries a containment path and story identity; header/footer stories include their stable part index plus every section index, reference type, and relationship binding. Direct story tables expose the same body/header/footer mutation coordinates used by fixed edit actions, while nested tables are observable but have no mutation address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, repeat-as-header state, and cells expose grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
 
 ```bash
 tiwater-docx inspect-tables <input.docx> [--json]
@@ -490,6 +490,8 @@ and exits non-zero when any font channel differs, or when a non-preserving rule'
 Preserved-size equality is established by comparing the pre-edit and output inspection evidence.
 `setTableRowHeight` accepts `height` in twips and optional `heightRule` (`atLeast`, `exact`, `auto`).
 `setTableRowCantSplit` accepts `cantSplit: true|false` and controls the Word table-row `w:cantSplit` property. `inspect-tables` reports the row property as `CantSplit`.
+
+`setTableRowRepeatAsHeader` accepts direct-story `tableIndex`/`rowIndex`, exactly one optional story coordinate (`headerIndex` or `footerIndex`), and `repeatAsHeader: true|false`. A body target supplies neither story index. A same-kind batch is fully validated before mutation; missing, ambiguous, duplicate, nested, or invalid targets reject the entire batch. `inspect-tables` reports `RepeatAsHeader` and publishes `MutationAddress` only for supported direct-story tables.
 `mergeTableCells` merges a horizontal cell range when `rowIndex/startCellIndex/endCellIndex` are provided, or a vertical row range when `startRowIndex/endRowIndex` and exactly one of `cellIndex` or logical `gridColumn` are provided. Prefer `gridColumn` when rows may have different horizontal spans.
 `unmergeTableRowHorizontalCells` splits one horizontally merged visible cell in `tableIndex/rowIndex/cellIndex` back into its grid columns, preserving the original text in the first cell and inserting empty styled cells for the remaining columns.
 `unmergeTableColumnVerticalCells` removes vertical merge markers in `tableIndex/cellIndex/startRowIndex/endRowIndex` and fills continuation cells from the latest visible content.

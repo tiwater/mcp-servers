@@ -37,6 +37,15 @@ The bounded DOCX object actions are:
   preserving its drawing geometry. Image inputs are hashed into the receipt.
 - `docx_insert_body_image`: inserts one inline body drawing with explicit EMU
   dimensions. Image inputs are hashed into the receipt.
+- `docx_set_table_row_repeat_as_header`: sets or unsets native repeat-as-header
+  state on uniquely addressed direct body, header, or footer table rows. The
+  whole same-action batch is validated before mutation; nested, missing,
+  ambiguous, duplicate, or invalid targets fail closed.
+
+`docx_inspect_tables` preserves the v1 body `Tables` view and additively exposes
+header/footer topology in `StoryTables`. Header/footer tables carry part
+coordinates plus section/reference bindings, and only supported direct-story
+tables expose mutation addresses.
 
 The catalog is intentionally open to new generic document capabilities, but a
 scenario, template, customer, issue, work item, or model difference does not

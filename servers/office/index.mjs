@@ -202,6 +202,16 @@ const tableCellInput = z.object({
   alignment: z.string().optional(),
   richText: z.array(richTextSegment).optional(),
 }).strict();
+const tableRowRepeatBase = {
+  tableIndex: index,
+  rowIndex: index,
+  repeatAsHeader: z.boolean(),
+};
+const tableRowRepeatAddress = z.union([
+  z.object(tableRowRepeatBase).strict(),
+  z.object({ ...tableRowRepeatBase, headerIndex: index }).strict(),
+  z.object({ ...tableRowRepeatBase, footerIndex: index }).strict(),
+]);
 
 function editAction(name, operationType, description, changeSchema, options = {}) {
   return { name, operationType, description, changeSchema, batch: true, ...options };
@@ -247,6 +257,7 @@ const docxEditActions = [
   editAction('docx_apply_font_policy', 'applyDocumentFontPolicy', 'Apply an explicit font policy to current document text.', z.object({ fontPolicy: z.object({ schema: pathInput, body: z.record(z.string(), z.string()), table: z.record(z.string(), z.string()) }).strict() }).strict()),
   editAction('docx_set_table_row_height', 'setTableRowHeight', 'Set current body table row height.', z.object({ tableIndex: index, rowIndex: index, height: pathInput, heightRule: z.string().optional() }).strict()),
   editAction('docx_set_table_row_cant_split', 'setTableRowCantSplit', 'Set current body table row split behavior.', z.object({ tableIndex: index, rowIndex: index, cantSplit: z.boolean() }).strict()),
+  editAction('docx_set_table_row_repeat_as_header', 'setTableRowRepeatAsHeader', 'Set or unset repeat-as-header on uniquely addressed current body, header, or footer table rows.', tableRowRepeatAddress),
   editAction('docx_set_table_row_keep_next', 'setTableRowKeepNext', 'Set keep-next behavior for current body table rows.', z.object({ tableIndex: index, rowIndex: index, keepNext: z.boolean() }).strict()),
   editAction('docx_set_body_paragraph_keep_next', 'setBodyParagraphKeepNext', 'Set keep-next behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepNext: z.boolean() }).strict()),
   editAction('docx_set_body_paragraph_keep_lines', 'setBodyParagraphKeepLines', 'Set keep-lines behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepLines: z.boolean() }).strict()),

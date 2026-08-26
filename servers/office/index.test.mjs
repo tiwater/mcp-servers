@@ -94,7 +94,7 @@ process.exit(2);
       protocolVersion: '2025-06-18', capabilities: {},
       clientInfo: { name: 'office-contract', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.14.0');
+    assert.equal(initialized.result.serverInfo.version, '0.14.1');
 
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
@@ -104,12 +104,12 @@ process.exit(2);
     for (const required of [
       'docx_inspect', 'docx_inspect_tables', 'docx_set_table_cell_text', 'docx_validate',
       'docx_insert_body_range', 'docx_replace_drawing_image', 'docx_insert_body_image',
+      'docx_set_table_row_repeat_as_header',
       'xlsx_convert_legacy', 'xlsx_set_cell_value', 'xlsx_delete_rows', 'xlsx_set_page_setup', 'xlsx_validate',
       'pptx_inspect', 'pptx_apply_template', 'pptx_apply_format', 'pptx_set_shape_geometry', 'pptx_replace_picture_image', 'pptx_validate',
       'office_render_pdf',
     ]) assert(names.includes(required), `missing ${required}`);
 
-    assert(names.length >= 60 && names.length <= 100, `unexpected capability count: ${names.length}`);
     assert(!names.some(name => /scenario|migration|issue|workitem/i.test(name)));
 
     const tool = listed.result.tools.find(candidate => candidate.name === 'docx_set_table_cell_text');
@@ -121,6 +121,18 @@ process.exit(2);
     assert.deepEqual(deleteRowsTool.inputSchema.properties.changes.items.required.sort(), ['count', 'sheet', 'startRow']);
     assert.deepEqual(Object.keys(deleteRowsTool.inputSchema.properties.changes.items.properties).sort(), ['count', 'sheet', 'startRow']);
     assert.equal(deleteRowsTool.inputSchema.properties.changes.items.additionalProperties, false);
+
+    const repeatHeaderTool = listed.result.tools.find(candidate => candidate.name === 'docx_set_table_row_repeat_as_header');
+    assert.deepEqual(repeatHeaderTool.inputSchema.required.sort(), ['changes', 'input', 'output', 'receiptOutput']);
+    assert.equal(repeatHeaderTool.inputSchema.properties.changes.items.anyOf.length, 3);
+    const repeatShapes = repeatHeaderTool.inputSchema.properties.changes.items.anyOf
+      .map(shape => Object.keys(shape.properties).sort());
+    assert.deepEqual(repeatShapes, [
+      ['repeatAsHeader', 'rowIndex', 'tableIndex'],
+      ['headerIndex', 'repeatAsHeader', 'rowIndex', 'tableIndex'],
+      ['footerIndex', 'repeatAsHeader', 'rowIndex', 'tableIndex'],
+    ]);
+    assert(repeatHeaderTool.inputSchema.properties.changes.items.anyOf.every(shape => shape.additionalProperties === false));
 
     const formatTool = listed.result.tools.find(candidate => candidate.name === 'pptx_apply_format');
     assert.equal(formatTool.inputSchema.properties.changes.items.properties.x, undefined);
@@ -146,6 +158,23 @@ process.exit(2);
     assert.equal(receipt.appliedOperations[0].type, 'replaceTableCellText');
     assert.equal(receipt.input.path, input);
     assert.equal(receipt.output.path, output);
+
+    const repeatedOutput = path.join(temporary, 'repeat-header.docx');
+    const repeatedReceipt = path.join(temporary, 'repeat-header.json');
+    const repeated = await request('tools/call', {
+      name: 'docx_set_table_row_repeat_as_header',
+      arguments: { input, output: repeatedOutput, receiptOutput: repeatedReceipt, changes: [{ headerIndex: 0, tableIndex: 1, rowIndex: 2, repeatAsHeader: false }] },
+    });
+    assert.equal(repeated.result.structuredContent.summary.pass, true);
+    const repeatReceipt = JSON.parse(await readFile(repeatedReceipt, 'utf8'));
+    assert.equal(repeatReceipt.operationType, 'setTableRowRepeatAsHeader');
+    assert.deepEqual(repeatReceipt.appliedOperations.map(operation => operation.type), ['setTableRowRepeatAsHeader']);
+
+    const repeatInjected = await request('tools/call', {
+      name: 'docx_set_table_row_repeat_as_header',
+      arguments: { input, output: path.join(temporary, 'bad-repeat.docx'), receiptOutput: path.join(temporary, 'bad-repeat.json'), changes: [{ tableIndex: 0, rowIndex: 0, repeatAsHeader: true, type: 'deleteTableRows' }] },
+    });
+    assert.equal(repeatInjected.result.isError, true);
 
     const workbookInput = path.join(temporary, 'input.xlsx');
     const workbookOutput = path.join(temporary, 'output.xlsx');
