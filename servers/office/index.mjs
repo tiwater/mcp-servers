@@ -609,7 +609,14 @@ async function fixedEdit(action, args) {
   return withTempJsonFile({ operations }, async operationsPath => {
     try {
       const result = await runJsonCandidateChain(candidates, ['edit', input, operationsPath, output], { allowedExitCodes: [0, 1] });
-      const appliedOperations = Array.isArray(result.json?.appliedOperations) ? result.json.appliedOperations : [];
+      const rawAppliedOperations = result.json?.appliedOperations ?? result.json?.AppliedOperations;
+      const appliedOperations = Array.isArray(rawAppliedOperations)
+        ? rawAppliedOperations.map(operation => ({
+            type: operation.type ?? operation.Type,
+            applied: operation.applied ?? operation.Applied,
+            detail: operation.detail ?? operation.Detail,
+          }))
+        : [];
       const observedSources = await Promise.all(sourcePaths.map(fileArtifact));
       const sourceBindingStable = isDeepStrictEqual(sources, observedSources);
       const pass = sourceBindingStable && appliedOperations.length === operations.length && appliedOperations.every(operation => operation.applied === true);
