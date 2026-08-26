@@ -156,7 +156,7 @@ public static class Inspector
                 var drawingCount = paragraph.Descendants<Drawing>().Count();
                 if (drawingCount > 0)
                     nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, keepLines, drawingCount, text });
-                else if (!string.IsNullOrEmpty(text) || numberingId is not null)
+                else
                     nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, keepLines, text });
                 bodyParagraphIndex += 1;
             }
