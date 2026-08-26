@@ -22,6 +22,10 @@ coordinates and values for that action, so they cannot provide an arbitrary
 operation discriminator or a multi-action plan language. A call may batch
 multiple changes only when every change has the same action kind.
 
+Structural worksheet row deletion is exposed as `xlsx_delete_rows`. Each change
+contains only `sheet`, `startRow`, and `count`; unsupported dependent workbook
+structures fail atomically and are reported by the provider receipt.
+
 The catalog is intentionally open to new generic document capabilities, but a
 scenario, template, customer, issue, work item, or model difference does not
 justify a new tool. Add a tool only for a stable technical responsibility that

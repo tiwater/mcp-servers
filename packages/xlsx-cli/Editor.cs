@@ -1,9 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using Xdr = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 namespace Dockit.Xlsx;
 
@@ -42,7 +44,11 @@ public static class Editor
         if (preflight.Any(error => error is not null))
         {
             return new XlsxEditResult(fullInput, fullOutput, operations.Select((operation, index) =>
-                new XlsxEditAppliedOperation(operation.Type, false, preflight[index] ?? "operation batch aborted by coordinate preflight")).ToList());
+                new XlsxEditAppliedOperation(
+                    operation.Type,
+                    false,
+                    preflight[index] ?? "operation batch aborted by coordinate preflight",
+                    ErrorCode: "xlsx.edit.invalidCoordinates")).ToList());
         }
         var outputDirectory = Path.GetDirectoryName(fullOutput) ?? Directory.GetCurrentDirectory();
         var temporaryOutput = Path.Combine(outputDirectory, $".{Path.GetFileName(fullOutput)}.{Guid.NewGuid():N}.tmp");
@@ -117,6 +123,7 @@ public static class Editor
             "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
             "insertRows" => InsertRowsOperation(workbookPart, operation),
+            "deleteRows" => DeleteRowsOperation(workbookPart, operation),
             "copyRow" => CopyRowOperation(workbookPart, operation),
             "expandSectionRows" => ExpandSectionRowsOperation(workbookPart, operation),
             _ => new XlsxEditAppliedOperation(operation.Type, false, $"Unknown operation type: {operation.Type}"),
@@ -678,6 +685,273 @@ public static class Editor
 
         worksheetPart.Worksheet.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Updated range from {operation.Sheet}!{operation.StartCell}");
+    }
+
+    private static XlsxEditAppliedOperation DeleteRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.Sheet) || operation.StartRow is null || operation.Count is null)
+            return DeleteRowsFailure(operation, "xlsx.deleteRows.invalidRequest", "sheet, startRow, and count are required");
+        var startRow = operation.StartRow.Value;
+        var count = operation.Count.Value;
+        if (startRow < 1 || count < 1 || (long)startRow + count - 1 > MaximumWorksheetRow)
+            return DeleteRowsFailure(operation, "xlsx.deleteRows.invalidCoordinates", "startRow and count must identify a bounded worksheet row interval");
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out var error);
+        if (worksheetPart is null)
+            return DeleteRowsFailure(operation, "xlsx.deleteRows.sheetNotFound", error!);
+        var endRow = startRow + count - 1;
+
+        foreach (var (_, part) in GetWorksheetParts(workbookPart)) MaterializeSharedFormulas(part.Worksheet);
+        if (!CanDeleteRows(workbookPart, worksheetPart, operation.Sheet, startRow, endRow, out var errorCode, out error))
+            return DeleteRowsFailure(operation, errorCode!, error!);
+
+        var worksheet = worksheetPart.Worksheet;
+        var sheetData = worksheet.GetFirstChild<SheetData>();
+        if (sheetData is not null)
+        {
+            foreach (var row in sheetData.Elements<Row>().Where(row => row.RowIndex?.Value is >= 1 && row.RowIndex.Value >= startRow && row.RowIndex.Value <= endRow).ToList())
+                row.Remove();
+            foreach (var row in sheetData.Elements<Row>().Where(row => row.RowIndex?.Value > endRow).OrderBy(row => row.RowIndex!.Value).ToList())
+            {
+                row.RowIndex = row.RowIndex!.Value - (uint)count;
+                foreach (var cell in row.Elements<Cell>())
+                    if (cell.CellReference?.Value is string reference) cell.CellReference = ShiftCellReference(reference, -count);
+            }
+        }
+
+        DeleteAndShiftMergedRanges(worksheet, startRow, endRow, count);
+        DeleteAndShiftWorksheetDimension(worksheet, startRow, endRow, count);
+        DeleteAndShiftRowBreaks(worksheet, startRow, endRow, count);
+        DeleteAndShiftComments(worksheetPart, startRow, endRow, count);
+        ShiftDrawingAnchors(worksheetPart, startRow, endRow, count);
+        DeleteAndShiftPrintDefinitions(workbookPart, operation.Sheet, startRow, endRow, count);
+        ShiftFormulasForDeletedRows(workbookPart, operation.Sheet, startRow, endRow, count);
+        if (workbookPart.CalculationChainPart is not null) workbookPart.DeletePart(workbookPart.CalculationChainPart);
+
+        worksheet.Save();
+        workbookPart.Workbook.Save();
+        return new XlsxEditAppliedOperation(
+            operation.Type,
+            true,
+            $"Deleted {count} row(s) at {operation.Sheet}!{startRow}",
+            operation.Sheet,
+            $"{startRow}:{endRow}");
+    }
+
+    private static XlsxEditAppliedOperation DeleteRowsFailure(XlsxEditOperation operation, string errorCode, string detail)
+        => new(operation.Type, false, detail, operation.Sheet, ErrorCode: errorCode);
+
+    private static bool CanDeleteRows(
+        WorkbookPart workbookPart,
+        WorksheetPart editedPart,
+        string editedSheetName,
+        int startRow,
+        int endRow,
+        out string? errorCode,
+        out string? error)
+    {
+        var unsupported = editedPart.TableDefinitionParts.Any()
+            || editedPart.Worksheet.Descendants<AutoFilter>().Any()
+            || editedPart.Worksheet.Descendants<ConditionalFormatting>().Any()
+            || editedPart.Worksheet.Descendants<DataValidation>().Any()
+            || editedPart.Worksheet.Descendants<Hyperlink>().Any();
+        if (unsupported)
+        {
+            errorCode = "xlsx.deleteRows.unsupportedDependentStructure";
+            error = $"Cannot safely delete rows on {editedSheetName}: a table, filter, conditional format, data validation, or hyperlink requires unsupported range translation";
+            return false;
+        }
+
+        if (editedPart.Parts.Any(part => part.OpenXmlPart.RelationshipType.Contains("threadedComment", StringComparison.OrdinalIgnoreCase)))
+        {
+            errorCode = "xlsx.deleteRows.unsupportedCommentType";
+            error = $"Cannot safely delete rows on {editedSheetName}: threaded comments are not supported";
+            return false;
+        }
+
+        if (editedPart.Worksheet.GetFirstChild<SheetDimension>()?.Reference?.Value is string dimension
+            && (!TryParseRangeReference(dimension, out var dimensionStart, out var dimensionEnd)
+                || !TryParseWritableCell(dimensionStart, out _, out _)
+                || !TryParseWritableCell(dimensionEnd, out _, out _)))
+        {
+            errorCode = "xlsx.deleteRows.invalidWorksheetDimension";
+            error = $"Cannot safely delete rows on {editedSheetName}: the worksheet dimension is invalid";
+            return false;
+        }
+
+        foreach (var merge in editedPart.Worksheet.Descendants<MergeCell>())
+        {
+            if (merge.Reference?.Value is not string mergeReference
+                || !TryParseRangeReference(mergeReference, out var mergeStart, out var mergeEnd)
+                || !TryParseWritableCell(mergeStart, out var startColumn, out var mergeStartRow)
+                || !TryParseWritableCell(mergeEnd, out var endColumn, out var mergeEndRow)
+                || startColumn > endColumn || mergeStartRow > mergeEndRow)
+            {
+                errorCode = "xlsx.deleteRows.invalidMergedRange";
+                error = $"Cannot safely delete rows on {editedSheetName}: a merged range is invalid";
+                return false;
+            }
+        }
+
+        if (editedPart.WorksheetCommentsPart?.Comments?.CommentList is { } commentList
+            && commentList.Elements<Comment>().Any(comment => comment.Reference?.Value is not string reference || !TryParseWritableCell(reference, out _, out _)))
+        {
+            errorCode = "xlsx.deleteRows.invalidCommentReference";
+            error = $"Cannot safely delete rows on {editedSheetName}: a comment has an invalid cell reference";
+            return false;
+        }
+
+        if (!HasValidVmlCommentCoordinates(editedPart))
+        {
+            errorCode = "xlsx.deleteRows.invalidCommentAnchor";
+            error = $"Cannot safely delete rows on {editedSheetName}: a legacy comment anchor has invalid row coordinates";
+            return false;
+        }
+
+        if (editedPart.DrawingsPart?.WorksheetDrawing is { } drawing
+            && drawing.Descendants<Xdr.RowId>().Any(row => !int.TryParse(row.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value < 0))
+        {
+            errorCode = "xlsx.deleteRows.invalidDrawingAnchor";
+            error = $"Cannot safely delete rows on {editedSheetName}: a drawing anchor has an invalid row coordinate";
+            return false;
+        }
+
+        foreach (var (formulaSheetName, worksheetPart) in GetWorksheetParts(workbookPart))
+        {
+            foreach (var cell in worksheetPart.Worksheet.Descendants<Cell>())
+            {
+                if (cell.CellFormula?.Text is not string formula) continue;
+                var formulaCellRow = cell.Ancestors<Row>().FirstOrDefault()?.RowIndex?.Value;
+                if (string.Equals(formulaSheetName, editedSheetName, StringComparison.OrdinalIgnoreCase)
+                    && formulaCellRow is not null
+                    && formulaCellRow.Value >= startRow
+                    && formulaCellRow.Value <= endRow)
+                    continue;
+                if (FormulaUsesUnsupportedRowAddressing(formula, formulaSheetName, editedSheetName))
+                {
+                    errorCode = "xlsx.deleteRows.unsupportedFormulaReference";
+                    error = $"Cannot safely translate formula at {formulaSheetName}!{cell.CellReference?.Value}: unsupported row-addressing syntax";
+                    return false;
+                }
+                foreach (Match match in FormulaCellReferencePattern.Matches(formula))
+                {
+                    if (ShouldSkipFormulaReferenceMatch(formula, match) || !FormulaReferenceTargetsSheet(formula, match, formulaSheetName, editedSheetName)) continue;
+                    if (int.TryParse(match.Groups[4].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var referencedRow)
+                        && referencedRow >= startRow && referencedRow <= endRow)
+                    {
+                        errorCode = "xlsx.deleteRows.formulaTargetsDeletedRows";
+                        error = $"Cannot safely delete rows {startRow}:{endRow}: formula at {formulaSheetName}!{cell.CellReference?.Value} targets deleted row {referencedRow}";
+                        return false;
+                    }
+                }
+            }
+        }
+
+        foreach (var definedName in workbookPart.Workbook.DefinedNames?.Elements<DefinedName>() ?? [])
+        {
+            if (definedName.Name?.Value is "_xlnm.Print_Area" or "_xlnm.Print_Titles") continue;
+            var text = definedName.Text ?? string.Empty;
+            if (ReferencesImpactedRows(text, editedSheetName, startRow))
+            {
+                errorCode = "xlsx.deleteRows.unsupportedDefinedName";
+                error = $"Cannot safely delete rows on {editedSheetName}: defined name {definedName.Name?.Value ?? "(unnamed)"} targets the affected row interval";
+                return false;
+            }
+        }
+
+        if (!HasSupportedPrintDefinitions(workbookPart, editedSheetName, out error))
+        {
+            errorCode = "xlsx.deleteRows.unsupportedPrintDefinition";
+            return false;
+        }
+
+        errorCode = null;
+        error = null;
+        return true;
+    }
+
+    private static bool HasValidVmlCommentCoordinates(WorksheetPart worksheetPart)
+    {
+        XNamespace excel = "urn:schemas-microsoft-com:office:excel";
+        foreach (var part in worksheetPart.VmlDrawingParts)
+        {
+            XDocument document;
+            try
+            {
+                using var input = part.GetStream(FileMode.Open, FileAccess.Read);
+                document = XDocument.Load(input, LoadOptions.PreserveWhitespace);
+            }
+            catch
+            {
+                return false;
+            }
+            foreach (var clientData in document.Descendants(excel + "ClientData").Where(item => string.Equals((string?)item.Attribute("ObjectType"), "Note", StringComparison.Ordinal)))
+            {
+                if (!int.TryParse(clientData.Element(excel + "Row")?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var row) || row < 0) return false;
+                var anchor = clientData.Element(excel + "Anchor")?.Value.Split(',').Select(value => value.Trim()).ToArray();
+                if (anchor is not null && (anchor.Length < 7
+                    || !int.TryParse(anchor[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var fromRow) || fromRow < 0
+                    || !int.TryParse(anchor[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out var toRow) || toRow < 0)) return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool HasSupportedPrintDefinitions(WorkbookPart workbookPart, string sheetName, out string? error)
+    {
+        var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>().ToList() ?? [];
+        var sheetIndex = sheets.FindIndex(sheet => string.Equals(sheet.Name?.Value, sheetName, StringComparison.Ordinal));
+        foreach (var definition in workbookPart.Workbook.DefinedNames?.Elements<DefinedName>()
+                     .Where(name => name.LocalSheetId?.Value == (uint)sheetIndex && name.Name?.Value is "_xlnm.Print_Area" or "_xlnm.Print_Titles") ?? [])
+        {
+            foreach (var reference in SplitDefinedNameReferences(definition.Text))
+            {
+                var separator = reference.LastIndexOf('!');
+                var validQualifier = separator >= 0 && string.Equals(NormalizeSheetQualifier(reference[..separator]), sheetName, StringComparison.OrdinalIgnoreCase);
+                var range = separator >= 0 ? reference[(separator + 1)..].Trim() : string.Empty;
+                var validRange = definition.Name?.Value == "_xlnm.Print_Area"
+                    ? TryParsePrintAreaRange(range, out _, out _)
+                    : PrintTitleRowRangePattern.IsMatch(range) || PrintTitleColumnRangePattern.IsMatch(range);
+                if (!validQualifier || !validRange)
+                {
+                    error = $"Cannot safely delete rows on {sheetName}: {definition.Name?.Value} contains an unsupported reference {reference}";
+                    return false;
+                }
+            }
+        }
+        error = null;
+        return true;
+    }
+
+    private static bool FormulaUsesUnsupportedRowAddressing(string formula, string formulaSheetName, string editedSheetName)
+    {
+        var mayTargetEditedSheet = string.Equals(formulaSheetName, editedSheetName, StringComparison.OrdinalIgnoreCase)
+            || formula.Contains($"{editedSheetName}!", StringComparison.OrdinalIgnoreCase)
+            || formula.Contains($"'{editedSheetName.Replace("'", "''", StringComparison.Ordinal)}'!", StringComparison.OrdinalIgnoreCase);
+        if (!mayTargetEditedSheet) return false;
+        return formula.Contains('[', StringComparison.Ordinal)
+            || Regex.IsMatch(formula, @"(?<![A-Za-z0-9_])\$?[1-9]\d*\s*:\s*\$?[1-9]\d*(?![A-Za-z0-9_])", RegexOptions.CultureInvariant)
+            || Regex.IsMatch(formula, @"(?<![A-Za-z0-9_])R(?:\[?-?\d*\]?)C(?:\[?-?\d*\]?)(?![A-Za-z0-9_])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool FormulaReferenceTargetsSheet(string formula, Match match, string formulaSheetName, string editedSheetName)
+    {
+        var qualifier = GetSheetQualifier(formula, match.Index);
+        return qualifier is null
+            ? string.Equals(formulaSheetName, editedSheetName, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(qualifier, editedSheetName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ReferencesImpactedRows(string text, string editedSheetName, int startRow)
+    {
+        foreach (Match match in FormulaCellReferencePattern.Matches(text))
+        {
+            if (ShouldSkipFormulaReferenceMatch(text, match)) continue;
+            var qualifier = GetSheetQualifier(text, match.Index);
+            if (string.Equals(qualifier, editedSheetName, StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(match.Groups[4].Value, out var row)
+                && row >= startRow) return true;
+        }
+        return false;
     }
 
     private static XlsxEditAppliedOperation InsertRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation, bool preserveMergedRanges = true, bool expandAdjacentPrintArea = false)
@@ -1264,6 +1538,232 @@ public static class Editor
         dimension.Reference = $"{GetCellReference(startColumn, startRow)}:{GetCellReference(endColumn, endRow)}";
     }
 
+    private static void DeleteAndShiftWorksheetDimension(Worksheet worksheet, int startRow, int endRow, int count)
+    {
+        var dimension = worksheet.GetFirstChild<SheetDimension>();
+        if (dimension?.Reference?.Value is not string reference
+            || !TryParseRangeReference(reference, out var startCell, out var endCell)) return;
+        var (startColumn, rangeStartRow) = ParseCellReference(startCell);
+        var (endColumn, rangeEndRow) = ParseCellReference(endCell);
+        if (!TryTransformDeletedRowInterval(rangeStartRow, rangeEndRow, startRow, endRow, count, out rangeStartRow, out rangeEndRow))
+        {
+            dimension.Reference = "A1";
+            return;
+        }
+        dimension.Reference = $"{GetCellReference(startColumn, rangeStartRow)}:{GetCellReference(endColumn, rangeEndRow)}";
+    }
+
+    private static void DeleteAndShiftMergedRanges(Worksheet worksheet, int startRow, int endRow, int count)
+    {
+        var mergeCells = worksheet.GetFirstChild<MergeCells>();
+        if (mergeCells is null) return;
+        foreach (var mergeCell in mergeCells.Elements<MergeCell>().ToList())
+        {
+            if (mergeCell.Reference?.Value is not string reference
+                || !TryParseRangeReference(reference, out var startCell, out var endCell)) continue;
+            var (startColumn, mergeStartRow) = ParseCellReference(startCell);
+            var (endColumn, mergeEndRow) = ParseCellReference(endCell);
+            if (!TryTransformDeletedRowInterval(mergeStartRow, mergeEndRow, startRow, endRow, count, out mergeStartRow, out mergeEndRow))
+            {
+                mergeCell.Remove();
+                continue;
+            }
+            mergeCell.Reference = $"{GetCellReference(startColumn, mergeStartRow)}:{GetCellReference(endColumn, mergeEndRow)}";
+        }
+        mergeCells.Count = (uint)mergeCells.ChildElements.Count;
+        if (!mergeCells.Elements<MergeCell>().Any()) mergeCells.Remove();
+    }
+
+    private static bool TryTransformDeletedRowInterval(
+        int rangeStart,
+        int rangeEnd,
+        int deletedStart,
+        int deletedEnd,
+        int count,
+        out int transformedStart,
+        out int transformedEnd)
+    {
+        if (rangeEnd < deletedStart)
+        {
+            transformedStart = rangeStart;
+            transformedEnd = rangeEnd;
+            return true;
+        }
+        if (rangeStart > deletedEnd)
+        {
+            transformedStart = rangeStart - count;
+            transformedEnd = rangeEnd - count;
+            return true;
+        }
+        var hasRowsBefore = rangeStart < deletedStart;
+        var hasRowsAfter = rangeEnd > deletedEnd;
+        if (!hasRowsBefore && !hasRowsAfter)
+        {
+            transformedStart = transformedEnd = 0;
+            return false;
+        }
+        transformedStart = hasRowsBefore ? rangeStart : deletedStart;
+        transformedEnd = hasRowsAfter ? rangeEnd - count : deletedStart - 1;
+        return transformedStart <= transformedEnd;
+    }
+
+    private static void DeleteAndShiftRowBreaks(Worksheet worksheet, int startRow, int endRow, int count)
+    {
+        var rowBreaks = worksheet.GetFirstChild<RowBreaks>();
+        if (rowBreaks is null) return;
+        foreach (var item in rowBreaks.Elements<Break>().ToList())
+        {
+            if (item.Id?.Value is not uint zeroBased) continue;
+            var breakBeforeRow = checked((int)zeroBased + 1);
+            if (breakBeforeRow >= startRow && breakBeforeRow <= endRow) item.Remove();
+            else if (breakBeforeRow > endRow) item.Id = (uint)(breakBeforeRow - count - 1);
+        }
+        rowBreaks.Count = (uint)rowBreaks.Elements<Break>().Count();
+        rowBreaks.ManualBreakCount = (uint)rowBreaks.Elements<Break>().Count(item => item.ManualPageBreak?.Value == true);
+        if (!rowBreaks.Elements<Break>().Any()) rowBreaks.Remove();
+    }
+
+    private static void DeleteAndShiftComments(WorksheetPart worksheetPart, int startRow, int endRow, int count)
+    {
+        var commentsPart = worksheetPart.WorksheetCommentsPart;
+        if (commentsPart?.Comments?.CommentList is not null)
+        {
+            foreach (var comment in commentsPart.Comments.CommentList.Elements<Comment>().ToList())
+            {
+                if (comment.Reference?.Value is not string reference || !TryParseWritableCell(reference, out var column, out var row)) continue;
+                if (row >= startRow && row <= endRow) comment.Remove();
+                else if (row > endRow) comment.Reference = GetCellReference(column, row - count);
+            }
+            commentsPart.Comments.Save();
+        }
+
+        XNamespace excel = "urn:schemas-microsoft-com:office:excel";
+        foreach (var vmlPart in worksheetPart.VmlDrawingParts)
+        {
+            XDocument document;
+            using (var input = vmlPart.GetStream(FileMode.Open, FileAccess.Read)) document = XDocument.Load(input, LoadOptions.PreserveWhitespace);
+            foreach (var clientData in document.Descendants(excel + "ClientData").ToList())
+            {
+                if (!string.Equals((string?)clientData.Attribute("ObjectType"), "Note", StringComparison.Ordinal)) continue;
+                var rowElement = clientData.Element(excel + "Row");
+                if (!int.TryParse(rowElement?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var zeroBasedRow)) continue;
+                var row = zeroBasedRow + 1;
+                if (row >= startRow && row <= endRow)
+                {
+                    clientData.Ancestors().FirstOrDefault(element => element.Name.LocalName == "shape")?.Remove();
+                    continue;
+                }
+                if (row > endRow) rowElement!.Value = (row - count - 1).ToString(CultureInfo.InvariantCulture);
+                var anchor = clientData.Element(excel + "Anchor");
+                if (anchor is not null) anchor.Value = TransformVmlAnchor(anchor.Value, startRow, endRow, count);
+            }
+            using var output = vmlPart.GetStream(FileMode.Create, FileAccess.Write);
+            document.Save(output, SaveOptions.DisableFormatting);
+        }
+    }
+
+    private static string TransformVmlAnchor(string value, int startRow, int endRow, int count)
+    {
+        var parts = value.Split(',').Select(part => part.Trim()).ToArray();
+        foreach (var index in new[] { 2, 6 })
+        {
+            if (parts.Length <= index || !int.TryParse(parts[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out var zeroBasedRow)) continue;
+            parts[index] = TransformAnchorRow(zeroBasedRow, startRow, endRow, count).ToString(CultureInfo.InvariantCulture);
+        }
+        return string.Join(", ", parts);
+    }
+
+    private static void ShiftDrawingAnchors(WorksheetPart worksheetPart, int startRow, int endRow, int count)
+    {
+        var drawing = worksheetPart.DrawingsPart?.WorksheetDrawing;
+        if (drawing is null) return;
+        foreach (var rowId in drawing.Descendants<Xdr.RowId>())
+        {
+            if (int.TryParse(rowId.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var zeroBasedRow))
+                rowId.Text = TransformAnchorRow(zeroBasedRow, startRow, endRow, count).ToString(CultureInfo.InvariantCulture);
+        }
+        drawing.Save();
+    }
+
+    private static int TransformAnchorRow(int zeroBasedRow, int startRow, int endRow, int count)
+    {
+        var row = zeroBasedRow + 1;
+        if (row > endRow) return zeroBasedRow - count;
+        if (row >= startRow) return startRow - 1;
+        return zeroBasedRow;
+    }
+
+    private static void DeleteAndShiftPrintDefinitions(WorkbookPart workbookPart, string sheetName, int startRow, int endRow, int count)
+    {
+        var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>().ToList() ?? [];
+        var sheetIndex = sheets.FindIndex(sheet => string.Equals(sheet.Name?.Value, sheetName, StringComparison.Ordinal));
+        if (sheetIndex < 0) return;
+        var definitions = workbookPart.Workbook.DefinedNames?.Elements<DefinedName>()
+            .Where(name => name.LocalSheetId?.Value == (uint)sheetIndex && name.Name?.Value is "_xlnm.Print_Area" or "_xlnm.Print_Titles")
+            .ToList() ?? [];
+        foreach (var definition in definitions)
+        {
+            var transformed = new List<string>();
+            foreach (var reference in SplitDefinedNameReferences(definition.Text))
+            {
+                if (definition.Name?.Value == "_xlnm.Print_Area")
+                {
+                    if (TryTransformQualifiedCellRange(reference, sheetName, startRow, endRow, count, out var value)) transformed.Add(value!);
+                }
+                else if (TryTransformPrintTitleReference(reference, sheetName, startRow, endRow, count, out var value))
+                {
+                    transformed.Add(value!);
+                }
+            }
+            if (transformed.Count == 0) definition.Remove();
+            else definition.Text = string.Join(",", transformed);
+        }
+    }
+
+    private static bool TryTransformQualifiedCellRange(string reference, string sheetName, int startRow, int endRow, int count, out string? transformed)
+    {
+        transformed = null;
+        var separator = reference.LastIndexOf('!');
+        if (separator < 0) return false;
+        var qualifier = NormalizeSheetQualifier(reference[..separator]);
+        var range = reference[(separator + 1)..];
+        if (!string.Equals(qualifier, sheetName, StringComparison.OrdinalIgnoreCase)
+            || !TryParsePrintAreaRange(range, out var startCell, out var endCell)) return false;
+        var (startColumn, rangeStartRow) = ParseCellReference(startCell);
+        var (endColumn, rangeEndRow) = ParseCellReference(endCell);
+        if (!TryTransformDeletedRowInterval(rangeStartRow, rangeEndRow, startRow, endRow, count, out rangeStartRow, out rangeEndRow)) return false;
+        var escapedSheet = sheetName.Replace("'", "''", StringComparison.Ordinal);
+        transformed = $"'{escapedSheet}'!${GetColumnReference(startColumn)}${rangeStartRow}:${GetColumnReference(endColumn)}${rangeEndRow}";
+        return true;
+    }
+
+    private static bool TryTransformPrintTitleReference(string reference, string sheetName, int startRow, int endRow, int count, out string? transformed)
+    {
+        transformed = null;
+        var separator = reference.LastIndexOf('!');
+        if (separator < 0 || !string.Equals(NormalizeSheetQualifier(reference[..separator]), sheetName, StringComparison.OrdinalIgnoreCase)) return false;
+        var range = reference[(separator + 1)..].Trim();
+        if (PrintTitleColumnRangePattern.IsMatch(range))
+        {
+            transformed = reference;
+            return true;
+        }
+        if (!PrintTitleRowRangePattern.IsMatch(range)) return false;
+        var rows = range.Split(':').Select(value => int.Parse(value.Trim().TrimStart('$'), CultureInfo.InvariantCulture)).ToArray();
+        if (!TryTransformDeletedRowInterval(rows[0], rows[1], startRow, endRow, count, out var first, out var last)) return false;
+        var escapedSheet = sheetName.Replace("'", "''", StringComparison.Ordinal);
+        transformed = $"'{escapedSheet}'!${first}:${last}";
+        return true;
+    }
+
+    private static string NormalizeSheetQualifier(string value)
+    {
+        var normalized = value.TrimStart('=').Trim();
+        if (normalized.Length >= 2 && normalized[0] == '\'' && normalized[^1] == '\'')
+            normalized = normalized[1..^1].Replace("''", "'", StringComparison.Ordinal);
+        return normalized;
+    }
+
     private static void ShiftMergedRanges(Worksheet worksheet, int startRow, int rowDelta, bool expandAdjacentVerticalMergedRanges = false)
     {
         foreach (var mergeCell in worksheet.Descendants<MergeCell>())
@@ -1672,6 +2172,31 @@ public static class Editor
             {
                 worksheetPart.Worksheet.Save();
             }
+        }
+    }
+
+    private static void ShiftFormulasForDeletedRows(WorkbookPart workbookPart, string editedSheetName, int startRow, int endRow, int count)
+    {
+        foreach (var (sheetName, worksheetPart) in GetWorksheetParts(workbookPart))
+        {
+            var changed = false;
+            foreach (var cell in worksheetPart.Worksheet.Descendants<Cell>())
+            {
+                if (cell.CellFormula?.Text is not string formula) continue;
+                var shiftedFormula = FormulaCellReferencePattern.Replace(formula, match =>
+                {
+                    if (ShouldSkipFormulaReferenceMatch(formula, match)
+                        || !FormulaReferenceTargetsSheet(formula, match, sheetName, editedSheetName)
+                        || !int.TryParse(match.Groups[4].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var row)
+                        || row <= endRow) return match.Value;
+                    return $"{match.Groups[1].Value}{match.Groups[2].Value}{match.Groups[3].Value}{row - count}";
+                });
+                if (string.Equals(shiftedFormula, formula, StringComparison.Ordinal)) continue;
+                cell.CellFormula.Text = shiftedFormula;
+                cell.CellValue = null;
+                changed = true;
+            }
+            if (changed) worksheetPart.Worksheet.Save();
         }
     }
 
@@ -2201,6 +2726,13 @@ public static class Editor
                 && operation.Width.Value is > 0 and <= 255
                 ? null
                 : "column must be bounded and width must be in (0, 255]";
+        if (operation.Type == "deleteRows")
+            return !string.IsNullOrWhiteSpace(operation.Sheet)
+                && operation.StartRow is >= 1 and <= MaximumWorksheetRow
+                && operation.Count is >= 1
+                && (long)operation.StartRow.Value + operation.Count.Value - 1 <= MaximumWorksheetRow
+                ? null
+                : "sheet, startRow, and count must identify a bounded worksheet row interval";
         if (operation.Type == "setRangeValues")
         {
             if (!TryParseWritableCell(operation.StartCell, out var column, out var row)) return "startCell must be a bounded A1 reference";

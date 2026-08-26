@@ -77,7 +77,7 @@ process.exit(2);
       protocolVersion: '2025-06-18', capabilities: {},
       clientInfo: { name: 'office-contract', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.13.0');
+    assert.equal(initialized.result.serverInfo.version, '0.13.1');
 
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
@@ -86,7 +86,7 @@ process.exit(2);
     }
     for (const required of [
       'docx_inspect', 'docx_inspect_tables', 'docx_set_table_cell_text', 'docx_validate',
-      'xlsx_convert_legacy', 'xlsx_set_cell_value', 'xlsx_set_page_setup', 'xlsx_validate',
+      'xlsx_convert_legacy', 'xlsx_set_cell_value', 'xlsx_delete_rows', 'xlsx_set_page_setup', 'xlsx_validate',
       'pptx_inspect', 'pptx_apply_template', 'pptx_apply_format', 'pptx_validate',
       'office_render_pdf',
     ]) assert(names.includes(required), `missing ${required}`);
@@ -98,6 +98,11 @@ process.exit(2);
     assert.deepEqual(tool.inputSchema.required.sort(), ['changes', 'input', 'output', 'receiptOutput']);
     assert.equal(tool.inputSchema.properties.changes.items.properties.type, undefined);
     assert.equal(tool.inputSchema.properties.changes.items.additionalProperties, false);
+
+    const deleteRowsTool = listed.result.tools.find(candidate => candidate.name === 'xlsx_delete_rows');
+    assert.deepEqual(deleteRowsTool.inputSchema.properties.changes.items.required.sort(), ['count', 'sheet', 'startRow']);
+    assert.deepEqual(Object.keys(deleteRowsTool.inputSchema.properties.changes.items.properties).sort(), ['count', 'sheet', 'startRow']);
+    assert.equal(deleteRowsTool.inputSchema.properties.changes.items.additionalProperties, false);
 
     const input = path.join(temporary, 'input.docx');
     const output = path.join(temporary, 'output.docx');
@@ -114,6 +119,25 @@ process.exit(2);
     assert.equal(receipt.appliedOperations[0].type, 'replaceTableCellText');
     assert.equal(receipt.input.path, input);
     assert.equal(receipt.output.path, output);
+
+    const workbookInput = path.join(temporary, 'input.xlsx');
+    const workbookOutput = path.join(temporary, 'output.xlsx');
+    const workbookReceiptOutput = path.join(temporary, 'xlsx-receipt.json');
+    await writeFile(workbookInput, 'current workbook', 'utf8');
+    const deletedRows = await request('tools/call', {
+      name: 'xlsx_delete_rows',
+      arguments: { input: workbookInput, output: workbookOutput, receiptOutput: workbookReceiptOutput, changes: [{ sheet: 'Data', startRow: 3, count: 2 }] },
+    });
+    assert.equal(deletedRows.result.structuredContent.summary.pass, true);
+    const workbookReceipt = JSON.parse(await readFile(workbookReceiptOutput, 'utf8'));
+    assert.equal(workbookReceipt.operationType, 'deleteRows');
+    assert.deepEqual(workbookReceipt.appliedOperations.map(operation => operation.type), ['deleteRows']);
+
+    const deleteRowsInjected = await request('tools/call', {
+      name: 'xlsx_delete_rows',
+      arguments: { input: workbookInput, output: path.join(temporary, 'injected.xlsx'), receiptOutput: path.join(temporary, 'injected.json'), changes: [{ sheet: 'Data', startRow: 3, count: 2, type: 'setCellValue' }] },
+    });
+    assert.equal(deleteRowsInjected.result.isError, true);
 
     const injected = await request('tools/call', {
       name: 'docx_set_table_cell_text',

@@ -24,7 +24,8 @@
               { "type": "null" },
               { "type": "array", "items": { "type": "string" } }
             ]
-          }
+          },
+          "errorCode": { "type": ["string", "null"], "pattern": "^xlsx\\.", "minLength": 1 }
         }
       }
     }
