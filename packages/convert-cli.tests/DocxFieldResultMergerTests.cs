@@ -75,6 +75,16 @@ public sealed class DocxFieldResultMergerTests
         ApplyFont(sourceIndex, "宋体", "24");
         ApplyFont(sourceHeading, "宋体", "24");
         var refreshedIndex = Index("table-of-contents", "New contents", "8", "_TocB");
+        refreshedIndex.Add(new XElement(W + "r",
+            new XElement(W + "rPr",
+                new XElement(W + "rFonts",
+                    new XAttribute(W + "ascii", "Times New Roman"),
+                    new XAttribute(W + "hAnsi", "Times New Roman"),
+                    new XAttribute(W + "eastAsia", "SimSun"),
+                    new XAttribute(W + "cs", "Times New Roman")),
+                new XElement(W + "sz", new XAttribute(W + "val", "22")),
+                new XElement(W + "szCs", new XAttribute(W + "val", "22"))),
+            new XElement(W + "t", " ")));
         var refreshedHeading = Heading("HEAD0001", "Contents heading", "_TocB", "2");
         ApplyFont(refreshedIndex, "SimSun", "22");
         ApplyFont(refreshedHeading, "SimSun", "22");
@@ -85,7 +95,7 @@ public sealed class DocxFieldResultMergerTests
         DocxFieldResultMerger.Merge(source, refreshed, output);
 
         var resultRuns = ReadDocument(output).Descendants(W + "r")
-            .Where(run => run.Descendants(W + "t").Any(text => !string.IsNullOrWhiteSpace(text.Value)))
+            .Where(run => run.Descendants(W + "t").Any())
             .ToList();
         Assert.All(resultRuns, run =>
         {

@@ -165,7 +165,7 @@ internal static class DocxFieldResultMerger
     private static void ApplyFontPolicy(XElement block, RunFontPolicy policy)
     {
         foreach (var run in block.Descendants(W + "r")
-                     .Where(run => run.Descendants(W + "t").Any(text => !string.IsNullOrWhiteSpace(text.Value))))
+                     .Where(run => run.Descendants(W + "t").Any()))
         {
             var properties = run.Element(W + "rPr");
             if (properties is null) { properties = new XElement(W + "rPr"); run.AddFirst(properties); }
