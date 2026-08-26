@@ -13,7 +13,8 @@ template-migration workflow, customer mapping, or Lucid lifecycle.
 - XLS/XLSX: convert legacy XLS with ET, inspect/export/fill, validate, and batch
   one fixed workbook edit action.
 - PPTX: inspect/export/fill, bind selected masters/layouts, apply text formatting,
-  and validate OpenXML.
+  set exact top-level object geometry, replace existing picture media, and
+  validate OpenXML.
 - Office: render DOC/DOCX/XLS/XLSX/PPT/PPTX to PDF with the corresponding native
   WPS backend.
 

@@ -116,6 +116,32 @@ const pptxFormatApplyOutput = z.object({
     issueCount: z.number().int().nonnegative(),
   }).strict(),
 }).strict();
+const pptxObjectIssue = z.object({
+  slideNumber: z.number().int(),
+  shapeId: z.number().int().nonnegative().max(0xffffffff),
+  message: z.string().min(1),
+}).strict();
+const pptxTransform = z.object({
+  x: z.number().int(), y: z.number().int(), cx: z.number().int().positive(), cy: z.number().int().positive(),
+}).strict();
+const pptxShapeGeometryResult = z.object({
+  input: z.string().min(1), output: z.string().min(1),
+  operationCount: z.number().int().nonnegative(), appliedCount: z.number().int().nonnegative(),
+  changes: z.array(z.object({
+    slideNumber: z.number().int().positive(), shapeId: z.number().int().positive().max(0xffffffff),
+    before: pptxTransform, after: pptxTransform,
+  }).strict()),
+  issues: z.array(pptxObjectIssue),
+}).strict();
+const pptxPictureImageResult = z.object({
+  input: z.string().min(1), output: z.string().min(1),
+  operationCount: z.number().int().nonnegative(), appliedCount: z.number().int().nonnegative(),
+  changes: z.array(z.object({
+    slideNumber: z.number().int().positive(), shapeId: z.number().int().positive().max(0xffffffff), image: z.string().min(1),
+    beforeSha256: z.string().regex(/^[0-9a-f]{64}$/), afterSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  }).strict()),
+  issues: z.array(pptxObjectIssue),
+}).strict();
 
 const renderFileIdentity = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -435,6 +461,30 @@ const tools = [
     handler: pptxApplyFormat,
   },
   {
+    name: 'pptx_set_shape_geometry',
+    description: 'Set exact native EMU bounds for uniquely identified current-slide PPTX objects. One call batches only this fixed geometry action and does not infer repair coordinates.',
+    inputSchema: z.object({
+      input: pathInput.describe('Path to the current PPTX.'),
+      changes: z.array(z.object({ slideNumber: positiveIndex, shapeId: positiveIndex.max(0xffffffff), x: z.number().int(), y: z.number().int(), cx: positiveIndex, cy: positiveIndex }).strict()).min(1),
+      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
+      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
+    }).strict(),
+    outputSchema: fixedEditOutput('pptx_set_shape_geometry'),
+    handler: pptxSetShapeGeometry,
+  },
+  {
+    name: 'pptx_replace_picture_image',
+    description: 'Replace embedded PNG or JPEG media for uniquely identified current-slide PPTX pictures while preserving the picture object, geometry, crop, and unrelated media. One call batches only this fixed replacement action.',
+    inputSchema: z.object({
+      input: pathInput.describe('Path to the current PPTX.'),
+      changes: z.array(z.object({ slideNumber: positiveIndex, shapeId: positiveIndex.max(0xffffffff), image: pathInput }).strict()).min(1),
+      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
+      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
+    }).strict(),
+    outputSchema: fixedEditOutput('pptx_replace_picture_image'),
+    handler: pptxReplacePictureImage,
+  },
+  {
     name: 'pptx_validate',
     description: 'Validate a current PPTX package against the published OpenXML contract.',
     inputSchema: inputOnly,
@@ -725,6 +775,67 @@ async function pptxApplyTemplate(args) {
 
 async function pptxApplyFormat(args) {
   return withTempJsonFile({ operations: args.changes }, planPath => pptxApply('pptx_apply_format', args, false, planPath));
+}
+
+async function pptxSetShapeGeometry(args) {
+  return pptxFixedObjectEdit('pptx_set_shape_geometry', 'set-shape-geometry', args, pptxShapeGeometryResult, args.changes);
+}
+
+async function pptxReplacePictureImage(args) {
+  const changes = args.changes.map(change => ({ ...change, image: path.resolve(requireString(change.image, 'image')) }));
+  return pptxFixedObjectEdit('pptx_replace_picture_image', 'replace-picture-image', args, pptxPictureImageResult, changes, changes.map(change => change.image));
+}
+
+async function pptxFixedObjectEdit(tool, command, args, resultSchema, changes, sourcePaths = []) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const output = path.resolve(requireString(args.output, 'output'));
+  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
+  if (path.extname(input).toLowerCase() !== '.pptx' || path.extname(output).toLowerCase() !== '.pptx')
+    throw Object.assign(new Error('PPTX object edits require .pptx input and output paths'), { code: -32602 });
+  await requireNewFile(output, 'output');
+  await requireNewFile(receiptOutput, 'receiptOutput');
+  const inputArtifact = await fileArtifact(input);
+  const sourceArtifacts = await Promise.all([...new Set(sourcePaths)].map(fileArtifact));
+  return withTempJsonFile({ changes }, async planPath => {
+    const requestArtifact = await fileArtifact(planPath);
+    try {
+      const result = await runJsonCandidateChain(pptxCandidates, [command, input, planPath, output], { allowedExitCodes: [0, 1] });
+      await requireArtifactUnchanged(inputArtifact, 'PPTX object edit input');
+      await requireArtifactUnchanged(requestArtifact, 'PPTX object edit request');
+      for (const source of sourceArtifacts) await requireArtifactUnchanged(source, 'PPTX replacement image');
+      const providerResult = resultSchema.parse(result.json);
+      if (path.resolve(providerResult.input) !== input || path.resolve(providerResult.output) !== output)
+        throw new Error('PPTX object edit receipt is not bound to the current input and output');
+      const sourceByPath = new Map(sourceArtifacts.map(source => [source.path, source]));
+      const providerMatchesRequest = providerResult.changes.length === changes.length && providerResult.changes.every((change, position) => {
+        const requested = changes[position];
+        if (change.slideNumber !== requested.slideNumber || change.shapeId !== requested.shapeId) return false;
+        if (tool === 'pptx_set_shape_geometry')
+          return isDeepStrictEqual(change.after, { x: requested.x, y: requested.y, cx: requested.cx, cy: requested.cy });
+        const requestedImage = path.resolve(requested.image);
+        return path.resolve(change.image) === requestedImage && change.afterSha256 === sourceByPath.get(requestedImage)?.sha256;
+      });
+      const pass = providerResult.issues.length === 0
+        && providerResult.operationCount === changes.length
+        && providerResult.appliedCount === changes.length
+        && providerMatchesRequest;
+      const outputArtifact = pass ? await fileArtifact(output) : null;
+      if (!pass) await rm(output, { force: true });
+      const receipt = {
+        schema: 'tiwater.office.pptx-fixed-object-edit-receipt/v1', tool, pass,
+        input: inputArtifact, requestSha256: requestArtifact.sha256,
+        ...(sourceArtifacts.length ? { sourceImages: sourceArtifacts } : {}),
+        output: outputArtifact, providerResult,
+      };
+      return {
+        tool, runtime: commandRuntime(result), receipt: await writeJsonArtifact(receiptOutput, receipt), output: outputArtifact,
+        summary: { pass, operationCount: providerResult.operationCount, appliedCount: providerResult.appliedCount },
+      };
+    } catch (error) {
+      await rm(output, { force: true });
+      throw error;
+    }
+  });
 }
 
 async function pptxApply(tool, args, templateMode, plan) {

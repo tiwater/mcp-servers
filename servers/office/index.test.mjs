@@ -43,8 +43,9 @@ function protocol(child) {
 
 test('published Office MCP exposes bounded orthogonal capabilities', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'office-mcp-contract-'));
-  const fake = `
+const fake = `
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const command = process.argv[2];
 if (command === 'edit') {
   const input = process.argv[3];
@@ -54,6 +55,22 @@ if (command === 'edit') {
   process.stdout.write(JSON.stringify({
     input, output,
     appliedOperations: operations.map(operation => ({type: operation.type, applied: true, detail: 'ok'})),
+  }));
+  process.exit(0);
+}
+if (command === 'set-shape-geometry' || command === 'replace-picture-image') {
+  const input = process.argv[3];
+  const changes = JSON.parse(fs.readFileSync(process.argv[4], 'utf8')).changes;
+  const output = process.argv[5];
+  fs.copyFileSync(input, output);
+  const geometry = command === 'set-shape-geometry';
+  const rejected = geometry && changes.some(change => change.x === -999);
+  process.stdout.write(JSON.stringify({
+    input, output, operationCount: changes.length, appliedCount: rejected ? 0 : changes.length,
+    issues: rejected ? [{slideNumber: changes[0].slideNumber, shapeId: changes[0].shapeId, message: 'unsupported test mutation'}] : [],
+    changes: rejected ? [] : changes.map(change => geometry
+      ? {slideNumber: change.slideNumber, shapeId: change.shapeId, before: {x: 1, y: 2, cx: 3, cy: 4}, after: {x: change.x === -998 ? -997 : change.x, y: change.y, cx: change.cx, cy: change.cy}}
+      : {slideNumber: change.slideNumber, shapeId: change.shapeId, image: change.image, beforeSha256: '0'.repeat(64), afterSha256: crypto.createHash('sha256').update(fs.readFileSync(change.image)).digest('hex')}),
   }));
   process.exit(0);
 }
@@ -77,7 +94,7 @@ process.exit(2);
       protocolVersion: '2025-06-18', capabilities: {},
       clientInfo: { name: 'office-contract', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.13.1');
+    assert.equal(initialized.result.serverInfo.version, '0.14.0');
 
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
@@ -87,7 +104,7 @@ process.exit(2);
     for (const required of [
       'docx_inspect', 'docx_inspect_tables', 'docx_set_table_cell_text', 'docx_validate',
       'xlsx_convert_legacy', 'xlsx_set_cell_value', 'xlsx_delete_rows', 'xlsx_set_page_setup', 'xlsx_validate',
-      'pptx_inspect', 'pptx_apply_template', 'pptx_apply_format', 'pptx_validate',
+      'pptx_inspect', 'pptx_apply_template', 'pptx_apply_format', 'pptx_set_shape_geometry', 'pptx_replace_picture_image', 'pptx_validate',
       'office_render_pdf',
     ]) assert(names.includes(required), `missing ${required}`);
 
@@ -103,6 +120,15 @@ process.exit(2);
     assert.deepEqual(deleteRowsTool.inputSchema.properties.changes.items.required.sort(), ['count', 'sheet', 'startRow']);
     assert.deepEqual(Object.keys(deleteRowsTool.inputSchema.properties.changes.items.properties).sort(), ['count', 'sheet', 'startRow']);
     assert.equal(deleteRowsTool.inputSchema.properties.changes.items.additionalProperties, false);
+
+    const formatTool = listed.result.tools.find(candidate => candidate.name === 'pptx_apply_format');
+    assert.equal(formatTool.inputSchema.properties.changes.items.properties.x, undefined);
+    assert.equal(formatTool.inputSchema.properties.changes.items.properties.image, undefined);
+    const geometryTool = listed.result.tools.find(candidate => candidate.name === 'pptx_set_shape_geometry');
+    assert.deepEqual(geometryTool.inputSchema.required.sort(), ['changes', 'input', 'output', 'receiptOutput']);
+    assert.deepEqual(Object.keys(geometryTool.inputSchema.properties.changes.items.properties).sort(), ['cx', 'cy', 'shapeId', 'slideNumber', 'x', 'y']);
+    assert.equal(geometryTool.inputSchema.properties.changes.items.properties.type, undefined);
+    assert.equal(geometryTool.inputSchema.properties.changes.items.additionalProperties, false);
 
     const input = path.join(temporary, 'input.docx');
     const output = path.join(temporary, 'output.docx');
@@ -139,11 +165,54 @@ process.exit(2);
     });
     assert.equal(deleteRowsInjected.result.isError, true);
 
+    const pptxInput = path.join(temporary, 'input.pptx');
+    await writeFile(pptxInput, 'current presentation', 'utf8');
+    const geometryOutput = path.join(temporary, 'geometry.pptx');
+    const geometryReceipt = path.join(temporary, 'geometry.json');
+    const geometry = await request('tools/call', {
+      name: 'pptx_set_shape_geometry',
+      arguments: { input: pptxInput, output: geometryOutput, receiptOutput: geometryReceipt, changes: [{ slideNumber: 1, shapeId: 2, x: -10, y: 20, cx: 30, cy: 40 }] },
+    });
+    assert.equal(geometry.result.structuredContent.summary.pass, true);
+    assert.equal(geometry.result.structuredContent.summary.appliedCount, 1);
+    assert.equal(JSON.parse(await readFile(geometryReceipt, 'utf8')).tool, 'pptx_set_shape_geometry');
+
+    const rejectedOutput = path.join(temporary, 'rejected-geometry.pptx');
+    const rejectedGeometry = await request('tools/call', {
+      name: 'pptx_set_shape_geometry',
+      arguments: { input: pptxInput, output: rejectedOutput, receiptOutput: path.join(temporary, 'rejected-geometry.json'), changes: [{ slideNumber: 1, shapeId: 2, x: -999, y: 20, cx: 30, cy: 40 }] },
+    });
+    assert.equal(rejectedGeometry.result.structuredContent.summary.pass, false);
+    await assert.rejects(readFile(rejectedOutput));
+
+    const mutatedOutput = path.join(temporary, 'mutated-geometry.pptx');
+    const mutatedGeometry = await request('tools/call', {
+      name: 'pptx_set_shape_geometry',
+      arguments: { input: pptxInput, output: mutatedOutput, receiptOutput: path.join(temporary, 'mutated-geometry.json'), changes: [{ slideNumber: 1, shapeId: 2, x: -998, y: 20, cx: 30, cy: 40 }] },
+    });
+    assert.equal(mutatedGeometry.result.structuredContent.summary.pass, false);
+    await assert.rejects(readFile(mutatedOutput));
+
+    const image = path.join(temporary, 'replacement.png');
+    await writeFile(image, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const picture = await request('tools/call', {
+      name: 'pptx_replace_picture_image',
+      arguments: { input: pptxInput, output: path.join(temporary, 'picture.pptx'), receiptOutput: path.join(temporary, 'picture.json'), changes: [{ slideNumber: 1, shapeId: 3, image }] },
+    });
+    assert.equal(picture.result.structuredContent.summary.pass, true);
+    assert.equal(picture.result.structuredContent.summary.appliedCount, 1);
+
     const injected = await request('tools/call', {
       name: 'docx_set_table_cell_text',
       arguments: { input, output: path.join(temporary, 'bad.docx'), receiptOutput: path.join(temporary, 'bad.json'), changes: [{ tableIndex: 0, rowIndex: 0, cellIndex: 0, text: 'x', type: 'deleteBodyRange' }] },
     });
     assert.equal(injected.result.isError, true);
+
+    const geometryInjected = await request('tools/call', {
+      name: 'pptx_set_shape_geometry',
+      arguments: { input: pptxInput, output: path.join(temporary, 'bad-geometry.pptx'), receiptOutput: path.join(temporary, 'bad-geometry.json'), changes: [{ slideNumber: 1, shapeId: 2, x: 1, y: 2, cx: 3, cy: 4, type: 'replace-picture-image' }] },
+    });
+    assert.equal(geometryInjected.result.isError, true);
   } finally {
     if (child.exitCode === null) {
       child.kill('SIGTERM');

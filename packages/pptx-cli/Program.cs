@@ -29,6 +29,8 @@ internal static class Cli
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
+                "set-shape-geometry" => RunSetShapeGeometryAsync(args[1..]),
+                "replace-picture-image" => RunReplacePictureImageAsync(args[1..]),
                 "apply-template" => RunApplyTemplateAsync(args[1..]),
                 "validate" => Task.FromResult(Validator.Run(args[1..])),
                 "map-render-findings" => RunMapRenderFindingsAsync(args[1..]),
@@ -87,6 +89,24 @@ internal static class Cli
         return Task.FromResult(0);
     }
 
+    private static Task<int> RunSetShapeGeometryAsync(string[] args)
+    {
+        if (args.Length != 3)
+            throw new InvalidOperationException("set-shape-geometry requires <input.pptx> <changes.json> <output.pptx>");
+        var result = ShapeGeometryEditor.Apply(args[0], args[1], args[2]);
+        WriteJson(result);
+        return Task.FromResult(result.Issues.Count == 0 ? 0 : 1);
+    }
+
+    private static Task<int> RunReplacePictureImageAsync(string[] args)
+    {
+        if (args.Length != 3)
+            throw new InvalidOperationException("replace-picture-image requires <input.pptx> <changes.json> <output.pptx>");
+        var result = PictureImageEditor.Apply(args[0], args[1], args[2]);
+        WriteJson(result);
+        return Task.FromResult(result.Issues.Count == 0 ? 0 : 1);
+    }
+
     private static Task<int> RunMapRenderFindingsAsync(string[] args)
     {
         if (args.Length != 4) throw new InvalidOperationException("map-render-findings requires <inspect.json> <render-manifest.json> <findings.json> <output.json>");
@@ -126,6 +146,8 @@ internal static class Cli
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
         Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
+        Console.WriteLine("  set-shape-geometry <input.pptx> <changes.json> <output.pptx>");
+        Console.WriteLine("  replace-picture-image <input.pptx> <changes.json> <output.pptx>");
         Console.WriteLine("  apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>");
         Console.WriteLine("  validate <input.pptx>");
         Console.WriteLine("  map-render-findings <inspect.json> <render-manifest.json> <findings.json> <output.json>");

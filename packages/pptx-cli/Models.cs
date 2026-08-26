@@ -180,6 +180,45 @@ public sealed record FormatEditIssue(
     string Message
 );
 
+public sealed record ShapeGeometryPlan(IReadOnlyList<ShapeGeometryChange> Changes);
+
+public sealed record ShapeGeometryChange(int SlideNumber, uint ShapeId, long X, long Y, long Cx, long Cy);
+
+public sealed record ShapeGeometryResult(
+    string Input,
+    string Output,
+    int OperationCount,
+    int AppliedCount,
+    IReadOnlyList<AppliedShapeGeometryChange> Changes,
+    IReadOnlyList<PptxObjectEditIssue> Issues);
+
+public sealed record AppliedShapeGeometryChange(
+    int SlideNumber,
+    uint ShapeId,
+    TransformInfo Before,
+    TransformInfo After);
+
+public sealed record PictureImagePlan(IReadOnlyList<PictureImageChange> Changes);
+
+public sealed record PictureImageChange(int SlideNumber, uint ShapeId, string Image);
+
+public sealed record PictureImageResult(
+    string Input,
+    string Output,
+    int OperationCount,
+    int AppliedCount,
+    IReadOnlyList<AppliedPictureImageChange> Changes,
+    IReadOnlyList<PptxObjectEditIssue> Issues);
+
+public sealed record AppliedPictureImageChange(
+    int SlideNumber,
+    uint ShapeId,
+    string Image,
+    string BeforeSha256,
+    string AfterSha256);
+
+public sealed record PptxObjectEditIssue(int SlideNumber, uint ShapeId, string Message);
+
 public sealed record TemplateApplicationPlan(
     string TargetMasterPath,
     IReadOnlyList<SlideLayoutAssignment> Slides,
