@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tiwater_pdf.cli import DEFAULT_LLM_TIMEOUT_SECONDS, DEFAULT_OCR_MODEL, _call_vision_with_retry, _resolve_llm_config, _resolve_llm_enable_thinking, llm_ocr
+from tiwater_pdf.cli import DEFAULT_LLM_TIMEOUT_SECONDS, DEFAULT_OCR_MODEL, _call_vision_with_retry, _resolve_llm_config, _resolve_llm_enable_thinking, llm_ocr, main
 
 
 class ResolveLlmConfigTest(unittest.TestCase):
@@ -20,12 +20,17 @@ class ResolveLlmConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unsupported format"):
             _call_vision_with_retry(lambda: (_ for _ in ()).throw(RuntimeError("unsupported format")), sleep_fn=lambda _: None)
 
-    def test_builtin_ocr_default_is_qwen37_plus(self):
-        self.assertEqual(DEFAULT_OCR_MODEL, "qwen3.7-plus")
-        self.assertEqual(llm_ocr.__defaults__[3], "qwen3.7-plus")
+    def test_builtin_ocr_default_is_qwen38_max(self):
+        self.assertEqual(DEFAULT_OCR_MODEL, "qwen3.8-max")
+        self.assertEqual(llm_ocr.__defaults__[3], "qwen3.8-max")
 
     def test_builtin_llm_timeout_covers_smai_gateway_latency(self):
         self.assertEqual(DEFAULT_LLM_TIMEOUT_SECONDS, 180.0)
+
+    def test_cli_rejects_any_other_llm_ocr_model_before_opening_input(self):
+        argv = ["tiwater-pdf", "ocr", "missing.pdf", "--llm-model", "deepseek-chat"]
+        with patch("sys.argv", argv):
+            self.assertEqual(main(), 1)
 
     def test_uses_supen_gateway_env(self):
         env = {
@@ -51,12 +56,10 @@ class ResolveLlmConfigTest(unittest.TestCase):
         self.assertEqual(api_key, "session-token")
         self.assertEqual(base_url, "http://127.0.0.1:2755/api/llm/v1")
 
-    def test_keeps_openrouter_default_only_for_openrouter_env(self):
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "openrouter-token"}, clear=True):
-            api_key, base_url = _resolve_llm_config()
-
-        self.assertEqual(api_key, "openrouter-token")
-        self.assertEqual(base_url, "https://openrouter.ai/api/v1")
+    def test_rejects_non_gateway_credential_environment(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "other-provider-token"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "per-invocation SUPEN_LLM_TOKEN"):
+                _resolve_llm_config()
 
     def test_explicit_args_win_over_environment(self):
         env = {
@@ -73,19 +76,19 @@ class ResolveLlmConfigTest(unittest.TestCase):
         self.assertEqual(api_key, "explicit-token")
         self.assertEqual(base_url, "https://llm.example/v1")
 
-    def test_auto_disables_thinking_for_aliyun_qwen37(self):
+    def test_auto_disables_thinking_for_aliyun_qwen38_max(self):
         value = _resolve_llm_enable_thinking(
             "auto",
-            llm_model="qwen3.7-plus",
+            llm_model="qwen3.8-max",
             base_url="https://example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
         )
 
         self.assertIs(value, False)
 
-    def test_auto_disables_thinking_for_bare_aliyun_qwen37_behind_gateway(self):
+    def test_auto_disables_thinking_for_qwen38_max_behind_gateway(self):
         value = _resolve_llm_enable_thinking(
             "auto",
-            llm_model="qwen3.7-plus",
+            llm_model="qwen3.8-max",
             base_url="https://hub.supen.ai/api/llm/v1",
         )
 
@@ -100,11 +103,11 @@ class ResolveLlmConfigTest(unittest.TestCase):
 
         self.assertIsNone(value)
 
-    def test_auto_does_not_treat_openrouter_owner_prefixed_qwen_as_aliyun(self):
+    def test_auto_does_not_treat_other_qwen_models_as_ocr_model(self):
         value = _resolve_llm_enable_thinking(
             "auto",
             llm_model="qwen/qwen3.7-plus",
-            base_url="https://openrouter.ai/api/v1",
+            base_url="https://hub.supen.ai/api/llm/v1",
         )
 
         self.assertIsNone(value)
@@ -112,7 +115,7 @@ class ResolveLlmConfigTest(unittest.TestCase):
     def test_explicit_enable_thinking_override(self):
         value = _resolve_llm_enable_thinking(
             "true",
-            llm_model="qwen3.7-plus",
+            llm_model="qwen3.8-max",
             base_url="https://example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
         )
 

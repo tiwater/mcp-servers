@@ -195,6 +195,15 @@ public sealed record TemplateApplicationResult(
 
 public sealed record TemplateApplicationIssue(int? SlideNumber, string Message);
 
+public sealed record PptxValidationIssue(string Description, string? Path, string Id);
+
+public sealed record PptxValidationResult(
+    string Schema,
+    bool Pass,
+    string File,
+    int ErrorCount,
+    IReadOnlyList<PptxValidationIssue> Errors);
+
 internal static class Json
 {
     public static JsonSerializerOptions Options => new()

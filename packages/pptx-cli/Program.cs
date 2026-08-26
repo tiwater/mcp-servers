@@ -30,6 +30,7 @@ internal static class Cli
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
                 "apply-template" => RunApplyTemplateAsync(args[1..]),
+                "validate" => Task.FromResult(Validator.Run(args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -108,6 +109,7 @@ internal static class Cli
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
         Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
         Console.WriteLine("  apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>");
+        Console.WriteLine("  validate <input.pptx>");
     }
 
     private static Task<int> FailUnknown(string command)

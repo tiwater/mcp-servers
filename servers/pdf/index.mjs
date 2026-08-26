@@ -34,16 +34,13 @@ const tools = [
   },
   {
     name: 'pdf_extract_tables',
-    description: 'Extract tables from a PDF, optionally limiting pages or enabling multi-page spanning and LLM fallback.',
+    description: 'Deterministically extract tables from a PDF, optionally limiting pages or enabling multi-page spanning.',
     inputSchema: {
       type: 'object',
       properties: {
         input: { type: 'string' },
         pages: { type: 'array', items: { type: 'number' } },
         autoSpan: { type: 'boolean' },
-        llmFallback: { type: 'boolean' },
-        apiKey: { type: 'string' },
-        llmModel: { type: 'string' },
       },
       required: ['input'],
     },
@@ -57,9 +54,6 @@ const tools = [
         input: { type: 'string' },
         name: { type: 'string' },
         autoSpan: { type: 'boolean' },
-        llmFallback: { type: 'boolean' },
-        apiKey: { type: 'string' },
-        llmModel: { type: 'string' },
       },
       required: ['input', 'name'],
     },
@@ -76,6 +70,19 @@ const tools = [
       required: ['input'],
     },
   },
+  {
+    name: 'pdf_ocr',
+    description: 'OCR current PDF pages with the fixed qwen3.8-max OCR model. Credentials are inherited only by this provider invocation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        pages: { type: 'array', items: { type: 'integer', minimum: 1 } },
+      },
+      required: ['input'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 async function callTool(name, args) {
@@ -88,6 +95,8 @@ async function callTool(name, args) {
       return createToolResult(await pdfFindTable(args));
     case 'pdf_extract_table_details':
       return createToolResult(await pdfExtractTableDetails(args));
+    case 'pdf_ocr':
+      return createToolResult(await pdfOcr(args));
     default:
       throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32601 });
   }
@@ -129,14 +138,22 @@ async function pdfExtractTableDetails(args) {
   return { tool: 'pdf_extract_table_details', runtime: commandRuntime(result), report: result.json };
 }
 
+async function pdfOcr(args) {
+  const input = requireString(args.input, 'input');
+  const commandArgs = ['ocr', input, '--provider', 'llm', '--llm-model', 'qwen3.8-max'];
+  if (Array.isArray(args.pages) && args.pages.length > 0) {
+    commandArgs.push('--pages', args.pages.join(','));
+  }
+  commandArgs.push('--json');
+  const result = await runJsonCandidateChain(pdfCandidates, commandArgs);
+  return { tool: 'pdf_ocr', runtime: commandRuntime(result), report: result.json };
+}
+
 function appendPdfFlags(commandArgs, args) {
   if (Array.isArray(args.pages) && args.pages.length > 0) {
     commandArgs.push('--pages', args.pages.join(','));
   }
   if (args.autoSpan) commandArgs.push('--auto-span');
-  if (args.llmFallback) commandArgs.push('--llm-fallback');
-  if (typeof args.apiKey === 'string' && args.apiKey) commandArgs.push('--api-key', args.apiKey);
-  if (typeof args.llmModel === 'string' && args.llmModel) commandArgs.push('--llm-model', args.llmModel);
 }
 
 function commandRuntime(result) {

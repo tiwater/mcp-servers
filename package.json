@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "office": "node servers/office/index.mjs",
-    "pdf": "node servers/pdf/index.mjs"
+    "pdf": "node servers/pdf/index.mjs",
+    "test:office": "node --test servers/office/*.test.mjs",
+    "test:pdf": "node --test servers/pdf/*.test.mjs"
   }
 }
