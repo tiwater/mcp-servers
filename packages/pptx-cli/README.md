@@ -11,6 +11,7 @@ tiwater-pptx export-json <input.pptx> [output.json]
 tiwater-pptx fill-template <template.pptx> <data.json> <output.pptx>
 tiwater-pptx apply-format-edits <input.pptx> <plan.json> <output.pptx>
 tiwater-pptx apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>
+tiwater-pptx validate <input.pptx>
 tiwater-pptx map-render-findings <inspect.json> <render-manifest.json> <findings.json> <map.json>
 tiwater-pptx validate-render-finding-map <inspect.json> <render-manifest.json> <findings.json> <map.json> <verdict.json>
 ```

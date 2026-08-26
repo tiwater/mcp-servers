@@ -30,6 +30,7 @@ internal static class Cli
                 "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
                 "apply-template" => RunApplyTemplateAsync(args[1..]),
+                "validate" => Task.FromResult(Validator.Run(args[1..])),
                 "map-render-findings" => RunMapRenderFindingsAsync(args[1..]),
                 "validate-render-finding-map" => RunValidateRenderFindingMapAsync(args[1..]),
                 _ => FailUnknown(args[0]),
@@ -126,6 +127,7 @@ internal static class Cli
         Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
         Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
         Console.WriteLine("  apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>");
+        Console.WriteLine("  validate <input.pptx>");
         Console.WriteLine("  map-render-findings <inspect.json> <render-manifest.json> <findings.json> <output.json>");
         Console.WriteLine("  validate-render-finding-map <inspect.json> <render-manifest.json> <findings.json> <map.json> <verdict.json>");
     }

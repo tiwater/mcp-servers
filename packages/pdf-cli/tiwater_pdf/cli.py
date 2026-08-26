@@ -17,7 +17,7 @@ from pathlib import Path
 import fitz
 from . import __version__
 
-DEFAULT_OCR_MODEL = "qwen3.7-plus"
+DEFAULT_OCR_MODEL = "qwen3.8-max"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 DEFAULT_VISION_REQUEST_ATTEMPTS = 3
 
@@ -399,59 +399,23 @@ def _table_quality_score(header: list, rows: list) -> float:
     return max(0.0, score)
 
 
-def _render_table_region(doc, page_num: int, table_bbox: tuple) -> bytes:
-    """Render a specific table region of a PDF page to a PNG image.
-    
-    Args:
-        doc: The fitz Document
-        page_num: 0-indexed page number
-        table_bbox: (x0, y0, x1, y1)
-        
-    Returns:
-        PNG image bytes
-    """
-    page = doc[page_num]
-    # Add a small padding around the table bbox
-    x0, y0, x1, y1 = table_bbox
-    rect = fitz.Rect(max(0, x0 - 20), max(0, y0 - 20), x1 + 20, y1 + 20)
-    
-    # Render at 2x resolution for better OCR by the LLM
-    mat = fitz.Matrix(2, 2)
-    pix = page.get_pixmap(matrix=mat, clip=rect)
-    return pix.tobytes("png")
-
-
 def _resolve_llm_config(api_key: str | None = None, base_url: str | None = None) -> tuple[str, str | None]:
-    """Resolve OpenAI-compatible LLM credentials from args, config, or environment."""
+    """Resolve the per-invocation Supen Gateway credential used by OCR."""
+    if api_key is not None or base_url is not None:
+        raise RuntimeError("LLM OCR credentials must be supplied through the per-invocation Supen environment")
     resolved_api_key = (
-        api_key
-        or os.environ.get("SUPEN_LLM_TOKEN")
+        os.environ.get("SUPEN_LLM_TOKEN")
         or os.environ.get("SUPEN_LLM_API_KEY")
-        or os.environ.get("TIWATER_LLM_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or os.environ.get("OPENROUTER_API_KEY")
     )
     if not resolved_api_key:
-        raise RuntimeError(
-            "LLM OCR requires SUPEN_LLM_TOKEN, SUPEN_LLM_API_KEY, TIWATER_LLM_API_KEY, "
-            "OPENAI_API_KEY, OPENROUTER_API_KEY, or --api-key"
-        )
+        raise RuntimeError("LLM OCR requires SUPEN_LLM_TOKEN or SUPEN_LLM_API_KEY")
 
     resolved_base_url = (
-        base_url
-        or os.environ.get("SUPEN_LLM_GATEWAY_URL")
+        os.environ.get("SUPEN_LLM_GATEWAY_URL")
         or os.environ.get("SUPEN_LLM_BASE_URL")
-        or os.environ.get("TIWATER_LLM_BASE_URL")
-        or os.environ.get("OPENAI_BASE_URL")
     )
-    if (
-        not resolved_base_url
-        and os.environ.get("OPENROUTER_API_KEY")
-        and not os.environ.get("OPENAI_API_KEY")
-        and not os.environ.get("SUPEN_LLM_TOKEN")
-        and not os.environ.get("SUPEN_LLM_API_KEY")
-    ):
-        resolved_base_url = "https://openrouter.ai/api/v1"
+    if not resolved_base_url:
+        raise RuntimeError("LLM OCR requires SUPEN_LLM_GATEWAY_URL or SUPEN_LLM_BASE_URL")
 
     return resolved_api_key, resolved_base_url
 
@@ -498,63 +462,10 @@ def _resolve_llm_enable_thinking(
         model = (llm_model or "").lower()
         base = (base_url or "").lower()
         is_aliyun = "aliyuncs.com" in base or "dashscope.aliyuncs.com" in base
-        # Alibaba Model Studio model ids are bare names such as qwen3.7-plus.
-        # OpenRouter-style ids use an owner prefix such as qwen/qwen3.7-plus.
-        is_bare_aliyun_qwen = "/" not in model and model.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-"))
-        thinking_default_qwen = is_bare_aliyun_qwen or (is_aliyun and model.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-")))
+        is_bare_aliyun_qwen = "/" not in model and model.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-", "qwen3.8-"))
+        thinking_default_qwen = is_bare_aliyun_qwen or (is_aliyun and model.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-", "qwen3.8-")))
         return False if thinking_default_qwen else None
     return _parse_optional_bool(mode)
-
-
-def _llm_extract_table(image_bytes: bytes, api_key: str | None = None, llm_model: str = "google/gemini-2.5-flash") -> tuple[list, list]:
-    """Use an LLM (via OpenRouter/OpenAI API) to extract a clean JSON table from an image of a table.
-    
-    Returns:
-        (header, rows)
-    """
-    try:
-        client = _resolve_llm_client(api_key)
-    except RuntimeError as error:
-        print(f"Warning: {error}", file=sys.stderr)
-        return [], []
-
-    b64_image = base64.b64encode(image_bytes).decode('utf-8')
-    
-    prompt = (
-        "You are an expert data extraction assistant. I have provided an image of a table (possibly with a title above it). "
-        "Your task is to extract the structured tabular data from this image exactly as it appears. "
-        "Do not include the table title. Output a clean JSON structure with 'header' and 'rows'. "
-        "If a cell is completely empty in the image, use an empty string. "
-        "Ensure column alignment is perfect. Return ONLY valid JSON."
-    )
-    
-    response = client.chat.completions.create(
-        model=llm_model,
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{b64_image}"
-                        }
-                    }
-                ]
-            }
-        ],
-        temperature=0.0,
-    )
-    
-    try:
-        content = response.choices[0].message.content
-        data = json.loads(content)
-        return data.get("header", []), data.get("rows", [])
-    except Exception as e:
-        print(f"Warning: Failed to parse LLM JSON response: {e}", file=sys.stderr)
-        return [], []
 
 
 def _render_page_image(doc, page_num: int, zoom: float = 2.5, rotation_degrees: int = 0) -> bytes:
@@ -1074,8 +985,12 @@ def llm_ocr(
     page_progress_func=None,
 ) -> dict:
     """Extract page text from scanned PDFs using an OpenAI-compatible vision model."""
+    if llm_model != DEFAULT_OCR_MODEL:
+        raise ValueError(f"OCR model must be {DEFAULT_OCR_MODEL}")
     resolved_api_key, resolved_base_url = _resolve_llm_config(api_key, base_url)
-    client = _resolve_llm_client(resolved_api_key, resolved_base_url)
+    from openai import OpenAI
+    timeout = float(os.environ.get("TIWATER_LLM_TIMEOUT", str(DEFAULT_LLM_TIMEOUT_SECONDS)))
+    client = OpenAI(base_url=resolved_base_url, api_key=resolved_api_key, timeout=timeout)
     resolved_enable_thinking = _resolve_llm_enable_thinking(
         enable_thinking,
         llm_model=llm_model,
@@ -1430,16 +1345,13 @@ def _reextract_with_columns(doc, page_num: int, table_bbox: tuple, table_cells: 
     return result
 
 
-def extract_tables(pdf_path: Path, page_numbers: list[int] | None = None, auto_span: bool = False, llm_fallback: bool = False, api_key: str | None = None, llm_model: str = "google/gemini-2.5-flash") -> dict:
+def extract_tables(pdf_path: Path, page_numbers: list[int] | None = None, auto_span: bool = False) -> dict:
     """Extract tables from PDF pages using PyMuPDF's table detection.
 
     Args:
         pdf_path: Path to PDF file
         page_numbers: Optional list of page numbers (1-indexed). If None, extracts from all pages.
         auto_span: If True, merge tables with matching headers across consecutive pages
-        llm_fallback: If True, use LLM vision to re-extract garbled tables.
-        api_key: Optional API key for LLM fallback.
-        llm_model: Model string to pass to OpenRouter (default: google/gemini-2.5-flash).
 
     Returns:
         Dictionary with extracted tables data
@@ -1465,16 +1377,6 @@ def extract_tables(pdf_path: Path, page_numbers: list[int] | None = None, auto_s
             header, rows, absorbed_title = _fix_absorbed_title(header, rows)
             if not title and absorbed_title:
                 title = absorbed_title
-                
-            # LLM Fallback for garbled tables
-            if llm_fallback:
-                q_score = _table_quality_score(header, rows)
-                if q_score < 0.95:
-                    print(f"Poor extraction quality ({q_score:.2f}) on page {page_num+1}. Falling back to LLM...", file=sys.stderr)
-                    img_bytes = _render_table_region(doc, page_num, table.bbox)
-                    llm_header, llm_rows = _llm_extract_table(img_bytes, api_key, llm_model)
-                    if llm_header or llm_rows:
-                        header, rows = llm_header, llm_rows
                 
             all_tables.append({
                 "page": page_num + 1,
@@ -1582,28 +1484,16 @@ def extract_tables(pdf_path: Path, page_numbers: list[int] | None = None, auto_s
                 needs_reextract = entry is not ref_table and match_ratio < 0.95
 
                 if needs_reextract:
-                    llm_success = False
-                    if llm_fallback:
-                        print(f"Garbled table spanning detected on page {entry['page']}. Falling back to LLM...", file=sys.stderr)
-                        img_bytes = _render_table_region(doc, entry["page"] - 1, tuple(entry["bbox"]))
-                        llm_h, llm_r = _llm_extract_table(img_bytes, api_key, llm_model)
-                        if llm_h or llm_r:
-                            merged_rows.extend(llm_r)
-                            llm_success = True
-                            
-                    if not llm_success:
-                        # Garbled page — re-extract using clean column boundaries geometrically
-                        reextracted = _reextract_with_columns(
-                            doc, entry["page"] - 1, tuple(entry["bbox"]),
-                            entry["_cells"], ref_cells, ref_col_count
-                        )
-                        if reextracted:
-                            # Re-extraction from table.bbox includes the header as its first row.
-                            # We use _fix_absorbed_title to safely separate header from data rows.
-                            _, re_rows, _ = _fix_absorbed_title(reextracted[0], reextracted[1:])
-                            merged_rows.extend(re_rows)
-                        else:
-                            merged_rows.extend(entry["rows"])
+                    # Garbled page — re-extract using clean column boundaries geometrically.
+                    reextracted = _reextract_with_columns(
+                        doc, entry["page"] - 1, tuple(entry["bbox"]),
+                        entry["_cells"], ref_cells, ref_col_count
+                    )
+                    if reextracted:
+                        _, re_rows, _ = _fix_absorbed_title(reextracted[0], reextracted[1:])
+                        merged_rows.extend(re_rows)
+                    else:
+                        merged_rows.extend(entry["rows"])
                 else:
                     rows = entry["rows"]
                     if entry is not span_entries[0] and len(rows) > 1 and _headers_match(current_header, rows[0]):
@@ -1733,22 +1623,19 @@ def extract_table_details(pdf_path: Path, page_numbers: list[int] | None = None)
     }
 
 
-def find_table_by_name(pdf_path: Path, table_name: str, auto_span: bool = False, llm_fallback: bool = False, api_key: str | None = None, llm_model: str = "google/gemini-2.5-flash") -> dict | None:
+def find_table_by_name(pdf_path: Path, table_name: str, auto_span: bool = False) -> dict | None:
     """Find a table by its name/header in the PDF.
 
     Args:
         pdf_path: Path to PDF file
         table_name: Name of table to find (searches in headers and content)
         auto_span: If True, merge tables with matching headers across consecutive pages
-        llm_fallback: If True, use LLM vision to re-extract garbled tables
-        api_key: Optional OpenRouter API Key
-        llm_model: Target LLM model on OpenRouter
 
     Returns:
         Dictionary with table data or None if not found
     """
     # Extract all tables
-    data = extract_tables(pdf_path, auto_span=auto_span, llm_fallback=llm_fallback, api_key=api_key, llm_model=llm_model)
+    data = extract_tables(pdf_path, auto_span=auto_span)
     
     # Search for the matched table
     for t in data.get("tables", []):
@@ -1868,15 +1755,6 @@ def _headers_match(header1: list[str], header2: list[str], threshold: float = 0.
 
 def main() -> int:
     """Main CLI entry point."""
-    default_api_key = None
-    default_base_url = None
-    default_llm_model = os.environ.get("TIWATER_LLM_MODEL", "qwen/qwen3.5-flash-02-23")
-    default_ocr_model = (
-        os.environ.get("TIWATER_LLM_OCR_MODEL")
-        or os.environ.get("TIWATER_LLM_VISION_MODEL")
-        or DEFAULT_OCR_MODEL
-    )
-
     parser = argparse.ArgumentParser(
         description="tiwater-pdf - PDF inspection and table extraction CLI"
     )
@@ -1892,9 +1770,6 @@ def main() -> int:
     extract_parser.add_argument("input", type=Path, help="PDF file to extract from")
     extract_parser.add_argument("--pages", type=str, help="Page numbers (comma-separated, 1-indexed)")
     extract_parser.add_argument("--auto-span", action="store_true", help="Merge tables spanning multiple pages")
-    extract_parser.add_argument("--llm-fallback", action="store_true", help="Use OpenRouter LLM for garbled tables")
-    extract_parser.add_argument("--api-key", type=str, default=default_api_key, help="OpenRouter API Key (or set OPENROUTER_API_KEY env var)")
-    extract_parser.add_argument("--llm-model", type=str, default=default_llm_model, help="LLM model to use on OpenRouter")
     extract_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # extract-table-details command
@@ -1908,19 +1783,14 @@ def main() -> int:
     find_parser.add_argument("input", type=Path, help="PDF file to search")
     find_parser.add_argument("name", type=str, help="Table name to find")
     find_parser.add_argument("--auto-span", action="store_true", help="Merge tables spanning multiple pages")
-    find_parser.add_argument("--llm-fallback", action="store_true", help="Use OpenRouter LLM for garbled tables")
-    find_parser.add_argument("--api-key", type=str, default=default_api_key, help="OpenRouter API Key")
-    find_parser.add_argument("--llm-model", type=str, default=default_llm_model, help="LLM model to use on OpenRouter")
     find_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # OCR command
     ocr_parser = subparsers.add_parser("ocr", help="Extract scanned PDF text with an OpenAI-compatible vision LLM")
     ocr_parser.add_argument("input", type=Path, nargs="+", help="PDF file(s) to OCR")
     ocr_parser.add_argument("--pages", type=str, help="Page numbers (comma-separated, 1-indexed)")
-    ocr_parser.add_argument("--api-key", type=str, default=default_api_key, help="LLM API key")
-    ocr_parser.add_argument("--base-url", type=str, default=default_base_url, help="OpenAI-compatible base URL")
-    ocr_parser.add_argument("--llm-model", type=str, default=default_ocr_model, help="Vision model to use")
-    ocr_parser.add_argument("--provider", choices=["local", "llm"], default=os.getenv("TIWATER_PDF_OCR_PROVIDER", "llm"), help="OCR provider")
+    ocr_parser.add_argument("--llm-model", choices=[DEFAULT_OCR_MODEL], default=DEFAULT_OCR_MODEL, help="Pinned OCR vision model")
+    ocr_parser.add_argument("--provider", choices=["llm"], default="llm", help="OCR provider")
     ocr_parser.add_argument("--language", type=str, default=os.getenv("TIWATER_PDF_OCR_LANGUAGE", "eng"), help="Tesseract language for local OCR")
     ocr_parser.add_argument("--zoom", type=float, default=2.5, help="PDF render zoom for page images")
     ocr_parser.add_argument("--max-tokens", type=int, default=int(os.getenv("TIWATER_PDF_OCR_MAX_TOKENS", "4096")), help="Maximum LLM output tokens per OCR page")
@@ -1973,7 +1843,7 @@ def main() -> int:
             pages = None
             if args.pages:
                 pages = [int(p.strip()) for p in args.pages.split(",")]
-            result = extract_tables(args.input, pages, auto_span=args.auto_span, llm_fallback=args.llm_fallback, api_key=args.api_key, llm_model=args.llm_model)
+            result = extract_tables(args.input, pages, auto_span=args.auto_span)
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))
             else:
@@ -2007,7 +1877,7 @@ def main() -> int:
                     )
 
         elif args.command == "find-table":
-            result = find_table_by_name(args.input, args.name, auto_span=args.auto_span, llm_fallback=args.llm_fallback, api_key=args.api_key)
+            result = find_table_by_name(args.input, args.name, auto_span=args.auto_span)
             if result:
                 if args.json:
                     print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -2043,7 +1913,7 @@ def main() -> int:
                     resolved_enable_thinking = None
                     model = f"local-tesseract:{args.language}"
                 else:
-                    _, resolved_base_url = _resolve_llm_config(args.api_key, args.base_url)
+                    _, resolved_base_url = _resolve_llm_config()
                     resolved_enable_thinking = _resolve_llm_enable_thinking(
                         args.enable_thinking,
                         llm_model=args.llm_model,
@@ -2053,8 +1923,6 @@ def main() -> int:
                         return llm_ocr(
                             input_path,
                             selected_pages,
-                            api_key=args.api_key,
-                            base_url=args.base_url,
                             llm_model=args.llm_model,
                             zoom=args.zoom,
                             max_tokens=args.max_tokens,
@@ -2096,8 +1964,6 @@ def main() -> int:
                 result = llm_ocr(
                     inputs[0],
                     pages,
-                    api_key=args.api_key,
-                    base_url=args.base_url,
                     llm_model=args.llm_model,
                     zoom=args.zoom,
                     max_tokens=args.max_tokens,
