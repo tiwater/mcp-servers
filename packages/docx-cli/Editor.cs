@@ -2763,8 +2763,18 @@ public static class Editor
 
     private static void NormalizeGeneratedOpenXml(WordprocessingDocument doc)
     {
+        const string w14 = "http://schemas.microsoft.com/office/word/2010/wordml";
+        var paragraphIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var root in Inspector.GetRoots(doc))
         {
+            foreach (var paragraph in root.Descendants<Paragraph>())
+            {
+                var paragraphId = paragraph.GetAttributes()
+                    .FirstOrDefault(attribute => attribute.LocalName == "paraId" && attribute.NamespaceUri == w14).Value;
+                if (string.IsNullOrWhiteSpace(paragraphId) || paragraphIds.Add(paragraphId)) continue;
+                paragraph.RemoveAttribute("paraId", w14);
+                paragraph.RemoveAttribute("textId", w14);
+            }
             foreach (var properties in root.Descendants<TableProperties>())
             {
                 NormalizeTableProperties(properties);

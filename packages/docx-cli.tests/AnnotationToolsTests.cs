@@ -4901,6 +4901,35 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_removes_duplicate_paragraph_identity_when_cell_text_adds_paragraphs()
+    {
+        const string w14 = "http://schemas.microsoft.com/office/word/2010/wordml";
+        var source = Path.Combine(Path.GetTempPath(), $"cell-paragraph-identity-{Guid.NewGuid():N}.docx");
+        using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+        {
+            var paragraph = new Paragraph(new Run(new Text("template")));
+            paragraph.SetAttribute(new OpenXmlAttribute("w14", "paraId", w14, "11111111"));
+            paragraph.SetAttribute(new OpenXmlAttribute("w14", "textId", w14, "22222222"));
+            var main = document.AddMainDocumentPart();
+            main.Document = new Document(new Body(new Table(new TableRow(new TableCell(paragraph)))));
+            main.Document.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"cell-paragraph-identity-output-{Guid.NewGuid():N}.docx");
+
+        var edit = Editor.Apply(source, output, [new DocxEditOperation(
+            "replaceTableCellText", TableIndex: 0, RowIndex: 0, CellIndex: 0, Text: "first\nsecond")]);
+
+        Assert.True(Assert.Single(edit.AppliedOperations).Applied);
+        using var result = WordprocessingDocument.Open(output, false);
+        var paragraphIds = result.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>()
+            .Select(paragraph => paragraph.GetAttributes()
+                .FirstOrDefault(attribute => attribute.LocalName == "paraId" && attribute.NamespaceUri == w14).Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+        Assert.Equal(paragraphIds.Count, paragraphIds.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
     public void Edit_plain_cell_text_does_not_materialize_paragraph_bold_over_an_existing_run_style()
     {
         var source = Path.Combine(Path.GetTempPath(), $"plain-cell-style-{Guid.NewGuid():N}.docx");
