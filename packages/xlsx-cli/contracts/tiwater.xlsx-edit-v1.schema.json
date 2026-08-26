@@ -23,6 +23,7 @@
               "setRichTextCellValue",
               "setRangeValues",
               "insertRows",
+              "deleteRows",
               "copyRow",
               "expandSectionRows"
             ]
@@ -89,6 +90,17 @@
           "repeatColsEnd": ["repeatColsStart"]
         },
         "allOf": [
+          {
+            "if": { "properties": { "type": { "const": "deleteRows" } }, "required": ["type"] },
+            "then": {
+              "required": ["sheet", "startRow", "count"],
+              "properties": {
+                "sheet": { "type": "string", "minLength": 1 },
+                "startRow": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+                "count": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+              }
+            }
+          },
           {
             "if": { "properties": { "type": { "const": "setCellNumberFormat" } }, "required": ["type"] },
             "then": {

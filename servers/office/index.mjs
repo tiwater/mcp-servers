@@ -116,6 +116,32 @@ const pptxFormatApplyOutput = z.object({
     issueCount: z.number().int().nonnegative(),
   }).strict(),
 }).strict();
+const pptxObjectIssue = z.object({
+  slideNumber: z.number().int(),
+  shapeId: z.number().int().nonnegative().max(0xffffffff),
+  message: z.string().min(1),
+}).strict();
+const pptxTransform = z.object({
+  x: z.number().int(), y: z.number().int(), cx: z.number().int().positive(), cy: z.number().int().positive(),
+}).strict();
+const pptxShapeGeometryResult = z.object({
+  input: z.string().min(1), output: z.string().min(1),
+  operationCount: z.number().int().nonnegative(), appliedCount: z.number().int().nonnegative(),
+  changes: z.array(z.object({
+    slideNumber: z.number().int().positive(), shapeId: z.number().int().positive().max(0xffffffff),
+    before: pptxTransform, after: pptxTransform,
+  }).strict()),
+  issues: z.array(pptxObjectIssue),
+}).strict();
+const pptxPictureImageResult = z.object({
+  input: z.string().min(1), output: z.string().min(1),
+  operationCount: z.number().int().nonnegative(), appliedCount: z.number().int().nonnegative(),
+  changes: z.array(z.object({
+    slideNumber: z.number().int().positive(), shapeId: z.number().int().positive().max(0xffffffff), image: z.string().min(1),
+    beforeSha256: z.string().regex(/^[0-9a-f]{64}$/), afterSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  }).strict()),
+  issues: z.array(pptxObjectIssue),
+}).strict();
 
 const renderFileIdentity = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -176,9 +202,19 @@ const tableCellInput = z.object({
   alignment: z.string().optional(),
   richText: z.array(richTextSegment).optional(),
 }).strict();
+const tableRowRepeatBase = {
+  tableIndex: index,
+  rowIndex: index,
+  repeatAsHeader: z.boolean(),
+};
+const tableRowRepeatAddress = z.union([
+  z.object(tableRowRepeatBase).strict(),
+  z.object({ ...tableRowRepeatBase, headerIndex: index }).strict(),
+  z.object({ ...tableRowRepeatBase, footerIndex: index }).strict(),
+]);
 
-function editAction(name, operationType, description, changeSchema) {
-  return { name, operationType, description, changeSchema, batch: true };
+function editAction(name, operationType, description, changeSchema, options = {}) {
+  return { name, operationType, description, changeSchema, batch: true, ...options };
 }
 
 function documentAction(name, operationType, description) {
@@ -192,6 +228,9 @@ const docxEditActions = [
   editAction('docx_replace_body_text', 'replaceBodyText', 'Replace uniquely matched current body text.', z.object({ findText: pathInput, text: z.string() }).strict()),
   editAction('docx_delete_body_paragraph', 'deleteBodyParagraph', 'Delete uniquely matched current body paragraphs.', z.object({ findText: pathInput, ...optionalTextMatch }).strict()),
   editAction('docx_delete_body_drawing_before_paragraph', 'deleteBodyDrawingBeforeParagraph', 'Delete the drawing immediately before a uniquely matched current paragraph.', z.object({ findText: pathInput, ...optionalTextMatch }).strict()),
+  editAction('docx_insert_body_range', 'insertBodyRange', 'Insert a bounded direct-body range from a current source DOCX before a current target body boundary, preserving supported styles and relationships.', z.object({ source: pathInput, sourceStartBodyIndex: index, sourceEndBodyIndex: index, targetBodyIndex: index }).strict(), { sourceFields: ['source'] }),
+  editAction('docx_replace_drawing_image', 'replaceDrawingImage', 'Replace the image relationship of a current body drawing while preserving its drawing geometry.', z.object({ paragraphIndex: index, drawingIndex: index, image: pathInput }).strict(), { sourceFields: ['image'] }),
+  editAction('docx_insert_body_image', 'insertBodyImage', 'Insert an image as a new inline drawing before a current direct-body boundary.', z.object({ targetBodyIndex: index, image: pathInput, widthEmu: z.number().int().positive(), heightEmu: z.number().int().positive(), altText: z.string().optional() }).strict(), { sourceFields: ['image'] }),
   editAction('docx_delete_body_range', 'deleteBodyRange', 'Delete uniquely bounded current body ranges.', z.object({ findText: pathInput, endFindText: z.string().optional(), matchMode: z.string().optional(), endMatchMode: z.string().optional(), paragraphStyle: z.string().optional(), endParagraphStyle: z.string().optional(), deleteToBodyEnd: z.boolean().optional(), removePrecedingPageBreak: z.boolean().optional() }).strict()),
   editAction('docx_start_section', 'startSectionBeforeParagraph', 'Start a section before a uniquely matched current paragraph.', z.object({ findText: pathInput, orientation: z.enum(['portrait', 'landscape']) }).strict()),
   editAction('docx_set_header_paragraph_text', 'replaceHeaderParagraphText', 'Set current header paragraph text.', z.object({ headerIndex: index, paragraphIndex: index, text: z.string() }).strict()),
@@ -218,6 +257,7 @@ const docxEditActions = [
   editAction('docx_apply_font_policy', 'applyDocumentFontPolicy', 'Apply an explicit font policy to current document text.', z.object({ fontPolicy: z.object({ schema: pathInput, body: z.record(z.string(), z.string()), table: z.record(z.string(), z.string()) }).strict() }).strict()),
   editAction('docx_set_table_row_height', 'setTableRowHeight', 'Set current body table row height.', z.object({ tableIndex: index, rowIndex: index, height: pathInput, heightRule: z.string().optional() }).strict()),
   editAction('docx_set_table_row_cant_split', 'setTableRowCantSplit', 'Set current body table row split behavior.', z.object({ tableIndex: index, rowIndex: index, cantSplit: z.boolean() }).strict()),
+  editAction('docx_set_table_row_repeat_as_header', 'setTableRowRepeatAsHeader', 'Set or unset repeat-as-header on uniquely addressed current body, header, or footer table rows.', tableRowRepeatAddress),
   editAction('docx_set_table_row_keep_next', 'setTableRowKeepNext', 'Set keep-next behavior for current body table rows.', z.object({ tableIndex: index, rowIndex: index, keepNext: z.boolean() }).strict()),
   editAction('docx_set_body_paragraph_keep_next', 'setBodyParagraphKeepNext', 'Set keep-next behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepNext: z.boolean() }).strict()),
   editAction('docx_set_body_paragraph_keep_lines', 'setBodyParagraphKeepLines', 'Set keep-lines behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepLines: z.boolean() }).strict()),
@@ -240,6 +280,7 @@ const xlsxEditActions = [
   editAction('xlsx_set_rich_text_cell_value', 'setRichTextCellValue', 'Set current workbook rich-text cell values.', z.object({ sheet: pathInput, cell: pathInput, value: z.string(), bold: z.boolean() }).strict()),
   editAction('xlsx_set_range_values', 'setRangeValues', 'Set rectangular values in a current workbook.', z.object({ sheet: pathInput, startCell: pathInput, values: z.array(z.array(scalar)), valueType: z.string().optional() }).strict()),
   editAction('xlsx_insert_rows', 'insertRows', 'Insert rows into a current worksheet.', z.object({ sheet: pathInput, startRow: positiveIndex, count: positiveIndex, preserveHorizontalMergedRanges: z.boolean().optional(), expandAdjacentVerticalMergedRanges: z.boolean().optional() }).strict()),
+  editAction('xlsx_delete_rows', 'deleteRows', 'Structurally delete rows from a current worksheet.', z.object({ sheet: pathInput, startRow: positiveIndex, count: positiveIndex }).strict()),
   editAction('xlsx_copy_row', 'copyRow', 'Copy current worksheet rows.', z.object({ sheet: pathInput, sourceRow: positiveIndex, targetRow: positiveIndex, translateFormulas: z.boolean().optional() }).strict()),
   editAction('xlsx_expand_section_rows', 'expandSectionRows', 'Expand current worksheet row sections from visible anchors.', z.object({ sheet: pathInput, anchorText: pathInput, exampleRows: positiveIndex, targetRows: positiveIndex, preserveStyle: z.boolean().optional(), preserveFormulas: z.boolean().optional(), preserveMergedRanges: z.boolean().optional() }).strict()),
   editAction('xlsx_set_print_area', 'setPrintArea', 'Set current worksheet print areas.', z.object({ sheet: pathInput, range: pathInput }).strict()),
@@ -434,6 +475,30 @@ const tools = [
     handler: pptxApplyFormat,
   },
   {
+    name: 'pptx_set_shape_geometry',
+    description: 'Set exact native EMU bounds for uniquely identified current-slide PPTX objects. One call batches only this fixed geometry action and does not infer repair coordinates.',
+    inputSchema: z.object({
+      input: pathInput.describe('Path to the current PPTX.'),
+      changes: z.array(z.object({ slideNumber: positiveIndex, shapeId: positiveIndex.max(0xffffffff), x: z.number().int(), y: z.number().int(), cx: positiveIndex, cy: positiveIndex }).strict()).min(1),
+      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
+      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
+    }).strict(),
+    outputSchema: fixedEditOutput('pptx_set_shape_geometry'),
+    handler: pptxSetShapeGeometry,
+  },
+  {
+    name: 'pptx_replace_picture_image',
+    description: 'Replace embedded PNG or JPEG media for uniquely identified current-slide PPTX pictures while preserving the picture object, geometry, crop, and unrelated media. One call batches only this fixed replacement action.',
+    inputSchema: z.object({
+      input: pathInput.describe('Path to the current PPTX.'),
+      changes: z.array(z.object({ slideNumber: positiveIndex, shapeId: positiveIndex.max(0xffffffff), image: pathInput }).strict()).min(1),
+      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
+      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
+    }).strict(),
+    outputSchema: fixedEditOutput('pptx_replace_picture_image'),
+    handler: pptxReplacePictureImage,
+  },
+  {
     name: 'pptx_validate',
     description: 'Validate a current PPTX package against the published OpenXML contract.',
     inputSchema: inputOnly,
@@ -537,12 +602,17 @@ async function fixedEdit(action, args) {
   const operations = action.batch
     ? args.changes.map(change => ({ ...change, type: action.operationType }))
     : [{ type: action.operationType }];
+  const sourcePaths = [...new Set((action.sourceFields ?? []).flatMap(field =>
+    (args.changes ?? []).map(change => path.resolve(requireString(change[field], field)))))];
+  const sources = await Promise.all(sourcePaths.map(fileArtifact));
   const candidates = action.name.startsWith('docx_') ? docxCandidates : xlsxCandidates;
   return withTempJsonFile({ operations }, async operationsPath => {
     try {
       const result = await runJsonCandidateChain(candidates, ['edit', input, operationsPath, output], { allowedExitCodes: [0, 1] });
       const appliedOperations = Array.isArray(result.json?.appliedOperations) ? result.json.appliedOperations : [];
-      const pass = appliedOperations.length === operations.length && appliedOperations.every(operation => operation.applied === true);
+      const observedSources = await Promise.all(sourcePaths.map(fileArtifact));
+      const sourceBindingStable = isDeepStrictEqual(sources, observedSources);
+      const pass = sourceBindingStable && appliedOperations.length === operations.length && appliedOperations.every(operation => operation.applied === true);
       const outputArtifact = pass ? await fileArtifact(output) : null;
       if (!pass) await rm(output, { force: true });
       const receipt = {
@@ -551,6 +621,8 @@ async function fixedEdit(action, args) {
         operationType: action.operationType,
         pass,
         input: inputArtifact,
+        ...(sources.length > 0 ? { sources } : {}),
+        ...(sources.length > 0 ? { sourceBindingStable } : {}),
         output: outputArtifact,
         operationCount: operations.length,
         appliedOperations,
@@ -724,6 +796,67 @@ async function pptxApplyTemplate(args) {
 
 async function pptxApplyFormat(args) {
   return withTempJsonFile({ operations: args.changes }, planPath => pptxApply('pptx_apply_format', args, false, planPath));
+}
+
+async function pptxSetShapeGeometry(args) {
+  return pptxFixedObjectEdit('pptx_set_shape_geometry', 'set-shape-geometry', args, pptxShapeGeometryResult, args.changes);
+}
+
+async function pptxReplacePictureImage(args) {
+  const changes = args.changes.map(change => ({ ...change, image: path.resolve(requireString(change.image, 'image')) }));
+  return pptxFixedObjectEdit('pptx_replace_picture_image', 'replace-picture-image', args, pptxPictureImageResult, changes, changes.map(change => change.image));
+}
+
+async function pptxFixedObjectEdit(tool, command, args, resultSchema, changes, sourcePaths = []) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const output = path.resolve(requireString(args.output, 'output'));
+  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
+  if (path.extname(input).toLowerCase() !== '.pptx' || path.extname(output).toLowerCase() !== '.pptx')
+    throw Object.assign(new Error('PPTX object edits require .pptx input and output paths'), { code: -32602 });
+  await requireNewFile(output, 'output');
+  await requireNewFile(receiptOutput, 'receiptOutput');
+  const inputArtifact = await fileArtifact(input);
+  const sourceArtifacts = await Promise.all([...new Set(sourcePaths)].map(fileArtifact));
+  return withTempJsonFile({ changes }, async planPath => {
+    const requestArtifact = await fileArtifact(planPath);
+    try {
+      const result = await runJsonCandidateChain(pptxCandidates, [command, input, planPath, output], { allowedExitCodes: [0, 1] });
+      await requireArtifactUnchanged(inputArtifact, 'PPTX object edit input');
+      await requireArtifactUnchanged(requestArtifact, 'PPTX object edit request');
+      for (const source of sourceArtifacts) await requireArtifactUnchanged(source, 'PPTX replacement image');
+      const providerResult = resultSchema.parse(result.json);
+      if (path.resolve(providerResult.input) !== input || path.resolve(providerResult.output) !== output)
+        throw new Error('PPTX object edit receipt is not bound to the current input and output');
+      const sourceByPath = new Map(sourceArtifacts.map(source => [source.path, source]));
+      const providerMatchesRequest = providerResult.changes.length === changes.length && providerResult.changes.every((change, position) => {
+        const requested = changes[position];
+        if (change.slideNumber !== requested.slideNumber || change.shapeId !== requested.shapeId) return false;
+        if (tool === 'pptx_set_shape_geometry')
+          return isDeepStrictEqual(change.after, { x: requested.x, y: requested.y, cx: requested.cx, cy: requested.cy });
+        const requestedImage = path.resolve(requested.image);
+        return path.resolve(change.image) === requestedImage && change.afterSha256 === sourceByPath.get(requestedImage)?.sha256;
+      });
+      const pass = providerResult.issues.length === 0
+        && providerResult.operationCount === changes.length
+        && providerResult.appliedCount === changes.length
+        && providerMatchesRequest;
+      const outputArtifact = pass ? await fileArtifact(output) : null;
+      if (!pass) await rm(output, { force: true });
+      const receipt = {
+        schema: 'tiwater.office.pptx-fixed-object-edit-receipt/v1', tool, pass,
+        input: inputArtifact, requestSha256: requestArtifact.sha256,
+        ...(sourceArtifacts.length ? { sourceImages: sourceArtifacts } : {}),
+        output: outputArtifact, providerResult,
+      };
+      return {
+        tool, runtime: commandRuntime(result), receipt: await writeJsonArtifact(receiptOutput, receipt), output: outputArtifact,
+        summary: { pass, operationCount: providerResult.operationCount, appliedCount: providerResult.appliedCount },
+      };
+    } catch (error) {
+      await rm(output, { force: true });
+      throw error;
+    }
+  });
 }
 
 async function pptxApply(tool, args, templateMode, plan) {

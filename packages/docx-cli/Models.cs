@@ -104,7 +104,25 @@ public sealed record TableRowDetail(
     int GridWidth,
     bool CantSplit,
     bool KeepNext,
-    IReadOnlyList<TableCellDetail> Cells);
+    IReadOnlyList<TableCellDetail> Cells,
+    bool RepeatAsHeader = false);
+
+public sealed record TableStoryReference(
+    int SectionIndex,
+    string ReferenceType,
+    string RelationshipId);
+
+public sealed record TableStoryIdentity(
+    string Kind,
+    int? HeaderIndex,
+    int? FooterIndex,
+    IReadOnlyList<TableStoryReference> References);
+
+public sealed record TableMutationAddress(
+    string Kind,
+    int TableIndex,
+    int? HeaderIndex = null,
+    int? FooterIndex = null);
 
 public sealed record TableDetail(
     int TableIndex,
@@ -116,14 +134,17 @@ public sealed record TableDetail(
     IReadOnlyList<string?> GridColumnWidths,
     string? Width,
     string? WidthType,
-    IReadOnlyList<TableRowDetail> Rows);
+    IReadOnlyList<TableRowDetail> Rows,
+    TableStoryIdentity? Story = null,
+    TableMutationAddress? MutationAddress = null);
 
 public sealed record TableInspectionReport(
     string Schema,
     string ToolVersion,
     IReadOnlyDictionary<string, string> ExtractionView,
     string File,
-    IReadOnlyList<TableDetail> Tables);
+    IReadOnlyList<TableDetail> Tables,
+    IReadOnlyList<TableDetail>? StoryTables = null);
 
 public sealed record StructureSummary(
     int BookmarkCount,
@@ -608,10 +629,20 @@ public sealed record DocxEditOperation(
     bool? CantSplit = null,
     bool? KeepNext = null,
     bool? KeepLines = null,
+    bool? RepeatAsHeader = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null,
     DocxFontPolicy? FontPolicy = null,
     IReadOnlyList<string>? ParagraphTexts = null,
-    int? ExpectedCount = null);
+    int? ExpectedCount = null,
+    string? Source = null,
+    int? SourceStartBodyIndex = null,
+    int? SourceEndBodyIndex = null,
+    int? TargetBodyIndex = null,
+    string? Image = null,
+    int? DrawingIndex = null,
+    long? WidthEmu = null,
+    long? HeightEmu = null,
+    string? AltText = null);
 
 public sealed record DocxFontRule(string EastAsia, string Latin, string Size);
 

@@ -30,6 +30,11 @@ public static class Editor
         using var doc = WordprocessingDocument.Open(output, true);
         var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
         var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+        var repeatHeaderFailures = ValidateRepeatHeaderBatch(doc, operations);
+        if (repeatHeaderFailures is not null)
+        {
+            return new DocxEditResult(Path.GetFullPath(input), Path.GetFullPath(output), repeatHeaderFailures);
+        }
         var applied = new List<DocxEditAppliedOperation>();
 
         foreach (var operation in operations)
@@ -79,6 +84,9 @@ public static class Editor
             "replaceBodyText" => ReplaceBodyText(body, operation),
             "deleteBodyParagraph" => DeleteBodyParagraph(body, operation),
             "deleteBodyDrawingBeforeParagraph" => DeleteBodyDrawingBeforeParagraph(body, operation),
+            "insertBodyRange" => DocxObjectActions.InsertBodyRange(doc, operation),
+            "replaceDrawingImage" => DocxObjectActions.ReplaceDrawingImage(doc, operation),
+            "insertBodyImage" => DocxObjectActions.InsertBodyImage(doc, operation),
             "deleteBodyRange" => DeleteBodyRange(body, operation),
             "startSectionBeforeParagraph" => StartSectionBeforeParagraph(body, operation),
             "replaceAllHeaderParagraphText" => ReplaceAllHeaderParagraphText(doc, operation),
@@ -107,6 +115,7 @@ public static class Editor
             "applyDocumentFontPolicy" => ApplyDocumentFontPolicy(body, operation),
             "setTableRowHeight" => SetTableRowHeight(body, operation),
             "setTableRowCantSplit" => SetTableRowCantSplit(body, operation),
+            "setTableRowRepeatAsHeader" => SetTableRowRepeatAsHeader(doc, operation),
             "setTableRowKeepNext" => SetTableRowKeepNext(body, operation),
             "setBodyParagraphKeepNext" => SetBodyParagraphKeepNext(body, operation),
             "setBodyParagraphKeepLines" => SetBodyParagraphKeepLines(body, operation),
@@ -1026,6 +1035,134 @@ public static class Editor
 
         return new DocxEditAppliedOperation(operation.Type, true,
             $"Updated table[{operation.TableIndex}].row[{operation.RowIndex}] cantSplit={operation.CantSplit.Value.ToString().ToLowerInvariant()}");
+    }
+
+    private static IReadOnlyList<DocxEditAppliedOperation>? ValidateRepeatHeaderBatch(
+        WordprocessingDocument doc,
+        IReadOnlyList<DocxEditOperation> operations)
+    {
+        var repeatOperations = operations.Where(operation => operation.Type == "setTableRowRepeatAsHeader").ToList();
+        if (repeatOperations.Count == 0) return null;
+
+        var errors = new string?[repeatOperations.Count];
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < repeatOperations.Count; index++)
+        {
+            var operation = repeatOperations[index];
+            if (!TryResolveTableRow(doc, operation, out _, out var address, out var error))
+            {
+                errors[index] = error;
+                continue;
+            }
+            if (!seen.TryAdd(address, index))
+            {
+                errors[index] = $"Duplicate table row target: {address}";
+                errors[seen[address]] ??= $"Duplicate table row target: {address}";
+            }
+        }
+
+        if (errors.All(error => error is null)) return null;
+        var repeatIndex = 0;
+        return operations.Select(operation =>
+        {
+            if (operation.Type == "setTableRowRepeatAsHeader")
+            {
+                var detail = errors[repeatIndex++] ?? "Batch rejected before mutation because another repeat-header target is invalid";
+                return new DocxEditAppliedOperation(operation.Type, false, detail);
+            }
+            return new DocxEditAppliedOperation(operation.Type, false, "Batch rejected before mutation");
+        }).ToList();
+    }
+
+    private static DocxEditAppliedOperation SetTableRowRepeatAsHeader(WordprocessingDocument doc, DocxEditOperation operation)
+    {
+        if (!TryResolveTableRow(doc, operation, out var row, out var address, out var error))
+            return new DocxEditAppliedOperation(operation.Type, false, error);
+
+        var properties = row!.GetFirstChild<TableRowProperties>() ?? row.PrependChild(new TableRowProperties());
+        properties.RemoveAllChildren<TableHeader>();
+        if (operation.RepeatAsHeader!.Value) properties.AppendChild(new TableHeader());
+        return new DocxEditAppliedOperation(
+            operation.Type,
+            true,
+            $"Updated {address} repeatAsHeader={operation.RepeatAsHeader.Value.ToString().ToLowerInvariant()}");
+    }
+
+    private static bool TryResolveTableRow(
+        WordprocessingDocument doc,
+        DocxEditOperation operation,
+        out TableRow? row,
+        out string address,
+        out string error)
+    {
+        row = null;
+        address = string.Empty;
+        error = string.Empty;
+        if (operation.TableIndex is null || operation.RowIndex is null || operation.RepeatAsHeader is null)
+        {
+            error = "tableIndex, rowIndex, and repeatAsHeader are required";
+            return false;
+        }
+        if (operation.TableIndex < 0 || operation.RowIndex < 0)
+        {
+            error = "tableIndex and rowIndex must be non-negative";
+            return false;
+        }
+        if (operation.HeaderIndex is not null && operation.FooterIndex is not null)
+        {
+            error = "headerIndex and footerIndex are mutually exclusive";
+            return false;
+        }
+
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        OpenXmlElement root;
+        string scope;
+        if (operation.HeaderIndex is { } headerIndex)
+        {
+            var headers = mainPart.HeaderParts.Where(part => part.Header is not null)
+                .OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).ToList();
+            if (headerIndex < 0 || headerIndex >= headers.Count)
+            {
+                error = $"headerIndex {headerIndex} is out of range";
+                return false;
+            }
+            root = headers[headerIndex].Header!;
+            scope = $"header[{headerIndex}]";
+        }
+        else if (operation.FooterIndex is { } footerIndex)
+        {
+            var footers = mainPart.FooterParts.Where(part => part.Footer is not null)
+                .OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).ToList();
+            if (footerIndex < 0 || footerIndex >= footers.Count)
+            {
+                error = $"footerIndex {footerIndex} is out of range";
+                return false;
+            }
+            root = footers[footerIndex].Footer!;
+            scope = $"footer[{footerIndex}]";
+        }
+        else
+        {
+            root = mainPart.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+            scope = "body";
+        }
+
+        var tables = root.Elements<Table>().ToList();
+        if (operation.TableIndex.Value >= tables.Count)
+        {
+            error = $"tableIndex {operation.TableIndex} is out of range for {scope}; nested tables are inspection-only targets";
+            return false;
+        }
+        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
+        if (operation.RowIndex.Value >= rows.Count)
+        {
+            error = $"rowIndex {operation.RowIndex} is out of range for {scope}.table[{operation.TableIndex}]";
+            return false;
+        }
+
+        row = rows[operation.RowIndex.Value];
+        address = $"{scope}.table[{operation.TableIndex}].row[{operation.RowIndex}]";
+        return true;
     }
 
     private static DocxEditAppliedOperation SetTableRowKeepNext(Body body, DocxEditOperation operation)

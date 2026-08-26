@@ -146,7 +146,8 @@ public sealed record XlsxEditAppliedOperation(
     string Detail,
     string? Sheet = null,
     string? ChangedRange = null,
-    IReadOnlyList<string>? Warnings = null
+    IReadOnlyList<string>? Warnings = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ErrorCode = null
 );
 
 public sealed record XlsxEditResult(

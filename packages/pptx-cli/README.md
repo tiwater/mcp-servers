@@ -10,6 +10,8 @@ tiwater-pptx inspect <input.pptx> --json --detail
 tiwater-pptx export-json <input.pptx> [output.json]
 tiwater-pptx fill-template <template.pptx> <data.json> <output.pptx>
 tiwater-pptx apply-format-edits <input.pptx> <plan.json> <output.pptx>
+tiwater-pptx set-shape-geometry <input.pptx> <changes.json> <output.pptx>
+tiwater-pptx replace-picture-image <input.pptx> <changes.json> <output.pptx>
 tiwater-pptx apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>
 tiwater-pptx validate <input.pptx>
 tiwater-pptx map-render-findings <inspect.json> <render-manifest.json> <findings.json> <map.json>
@@ -70,6 +72,25 @@ by slide number, shape id, and run index from `inspect --detail`.
 Supported `paragraphAlignment` values are `left`, `center`, `right`,
 `justified`, and `distributed`. Missing targets are reported in `issues`; they
 are not silently ignored.
+
+## Fixed Object Actions
+
+`set-shape-geometry` sets exact `x`, `y`, `cx`, and `cy` EMU values for a
+uniquely identified top-level slide shape, picture, graphic frame, or group.
+Every target must already have a complete explicit transform. Duplicate,
+missing, ambiguous, nested, unsupported, or incomplete targets reject the
+entire batch before an output is created. Rotation, flips, group child
+coordinates, content, z-order, identity, and relationships are preserved.
+
+`replace-picture-image` replaces the embedded media for a uniquely identified
+top-level slide picture. Replacement is limited to a valid PNG or JPEG of the
+same media type as the current picture. The picture identity, geometry, crop,
+and unrelated or shared media consumers are preserved. The action does not
+insert pictures or create new shape identities.
+
+Both commands accept `{ "changes": [...] }` with no operation discriminator.
+Their published contracts are `tiwater.pptx-shape-geometry/v1` and
+`tiwater.pptx-picture-replacement/v1` under `contracts/`.
 
 Rendered finding mapping is evidence-only: it identifies the current slide,
 layout, or master object associated with a hash-bound WPS raster finding but

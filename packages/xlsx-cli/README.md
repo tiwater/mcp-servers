@@ -101,6 +101,7 @@ Applies a batch of explicit fixed-layout workbook edits. Supported operation typ
 - `setRichTextCellValue` with required `sheet`, `cell`, `value`, and `bold`; writes one explicit rich-text run so value and all-run bold state are one operation
 - `setRangeValues` with required `sheet`, `startCell`, and `values`; optional `valueType`
 - `insertRows` with required `sheet`, `startRow`, and `count`; optional `expandAdjacentVerticalMergedRanges` extends vertical merged ranges that end immediately before the insertion point
+- `deleteRows` with required `sheet`, `startRow`, and `count`; structurally removes the bounded row interval and translates supported worksheet coordinates, failing atomically with a typed error when a dependent structure cannot be translated safely
 - `copyRow` with required `sheet`, `sourceRow`, and `targetRow`; optional `translateFormulas` and `preserveHorizontalMergedRanges`
 - `expandSectionRows` with required `sheet`, `anchorText`, `exampleRows`, and `targetRows`; optional `preserveStyle`, `preserveFormulas`, and `preserveMergedRanges`
 
@@ -128,6 +129,16 @@ one ending at its last example row, expands with the generated rows. Shrinking
 existing sections is reported as a warning and
 does not delete rows.
 
+`deleteRows` shifts surviving row and cell coordinates, supported A1 formulas,
+merged ranges, classic comments, drawing anchors, worksheet dimensions, manual
+row breaks, print areas, and print-title rows; surviving cell and row styles move
+with their rows. Comments whose cells are deleted are removed. A surviving
+formula that directly targets a deleted row is rejected instead of being guessed
+into a `#REF!` expression. Tables, auto-filters, conditional formatting, data
+validation, hyperlinks, threaded comments, unsupported formula address forms,
+and unsupported defined-name or print-definition forms fail the complete edit
+batch with a typed `errorCode` and leave the requested output unchanged.
+
 ```bash
 tiwater-xlsx edit <input.xlsx> <operations.json> <output.xlsx>
 ```
@@ -150,6 +161,7 @@ Example operations file:
     { "type": "setColumnWidth", "sheet": "Sheet1", "column": "G", "width": 60 },
     { "type": "setRangeValues", "sheet": "Sheet1", "startCell": "F2", "values": [["233988", "383789"], ["252353", "341366"]], "valueType": "number" },
     { "type": "insertRows", "sheet": "RP", "startRow": 8, "count": 2 },
+    { "type": "deleteRows", "sheet": "RP", "startRow": 8, "count": 2 },
     { "type": "copyRow", "sheet": "RP", "sourceRow": 12, "targetRow": 14, "translateFormulas": true },
     { "type": "expandSectionRows", "sheet": "RP", "anchorText": "impurity peak area", "exampleRows": 2, "targetRows": 4, "preserveStyle": true, "preserveFormulas": true, "preserveMergedRanges": true }
   ]

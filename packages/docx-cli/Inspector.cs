@@ -179,7 +179,12 @@ public static class Inspector
         var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
         var details = new List<TableDetail>();
         var nextTableIndex = 0;
-        void AddTable(Table table, IReadOnlyList<string> containmentPath, string? parentCellAddress)
+        void AddTable(
+            Table table,
+            IReadOnlyList<string> containmentPath,
+            string? parentCellAddress,
+            TableStoryIdentity story,
+            TableMutationAddress? mutationAddress)
         {
             var tableIndex = nextTableIndex++;
             var rows = table.Elements<TableRow>().ToList();
@@ -236,7 +241,8 @@ public static class Inspector
                     GridWidth: gridWidth,
                     CantSplit: row.TableRowProperties?.GetFirstChild<CantSplit>() is not null,
                     KeepNext: row.Elements<TableCell>().SelectMany(cell => cell.Elements<Paragraph>()).Any(paragraph => paragraph.ParagraphProperties?.GetFirstChild<KeepNext>() is not null),
-                    Cells: cellDetails));
+                    Cells: cellDetails,
+                    RepeatAsHeader: row.TableRowProperties?.GetFirstChild<TableHeader>() is not null));
             }
 
             var declaredGridWidths = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Select(column => (string?)column.Width?.Value).ToList() ?? [];
@@ -253,7 +259,9 @@ public static class Inspector
                 GridColumnWidths: declaredGridWidths,
                 Width: tableWidth?.Width?.Value,
                 WidthType: tableWidth?.GetAttributes().FirstOrDefault(attribute => attribute.LocalName == "type").Value,
-                Rows: rowDetails));
+                Rows: rowDetails,
+                Story: story,
+                MutationAddress: mutationAddress));
 
             for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
             for (var cellIndex = 0; cellIndex < rows[rowIndex].Elements<TableCell>().Count(); cellIndex++)
@@ -263,13 +271,46 @@ public static class Inspector
                 for (var nestedIndex = 0; nestedIndex < nested.Count; nestedIndex++)
                 {
                     var cellAddress = $"table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}";
-                    AddTable(nested[nestedIndex], [.. containmentPath, $"row:{rowIndex}", $"cell:{cellIndex}", $"table:{nestedIndex}"], cellAddress);
+                    AddTable(
+                        nested[nestedIndex],
+                        [.. containmentPath, $"row:{rowIndex}", $"cell:{cellIndex}", $"table:{nestedIndex}"],
+                        cellAddress,
+                        story,
+                        null);
                 }
             }
         }
 
+        var bodyStory = new TableStoryIdentity("body", null, null, []);
         var bodyTables = body.Elements<Table>().ToList();
-        for (var index = 0; index < bodyTables.Count; index++) AddTable(bodyTables[index], ["body", $"table:{index}"], null);
+        for (var index = 0; index < bodyTables.Count; index++)
+            AddTable(bodyTables[index], ["body", $"table:{index}"], null, bodyStory, new TableMutationAddress("body", index));
+        var bodyTableDetailCount = details.Count;
+
+        var sections = body.Descendants<SectionProperties>().ToList();
+        var headers = mainPart.HeaderParts.Where(part => part.Header is not null)
+            .OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).ToList();
+        for (var headerIndex = 0; headerIndex < headers.Count; headerIndex++)
+        {
+            var relationshipId = mainPart.GetIdOfPart(headers[headerIndex]);
+            var references = BuildStoryReferences(sections, relationshipId, header: true);
+            var story = new TableStoryIdentity("header", headerIndex, null, references);
+            var tables = headers[headerIndex].Header!.Elements<Table>().ToList();
+            for (var tableIndex = 0; tableIndex < tables.Count; tableIndex++)
+                AddTable(tables[tableIndex], ["header", $"header:{headerIndex}", $"table:{tableIndex}"], null, story, new TableMutationAddress("header", tableIndex, HeaderIndex: headerIndex));
+        }
+
+        var footers = mainPart.FooterParts.Where(part => part.Footer is not null)
+            .OrderBy(part => mainPart.GetIdOfPart(part), StringComparer.Ordinal).ToList();
+        for (var footerIndex = 0; footerIndex < footers.Count; footerIndex++)
+        {
+            var relationshipId = mainPart.GetIdOfPart(footers[footerIndex]);
+            var references = BuildStoryReferences(sections, relationshipId, header: false);
+            var story = new TableStoryIdentity("footer", null, footerIndex, references);
+            var tables = footers[footerIndex].Footer!.Elements<Table>().ToList();
+            for (var tableIndex = 0; tableIndex < tables.Count; tableIndex++)
+                AddTable(tables[tableIndex], ["footer", $"footer:{footerIndex}", $"table:{tableIndex}"], null, story, new TableMutationAddress("footer", tableIndex, FooterIndex: footerIndex));
+        }
 
         var version = typeof(Inspector).Assembly.GetName().Version?.ToString() ?? "unknown";
         return new TableInspectionReport(
@@ -281,10 +322,43 @@ public static class Inspector
                 ["visibilityView"] = "all-direct-visible-text",
                 ["tableTraversal"] = "body-and-nested-depth-first",
                 ["cellText"] = "direct-cell-paragraphs-excluding-nested-tables",
-                ["paragraphs"] = "direct-cell-paragraphs-only"
+                ["paragraphs"] = "direct-cell-paragraphs-only",
+                ["storyTableTraversal"] = "header-footer-and-nested-depth-first",
+                ["storyIdentity"] = "body-or-part-index-with-section-reference-bindings",
+                ["mutationAddress"] = "direct-story-tables-only"
             },
             path,
-            details);
+            details.Take(bodyTableDetailCount).ToList(),
+            details.Skip(bodyTableDetailCount).ToList());
+    }
+
+    private static IReadOnlyList<TableStoryReference> BuildStoryReferences(
+        IReadOnlyList<SectionProperties> sections,
+        string relationshipId,
+        bool header)
+    {
+        var result = new List<TableStoryReference>();
+        for (var sectionIndex = 0; sectionIndex < sections.Count; sectionIndex++)
+        {
+            if (header)
+            {
+                foreach (var reference in sections[sectionIndex].Elements<HeaderReference>().Where(reference => reference.Id?.Value == relationshipId))
+                    result.Add(new TableStoryReference(sectionIndex, HeaderFooterReferenceType(reference.Type?.Value), relationshipId));
+            }
+            else
+            {
+                foreach (var reference in sections[sectionIndex].Elements<FooterReference>().Where(reference => reference.Id?.Value == relationshipId))
+                    result.Add(new TableStoryReference(sectionIndex, HeaderFooterReferenceType(reference.Type?.Value), relationshipId));
+            }
+        }
+        return result;
+    }
+
+    private static string HeaderFooterReferenceType(HeaderFooterValues? value)
+    {
+        if (value == HeaderFooterValues.First) return "first";
+        if (value == HeaderFooterValues.Even) return "even";
+        return "default";
     }
 
     public static IReadOnlyList<AnnotationAnchor> BuildAnnotationAnchors(

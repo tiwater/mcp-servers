@@ -141,16 +141,37 @@ tools remain separate read-only capabilities.
 
 ## Presentation editing
 
-Presentation editing exposes two public execution operations. Template
+Presentation editing exposes four public execution operations. Template
 application consumes a current presentation, a selected current template, and a
 deterministic plan. Formatting consumes a current presentation and deterministic
-format operations. Each produces a new presentation plus a receipt binding the
-input artifacts, output, and published runtime result.
+text-format operations. Shape geometry sets exact native bounds for uniquely
+identified current-slide objects. Picture replacement swaps embedded PNG or JPEG
+media for uniquely identified current-slide pictures. Each produces a new
+presentation plus a receipt binding the input artifacts, output, and published
+runtime result.
 
 These operations do not choose a template, derive business content, infer slide
-mapping or geometry, or decide delivery. Template application and formatting
-remain separate so each intermediate presentation can be freshly inspected and
-independently validated before the next mutation.
+mapping, repair coordinates, image selection, or delivery. Geometry and picture
+replacement are fixed technical actions with slide-number and shape-id
+references; they do not expose semantic roles or a generic operation plan.
+Template application and formatting remain separate so each intermediate
+presentation can be freshly inspected and independently validated before the
+next mutation.
+
+## Word table stories
+
+Word table inspection observes body, header, and footer stories under the
+additive `tiwater.docx.inspect-tables/v1` contract. The existing body `Tables`
+view is unchanged; header/footer topology is published separately as
+`StoryTables`. Header/footer story identity binds the existing
+relationship-sorted part coordinate to section index and reference type.
+Direct story tables expose fixed mutation addresses; nested tables remain
+visible topology with a typed unsupported mutation boundary.
+
+Repeat-as-header is one fixed technical row-property action. It accepts only
+existing body/header/footer coordinates and a boolean state, batches only that
+action kind, and preflights every target before mutation. It does not infer
+which rows are business headers or expose an edit-plan language.
 
 ## Ownership
 

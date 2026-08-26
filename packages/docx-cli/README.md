@@ -24,7 +24,7 @@ tiwater-docx inspect <input.docx> [--json]
 `--json` includes the document report, table details, document flow, and font inspection in one result.
 
 ### 1a. Inspect Table Details
-Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. Tables are traversed depth-first from the body through arbitrarily nested table cells; every table carries a containment path, declared `Width`/`WidthType`, and nested tables carry their parent-cell runtime address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, and cells expose mutation address, grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
+Exports a versioned `tiwater.docx.inspect-tables/v1` envelope with tool version and extraction-view identity. The existing `Tables` collection remains the body-and-nested depth-first view. The additive `StoryTables` collection traverses header/footer stories and their arbitrarily nested table cells. Every table carries a containment path and story identity; header/footer stories include their stable part index plus every section index, reference type, and relationship binding. Direct story tables expose the same body/header/footer mutation coordinates used by fixed edit actions, while nested tables are observable but have no mutation address. Cell `Text` and `Paragraphs` contain only direct cell paragraphs and exclude nested-table descendants. Rows expose normalized grid omissions/extents, repeat-as-header state, and cells expose grid range/span, vertical merge, paragraph alignment, run font, color, underline, and text-fill details.
 
 ```bash
 tiwater-docx inspect-tables <input.docx> [--json]
@@ -425,6 +425,9 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceBodyText`
 - `deleteBodyParagraph`
 - `deleteBodyDrawingBeforeParagraph`
+- `insertBodyRange`
+- `replaceDrawingImage`
+- `insertBodyImage`
 - `deleteBodyRange`
 - `collapseTrailingEmptyBodyParagraphs`
 - `startSectionBeforeParagraph`
@@ -460,6 +463,9 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 `replaceAllHeaderParagraphText` accepts `paragraphIndex` and `text`, replacing that paragraph in every header part where it exists.
 `deleteBodyParagraph` removes exactly one body descendant paragraph selected by `findText`. `matchMode` is `exact` by default and may be `startsWith`; optional `paragraphStyle` binds the selector to the current paragraph style id. Missing or ambiguous matches fail the operation.
 `deleteBodyDrawingBeforeParagraph` removes the direct body paragraph immediately before a uniquely selected direct body paragraph. The removed paragraph must contain exactly one drawing and no text. `findText`, `matchMode`, and optional `paragraphStyle` select the retained anchor paragraph; missing or ambiguous anchors, non-paragraph boundaries, text-bearing drawing paragraphs, and zero or multiple drawings fail the operation.
+`insertBodyRange` copies the inclusive `sourceStartBodyIndex`..`sourceEndBodyIndex` range of direct body children from `source` before `targetBodyIndex` in the current target. It preserves paragraph, run, and table styles; numbering; embedded images; hyperlinks; and whole-section header/footer part graphs. A section-bearing range must select exactly one complete source section. The action rejects partial sections, conflicting style or numbering definitions, annotations, revisions, content controls, footnotes/endnotes, linked images, and unsupported relationship types. The final source body `w:sectPr` is materialized as an inserted section-break paragraph, and no content can be inserted after the target's final body `w:sectPr`.
+`replaceDrawingImage` selects one drawing by zero-based direct-body `paragraphIndex` and descendant `drawingIndex`, creates a new image relationship from `image`, and changes only that drawing's embedded image reference. Existing inline/anchor geometry and any other drawing sharing the old media part remain unchanged.
+`insertBodyImage` inserts a new inline drawing before zero-based `targetBodyIndex`. `image`, positive `widthEmu`, positive `heightEmu`, and optional `altText` are explicit technical inputs. Supported image extensions and signatures are PNG, JPEG, GIF, BMP, TIFF, ICO, and SVG.
 `deleteBodyRange` removes direct body elements beginning with the uniquely selected `findText` paragraph and ending immediately before the uniquely selected following `endFindText` paragraph. Use `deleteToBodyEnd: true` instead of `endFindText` for a final body range; the document-level final section properties are preserved. A final range may set `removePrecedingPageBreak: true` to remove the single explicit page break that separated the deleted range from the preceding retained content; missing or ambiguous boundary breaks fail the operation. `matchMode` and `endMatchMode` accept `exact` or `startsWith`; optional `paragraphStyle` and `endParagraphStyle` bind each selector to a paragraph style id. All missing, ambiguous, reversed, or unsafe ranges fail the operation.
 `collapseTrailingEmptyBodyParagraphs` removes contiguous empty direct-body paragraphs immediately before the final section properties. `expectedCount` is required and must exactly match the current inspection value `Content.TrailingEmptyBodyParagraphCount`; count drift or any text, drawing, break, field, reference, bookmark, or hyperlink fails closed.
 `startSectionBeforeParagraph` accepts `findText` and `orientation` (`landscape` or `portrait`); it inserts a section break before the matching direct body paragraph and applies the requested orientation to the following section.
@@ -484,6 +490,8 @@ and exits non-zero when any font channel differs, or when a non-preserving rule'
 Preserved-size equality is established by comparing the pre-edit and output inspection evidence.
 `setTableRowHeight` accepts `height` in twips and optional `heightRule` (`atLeast`, `exact`, `auto`).
 `setTableRowCantSplit` accepts `cantSplit: true|false` and controls the Word table-row `w:cantSplit` property. `inspect-tables` reports the row property as `CantSplit`.
+
+`setTableRowRepeatAsHeader` accepts direct-story `tableIndex`/`rowIndex`, exactly one optional story coordinate (`headerIndex` or `footerIndex`), and `repeatAsHeader: true|false`. A body target supplies neither story index. A same-kind batch is fully validated before mutation; missing, ambiguous, duplicate, nested, or invalid targets reject the entire batch. `inspect-tables` reports `RepeatAsHeader` and publishes `MutationAddress` only for supported direct-story tables.
 `mergeTableCells` merges a horizontal cell range when `rowIndex/startCellIndex/endCellIndex` are provided, or a vertical row range when `startRowIndex/endRowIndex` and exactly one of `cellIndex` or logical `gridColumn` are provided. Prefer `gridColumn` when rows may have different horizontal spans.
 `unmergeTableRowHorizontalCells` splits one horizontally merged visible cell in `tableIndex/rowIndex/cellIndex` back into its grid columns, preserving the original text in the first cell and inserting empty styled cells for the remaining columns.
 `unmergeTableColumnVerticalCells` removes vertical merge markers in `tableIndex/cellIndex/startRowIndex/endRowIndex` and fills continuation cells from the latest visible content.
