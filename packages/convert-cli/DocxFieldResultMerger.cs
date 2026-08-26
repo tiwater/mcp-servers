@@ -25,8 +25,9 @@ internal static class DocxFieldResultMerger
                 throw new InvalidOperationException("WPS field refresh changed the order or kind of DOCX index fields.");
         }
 
+        var bodyFontPolicy = UniformExplicitBodyFontPolicy(source);
         CopyTocBookmarks(source, refreshed, sourceRegions, refreshedRegions);
-        ReplaceIndexRegions(source, refreshed, sourceRegions, refreshedRegions);
+        ReplaceIndexRegions(source, refreshed, sourceRegions, refreshedRegions, bodyFontPolicy);
 
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
@@ -115,7 +116,8 @@ internal static class DocxFieldResultMerger
         XDocument source,
         XDocument refreshed,
         IReadOnlyList<IndexRegion> sourceRegions,
-        IReadOnlyList<IndexRegion> refreshedRegions)
+        IReadOnlyList<IndexRegion> refreshedRegions,
+        RunFontPolicy? bodyFontPolicy)
     {
         var sourceBlocks = source.Root!.Element(W + "body")!.Elements().ToList();
         var refreshedBlocks = refreshed.Root!.Element(W + "body")!.Elements().ToList();
@@ -128,9 +130,53 @@ internal static class DocxFieldResultMerger
                 .Take(refreshedRegion.EndBlock - refreshedRegion.StartBlock + 1)
                 .Select(element => new XElement(element))
                 .ToList();
+            if (bodyFontPolicy is not null)
+                foreach (var replacement in replacements) ApplyFontPolicy(replacement, bodyFontPolicy);
             sourceBlocks[sourceRegion.StartBlock].AddBeforeSelf(replacements);
             for (var block = sourceRegion.EndBlock; block >= sourceRegion.StartBlock; block--)
                 sourceBlocks[block].Remove();
+        }
+    }
+
+    private static RunFontPolicy? UniformExplicitBodyFontPolicy(XDocument document)
+    {
+        var policies = document.Descendants(W + "r")
+            .Where(run => !run.Ancestors(W + "tbl").Any())
+            .Where(run => run.Descendants(W + "t").Any(text => !string.IsNullOrWhiteSpace(text.Value)))
+            .Select(ExplicitFontPolicy)
+            .ToList();
+        if (policies.Count == 0 || policies.Any(policy => policy is null)) return null;
+        var first = policies[0];
+        return policies.All(policy => policy == first) ? first : null;
+    }
+
+    private static RunFontPolicy? ExplicitFontPolicy(XElement run)
+    {
+        var properties = run.Element(W + "rPr");
+        var fonts = properties?.Element(W + "rFonts");
+        var policy = new RunFontPolicy(
+            (string?)fonts?.Attribute(W + "ascii"), (string?)fonts?.Attribute(W + "hAnsi"),
+            (string?)fonts?.Attribute(W + "eastAsia"), (string?)fonts?.Attribute(W + "cs"),
+            (string?)properties?.Element(W + "sz")?.Attribute(W + "val"),
+            (string?)properties?.Element(W + "szCs")?.Attribute(W + "val"));
+        return policy.Values.All(value => !string.IsNullOrWhiteSpace(value)) ? policy : null;
+    }
+
+    private static void ApplyFontPolicy(XElement block, RunFontPolicy policy)
+    {
+        foreach (var run in block.Descendants(W + "r")
+                     .Where(run => run.Descendants(W + "t").Any(text => !string.IsNullOrWhiteSpace(text.Value))))
+        {
+            var properties = run.Element(W + "rPr");
+            if (properties is null) { properties = new XElement(W + "rPr"); run.AddFirst(properties); }
+            properties.Elements(W + "rFonts").Remove();
+            properties.AddFirst(new XElement(W + "rFonts",
+                new XAttribute(W + "ascii", policy.Ascii!), new XAttribute(W + "hAnsi", policy.HighAnsi!),
+                new XAttribute(W + "eastAsia", policy.EastAsia!), new XAttribute(W + "cs", policy.ComplexScript!)));
+            properties.Elements(W + "sz").Remove();
+            properties.Elements(W + "szCs").Remove();
+            properties.Add(new XElement(W + "sz", new XAttribute(W + "val", policy.Size!)));
+            properties.Add(new XElement(W + "szCs", new XAttribute(W + "val", policy.ComplexSize!)));
         }
     }
 
@@ -251,4 +297,8 @@ internal static class DocxFieldResultMerger
     }
 
     private sealed record IndexRegion(int StartBlock, int EndBlock, string Kind);
+    private sealed record RunFontPolicy(string? Ascii, string? HighAnsi, string? EastAsia, string? ComplexScript, string? Size, string? ComplexSize)
+    {
+        internal IEnumerable<string?> Values => [Ascii, HighAnsi, EastAsia, ComplexScript, Size, ComplexSize];
+    }
 }

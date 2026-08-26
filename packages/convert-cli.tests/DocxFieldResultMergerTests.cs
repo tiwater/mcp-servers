@@ -68,6 +68,39 @@ public sealed class DocxFieldResultMergerTests
     }
 
     [Fact]
+    public void Merge_preserves_a_uniform_explicit_body_font_policy_on_refreshed_index_results()
+    {
+        var sourceIndex = Index("table-of-contents", "Old contents", "1", "_TocA");
+        var sourceHeading = Heading("HEAD0001", "Contents heading", "_TocA", "1");
+        ApplyFont(sourceIndex, "宋体", "24");
+        ApplyFont(sourceHeading, "宋体", "24");
+        var refreshedIndex = Index("table-of-contents", "New contents", "8", "_TocB");
+        var refreshedHeading = Heading("HEAD0001", "Contents heading", "_TocB", "2");
+        ApplyFont(refreshedIndex, "SimSun", "22");
+        ApplyFont(refreshedHeading, "SimSun", "22");
+        var source = Package(sourceIndex, sourceHeading);
+        var refreshed = Package(refreshedIndex, refreshedHeading);
+        var output = TemporaryDocx();
+
+        DocxFieldResultMerger.Merge(source, refreshed, output);
+
+        var resultRuns = ReadDocument(output).Descendants(W + "r")
+            .Where(run => run.Descendants(W + "t").Any(text => !string.IsNullOrWhiteSpace(text.Value)))
+            .ToList();
+        Assert.All(resultRuns, run =>
+        {
+            var properties = run.Element(W + "rPr")!;
+            var fonts = properties.Element(W + "rFonts")!;
+            Assert.Equal("Times New Roman", (string?)fonts.Attribute(W + "ascii"));
+            Assert.Equal("Times New Roman", (string?)fonts.Attribute(W + "hAnsi"));
+            Assert.Equal("宋体", (string?)fonts.Attribute(W + "eastAsia"));
+            Assert.Equal("Times New Roman", (string?)fonts.Attribute(W + "cs"));
+            Assert.Equal("24", (string?)properties.Element(W + "sz")?.Attribute(W + "val"));
+            Assert.Equal("24", (string?)properties.Element(W + "szCs")?.Attribute(W + "val"));
+        });
+    }
+
+    [Fact]
     public void Merge_with_no_index_fields_preserves_the_source_document()
     {
         var source = Package(Paragraph("BODY0001", "source body"));
@@ -202,6 +235,21 @@ public sealed class DocxFieldResultMergerTests
             new XElement(W + "r", new XElement(W + "fldChar", new XAttribute(W + "fldCharType", "end"))),
             new XElement(W + "r", new XElement(W + "t", page)),
             new XElement(W + "r", new XElement(W + "fldChar", new XAttribute(W + "fldCharType", "end"))));
+    }
+
+    private static void ApplyFont(XElement element, string eastAsia, string size)
+    {
+        foreach (var run in element.Descendants(W + "r"))
+        {
+            run.AddFirst(new XElement(W + "rPr",
+                new XElement(W + "rFonts",
+                    new XAttribute(W + "ascii", "Times New Roman"),
+                    new XAttribute(W + "hAnsi", "Times New Roman"),
+                    new XAttribute(W + "eastAsia", eastAsia),
+                    new XAttribute(W + "cs", "Times New Roman")),
+                new XElement(W + "sz", new XAttribute(W + "val", size)),
+                new XElement(W + "szCs", new XAttribute(W + "val", size))));
+        }
     }
 
     private static string Package(XElement first, params XElement[] rest)
