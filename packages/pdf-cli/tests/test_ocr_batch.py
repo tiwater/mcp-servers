@@ -33,14 +33,8 @@ class OcrBatchTest(unittest.TestCase):
                 "tiwater_pdf.cli._run_with_orientation_correction",
                 return_value=(page_result, 0, [1]),
             ), redirect_stderr(stream):
-                result = llm_ocr(
-                    source,
-                    api_key="test-key",
-                    base_url="https://example.invalid/v1",
-                    llm_model="unseen-model",
-                    enable_thinking=False,
-                    max_page_parallel=1,
-                )
+                with patch.dict("os.environ", {"SUPEN_LLM_TOKEN": "test-key", "SUPEN_LLM_GATEWAY_URL": "https://example.invalid/v1"}, clear=True):
+                    result = llm_ocr(source, llm_model="qwen3.8-max", enable_thinking=False, max_page_parallel=1)
 
             self.assertEqual(result["page_count"], 2)
             self.assertRegex(
@@ -95,7 +89,7 @@ class OcrBatchTest(unittest.TestCase):
                 calls.append((input_path.name, pages))
                 return {
                     "file": str(input_path),
-                    "model": "qwen3.7-plus",
+                    "model": "qwen3.8-max",
                     "page_count": 1,
                     "pages": [{"page": pages[0], "text": input_path.stem, "tables": [], "warnings": []}],
                     "text": input_path.stem,
@@ -107,7 +101,7 @@ class OcrBatchTest(unittest.TestCase):
                 max_parallel=2,
                 pages=[1],
                 ocr_func=fake_ocr,
-                model="qwen3.7-plus",
+                model="qwen3.8-max",
                 provider="llm",
                 enable_thinking=False,
             )
@@ -121,14 +115,14 @@ class OcrBatchTest(unittest.TestCase):
 
             for item in manifest["files"]:
                 self.assertEqual(item["status"], "success")
-                self.assertEqual(item["model"], "qwen3.7-plus")
+                self.assertEqual(item["model"], "qwen3.8-max")
                 self.assertEqual(item["provider"], "llm")
                 self.assertIs(item["enable_thinking"], False)
                 self.assertGreaterEqual(item["duration_ms"], 0)
                 self.assertTrue(Path(item["output"]).exists())
                 self.assertTrue(Path(item["status_path"]).exists())
                 written = json.loads(Path(item["output"]).read_text())
-                self.assertEqual(written["model"], "qwen3.7-plus")
+                self.assertEqual(written["model"], "qwen3.8-max")
 
     def test_batch_fails_file_when_any_page_ocr_is_incomplete(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,7 +141,7 @@ class OcrBatchTest(unittest.TestCase):
                     max_parallel=1,
                     pages=None,
                     ocr_func=failed_page_ocr,
-                    model="qwen3.7-plus",
+                    model="qwen3.8-max",
                     provider="llm",
                     enable_thinking=False,
                 )

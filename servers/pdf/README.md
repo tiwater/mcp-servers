@@ -7,6 +7,8 @@ Shared stdio MCP server for PDF inspection and table extraction.
 - `pdf_inspect`
 - `pdf_extract_tables`
 - `pdf_find_table`
+- `pdf_extract_table_details`
+- `pdf_ocr` (pinned Aliyun `qwen3.8-max`; per-invocation Supen credential)
 
 ## Run
 

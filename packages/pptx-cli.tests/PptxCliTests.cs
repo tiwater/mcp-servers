@@ -13,6 +13,28 @@ namespace Dockit.Pptx.Tests;
 public class PptxCliTests
 {
     [Fact]
+    public void Validate_accepts_a_current_valid_presentation()
+    {
+        var result = Validator.Validate(CreateFixture());
+
+        Assert.True(result.Pass, string.Join(Environment.NewLine, result.Errors.Select(error => error.Description)));
+        Assert.Equal("tiwater.pptx.openxml-validation/v1", result.Schema);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Validate_rejects_a_non_pptx_package()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invalid-{Guid.NewGuid():N}.pptx");
+        File.WriteAllText(path, "not a presentation");
+
+        var result = Validator.Validate(path);
+
+        Assert.False(result.Pass);
+        Assert.Contains(result.Errors, error => error.Id == "invalid-pptx-package");
+    }
+
+    [Fact]
     public void Inspect_reports_slide_metrics_and_placeholders()
     {
         var path = CreateFixture();
@@ -868,7 +890,8 @@ public class PptxCliTests
 
         slideMasterPart.SlideMaster = new P.SlideMaster(
             new P.CommonSlideData(CreateShapeTree()),
-            new P.SlideLayoutIdList(new P.SlideLayoutId { Id = 1U, RelationshipId = "rIdLayout1" }),
+            CreateColorMap(),
+            new P.SlideLayoutIdList(new P.SlideLayoutId { Id = 2147483648U, RelationshipId = "rIdLayout1" }),
             new P.TextStyles());
         slideMasterPart.SlideMaster.Save();
         slideLayoutPart.AddPart(slideMasterPart, "rIdMaster");
@@ -1019,7 +1042,8 @@ public class PptxCliTests
         };
         master.SlideMaster = new P.SlideMaster(
             new P.CommonSlideData(CreateShapeTree()),
-            new P.SlideLayoutIdList(new P.SlideLayoutId { Id = 1U, RelationshipId = "rIdLayout1" }),
+            CreateColorMap(),
+            new P.SlideLayoutIdList(new P.SlideLayoutId { Id = 2147483648U, RelationshipId = "rIdLayout1" }),
             new P.TextStyles(new P.TitleStyle(), new P.BodyStyle(), new P.OtherStyle(new A.Level1ParagraphProperties(masterRunProperties))));
         master.SlideMaster.Save();
         layout.AddPart(master, "rIdMaster");
@@ -1138,4 +1162,20 @@ public class PptxCliTests
 
         return shapeTree;
     }
+
+    private static P.ColorMap CreateColorMap() => new()
+    {
+        Background1 = A.ColorSchemeIndexValues.Light1,
+        Text1 = A.ColorSchemeIndexValues.Dark1,
+        Background2 = A.ColorSchemeIndexValues.Light2,
+        Text2 = A.ColorSchemeIndexValues.Dark2,
+        Accent1 = A.ColorSchemeIndexValues.Accent1,
+        Accent2 = A.ColorSchemeIndexValues.Accent2,
+        Accent3 = A.ColorSchemeIndexValues.Accent3,
+        Accent4 = A.ColorSchemeIndexValues.Accent4,
+        Accent5 = A.ColorSchemeIndexValues.Accent5,
+        Accent6 = A.ColorSchemeIndexValues.Accent6,
+        Hyperlink = A.ColorSchemeIndexValues.Hyperlink,
+        FollowedHyperlink = A.ColorSchemeIndexValues.FollowedHyperlink,
+    };
 }

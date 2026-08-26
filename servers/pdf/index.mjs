@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { McpStdioServer } from '../_shared/mcp-stdio.mjs';
 import {
   commandCandidate,
@@ -34,16 +36,13 @@ const tools = [
   },
   {
     name: 'pdf_extract_tables',
-    description: 'Extract tables from a PDF, optionally limiting pages or enabling multi-page spanning and LLM fallback.',
+    description: 'Extract tables from a PDF with deterministic published extraction.',
     inputSchema: {
       type: 'object',
       properties: {
         input: { type: 'string' },
         pages: { type: 'array', items: { type: 'number' } },
         autoSpan: { type: 'boolean' },
-        llmFallback: { type: 'boolean' },
-        apiKey: { type: 'string' },
-        llmModel: { type: 'string' },
       },
       required: ['input'],
     },
@@ -57,11 +56,22 @@ const tools = [
         input: { type: 'string' },
         name: { type: 'string' },
         autoSpan: { type: 'boolean' },
-        llmFallback: { type: 'boolean' },
-        apiKey: { type: 'string' },
-        llmModel: { type: 'string' },
       },
       required: ['input', 'name'],
+    },
+  },
+  {
+    name: 'pdf_ocr',
+    description: 'OCR current PDF pages through the per-invocation Supen Gateway using the pinned Aliyun qwen3.8-max vision model and write a JSON evidence artifact.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: { type: 'string' },
+        output: { type: 'string' },
+        pages: { type: 'array', items: { type: 'number' } },
+      },
+      required: ['input', 'output'],
+      additionalProperties: false,
     },
   },
   {
@@ -86,6 +96,8 @@ async function callTool(name, args) {
       return createToolResult(await pdfExtractTables(args));
     case 'pdf_find_table':
       return createToolResult(await pdfFindTable(args));
+    case 'pdf_ocr':
+      return createToolResult(await pdfOcr(args));
     case 'pdf_extract_table_details':
       return createToolResult(await pdfExtractTableDetails(args));
     default:
@@ -100,6 +112,7 @@ async function pdfInspect(args) {
 }
 
 async function pdfExtractTables(args) {
+  rejectUnexpectedArgs(args, ['input', 'pages', 'autoSpan']);
   const input = requireString(args.input, 'input');
   const commandArgs = ['extract-tables', input];
   appendPdfFlags(commandArgs, args);
@@ -109,6 +122,7 @@ async function pdfExtractTables(args) {
 }
 
 async function pdfFindTable(args) {
+  rejectUnexpectedArgs(args, ['input', 'name', 'autoSpan']);
   const input = requireString(args.input, 'input');
   const name = requireString(args.name, 'name');
   const commandArgs = ['find-table', input, name];
@@ -129,14 +143,37 @@ async function pdfExtractTableDetails(args) {
   return { tool: 'pdf_extract_table_details', runtime: commandRuntime(result), report: result.json };
 }
 
+async function pdfOcr(args) {
+  rejectUnexpectedArgs(args, ['input', 'output', 'pages']);
+  const input = requireString(args.input, 'input');
+  const output = path.resolve(requireString(args.output, 'output'));
+  const commandArgs = ['ocr', input, '--provider', 'llm', '--llm-model', 'qwen3.8-max'];
+  if (Array.isArray(args.pages) && args.pages.length > 0) commandArgs.push('--pages', args.pages.join(','));
+  commandArgs.push('--json');
+  const result = await runJsonCandidateChain(pdfCandidates, commandArgs);
+  const bytes = Buffer.from(`${JSON.stringify(result.json, null, 2)}\n`, 'utf8');
+  await mkdir(path.dirname(output), { recursive: true });
+  await writeFile(output, bytes, { flag: 'wx' });
+  return {
+    tool: 'pdf_ocr',
+    runtime: commandRuntime(result),
+    artifact: { path: output, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length },
+    summary: { model: 'qwen3.8-max', pageCount: result.json?.page_count ?? result.json?.pages?.length ?? 0 },
+  };
+}
+
+function rejectUnexpectedArgs(args, allowed) {
+  const unexpected = Object.keys(args).filter(key => !allowed.includes(key));
+  if (unexpected.length > 0) {
+    throw Object.assign(new Error(`Unexpected arguments: ${unexpected.join(', ')}`), { code: -32602 });
+  }
+}
+
 function appendPdfFlags(commandArgs, args) {
   if (Array.isArray(args.pages) && args.pages.length > 0) {
     commandArgs.push('--pages', args.pages.join(','));
   }
   if (args.autoSpan) commandArgs.push('--auto-span');
-  if (args.llmFallback) commandArgs.push('--llm-fallback');
-  if (typeof args.apiKey === 'string' && args.apiKey) commandArgs.push('--api-key', args.apiKey);
-  if (typeof args.llmModel === 'string' && args.llmModel) commandArgs.push('--llm-model', args.llmModel);
 }
 
 function commandRuntime(result) {
@@ -145,8 +182,8 @@ function commandRuntime(result) {
 
 const server = new McpStdioServer({
   name: 'tiwater-pdf',
-  version: '0.1.2',
-  instructions: 'Shared PDF MCP server for inspection and table extraction.',
+  version: '0.22.2',
+  instructions: 'Generic PDF inspection, deterministic table extraction, and OCR fixed to Aliyun qwen3.8-max through the per-invocation Supen Gateway credential.',
   tools,
   callTool,
   logger: message => process.stderr.write(`${message}\n`),
