@@ -203,8 +203,8 @@ const tableCellInput = z.object({
   richText: z.array(richTextSegment).optional(),
 }).strict();
 
-function editAction(name, operationType, description, changeSchema) {
-  return { name, operationType, description, changeSchema, batch: true };
+function editAction(name, operationType, description, changeSchema, options = {}) {
+  return { name, operationType, description, changeSchema, batch: true, ...options };
 }
 
 function documentAction(name, operationType, description) {
@@ -218,6 +218,9 @@ const docxEditActions = [
   editAction('docx_replace_body_text', 'replaceBodyText', 'Replace uniquely matched current body text.', z.object({ findText: pathInput, text: z.string() }).strict()),
   editAction('docx_delete_body_paragraph', 'deleteBodyParagraph', 'Delete uniquely matched current body paragraphs.', z.object({ findText: pathInput, ...optionalTextMatch }).strict()),
   editAction('docx_delete_body_drawing_before_paragraph', 'deleteBodyDrawingBeforeParagraph', 'Delete the drawing immediately before a uniquely matched current paragraph.', z.object({ findText: pathInput, ...optionalTextMatch }).strict()),
+  editAction('docx_insert_body_range', 'insertBodyRange', 'Insert a bounded direct-body range from a current source DOCX before a current target body boundary, preserving supported styles and relationships.', z.object({ source: pathInput, sourceStartBodyIndex: index, sourceEndBodyIndex: index, targetBodyIndex: index }).strict(), { sourceFields: ['source'] }),
+  editAction('docx_replace_drawing_image', 'replaceDrawingImage', 'Replace the image relationship of a current body drawing while preserving its drawing geometry.', z.object({ paragraphIndex: index, drawingIndex: index, image: pathInput }).strict(), { sourceFields: ['image'] }),
+  editAction('docx_insert_body_image', 'insertBodyImage', 'Insert an image as a new inline drawing before a current direct-body boundary.', z.object({ targetBodyIndex: index, image: pathInput, widthEmu: z.number().int().positive(), heightEmu: z.number().int().positive(), altText: z.string().optional() }).strict(), { sourceFields: ['image'] }),
   editAction('docx_delete_body_range', 'deleteBodyRange', 'Delete uniquely bounded current body ranges.', z.object({ findText: pathInput, endFindText: z.string().optional(), matchMode: z.string().optional(), endMatchMode: z.string().optional(), paragraphStyle: z.string().optional(), endParagraphStyle: z.string().optional(), deleteToBodyEnd: z.boolean().optional(), removePrecedingPageBreak: z.boolean().optional() }).strict()),
   editAction('docx_start_section', 'startSectionBeforeParagraph', 'Start a section before a uniquely matched current paragraph.', z.object({ findText: pathInput, orientation: z.enum(['portrait', 'landscape']) }).strict()),
   editAction('docx_set_header_paragraph_text', 'replaceHeaderParagraphText', 'Set current header paragraph text.', z.object({ headerIndex: index, paragraphIndex: index, text: z.string() }).strict()),
@@ -588,12 +591,17 @@ async function fixedEdit(action, args) {
   const operations = action.batch
     ? args.changes.map(change => ({ ...change, type: action.operationType }))
     : [{ type: action.operationType }];
+  const sourcePaths = [...new Set((action.sourceFields ?? []).flatMap(field =>
+    (args.changes ?? []).map(change => path.resolve(requireString(change[field], field)))))];
+  const sources = await Promise.all(sourcePaths.map(fileArtifact));
   const candidates = action.name.startsWith('docx_') ? docxCandidates : xlsxCandidates;
   return withTempJsonFile({ operations }, async operationsPath => {
     try {
       const result = await runJsonCandidateChain(candidates, ['edit', input, operationsPath, output], { allowedExitCodes: [0, 1] });
       const appliedOperations = Array.isArray(result.json?.appliedOperations) ? result.json.appliedOperations : [];
-      const pass = appliedOperations.length === operations.length && appliedOperations.every(operation => operation.applied === true);
+      const observedSources = await Promise.all(sourcePaths.map(fileArtifact));
+      const sourceBindingStable = isDeepStrictEqual(sources, observedSources);
+      const pass = sourceBindingStable && appliedOperations.length === operations.length && appliedOperations.every(operation => operation.applied === true);
       const outputArtifact = pass ? await fileArtifact(output) : null;
       if (!pass) await rm(output, { force: true });
       const receipt = {
@@ -602,6 +610,8 @@ async function fixedEdit(action, args) {
         operationType: action.operationType,
         pass,
         input: inputArtifact,
+        ...(sources.length > 0 ? { sources } : {}),
+        ...(sources.length > 0 ? { sourceBindingStable } : {}),
         output: outputArtifact,
         operationCount: operations.length,
         appliedOperations,

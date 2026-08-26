@@ -425,6 +425,9 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 - `replaceBodyText`
 - `deleteBodyParagraph`
 - `deleteBodyDrawingBeforeParagraph`
+- `insertBodyRange`
+- `replaceDrawingImage`
+- `insertBodyImage`
 - `deleteBodyRange`
 - `collapseTrailingEmptyBodyParagraphs`
 - `startSectionBeforeParagraph`
@@ -460,6 +463,9 @@ Applies a batch of explicit edits to a DOCX. Supported operation types are:
 `replaceAllHeaderParagraphText` accepts `paragraphIndex` and `text`, replacing that paragraph in every header part where it exists.
 `deleteBodyParagraph` removes exactly one body descendant paragraph selected by `findText`. `matchMode` is `exact` by default and may be `startsWith`; optional `paragraphStyle` binds the selector to the current paragraph style id. Missing or ambiguous matches fail the operation.
 `deleteBodyDrawingBeforeParagraph` removes the direct body paragraph immediately before a uniquely selected direct body paragraph. The removed paragraph must contain exactly one drawing and no text. `findText`, `matchMode`, and optional `paragraphStyle` select the retained anchor paragraph; missing or ambiguous anchors, non-paragraph boundaries, text-bearing drawing paragraphs, and zero or multiple drawings fail the operation.
+`insertBodyRange` copies the inclusive `sourceStartBodyIndex`..`sourceEndBodyIndex` range of direct body children from `source` before `targetBodyIndex` in the current target. It preserves paragraph, run, and table styles; numbering; embedded images; hyperlinks; and whole-section header/footer part graphs. A section-bearing range must select exactly one complete source section. The action rejects partial sections, conflicting style or numbering definitions, annotations, revisions, content controls, footnotes/endnotes, linked images, and unsupported relationship types. The final source body `w:sectPr` is materialized as an inserted section-break paragraph, and no content can be inserted after the target's final body `w:sectPr`.
+`replaceDrawingImage` selects one drawing by zero-based direct-body `paragraphIndex` and descendant `drawingIndex`, creates a new image relationship from `image`, and changes only that drawing's embedded image reference. Existing inline/anchor geometry and any other drawing sharing the old media part remain unchanged.
+`insertBodyImage` inserts a new inline drawing before zero-based `targetBodyIndex`. `image`, positive `widthEmu`, positive `heightEmu`, and optional `altText` are explicit technical inputs. Supported image extensions and signatures are PNG, JPEG, GIF, BMP, TIFF, ICO, and SVG.
 `deleteBodyRange` removes direct body elements beginning with the uniquely selected `findText` paragraph and ending immediately before the uniquely selected following `endFindText` paragraph. Use `deleteToBodyEnd: true` instead of `endFindText` for a final body range; the document-level final section properties are preserved. A final range may set `removePrecedingPageBreak: true` to remove the single explicit page break that separated the deleted range from the preceding retained content; missing or ambiguous boundary breaks fail the operation. `matchMode` and `endMatchMode` accept `exact` or `startsWith`; optional `paragraphStyle` and `endParagraphStyle` bind each selector to a paragraph style id. All missing, ambiguous, reversed, or unsafe ranges fail the operation.
 `collapseTrailingEmptyBodyParagraphs` removes contiguous empty direct-body paragraphs immediately before the final section properties. `expectedCount` is required and must exactly match the current inspection value `Content.TrailingEmptyBodyParagraphCount`; count drift or any text, drawing, break, field, reference, bookmark, or hyperlink fails closed.
 `startSectionBeforeParagraph` accepts `findText` and `orientation` (`landscape` or `portrait`); it inserts a section break before the matching direct body paragraph and applies the requested orientation to the following section.

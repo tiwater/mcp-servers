@@ -27,6 +27,17 @@ Structural worksheet row deletion is exposed as `xlsx_delete_rows`. Each change
 contains only `sheet`, `startRow`, and `count`; unsupported dependent workbook
 structures fail atomically and are reported by the provider receipt.
 
+The bounded DOCX object actions are:
+
+- `docx_insert_body_range`: copies inclusive direct-body indexes from a bound
+  source DOCX before a target direct-body boundary. Source documents are hashed
+  into the receipt. Whole sections preserve supported style, numbering, media,
+  hyperlink, header, and footer relationships; partial or unsafe sections fail.
+- `docx_replace_drawing_image`: replaces one body drawing's embedded image while
+  preserving its drawing geometry. Image inputs are hashed into the receipt.
+- `docx_insert_body_image`: inserts one inline body drawing with explicit EMU
+  dimensions. Image inputs are hashed into the receipt.
+
 The catalog is intentionally open to new generic document capabilities, but a
 scenario, template, customer, issue, work item, or model difference does not
 justify a new tool. Add a tool only for a stable technical responsibility that

@@ -103,6 +103,7 @@ process.exit(2);
     }
     for (const required of [
       'docx_inspect', 'docx_inspect_tables', 'docx_set_table_cell_text', 'docx_validate',
+      'docx_insert_body_range', 'docx_replace_drawing_image', 'docx_insert_body_image',
       'xlsx_convert_legacy', 'xlsx_set_cell_value', 'xlsx_delete_rows', 'xlsx_set_page_setup', 'xlsx_validate',
       'pptx_inspect', 'pptx_apply_template', 'pptx_apply_format', 'pptx_set_shape_geometry', 'pptx_replace_picture_image', 'pptx_validate',
       'office_render_pdf',
@@ -201,6 +202,26 @@ process.exit(2);
     });
     assert.equal(picture.result.structuredContent.summary.pass, true);
     assert.equal(picture.result.structuredContent.summary.appliedCount, 1);
+
+    const source = path.join(temporary, 'source.docx');
+    await writeFile(source, 'source document', 'utf8');
+    const insertedOutput = path.join(temporary, 'inserted.docx');
+    const insertedReceipt = path.join(temporary, 'inserted.json');
+    const inserted = await request('tools/call', {
+      name: 'docx_insert_body_range',
+      arguments: { input, output: insertedOutput, receiptOutput: insertedReceipt, changes: [{ source, sourceStartBodyIndex: 0, sourceEndBodyIndex: 1, targetBodyIndex: 0 }] },
+    });
+    assert.equal(inserted.result.structuredContent.summary.pass, true);
+    const sourceBoundReceipt = JSON.parse(await readFile(insertedReceipt, 'utf8'));
+    assert.equal(sourceBoundReceipt.operationType, 'insertBodyRange');
+    assert.equal(sourceBoundReceipt.sources.length, 1);
+    assert.equal(sourceBoundReceipt.sources[0].path, source);
+    assert.match(sourceBoundReceipt.sources[0].sha256, /^[0-9a-f]{64}$/);
+    assert.equal(sourceBoundReceipt.sourceBindingStable, true);
+    const rangeTool = listed.result.tools.find(candidate => candidate.name === 'docx_insert_body_range');
+    assert.deepEqual(rangeTool.inputSchema.properties.changes.items.required.sort(), ['source', 'sourceEndBodyIndex', 'sourceStartBodyIndex', 'targetBodyIndex']);
+    assert.equal(rangeTool.inputSchema.properties.changes.items.properties.scenarioId, undefined);
+    assert.equal(rangeTool.inputSchema.properties.changes.items.properties.type, undefined);
 
     const injected = await request('tools/call', {
       name: 'docx_set_table_cell_text',

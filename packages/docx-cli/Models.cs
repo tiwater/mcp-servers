@@ -611,7 +611,16 @@ public sealed record DocxEditOperation(
     IReadOnlyList<DocxRichTextSegment>? RichText = null,
     DocxFontPolicy? FontPolicy = null,
     IReadOnlyList<string>? ParagraphTexts = null,
-    int? ExpectedCount = null);
+    int? ExpectedCount = null,
+    string? Source = null,
+    int? SourceStartBodyIndex = null,
+    int? SourceEndBodyIndex = null,
+    int? TargetBodyIndex = null,
+    string? Image = null,
+    int? DrawingIndex = null,
+    long? WidthEmu = null,
+    long? HeightEmu = null,
+    string? AltText = null);
 
 public sealed record DocxFontRule(string EastAsia, string Latin, string Size);
 
