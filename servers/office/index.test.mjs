@@ -46,13 +46,18 @@ test('published Office MCP exposes bounded orthogonal capabilities', async () =>
 const fake = `
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const path = require('node:path');
 const command = process.argv[2];
 if (command === 'edit') {
   const input = process.argv[3];
   const operations = JSON.parse(fs.readFileSync(process.argv[4], 'utf8')).operations;
   const output = process.argv[5];
   fs.copyFileSync(input, output);
-  process.stdout.write(JSON.stringify({
+  const docx = path.basename(process.argv[1]) === 'tiwater-docx';
+  process.stdout.write(JSON.stringify(docx ? {
+    Input: input, Output: output,
+    AppliedOperations: operations.map(operation => ({Type: operation.type, Applied: true, Detail: 'ok'})),
+  } : {
     input, output,
     appliedOperations: operations.map(operation => ({type: operation.type, applied: true, detail: 'ok'})),
   }));
@@ -94,7 +99,7 @@ process.exit(2);
       protocolVersion: '2025-06-18', capabilities: {},
       clientInfo: { name: 'office-contract', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.14.1');
+    assert.equal(initialized.result.serverInfo.version, '0.14.2');
 
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);
