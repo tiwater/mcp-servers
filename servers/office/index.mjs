@@ -364,6 +364,13 @@ const tools = [
     handler: docxValidateFontPolicy,
   },
   {
+    name: 'docx_validate_toc_style_policy',
+    description: 'Validate current DOCX table-of-contents paragraph styles against an explicit policy.',
+    inputSchema: z.object({ input: pathInput, italic: z.boolean(), indentCharactersPerLevel: index }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: docxValidateTocStylePolicy,
+  },
+  {
     name: 'docx_strip_direct_formatting',
     description: 'Remove direct paragraph and run formatting while preserving styles.',
     inputSchema: z.object({ input: pathInput, output: pathInput }).strict(),
@@ -557,6 +564,13 @@ async function docxValidateFontPolicy(args) {
     const result = await runJsonCandidateChain(docxCandidates, ['validate-font-policy', requireString(args.input, 'input'), policyPath], { allowedExitCodes: [0, 1] });
     return { tool: 'docx_validate_font_policy', runtime: commandRuntime(result), result: result.json };
   });
+}
+
+async function docxValidateTocStylePolicy(args) {
+  const result = await runJsonCandidateChain(docxCandidates, [
+    'validate-toc-style-policy', requireString(args.input, 'input'), String(args.italic), String(args.indentCharactersPerLevel),
+  ], { allowedExitCodes: [0, 1] });
+  return { tool: 'docx_validate_toc_style_policy', runtime: commandRuntime(result), result: result.json };
 }
 
 async function docxStripDirectFormatting(args) {

@@ -32,14 +32,25 @@ public sealed class TocStylePolicyTests
         ]);
         Assert.True(Assert.Single(result.AppliedOperations).Applied);
 
-        using var edited = WordprocessingDocument.Open(output, false);
-        var styles = edited.MainDocumentPart!.StyleDefinitionsPart!.Styles!;
-        Assert.Equal(0, Indent(styles, "TOC1"));
-        Assert.Equal(200, Indent(styles, "TOC2"));
-        Assert.Equal(400, Indent(styles, "TOC3"));
-        Assert.All(styles.Elements<Style>().Where(style => style.StyleId!.Value!.StartsWith("TOC")), style =>
-            Assert.False(style.StyleRunProperties!.GetFirstChild<Italic>()!.Val!.Value));
-        Assert.Null(styles.Elements<Style>().Single(style => style.StyleId == "Normal").StyleParagraphProperties);
+        using (var edited = WordprocessingDocument.Open(output, false))
+        {
+            var styles = edited.MainDocumentPart!.StyleDefinitionsPart!.Styles!;
+            Assert.Equal(0, Indent(styles, "TOC1"));
+            Assert.Equal(200, Indent(styles, "TOC2"));
+            Assert.Equal(400, Indent(styles, "TOC3"));
+            Assert.All(styles.Elements<Style>().Where(style => style.StyleId!.Value!.StartsWith("TOC")), style =>
+                Assert.False(style.StyleRunProperties!.GetFirstChild<Italic>()!.Val!.Value));
+            Assert.Null(styles.Elements<Style>().Single(style => style.StyleId == "Normal").StyleParagraphProperties);
+        }
+        Assert.True(TocStylePolicy.Validate(output, false, 2).Pass);
+        using (var mutated = WordprocessingDocument.Open(output, true))
+        {
+            var styles = mutated.MainDocumentPart!.StyleDefinitionsPart!.Styles!;
+            styles.Elements<Style>().Single(style => style.StyleId == "TOC2").StyleParagraphProperties!
+                .GetFirstChild<Indentation>()!.LeftChars = 300;
+            styles.Save();
+        }
+        Assert.False(TocStylePolicy.Validate(output, false, 2).Pass);
     }
 
     private static Style Toc(string id, string name) => new(

@@ -8,7 +8,7 @@ template-migration workflow, customer mapping, or Lucid lifecycle.
 
 ## Capability families
 
-- DOCX: inspect document/tables, export, compare, validate OpenXML and font
+- DOCX: inspect document/tables, export, compare, validate OpenXML, font, and table-of-contents styles
   policy, fill placeholders, transform styles, and batch one fixed edit action.
 - XLS/XLSX: convert legacy XLS with ET, inspect/export/fill, validate, and batch
   one fixed workbook edit action.
