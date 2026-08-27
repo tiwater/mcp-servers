@@ -186,7 +186,9 @@
         "color": { "type": ["string", "null"] },
         "underline": { "type": ["boolean", "null"] },
         "bold": { "type": ["boolean", "null"] },
-        "fontName": { "type": ["string", "null"] }
+        "fontName": { "type": ["string", "null"] },
+        "italic": { "type": ["boolean", "null"] },
+        "verticalAlignment": { "type": ["string", "null"], "enum": ["baseline", "superscript", "subscript", null] }
       }
     },
     "semanticFillRule": {

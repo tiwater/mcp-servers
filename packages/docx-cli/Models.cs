@@ -69,6 +69,7 @@ public sealed record TableRunDetail(
     string? Underline,
     bool Bold,
     bool Italic,
+    string? VerticalAlignment,
     string? FontAscii,
     string? FontHighAnsi,
     string? FontEastAsia,
@@ -706,7 +707,9 @@ public sealed record DocxRichTextSegment(
     string? Color = null,
     bool? Underline = null,
     bool? Bold = null,
-    string? FontName = null);
+    string? FontName = null,
+    bool? Italic = null,
+    string? VerticalAlignment = null);
 
 public sealed record DocxEditDocument(
     IReadOnlyList<DocxEditOperation> Operations);

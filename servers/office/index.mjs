@@ -191,6 +191,8 @@ const richTextSegment = z.object({
   underline: z.boolean().optional(),
   bold: z.boolean().optional(),
   fontName: z.string().optional(),
+  italic: z.boolean().optional(),
+  verticalAlignment: z.enum(['baseline', 'superscript', 'subscript']).optional(),
 }).strict();
 const tableCellInput = z.object({
   text: z.string().optional(),

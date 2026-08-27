@@ -2734,6 +2734,32 @@ public static class Editor
             properties.RemoveAllChildren<Underline>();
         }
 
+        if (segment.Italic == true)
+        {
+            properties.RemoveAllChildren<Italic>();
+            properties.RemoveAllChildren<ItalicComplexScript>();
+            properties.AppendChild(new Italic());
+            properties.AppendChild(new ItalicComplexScript());
+        }
+        else if (segment.Italic == false)
+        {
+            properties.RemoveAllChildren<Italic>();
+            properties.RemoveAllChildren<ItalicComplexScript>();
+        }
+
+        if (!string.IsNullOrWhiteSpace(segment.VerticalAlignment))
+        {
+            var alignment = segment.VerticalAlignment switch
+            {
+                "baseline" => VerticalPositionValues.Baseline,
+                "superscript" => VerticalPositionValues.Superscript,
+                "subscript" => VerticalPositionValues.Subscript,
+                _ => throw new InvalidOperationException("rich-text-vertical-alignment-invalid")
+            };
+            properties.RemoveAllChildren<VerticalTextAlignment>();
+            properties.AppendChild(new VerticalTextAlignment { Val = alignment });
+        }
+
         NormalizeRunProperties(properties);
         AppendTextWithLineBreaks(run, segment.Text);
         return run;
