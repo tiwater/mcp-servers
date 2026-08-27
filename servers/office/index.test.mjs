@@ -99,7 +99,7 @@ process.exit(2);
       protocolVersion: '2025-06-18', capabilities: {},
       clientInfo: { name: 'office-contract', version: '1.0.0' },
     });
-    assert.equal(initialized.result.serverInfo.version, '0.14.2');
+    assert.equal(initialized.result.serverInfo.version, '0.14.3');
 
     const listed = await request('tools/list');
     const names = listed.result.tools.map(tool => tool.name);

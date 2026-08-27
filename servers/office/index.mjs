@@ -191,6 +191,8 @@ const richTextSegment = z.object({
   underline: z.boolean().optional(),
   bold: z.boolean().optional(),
   fontName: z.string().optional(),
+  italic: z.boolean().optional(),
+  verticalAlignment: z.enum(['baseline', 'superscript', 'subscript']).optional(),
 }).strict();
 const tableCellInput = z.object({
   text: z.string().optional(),
@@ -261,6 +263,7 @@ const docxEditActions = [
   editAction('docx_set_table_row_keep_next', 'setTableRowKeepNext', 'Set keep-next behavior for current body table rows.', z.object({ tableIndex: index, rowIndex: index, keepNext: z.boolean() }).strict()),
   editAction('docx_set_body_paragraph_keep_next', 'setBodyParagraphKeepNext', 'Set keep-next behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepNext: z.boolean() }).strict()),
   editAction('docx_set_body_paragraph_keep_lines', 'setBodyParagraphKeepLines', 'Set keep-lines behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepLines: z.boolean() }).strict()),
+  editAction('docx_apply_toc_style_policy', 'applyTocStylePolicy', 'Apply current document table-of-contents paragraph style properties.', z.object({ italic: z.boolean(), indentCharactersPerLevel: index }).strict()),
   editAction('docx_set_header_paragraph_font_size', 'setHeaderParagraphFontSize', 'Set current header paragraph font size.', z.object({ headerIndex: index, paragraphIndex: index, fontSize: pathInput }).strict()),
   documentAction('docx_collapse_trailing_empty_section', 'collapseTrailingEmptySection', 'Collapse a current trailing empty section.'),
   documentAction('docx_collapse_trailing_empty_paragraphs', 'collapseTrailingEmptyBodyParagraphs', 'Collapse current trailing empty body paragraphs.'),
@@ -359,6 +362,13 @@ const tools = [
     inputSchema: z.object({ input: pathInput, policy: z.object({ schema: pathInput, body: z.record(z.string(), z.string()), table: z.record(z.string(), z.string()) }).strict() }).strict(),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxValidateFontPolicy,
+  },
+  {
+    name: 'docx_validate_toc_style_policy',
+    description: 'Validate current DOCX table-of-contents paragraph styles against an explicit policy.',
+    inputSchema: z.object({ input: pathInput, italic: z.boolean(), indentCharactersPerLevel: index }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: docxValidateTocStylePolicy,
   },
   {
     name: 'docx_strip_direct_formatting',
@@ -554,6 +564,13 @@ async function docxValidateFontPolicy(args) {
     const result = await runJsonCandidateChain(docxCandidates, ['validate-font-policy', requireString(args.input, 'input'), policyPath], { allowedExitCodes: [0, 1] });
     return { tool: 'docx_validate_font_policy', runtime: commandRuntime(result), result: result.json };
   });
+}
+
+async function docxValidateTocStylePolicy(args) {
+  const result = await runJsonCandidateChain(docxCandidates, [
+    'validate-toc-style-policy', requireString(args.input, 'input'), String(args.italic), String(args.indentCharactersPerLevel),
+  ], { allowedExitCodes: [0, 1] });
+  return { tool: 'docx_validate_toc_style_policy', runtime: commandRuntime(result), result: result.json };
 }
 
 async function docxStripDirectFormatting(args) {

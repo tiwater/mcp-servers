@@ -4416,7 +4416,7 @@ public class AnnotationToolsTests
         {
             var properties = run.RunProperties;
             Assert.NotNull(properties);
-            Assert.Equal("FF0000", properties!.GetFirstChild<Color>()!.Val!.Value);
+            Assert.Equal("FF0000", properties.GetFirstChild<Color>()!.Val!.Value);
             Assert.Equal(UnderlineValues.Single, properties.GetFirstChild<Underline>()!.Val!.Value);
             var fonts = properties.GetFirstChild<RunFonts>();
             Assert.NotNull(fonts);
@@ -4430,6 +4430,32 @@ public class AnnotationToolsTests
         Assert.DoesNotContain(
             new OpenXmlValidator().Validate(doc).Select(error => error.Description),
             description => description.Contains("unexpected child element", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Rich_text_round_trips_italic_and_vertical_alignment()
+    {
+        var path = CreateRichTextTableFixture();
+        var output = Path.Combine(Path.GetTempPath(), $"rich-cell-script-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "replaceTableCellRichText",
+                TableIndex: 0,
+                RowIndex: 0,
+                CellIndex: 0,
+                RichText: [
+                    new DocxRichTextSegment("R", Italic: true),
+                    new DocxRichTextSegment("2", VerticalAlignment: "superscript"),
+                    new DocxRichTextSegment(" baseline", Italic: false, VerticalAlignment: "baseline")
+                ])
+        ]);
+
+        Assert.True(Assert.Single(result.AppliedOperations).Applied);
+        var runs = Inspector.InspectTables(output).Tables.Single().Rows.Single().Cells.Single().Paragraphs.Single().Runs;
+        Assert.True(runs.Single(run => run.Text == "R").Italic);
+        Assert.Equal("superscript", runs.Single(run => run.Text == "2").VerticalAlignment);
+        Assert.Equal("baseline", runs.Single(run => run.Text == " baseline").VerticalAlignment);
     }
 
     [Fact]

@@ -529,6 +529,7 @@ public static class Inspector
             Underline: properties?.Underline is null ? null : GetValAttribute(properties.Underline) ?? "single",
             Bold: IsOn(properties?.Bold),
             Italic: IsOn(properties?.Italic),
+            VerticalAlignment: GetValAttribute(properties?.VerticalTextAlignment),
             FontAscii: fonts?.Ascii?.Value,
             FontHighAnsi: fonts?.HighAnsi?.Value,
             FontEastAsia: fonts?.EastAsia?.Value,

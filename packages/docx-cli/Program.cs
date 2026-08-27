@@ -96,6 +96,7 @@ public static class Cli
                 "normalize-openxml" => Task.FromResult(DocxPackageNormalizer.RunNormalize(args[1..])),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 "validate-font-policy" => Task.FromResult(FontPolicy.RunValidate(args[1..])),
+                "validate-toc-style-policy" => Task.FromResult(TocStylePolicy.RunValidate(args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -212,6 +213,7 @@ public static class Cli
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
         Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
         Console.WriteLine("  validate-font-policy <input.docx> <policy.json>");
+        Console.WriteLine("  validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level>");
     }
 
     private static void PrintToolDescription()
