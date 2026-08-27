@@ -263,6 +263,7 @@ const docxEditActions = [
   editAction('docx_set_table_row_keep_next', 'setTableRowKeepNext', 'Set keep-next behavior for current body table rows.', z.object({ tableIndex: index, rowIndex: index, keepNext: z.boolean() }).strict()),
   editAction('docx_set_body_paragraph_keep_next', 'setBodyParagraphKeepNext', 'Set keep-next behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepNext: z.boolean() }).strict()),
   editAction('docx_set_body_paragraph_keep_lines', 'setBodyParagraphKeepLines', 'Set keep-lines behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepLines: z.boolean() }).strict()),
+  editAction('docx_apply_toc_style_policy', 'applyTocStylePolicy', 'Apply current document table-of-contents paragraph style properties.', z.object({ italic: z.boolean(), indentCharactersPerLevel: index }).strict()),
   editAction('docx_set_header_paragraph_font_size', 'setHeaderParagraphFontSize', 'Set current header paragraph font size.', z.object({ headerIndex: index, paragraphIndex: index, fontSize: pathInput }).strict()),
   documentAction('docx_collapse_trailing_empty_section', 'collapseTrailingEmptySection', 'Collapse a current trailing empty section.'),
   documentAction('docx_collapse_trailing_empty_paragraphs', 'collapseTrailingEmptyBodyParagraphs', 'Collapse current trailing empty body paragraphs.'),

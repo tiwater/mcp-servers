@@ -119,6 +119,7 @@ public static class Editor
             "setTableRowKeepNext" => SetTableRowKeepNext(body, operation),
             "setBodyParagraphKeepNext" => SetBodyParagraphKeepNext(body, operation),
             "setBodyParagraphKeepLines" => SetBodyParagraphKeepLines(body, operation),
+            "applyTocStylePolicy" => ApplyTocStylePolicy(doc, operation),
             "setHeaderParagraphFontSize" => SetHeaderParagraphFontSize(doc, operation),
             "collapseTrailingEmptySection" => CollapseTrailingEmptySection(body, operation),
             "collapseTrailingEmptyBodyParagraphs" => CollapseTrailingEmptyBodyParagraphs(body, operation),
@@ -1228,6 +1229,37 @@ public static class Editor
 
         return new DocxEditAppliedOperation(operation.Type, true,
             $"Updated body paragraph[{operation.ParagraphIndex}] keepLines={operation.KeepLines.Value.ToString().ToLowerInvariant()}");
+    }
+
+    private static DocxEditAppliedOperation ApplyTocStylePolicy(WordprocessingDocument doc, DocxEditOperation operation)
+    {
+        if (operation.Italic is null || operation.IndentCharactersPerLevel is null or < 0)
+            return new DocxEditAppliedOperation(operation.Type, false, "italic and non-negative indentCharactersPerLevel are required");
+        var styles = doc.MainDocumentPart?.StyleDefinitionsPart?.Styles;
+        if (styles is null) return new DocxEditAppliedOperation(operation.Type, false, "document styles are missing");
+
+        var matched = 0;
+        foreach (var style in styles.Elements<Style>().Where(style => style.Type?.Value == StyleValues.Paragraph))
+        {
+            var id = style.StyleId?.Value ?? string.Empty;
+            var name = style.StyleName?.Val?.Value ?? string.Empty;
+            var token = id.StartsWith("TOC", StringComparison.OrdinalIgnoreCase) ? id[3..]
+                : name.StartsWith("toc ", StringComparison.OrdinalIgnoreCase) ? name[4..] : string.Empty;
+            if (!int.TryParse(token, out var level) || level < 1) continue;
+
+            var paragraph = style.StyleParagraphProperties ?? style.AppendChild(new StyleParagraphProperties());
+            paragraph.RemoveAllChildren<Indentation>();
+            paragraph.AppendChild(new Indentation { LeftChars = (level - 1) * operation.IndentCharactersPerLevel.Value * 100 });
+
+            var run = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
+            run.RemoveAllChildren<Italic>();
+            run.RemoveAllChildren<ItalicComplexScript>();
+            run.AppendChild(new Italic { Val = operation.Italic.Value });
+            run.AppendChild(new ItalicComplexScript { Val = operation.Italic.Value });
+            matched += 1;
+        }
+        if (matched == 0) return new DocxEditAppliedOperation(operation.Type, false, "no built-in TOC paragraph styles were found");
+        return new DocxEditAppliedOperation(operation.Type, true, $"Updated {matched} TOC paragraph styles");
     }
 
     private static DocxEditAppliedOperation SetHeaderParagraphFontSize(WordprocessingDocument doc, DocxEditOperation operation)

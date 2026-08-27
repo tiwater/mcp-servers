@@ -630,6 +630,8 @@ public sealed record DocxEditOperation(
     bool? CantSplit = null,
     bool? KeepNext = null,
     bool? KeepLines = null,
+    bool? Italic = null,
+    int? IndentCharactersPerLevel = null,
     bool? RepeatAsHeader = null,
     IReadOnlyList<DocxRichTextSegment>? RichText = null,
     DocxFontPolicy? FontPolicy = null,
