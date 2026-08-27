@@ -1901,8 +1901,14 @@ public static class Editor
             properties.RemoveAllChildren<VerticalMerge>();
             if (input.VMerge is { Length: > 0 } vMergeVal)
             {
-                var vmVal = vMergeVal.ToLowerInvariant() == "restart" ? MergedCellValues.Restart : MergedCellValues.Continue;
-                properties.AppendChild(new VerticalMerge { Val = vmVal });
+                MergedCellValues? vmVal = vMergeVal.ToLowerInvariant() switch
+                {
+                    "restart" => MergedCellValues.Restart,
+                    "continue" => MergedCellValues.Continue,
+                    "none" => null,
+                    _ => throw new InvalidOperationException("table-cell-vmerge-invalid")
+                };
+                if (vmVal is not null) properties.AppendChild(new VerticalMerge { Val = vmVal });
             }
         }
 

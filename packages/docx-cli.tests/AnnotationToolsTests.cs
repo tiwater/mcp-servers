@@ -3905,6 +3905,49 @@ public class AnnotationToolsTests
     }
 
     [Fact]
+    public void Edit_replace_table_rows_none_vmerge_clears_template_continuation()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"fixture-vmerge-none-{Guid.NewGuid():N}.docx");
+        using (var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document(new Body(new Table(
+                new TableRow(
+                    new TableCell(new TableCellProperties(new VerticalMerge { Val = MergedCellValues.Restart }), new Paragraph(new Run(new Text("A")))),
+                    new TableCell(new TableCellProperties(new VerticalMerge { Val = MergedCellValues.Restart }), new Paragraph(new Run(new Text("B"))))),
+                new TableRow(
+                    new TableCell(new TableCellProperties(new VerticalMerge { Val = MergedCellValues.Continue }), new Paragraph(new Run(new Text(string.Empty)))),
+                    new TableCell(new TableCellProperties(new VerticalMerge { Val = MergedCellValues.Continue }), new Paragraph(new Run(new Text(string.Empty))))))));
+            mainPart.Document.Save();
+        }
+        var output = Path.Combine(Path.GetTempPath(), $"vmerge-none-{Guid.NewGuid():N}.docx");
+
+        var result = Editor.Apply(path, output, [
+            new DocxEditOperation(
+                "replaceTableRows",
+                TableIndex: 0,
+                StartRowIndex: 1,
+                EndRowIndex: 1,
+                TemplateRowIndex: 1,
+                Rows: [[
+                    new DocxTableCellInput("independent", VMerge: "none"),
+                    new DocxTableCellInput("grouped", VMerge: "restart")
+                ]])
+        ]);
+
+        Assert.True(Assert.Single(result.AppliedOperations).Applied);
+        var cells = Assert.Single(Inspector.InspectTables(output).Tables).Rows[1].Cells;
+        Assert.Null(cells[0].VMerge);
+        Assert.Equal("restart", cells[1].VMerge);
+        Assert.Equal("independent", cells[0].Text);
+        Assert.Equal("grouped", cells[1].Text);
+        using var edited = WordprocessingDocument.Open(output, false);
+        var firstCell = edited.MainDocumentPart!.Document!.Body!.Elements<Table>().Single()
+            .Elements<TableRow>().ElementAt(1).Elements<TableCell>().First();
+        Assert.Null(firstCell.GetFirstChild<TableCellProperties>()!.GetFirstChild<VerticalMerge>());
+    }
+
+    [Fact]
     public void Edit_insert_table_rows_inherits_complete_style_from_text_bearing_template_run()
     {
         var path = Path.Combine(Path.GetTempPath(), $"fixture-insert-row-complete-style-{Guid.NewGuid():N}.docx");
