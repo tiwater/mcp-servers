@@ -4,17 +4,20 @@
   "properties": {
     "input": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
     },
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "New document output path. Existing files are never overwritten."
+      "description": "New document output path. Existing files are never overwritten.",
+      "x-tiwater-file-role": "write"
     },
     "receiptOutput": {
       "type": "string",
       "minLength": 1,
-      "description": "New JSON receipt path. Existing files are never overwritten."
+      "description": "New JSON receipt path. Existing files are never overwritten.",
+      "x-tiwater-file-role": "write"
     },
     "changes": {
       "minItems": 1,
