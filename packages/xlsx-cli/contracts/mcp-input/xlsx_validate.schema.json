@@ -4,7 +4,8 @@
   "properties": {
     "input": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
     }
   },
   "required": [

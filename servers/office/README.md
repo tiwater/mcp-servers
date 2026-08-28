@@ -6,6 +6,11 @@ The server owns technical observation, native conversion, fixed-action edits,
 package validation, and native WPS rendering. Callers own document selections,
 values, business mappings, workflow decisions, and delivery status.
 
+Every filesystem argument is identified in the published MCP input schema by
+`x-tiwater-file-role`. `read` marks an existing provider input; `write` marks a
+new provider artifact. Strings without this metadata are document values or
+OpenXML-internal identifiers, not filesystem arguments.
+
 ## Capability families
 
 - DOCX: inspect document/tables, export, compare, validate OpenXML, font, and table-of-contents styles

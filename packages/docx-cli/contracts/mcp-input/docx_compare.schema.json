@@ -4,11 +4,13 @@
   "properties": {
     "baseline": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
     },
     "updated": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
     }
   },
   "required": [

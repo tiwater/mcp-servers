@@ -18,6 +18,17 @@ const serverPackagePath = path.join(serverRoot, 'package.json');
 const serverLockPath = path.join(serverRoot, 'package-lock.json');
 const generatedManifestRelativePath = 'office/contracts/tiwater-office-provider-contract-manifest-v1.json';
 const generatedContractDeclaration = 'office/contracts/*.schema.json';
+const fileRoleKey = 'x-tiwater-file-role';
+const expectedFileRolesByProperty = new Map([
+  ['input', 'read'],
+  ['baseline', 'read'],
+  ['updated', 'read'],
+  ['template', 'read'],
+  ['image', 'read'],
+  ['source', 'read'],
+  ['output', 'write'],
+  ['receiptOutput', 'write'],
+]);
 const requiredPackageFiles = [
   'package.json',
   '_shared/tool-runtime.mjs',
@@ -440,6 +451,7 @@ async function checkGeneratedManifest(packageRoot, toolNames, packageManifest) {
     .filter(file => file.endsWith('.schema.json') && file.includes(`${path.sep}contracts${path.sep}`))
     .map(file => path.relative(packageRoot, file).split(path.sep).join('/')));
   const referencedContractFiles = new Set();
+  let fileRoleCount = 0;
   for (const entry of manifest.tools) {
     if (!exactKeys(entry, ['name', 'providerContract', 'inputContract'])
         || !exactKeys(entry.providerContract, ['source', 'sha256'])
@@ -489,6 +501,7 @@ async function checkGeneratedManifest(packageRoot, toolNames, packageManifest) {
     if (packagedInputSchema.type !== 'object') {
       fail(check, `tool ${entry.name} MCP input contract root must be an object`);
     }
+    fileRoleCount += checkFileArgumentRoles(packagedInputSchema, entry.name, check);
     const expectedInputSchema = canonicalMcpInputSchema(toolNames.find(tool => tool?.name === entry.name)?.inputSchema);
     const actualInputSchema = canonicalMcpInputSchema(packagedInputSchema);
     if (expectedInputSchema === null) {
@@ -503,7 +516,38 @@ async function checkGeneratedManifest(packageRoot, toolNames, packageManifest) {
       fail(check, `packaged public contract is not declared by any MCP tool: ${packagedPath}`);
     }
   }
-  note(`generated manifest checked: ${manifest.tools.length} MCP tools and ${referencedContractFiles.size} provider contracts`);
+  note(`generated manifest checked: ${manifest.tools.length} MCP tools, ${referencedContractFiles.size} provider contracts, and ${fileRoleCount} file arguments`);
+}
+
+function checkFileArgumentRoles(schema, toolName, check) {
+  let count = 0;
+  function visit(node, location, propertyName = '') {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+    const declaredRole = node[fileRoleKey];
+    if (declaredRole !== undefined) {
+      if (node.type !== 'string' || !['read', 'write'].includes(declaredRole)) {
+        fail(check, `tool ${toolName} has invalid ${fileRoleKey} at ${location}`);
+      } else {
+        count += 1;
+      }
+    }
+    const expectedRole = node.type === 'string' ? expectedFileRolesByProperty.get(propertyName) : undefined;
+    if (expectedRole && declaredRole !== expectedRole) {
+      fail(check, `tool ${toolName} must declare ${location} as a ${expectedRole} file argument`);
+    }
+    for (const [name, child] of Object.entries(node.properties || {})) {
+      visit(child, `${location}.properties.${name}`, name);
+    }
+    if (node.items) visit(node.items, `${location}.items`);
+    for (const keyword of ['allOf', 'anyOf', 'oneOf']) {
+      for (const [index, child] of (node[keyword] || []).entries()) {
+        visit(child, `${location}.${keyword}[${index}]`, propertyName);
+      }
+    }
+  }
+  visit(schema, '$');
+  if (count === 0) fail(check, `tool ${toolName} declares no file arguments`);
+  return count;
 }
 
 const allowedMcpSchemaMetadata = new Map([

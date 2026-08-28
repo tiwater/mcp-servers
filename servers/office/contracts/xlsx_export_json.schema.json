@@ -4,12 +4,14 @@
   "properties": {
     "input": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
     },
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "New JSON artifact path. Existing files are never overwritten."
+      "description": "New JSON artifact path. Existing files are never overwritten.",
+      "x-tiwater-file-role": "write"
     },
     "resolveMergedCells": {
       "description": "Resolve merged cells to project values.",

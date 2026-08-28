@@ -2,953 +2,953 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.15.1"
+    "version": "0.15.2"
   },
   "tools": [
     {
       "name": "docx_apply_font_policy",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_apply_font_policy.schema.json",
-        "sha256": "390cf06cf0ab49c8115f2f60d2e7852833c514f63cd33a510a2615f6bd1c7788"
+        "sha256": "c3647f1b3733e4ced3a23c4c334abb52b30518b862c8d9d9bd49155ef7e5c91f"
       },
       "inputContract": {
         "path": "office/contracts/docx_apply_font_policy.schema.json",
-        "sha256": "390cf06cf0ab49c8115f2f60d2e7852833c514f63cd33a510a2615f6bd1c7788"
+        "sha256": "c3647f1b3733e4ced3a23c4c334abb52b30518b862c8d9d9bd49155ef7e5c91f"
       }
     },
     {
       "name": "docx_apply_toc_style_policy",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_apply_toc_style_policy.schema.json",
-        "sha256": "87b4edaa0ed6c461ee606cc463597d665c0b79ce339c770ebf33b8217606a9c8"
+        "sha256": "bc180674d89109d6b57c26312bb5fe4b7599c31cb45a46bd5d08710ab66954e3"
       },
       "inputContract": {
         "path": "office/contracts/docx_apply_toc_style_policy.schema.json",
-        "sha256": "87b4edaa0ed6c461ee606cc463597d665c0b79ce339c770ebf33b8217606a9c8"
+        "sha256": "bc180674d89109d6b57c26312bb5fe4b7599c31cb45a46bd5d08710ab66954e3"
       }
     },
     {
       "name": "docx_collapse_trailing_empty_paragraphs",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_collapse_trailing_empty_paragraphs.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       },
       "inputContract": {
         "path": "office/contracts/docx_collapse_trailing_empty_paragraphs.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       }
     },
     {
       "name": "docx_collapse_trailing_empty_section",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_collapse_trailing_empty_section.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       },
       "inputContract": {
         "path": "office/contracts/docx_collapse_trailing_empty_section.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       }
     },
     {
       "name": "docx_compare",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_compare.schema.json",
-        "sha256": "72144786f0f56745750bfcf41cd7e849cf9045597e0288890aa7c25806045a08"
+        "sha256": "5ca303fccb95b448358b93f941c71fbecb2ab8ec8c83a7babc2f1436c0773e1d"
       },
       "inputContract": {
         "path": "office/contracts/docx_compare.schema.json",
-        "sha256": "72144786f0f56745750bfcf41cd7e849cf9045597e0288890aa7c25806045a08"
+        "sha256": "5ca303fccb95b448358b93f941c71fbecb2ab8ec8c83a7babc2f1436c0773e1d"
       }
     },
     {
       "name": "docx_copy_table_range",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_copy_table_range.schema.json",
-        "sha256": "6de812d29b9418efac7341289acef03c1f49c4d40c3c3e9828802bbdeb9e8391"
+        "sha256": "203719ca85561647c6cef62eef803f6413290c8f13802cdbcb6cc67bb4892f31"
       },
       "inputContract": {
         "path": "office/contracts/docx_copy_table_range.schema.json",
-        "sha256": "6de812d29b9418efac7341289acef03c1f49c4d40c3c3e9828802bbdeb9e8391"
+        "sha256": "203719ca85561647c6cef62eef803f6413290c8f13802cdbcb6cc67bb4892f31"
       }
     },
     {
       "name": "docx_delete_body_drawing_before_paragraph",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_delete_body_drawing_before_paragraph.schema.json",
-        "sha256": "74a3fa0057ffc1a59af651fb55400164a2700685e7fd073fbeef1eb8c4186b69"
+        "sha256": "337c842f79b744de0e3d491f638fc416f092e55dbdc109ecc5bd730e7fe3dc48"
       },
       "inputContract": {
         "path": "office/contracts/docx_delete_body_drawing_before_paragraph.schema.json",
-        "sha256": "74a3fa0057ffc1a59af651fb55400164a2700685e7fd073fbeef1eb8c4186b69"
+        "sha256": "337c842f79b744de0e3d491f638fc416f092e55dbdc109ecc5bd730e7fe3dc48"
       }
     },
     {
       "name": "docx_delete_body_paragraph",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_delete_body_paragraph.schema.json",
-        "sha256": "74a3fa0057ffc1a59af651fb55400164a2700685e7fd073fbeef1eb8c4186b69"
+        "sha256": "337c842f79b744de0e3d491f638fc416f092e55dbdc109ecc5bd730e7fe3dc48"
       },
       "inputContract": {
         "path": "office/contracts/docx_delete_body_paragraph.schema.json",
-        "sha256": "74a3fa0057ffc1a59af651fb55400164a2700685e7fd073fbeef1eb8c4186b69"
+        "sha256": "337c842f79b744de0e3d491f638fc416f092e55dbdc109ecc5bd730e7fe3dc48"
       }
     },
     {
       "name": "docx_delete_body_range",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_delete_body_range.schema.json",
-        "sha256": "c2dc5ff6710efe368c0c19683ad6493bdaa6449ff57fd198837e949f407fffe6"
+        "sha256": "375a7c12a3eee1c0684ca53f43b703ca9826cab078c17148fbca370eb0b71607"
       },
       "inputContract": {
         "path": "office/contracts/docx_delete_body_range.schema.json",
-        "sha256": "c2dc5ff6710efe368c0c19683ad6493bdaa6449ff57fd198837e949f407fffe6"
+        "sha256": "375a7c12a3eee1c0684ca53f43b703ca9826cab078c17148fbca370eb0b71607"
       }
     },
     {
       "name": "docx_delete_comments",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_delete_comments.schema.json",
-        "sha256": "5424a30385b12277dd7ee57f1c238fe1d725b36990bab79909901065d6d07369"
+        "sha256": "481bebffd8668e8a7a0a2957b57d5b34bbdcde527633ba5d9171aec33f722cca"
       },
       "inputContract": {
         "path": "office/contracts/docx_delete_comments.schema.json",
-        "sha256": "5424a30385b12277dd7ee57f1c238fe1d725b36990bab79909901065d6d07369"
+        "sha256": "481bebffd8668e8a7a0a2957b57d5b34bbdcde527633ba5d9171aec33f722cca"
       }
     },
     {
       "name": "docx_delete_table_rows",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_delete_table_rows.schema.json",
-        "sha256": "7a80c62759a396d6bd0769f69ad3a630f767c238608da9792d4d9a35391d059b"
+        "sha256": "dbf55769c924cf7421396bc4a834b1e4c5f46780c88aa2aab55b4112d5e71144"
       },
       "inputContract": {
         "path": "office/contracts/docx_delete_table_rows.schema.json",
-        "sha256": "7a80c62759a396d6bd0769f69ad3a630f767c238608da9792d4d9a35391d059b"
+        "sha256": "dbf55769c924cf7421396bc4a834b1e4c5f46780c88aa2aab55b4112d5e71144"
       }
     },
     {
       "name": "docx_export_json",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_export_json.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       },
       "inputContract": {
         "path": "office/contracts/docx_export_json.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       }
     },
     {
       "name": "docx_find_literal",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_find_literal.schema.json",
-        "sha256": "b785eee229932168a69bfe5951e55dbd2cd4e9820942a87cdb9fbd6f9fd27ac3"
+        "sha256": "df445818f3e166f4ac20fcd6539dff5871d304c50f2cd9986a8026635558d79a"
       },
       "inputContract": {
         "path": "office/contracts/docx_find_literal.schema.json",
-        "sha256": "b785eee229932168a69bfe5951e55dbd2cd4e9820942a87cdb9fbd6f9fd27ac3"
+        "sha256": "df445818f3e166f4ac20fcd6539dff5871d304c50f2cd9986a8026635558d79a"
       }
     },
     {
       "name": "docx_freeze_fields",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_freeze_fields.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       },
       "inputContract": {
         "path": "office/contracts/docx_freeze_fields.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       }
     },
     {
       "name": "docx_insert_body_image",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_insert_body_image.schema.json",
-        "sha256": "e3e4f2de484c42d7881b9cc3f1d6a22b25d448eabe049d29485cb45f4fbe15bb"
+        "sha256": "2003e0938c7cd1da175132b6f3331d93bed413dbece544704a1f40304af52598"
       },
       "inputContract": {
         "path": "office/contracts/docx_insert_body_image.schema.json",
-        "sha256": "e3e4f2de484c42d7881b9cc3f1d6a22b25d448eabe049d29485cb45f4fbe15bb"
+        "sha256": "2003e0938c7cd1da175132b6f3331d93bed413dbece544704a1f40304af52598"
       }
     },
     {
       "name": "docx_insert_body_range",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_insert_body_range.schema.json",
-        "sha256": "a5e0cfbcc298e51d8c534438cb494054f0d7949095afa55c13f2dca87fe2d43d"
+        "sha256": "19cfd7e2a0c7f97ddb3ad486f82674b0bba47622c90bdd2c81f14c09e446ec5d"
       },
       "inputContract": {
         "path": "office/contracts/docx_insert_body_range.schema.json",
-        "sha256": "a5e0cfbcc298e51d8c534438cb494054f0d7949095afa55c13f2dca87fe2d43d"
+        "sha256": "19cfd7e2a0c7f97ddb3ad486f82674b0bba47622c90bdd2c81f14c09e446ec5d"
       }
     },
     {
       "name": "docx_insert_table_columns",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_insert_table_columns.schema.json",
-        "sha256": "79f639535fcfdc82a411ea475c7f94c8a8bb287fea153cb9408142bb726f9ec7"
+        "sha256": "cc154b5136f025f049cfd4993a2294c8a1e18027d55146dbb997c44d71b4531a"
       },
       "inputContract": {
         "path": "office/contracts/docx_insert_table_columns.schema.json",
-        "sha256": "79f639535fcfdc82a411ea475c7f94c8a8bb287fea153cb9408142bb726f9ec7"
+        "sha256": "cc154b5136f025f049cfd4993a2294c8a1e18027d55146dbb997c44d71b4531a"
       }
     },
     {
       "name": "docx_insert_table_rows",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_insert_table_rows.schema.json",
-        "sha256": "d51c0578d5a27cfe290afeca068f36e78af49403487351203f3b19af277f56a8"
+        "sha256": "bcb7619a7e64037d17287606778236202fff6516b33fa29fbc533e9520478153"
       },
       "inputContract": {
         "path": "office/contracts/docx_insert_table_rows.schema.json",
-        "sha256": "d51c0578d5a27cfe290afeca068f36e78af49403487351203f3b19af277f56a8"
+        "sha256": "bcb7619a7e64037d17287606778236202fff6516b33fa29fbc533e9520478153"
       }
     },
     {
       "name": "docx_inspect",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_inspect.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       },
       "inputContract": {
         "path": "office/contracts/docx_inspect.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       }
     },
     {
       "name": "docx_inspect_tables",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_inspect_tables.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       },
       "inputContract": {
         "path": "office/contracts/docx_inspect_tables.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       }
     },
     {
       "name": "docx_list_objects",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_list_objects.schema.json",
-        "sha256": "4d26e0759f286ffa8a7bfcb4d2c4444e7988707d40989c414b862105f5b6d3f0"
+        "sha256": "cdbe75c9f10cf72dffad22debb4dd5f96d8bf3f314dee362dd8e313e30f8ee32"
       },
       "inputContract": {
         "path": "office/contracts/docx_list_objects.schema.json",
-        "sha256": "4d26e0759f286ffa8a7bfcb4d2c4444e7988707d40989c414b862105f5b6d3f0"
+        "sha256": "cdbe75c9f10cf72dffad22debb4dd5f96d8bf3f314dee362dd8e313e30f8ee32"
       }
     },
     {
       "name": "docx_mark_fields_dirty",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_mark_fields_dirty.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       },
       "inputContract": {
         "path": "office/contracts/docx_mark_fields_dirty.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       }
     },
     {
       "name": "docx_merge_table_cells",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_merge_table_cells.schema.json",
-        "sha256": "057b3083d01fd3e21f7a3ff682a60906c96215c91276c92d71546d252ccf24ce"
+        "sha256": "9ed1a405b8338f8f18d515fe267007e78dd4829a5ff685c69373aa9f614a546b"
       },
       "inputContract": {
         "path": "office/contracts/docx_merge_table_cells.schema.json",
-        "sha256": "057b3083d01fd3e21f7a3ff682a60906c96215c91276c92d71546d252ccf24ce"
+        "sha256": "9ed1a405b8338f8f18d515fe267007e78dd4829a5ff685c69373aa9f614a546b"
       }
     },
     {
       "name": "docx_read_object",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_read_object.schema.json",
-        "sha256": "484836e4fa3b6e584c3bcf8f93e15e644f023a8b47f556753b3f06b39ea2f77a"
+        "sha256": "bc8dd92c05fad110ed5875e6bef189a85e595bb857b7008e2451212ac6231f99"
       },
       "inputContract": {
         "path": "office/contracts/docx_read_object.schema.json",
-        "sha256": "484836e4fa3b6e584c3bcf8f93e15e644f023a8b47f556753b3f06b39ea2f77a"
+        "sha256": "bc8dd92c05fad110ed5875e6bef189a85e595bb857b7008e2451212ac6231f99"
       }
     },
     {
       "name": "docx_replace_body_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_body_text.schema.json",
-        "sha256": "3ec9d9bdc58219e300e7ab8d0d63147dfbf6fc60ed2e4d7d5a1f4616dbecd59d"
+        "sha256": "2bedee2af8a2c39bd4de09a74e27abdf9d5926c0e0fc502538c6456ce8eb35ed"
       },
       "inputContract": {
         "path": "office/contracts/docx_replace_body_text.schema.json",
-        "sha256": "3ec9d9bdc58219e300e7ab8d0d63147dfbf6fc60ed2e4d7d5a1f4616dbecd59d"
+        "sha256": "2bedee2af8a2c39bd4de09a74e27abdf9d5926c0e0fc502538c6456ce8eb35ed"
       }
     },
     {
       "name": "docx_replace_drawing_image",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_drawing_image.schema.json",
-        "sha256": "0e9b1f95459b28acf2f606485ec85ca635b4af2e8972ebfc4ea5614401b8615f"
+        "sha256": "0cfc2dd1e0b463410be10c393466ac70e5d70c8c754d7036ce923f946dd9fc62"
       },
       "inputContract": {
         "path": "office/contracts/docx_replace_drawing_image.schema.json",
-        "sha256": "0e9b1f95459b28acf2f606485ec85ca635b4af2e8972ebfc4ea5614401b8615f"
+        "sha256": "0cfc2dd1e0b463410be10c393466ac70e5d70c8c754d7036ce923f946dd9fc62"
       }
     },
     {
       "name": "docx_replace_header_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_header_text.schema.json",
-        "sha256": "3ec9d9bdc58219e300e7ab8d0d63147dfbf6fc60ed2e4d7d5a1f4616dbecd59d"
+        "sha256": "2bedee2af8a2c39bd4de09a74e27abdf9d5926c0e0fc502538c6456ce8eb35ed"
       },
       "inputContract": {
         "path": "office/contracts/docx_replace_header_text.schema.json",
-        "sha256": "3ec9d9bdc58219e300e7ab8d0d63147dfbf6fc60ed2e4d7d5a1f4616dbecd59d"
+        "sha256": "2bedee2af8a2c39bd4de09a74e27abdf9d5926c0e0fc502538c6456ce8eb35ed"
       }
     },
     {
       "name": "docx_replace_style_ids",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_style_ids.schema.json",
-        "sha256": "c929b67da47006ed0b52148fb85c7464b3f1f06e1a8159fd7a3aac4ce64e708f"
+        "sha256": "aa8fc12a350a391fadf32546847f29a816319efcab01866a1f406dc8313ea1ed"
       },
       "inputContract": {
         "path": "office/contracts/docx_replace_style_ids.schema.json",
-        "sha256": "c929b67da47006ed0b52148fb85c7464b3f1f06e1a8159fd7a3aac4ce64e708f"
+        "sha256": "aa8fc12a350a391fadf32546847f29a816319efcab01866a1f406dc8313ea1ed"
       }
     },
     {
       "name": "docx_replace_table_rows",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_table_rows.schema.json",
-        "sha256": "4bc40b83f154993a98b374ba94631c689493ead78f9c56e6069ccc8681ab382f"
+        "sha256": "5e7023b70153e8386f1e1e58174bcaf49864b60c2347457e562606348a132183"
       },
       "inputContract": {
         "path": "office/contracts/docx_replace_table_rows.schema.json",
-        "sha256": "4bc40b83f154993a98b374ba94631c689493ead78f9c56e6069ccc8681ab382f"
+        "sha256": "5e7023b70153e8386f1e1e58174bcaf49864b60c2347457e562606348a132183"
       }
     },
     {
       "name": "docx_sanitize_fields",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_sanitize_fields.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       },
       "inputContract": {
         "path": "office/contracts/docx_sanitize_fields.schema.json",
-        "sha256": "1f86d75234b34aaf9eb6ba35763155c2220bc66dd6a15f8afaee96b5dae0ba30"
+        "sha256": "c640984b4d00875bd6d8e6b1b79773c9aba2fd5effaa5e5d4a30e435d5a9c1aa"
       }
     },
     {
       "name": "docx_set_anchored_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_anchored_text.schema.json",
-        "sha256": "cdb6236297d02c4336e6ae7b482b9645e3d483ea765769fe94f0298641db5bd6"
+        "sha256": "84f1548eea8bcadd4679aa717acdd531dca1c9aa13d9b0da1562e7d4b69711bc"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_anchored_text.schema.json",
-        "sha256": "cdb6236297d02c4336e6ae7b482b9645e3d483ea765769fe94f0298641db5bd6"
+        "sha256": "84f1548eea8bcadd4679aa717acdd531dca1c9aa13d9b0da1562e7d4b69711bc"
       }
     },
     {
       "name": "docx_set_body_paragraph_keep_lines",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_body_paragraph_keep_lines.schema.json",
-        "sha256": "958bdc6750574ac9f668836e034d1c49c13f0877ae025deb48c6ea794093441f"
+        "sha256": "911d417e4a8d33952c12fad13d0ef698d420a8262cfb0b6170c5d8b51e8f2a9f"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_body_paragraph_keep_lines.schema.json",
-        "sha256": "958bdc6750574ac9f668836e034d1c49c13f0877ae025deb48c6ea794093441f"
+        "sha256": "911d417e4a8d33952c12fad13d0ef698d420a8262cfb0b6170c5d8b51e8f2a9f"
       }
     },
     {
       "name": "docx_set_body_paragraph_keep_next",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_body_paragraph_keep_next.schema.json",
-        "sha256": "80e2ab9fc854d07ee6ae8a446793fcd733885734d68046f7a81fe2e8d60d56a1"
+        "sha256": "c0b49614b2fe0e7aa07924c5bfb5ea2a2ae8ddc438de5dcfb39dc9339e98a574"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_body_paragraph_keep_next.schema.json",
-        "sha256": "80e2ab9fc854d07ee6ae8a446793fcd733885734d68046f7a81fe2e8d60d56a1"
+        "sha256": "c0b49614b2fe0e7aa07924c5bfb5ea2a2ae8ddc438de5dcfb39dc9339e98a574"
       }
     },
     {
       "name": "docx_set_footer_paragraph_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_footer_paragraph_text.schema.json",
-        "sha256": "0ee0e87abdcabfebdbc6d6bb5965ff4220c037785c719e791b3efc81e3d92298"
+        "sha256": "0660062ac4f2589e625703a6a9267d2484ce647a7bcc591d916b67c3959907c6"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_footer_paragraph_text.schema.json",
-        "sha256": "0ee0e87abdcabfebdbc6d6bb5965ff4220c037785c719e791b3efc81e3d92298"
+        "sha256": "0660062ac4f2589e625703a6a9267d2484ce647a7bcc591d916b67c3959907c6"
       }
     },
     {
       "name": "docx_set_footer_run_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_footer_run_text.schema.json",
-        "sha256": "dac623ea955a1ed2b0ae728641a3dccf33beba328d9e91efe6ed0bfe64d1f940"
+        "sha256": "bcd697d39c5b8cb9ca7e4603d82b83a354379ac3bc9cb9e6c311ad30bfd3a1f1"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_footer_run_text.schema.json",
-        "sha256": "dac623ea955a1ed2b0ae728641a3dccf33beba328d9e91efe6ed0bfe64d1f940"
+        "sha256": "bcd697d39c5b8cb9ca7e4603d82b83a354379ac3bc9cb9e6c311ad30bfd3a1f1"
       }
     },
     {
       "name": "docx_set_footer_table_cell_run_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_footer_table_cell_run_text.schema.json",
-        "sha256": "1d08c18c8ead80dbda155693f73263d46f629fa7eef5f10915e46e65fb108834"
+        "sha256": "1be3c6bed18ab93d376ade3fdccc561dcb375f7837f8d442ee932e5828c0e6da"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_footer_table_cell_run_text.schema.json",
-        "sha256": "1d08c18c8ead80dbda155693f73263d46f629fa7eef5f10915e46e65fb108834"
+        "sha256": "1be3c6bed18ab93d376ade3fdccc561dcb375f7837f8d442ee932e5828c0e6da"
       }
     },
     {
       "name": "docx_set_footer_table_cell_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_footer_table_cell_text.schema.json",
-        "sha256": "f27f9d7f64dbd3933b02085b120f71797158eb7418b5ce642433434535b9d3b5"
+        "sha256": "a3f0402e1aa3c0b7fa62b6d17fd2194a6e8d9e8e8b4068b9693c87a3a896dea5"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_footer_table_cell_text.schema.json",
-        "sha256": "f27f9d7f64dbd3933b02085b120f71797158eb7418b5ce642433434535b9d3b5"
+        "sha256": "a3f0402e1aa3c0b7fa62b6d17fd2194a6e8d9e8e8b4068b9693c87a3a896dea5"
       }
     },
     {
       "name": "docx_set_header_paragraph_font_size",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_header_paragraph_font_size.schema.json",
-        "sha256": "f05418d4133b7728a023e89aa7a78794001dfcaf55607112d7d33af717d09671"
+        "sha256": "784ed822aa6ed66a8ee0d6e3d121f60b2159eae41afcd3d26bbd9133a3610e7a"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_header_paragraph_font_size.schema.json",
-        "sha256": "f05418d4133b7728a023e89aa7a78794001dfcaf55607112d7d33af717d09671"
+        "sha256": "784ed822aa6ed66a8ee0d6e3d121f60b2159eae41afcd3d26bbd9133a3610e7a"
       }
     },
     {
       "name": "docx_set_header_paragraph_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_header_paragraph_text.schema.json",
-        "sha256": "494a59ce91e82eacd9e65521cac2634f4dd2e2569deeacc100a870b65f86f486"
+        "sha256": "cb352fae9cb2bd90bcbe548c1d19ab6809850b9901c067b0b3d6f2e72bbe610c"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_header_paragraph_text.schema.json",
-        "sha256": "494a59ce91e82eacd9e65521cac2634f4dd2e2569deeacc100a870b65f86f486"
+        "sha256": "cb352fae9cb2bd90bcbe548c1d19ab6809850b9901c067b0b3d6f2e72bbe610c"
       }
     },
     {
       "name": "docx_set_header_run_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_header_run_text.schema.json",
-        "sha256": "164f39b037a942b6d91804838e00fa3ec6f0a4484f2b55f4350fc87b40805ec9"
+        "sha256": "987df2442e46b5792658190f4b39f9f49509c68c461cd7ffb76d0eb540cfdae7"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_header_run_text.schema.json",
-        "sha256": "164f39b037a942b6d91804838e00fa3ec6f0a4484f2b55f4350fc87b40805ec9"
+        "sha256": "987df2442e46b5792658190f4b39f9f49509c68c461cd7ffb76d0eb540cfdae7"
       }
     },
     {
       "name": "docx_set_header_table_cell_run_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_header_table_cell_run_text.schema.json",
-        "sha256": "8ed2fb14f5a70f1ce2f37d60509176c4b54d900049485e9e574d762821bc5410"
+        "sha256": "9e322f54bc025e9f06778c0d0a47171b39609e554ab06a4057ee071160d83b8e"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_header_table_cell_run_text.schema.json",
-        "sha256": "8ed2fb14f5a70f1ce2f37d60509176c4b54d900049485e9e574d762821bc5410"
+        "sha256": "9e322f54bc025e9f06778c0d0a47171b39609e554ab06a4057ee071160d83b8e"
       }
     },
     {
       "name": "docx_set_header_table_cell_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_header_table_cell_text.schema.json",
-        "sha256": "6781de6c815e1cc373a033776f3a5fc879d2fd8bda9eb4e14030b6c51477ce52"
+        "sha256": "d30a7e2bf80baff93232d1469cf9327de92de7487f9d9f8097c98a8478170284"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_header_table_cell_text.schema.json",
-        "sha256": "6781de6c815e1cc373a033776f3a5fc879d2fd8bda9eb4e14030b6c51477ce52"
+        "sha256": "d30a7e2bf80baff93232d1469cf9327de92de7487f9d9f8097c98a8478170284"
       }
     },
     {
       "name": "docx_set_paragraph_run_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_paragraph_run_text.schema.json",
-        "sha256": "f4466b6b58ca02dc6205cf05ef71a476ae81a6a04cec68c34dc7534e32871161"
+        "sha256": "462e41f8c5aafeb65cd8e34a8a9b4240f9d1b56442811e6e1845f16bcc2d9976"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_paragraph_run_text.schema.json",
-        "sha256": "f4466b6b58ca02dc6205cf05ef71a476ae81a6a04cec68c34dc7534e32871161"
+        "sha256": "462e41f8c5aafeb65cd8e34a8a9b4240f9d1b56442811e6e1845f16bcc2d9976"
       }
     },
     {
       "name": "docx_set_paragraph_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_paragraph_text.schema.json",
-        "sha256": "d4ea9c1ef4a9e85adffa84954d681471917be64a78bd5404faecfec1d59dfa12"
+        "sha256": "2ce36f6bf62965fab65dd9c3b3481a06ea1d62aa7786704fa602aae407a1e07b"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_paragraph_text.schema.json",
-        "sha256": "d4ea9c1ef4a9e85adffa84954d681471917be64a78bd5404faecfec1d59dfa12"
+        "sha256": "2ce36f6bf62965fab65dd9c3b3481a06ea1d62aa7786704fa602aae407a1e07b"
       }
     },
     {
       "name": "docx_set_table_cell_alignment",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_cell_alignment.schema.json",
-        "sha256": "825030dfc2497090ca39d3ad55a4cee7c6aa7250f2b35f738c86ffbb64192238"
+        "sha256": "ae3b2d9ccb2af3045cd0b7a81d07788ada79952091a2e5a1c8e749c630a17f37"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_cell_alignment.schema.json",
-        "sha256": "825030dfc2497090ca39d3ad55a4cee7c6aa7250f2b35f738c86ffbb64192238"
+        "sha256": "ae3b2d9ccb2af3045cd0b7a81d07788ada79952091a2e5a1c8e749c630a17f37"
       }
     },
     {
       "name": "docx_set_table_cell_font_size",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_cell_font_size.schema.json",
-        "sha256": "ed8560c4395bbde1d10ffe5db8c88af00ca2a2db841df855425555daffbdaa0a"
+        "sha256": "fbde0a7e40ade1aae88d3e2491694b22e89b00f40c731818d0ba62f88a290144"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_cell_font_size.schema.json",
-        "sha256": "ed8560c4395bbde1d10ffe5db8c88af00ca2a2db841df855425555daffbdaa0a"
+        "sha256": "fbde0a7e40ade1aae88d3e2491694b22e89b00f40c731818d0ba62f88a290144"
       }
     },
     {
       "name": "docx_set_table_cell_no_wrap",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_cell_no_wrap.schema.json",
-        "sha256": "fe1bc516ffd1d39c27b9e19c64609052668aaef37d6923ff20321ce48e980119"
+        "sha256": "170bed3de395d16c31f7545e2d2084425d7edd253f4546ad6ef1948c2f766ff7"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_cell_no_wrap.schema.json",
-        "sha256": "fe1bc516ffd1d39c27b9e19c64609052668aaef37d6923ff20321ce48e980119"
+        "sha256": "170bed3de395d16c31f7545e2d2084425d7edd253f4546ad6ef1948c2f766ff7"
       }
     },
     {
       "name": "docx_set_table_cell_rich_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_cell_rich_text.schema.json",
-        "sha256": "36420040201a616d058093c76daf73e5cacc1fc7bb53392410228fb8566e9dee"
+        "sha256": "42ccb114e66bd4eb89903a3dc893d70ddadca65bd45e62945503c8aa7622151b"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_cell_rich_text.schema.json",
-        "sha256": "36420040201a616d058093c76daf73e5cacc1fc7bb53392410228fb8566e9dee"
+        "sha256": "42ccb114e66bd4eb89903a3dc893d70ddadca65bd45e62945503c8aa7622151b"
       }
     },
     {
       "name": "docx_set_table_cell_run_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_cell_run_text.schema.json",
-        "sha256": "ea59c891ae10cf724ecb56fe979f83e24a81274499228309b34c710f64f3d48e"
+        "sha256": "fbb86d0d2339754a431cf54ddf374f9cd720136ffe77b279847bbb9808d464fe"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_cell_run_text.schema.json",
-        "sha256": "ea59c891ae10cf724ecb56fe979f83e24a81274499228309b34c710f64f3d48e"
+        "sha256": "fbb86d0d2339754a431cf54ddf374f9cd720136ffe77b279847bbb9808d464fe"
       }
     },
     {
       "name": "docx_set_table_cell_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_cell_text.schema.json",
-        "sha256": "a269ef7e3105557c97629f9135e9ed74c01e0aae8e6c14ffa49f7ce754ac42fc"
+        "sha256": "9e9e8f08c291aef236f3dcf92360ced844874b62dae9a76d1d50591630899361"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_cell_text.schema.json",
-        "sha256": "a269ef7e3105557c97629f9135e9ed74c01e0aae8e6c14ffa49f7ce754ac42fc"
+        "sha256": "9e9e8f08c291aef236f3dcf92360ced844874b62dae9a76d1d50591630899361"
       }
     },
     {
       "name": "docx_set_table_row_cant_split",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_row_cant_split.schema.json",
-        "sha256": "bc289d7d5873a3340caa2d2af7edd372eecc16d695a7c7321b8d2127ddd394e6"
+        "sha256": "d7bb18b97378620452da3dcbcc8e589fea32892a35cd0b670247bc732ae9e0c0"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_row_cant_split.schema.json",
-        "sha256": "bc289d7d5873a3340caa2d2af7edd372eecc16d695a7c7321b8d2127ddd394e6"
+        "sha256": "d7bb18b97378620452da3dcbcc8e589fea32892a35cd0b670247bc732ae9e0c0"
       }
     },
     {
       "name": "docx_set_table_row_height",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_row_height.schema.json",
-        "sha256": "49fa0473de765e629842b850db3a1dbebb659cec87776020c5d9f69f738bf25f"
+        "sha256": "fd0e9bec8e78cd2d41dbed527ccb664e00f40c7009d86c4b527ce0aee6898b6c"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_row_height.schema.json",
-        "sha256": "49fa0473de765e629842b850db3a1dbebb659cec87776020c5d9f69f738bf25f"
+        "sha256": "fd0e9bec8e78cd2d41dbed527ccb664e00f40c7009d86c4b527ce0aee6898b6c"
       }
     },
     {
       "name": "docx_set_table_row_keep_next",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_row_keep_next.schema.json",
-        "sha256": "d3bc29f54219660dba890db67095ede6d9e3837ed0cf28590894b565be9e29e5"
+        "sha256": "a006980d8298f414a233e714d447ace8cd6c324d09977b357137b3a194a7a404"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_row_keep_next.schema.json",
-        "sha256": "d3bc29f54219660dba890db67095ede6d9e3837ed0cf28590894b565be9e29e5"
+        "sha256": "a006980d8298f414a233e714d447ace8cd6c324d09977b357137b3a194a7a404"
       }
     },
     {
       "name": "docx_set_table_row_repeat_as_header",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_row_repeat_as_header.schema.json",
-        "sha256": "f2a81dc030b849c9ca7bddff3e10533f727dd6227df13f4f9c53e7eb63472a9a"
+        "sha256": "8d91f29397adbd1548de953c8d798a96c69e5570dc7f9817db19db155b1bc4e8"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_row_repeat_as_header.schema.json",
-        "sha256": "f2a81dc030b849c9ca7bddff3e10533f727dd6227df13f4f9c53e7eb63472a9a"
+        "sha256": "8d91f29397adbd1548de953c8d798a96c69e5570dc7f9817db19db155b1bc4e8"
       }
     },
     {
       "name": "docx_set_table_width",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_width.schema.json",
-        "sha256": "d8c7f0fcaa1ca4c72a9fd198b879c6ac700f602e3e7dda1bbb41074b1ffb0717"
+        "sha256": "16000b0fd035d606400a93cba7ee4ca55528c0cc83251396ab36abaf4a2a7bb0"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table_width.schema.json",
-        "sha256": "d8c7f0fcaa1ca4c72a9fd198b879c6ac700f602e3e7dda1bbb41074b1ffb0717"
+        "sha256": "16000b0fd035d606400a93cba7ee4ca55528c0cc83251396ab36abaf4a2a7bb0"
       }
     },
     {
       "name": "docx_start_section",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_start_section.schema.json",
-        "sha256": "3992bc839e81536370cfd4872d785c88ee36822eb590e11dd6b00865968396da"
+        "sha256": "3a9e83bc24ce0a164732b7fed88e99cf80219b1e79779ac1edc40cedc233cf27"
       },
       "inputContract": {
         "path": "office/contracts/docx_start_section.schema.json",
-        "sha256": "3992bc839e81536370cfd4872d785c88ee36822eb590e11dd6b00865968396da"
+        "sha256": "3a9e83bc24ce0a164732b7fed88e99cf80219b1e79779ac1edc40cedc233cf27"
       }
     },
     {
       "name": "docx_strip_direct_formatting",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_strip_direct_formatting.schema.json",
-        "sha256": "707fa54708bd6f8c51977cfc7ce3f4ccfb3e4e39303eb26304ef3ff13b5a3300"
+        "sha256": "49a6682f7c8aecce6e30e5a4bfc08111151d9c755d38e759de6b7efb66979cac"
       },
       "inputContract": {
         "path": "office/contracts/docx_strip_direct_formatting.schema.json",
-        "sha256": "707fa54708bd6f8c51977cfc7ce3f4ccfb3e4e39303eb26304ef3ff13b5a3300"
+        "sha256": "49a6682f7c8aecce6e30e5a4bfc08111151d9c755d38e759de6b7efb66979cac"
       }
     },
     {
       "name": "docx_unmerge_table_column_cells",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_unmerge_table_column_cells.schema.json",
-        "sha256": "3f4bfa751bec93ab187b9ea63ab74822952f2fbac668a55f363f4771fb861551"
+        "sha256": "a63c84e0031b0f7ebe8763ce18e1854b78f3fe2baaf44da66cb8e0fbcd60479a"
       },
       "inputContract": {
         "path": "office/contracts/docx_unmerge_table_column_cells.schema.json",
-        "sha256": "3f4bfa751bec93ab187b9ea63ab74822952f2fbac668a55f363f4771fb861551"
+        "sha256": "a63c84e0031b0f7ebe8763ce18e1854b78f3fe2baaf44da66cb8e0fbcd60479a"
       }
     },
     {
       "name": "docx_unmerge_table_row_cells",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_unmerge_table_row_cells.schema.json",
-        "sha256": "5a37445d13c54242c13bae67741f589b9b69e4e5daec1374c46e15c9d06e10e5"
+        "sha256": "765651cdce25735e6eaa80dacbbdf41f95afb0f08aec23966b280e2144233e35"
       },
       "inputContract": {
         "path": "office/contracts/docx_unmerge_table_row_cells.schema.json",
-        "sha256": "5a37445d13c54242c13bae67741f589b9b69e4e5daec1374c46e15c9d06e10e5"
+        "sha256": "765651cdce25735e6eaa80dacbbdf41f95afb0f08aec23966b280e2144233e35"
       }
     },
     {
       "name": "docx_validate",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_validate.schema.json",
-        "sha256": "5c8aaea94b0229e6c09fc99171da6614cf4157f21774d84dfb6b3c718fc7e86c"
+        "sha256": "05e9004b5c48e85a9072ee9ad697c0585b292d2436a46c0c8eedf4c50bb48321"
       },
       "inputContract": {
         "path": "office/contracts/docx_validate.schema.json",
-        "sha256": "5c8aaea94b0229e6c09fc99171da6614cf4157f21774d84dfb6b3c718fc7e86c"
+        "sha256": "05e9004b5c48e85a9072ee9ad697c0585b292d2436a46c0c8eedf4c50bb48321"
       }
     },
     {
       "name": "docx_validate_font_policy",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_validate_font_policy.schema.json",
-        "sha256": "a682d813e5163514d2c2f2144a6bfa5f191775b67b26d72a00819948d3d38828"
+        "sha256": "e05410f04a81355437e7cf8cf4b8bd1538ea9bd7ae424f37afd7d4fe6ffc2c6a"
       },
       "inputContract": {
         "path": "office/contracts/docx_validate_font_policy.schema.json",
-        "sha256": "a682d813e5163514d2c2f2144a6bfa5f191775b67b26d72a00819948d3d38828"
+        "sha256": "e05410f04a81355437e7cf8cf4b8bd1538ea9bd7ae424f37afd7d4fe6ffc2c6a"
       }
     },
     {
       "name": "docx_validate_toc_style_policy",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_validate_toc_style_policy.schema.json",
-        "sha256": "3619b1aa08e43a2f76dfaf17e8841aa6f178ac7831502aa291e337ce00cedfdc"
+        "sha256": "8e4fbab73401037eab47fd2056ac7829476003771dc78c6619041eab8b5531ca"
       },
       "inputContract": {
         "path": "office/contracts/docx_validate_toc_style_policy.schema.json",
-        "sha256": "3619b1aa08e43a2f76dfaf17e8841aa6f178ac7831502aa291e337ce00cedfdc"
+        "sha256": "8e4fbab73401037eab47fd2056ac7829476003771dc78c6619041eab8b5531ca"
       }
     },
     {
       "name": "office_render_pdf",
       "providerContract": {
         "source": "packages/convert-cli/schemas/mcp-input/office_render_pdf.schema.json",
-        "sha256": "9ae004237daf301e8f16c5ddf9deb60eab0c767991917c93447feccc64d088d0"
+        "sha256": "2bb236cce6fb13ced580263496365fd709d0c8ce014d2a5fd9314d2213983f0c"
       },
       "inputContract": {
         "path": "office/contracts/office_render_pdf.schema.json",
-        "sha256": "9ae004237daf301e8f16c5ddf9deb60eab0c767991917c93447feccc64d088d0"
+        "sha256": "2bb236cce6fb13ced580263496365fd709d0c8ce014d2a5fd9314d2213983f0c"
       }
     },
     {
       "name": "pptx_apply_format",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_apply_format.schema.json",
-        "sha256": "1941220fafe6cfdc3f3af3623333ba0674b28712a8d57452518f2c9260fc9f26"
+        "sha256": "e3d899b0061055ce8c470ca6a040302037e5fd208de8b079bad39648cfee56b1"
       },
       "inputContract": {
         "path": "office/contracts/pptx_apply_format.schema.json",
-        "sha256": "1941220fafe6cfdc3f3af3623333ba0674b28712a8d57452518f2c9260fc9f26"
+        "sha256": "e3d899b0061055ce8c470ca6a040302037e5fd208de8b079bad39648cfee56b1"
       }
     },
     {
       "name": "pptx_apply_template",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_apply_template.schema.json",
-        "sha256": "da3d2ac251d00dc49ea251a789420ca4ac0aac06508de26e4f6513b7648422f2"
+        "sha256": "b657fa2dd214da260d6a36a356e075cb2f0c241ea1d6f7bcf183c41ce2c93c96"
       },
       "inputContract": {
         "path": "office/contracts/pptx_apply_template.schema.json",
-        "sha256": "da3d2ac251d00dc49ea251a789420ca4ac0aac06508de26e4f6513b7648422f2"
+        "sha256": "b657fa2dd214da260d6a36a356e075cb2f0c241ea1d6f7bcf183c41ce2c93c96"
       }
     },
     {
       "name": "pptx_export_json",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_export_json.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       },
       "inputContract": {
         "path": "office/contracts/pptx_export_json.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       }
     },
     {
       "name": "pptx_inspect",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_inspect.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       },
       "inputContract": {
         "path": "office/contracts/pptx_inspect.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       }
     },
     {
       "name": "pptx_replace_picture_image",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_replace_picture_image.schema.json",
-        "sha256": "d716e31df3aa974cbb5a62bfee140be635b4227ca27ad10017f163c552afec74"
+        "sha256": "c1ae3112ff0ce54f78a66d34ffb2013aa0300ec8361784787aaf6751c3ea5f95"
       },
       "inputContract": {
         "path": "office/contracts/pptx_replace_picture_image.schema.json",
-        "sha256": "d716e31df3aa974cbb5a62bfee140be635b4227ca27ad10017f163c552afec74"
+        "sha256": "c1ae3112ff0ce54f78a66d34ffb2013aa0300ec8361784787aaf6751c3ea5f95"
       }
     },
     {
       "name": "pptx_set_shape_geometry",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_set_shape_geometry.schema.json",
-        "sha256": "9636d7b4c568c8aae9d26724be5c03404bef9b02b957dce85615fd81ef13ccd4"
+        "sha256": "1c6e741eb84d4379efae5229d562412d7818e239257e9e1f52fb21943b654f3d"
       },
       "inputContract": {
         "path": "office/contracts/pptx_set_shape_geometry.schema.json",
-        "sha256": "9636d7b4c568c8aae9d26724be5c03404bef9b02b957dce85615fd81ef13ccd4"
+        "sha256": "1c6e741eb84d4379efae5229d562412d7818e239257e9e1f52fb21943b654f3d"
       }
     },
     {
       "name": "pptx_validate",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_validate.schema.json",
-        "sha256": "5c8aaea94b0229e6c09fc99171da6614cf4157f21774d84dfb6b3c718fc7e86c"
+        "sha256": "05e9004b5c48e85a9072ee9ad697c0585b292d2436a46c0c8eedf4c50bb48321"
       },
       "inputContract": {
         "path": "office/contracts/pptx_validate.schema.json",
-        "sha256": "5c8aaea94b0229e6c09fc99171da6614cf4157f21774d84dfb6b3c718fc7e86c"
+        "sha256": "05e9004b5c48e85a9072ee9ad697c0585b292d2436a46c0c8eedf4c50bb48321"
       }
     },
     {
       "name": "xlsx_convert_legacy",
       "providerContract": {
         "source": "packages/convert-cli/schemas/mcp-input/xlsx_convert_legacy.schema.json",
-        "sha256": "e9eb437490b107a2a5046deeb476b3dbe6e5d38135b7646ca2dd3b53646a28b5"
+        "sha256": "876c2873813dbf9054266127fa24230daa4821868f9bf5361754b945dc542f10"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_convert_legacy.schema.json",
-        "sha256": "e9eb437490b107a2a5046deeb476b3dbe6e5d38135b7646ca2dd3b53646a28b5"
+        "sha256": "876c2873813dbf9054266127fa24230daa4821868f9bf5361754b945dc542f10"
       }
     },
     {
       "name": "xlsx_copy_row",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_copy_row.schema.json",
-        "sha256": "4e6668b3887f7e6f6134aad9c4f3dc9179ac987092ef2762507651cdb97ef760"
+        "sha256": "865cff23c8edd06d4a4a608713b1b0383f630b3d9cdb853f5f9a0fb0fbe7168a"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_copy_row.schema.json",
-        "sha256": "4e6668b3887f7e6f6134aad9c4f3dc9179ac987092ef2762507651cdb97ef760"
+        "sha256": "865cff23c8edd06d4a4a608713b1b0383f630b3d9cdb853f5f9a0fb0fbe7168a"
       }
     },
     {
       "name": "xlsx_delete_rows",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_delete_rows.schema.json",
-        "sha256": "ab7dc2ce2fc065c0083b2299876c16918e6cfbdd721f63ec0089014f42c4aea0"
+        "sha256": "025bd2de953d5a5fd5d227e505a16d14ed9e272b35b978c9dfdfd324d7930b21"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_delete_rows.schema.json",
-        "sha256": "ab7dc2ce2fc065c0083b2299876c16918e6cfbdd721f63ec0089014f42c4aea0"
+        "sha256": "025bd2de953d5a5fd5d227e505a16d14ed9e272b35b978c9dfdfd324d7930b21"
       }
     },
     {
       "name": "xlsx_expand_section_rows",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_expand_section_rows.schema.json",
-        "sha256": "ba5066a7cd8f132034c0a6de5ce9377ab2a6e2ec95c40ab9afd5e7dcea6b3411"
+        "sha256": "d964035d95cda5fce0a5b90d9c3b02eb5cfc5d631bdebdf8110e916179a07374"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_expand_section_rows.schema.json",
-        "sha256": "ba5066a7cd8f132034c0a6de5ce9377ab2a6e2ec95c40ab9afd5e7dcea6b3411"
+        "sha256": "d964035d95cda5fce0a5b90d9c3b02eb5cfc5d631bdebdf8110e916179a07374"
       }
     },
     {
       "name": "xlsx_export_json",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_export_json.schema.json",
-        "sha256": "e2b590f4d291fde9b34c455d35e1abe1881ff34951fb9ba10d876366daac0c23"
+        "sha256": "dbe2f6fec46cff52f3a1581369d5150244f905ecc6a99fee1a57c7d4edd4bbf8"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_export_json.schema.json",
-        "sha256": "e2b590f4d291fde9b34c455d35e1abe1881ff34951fb9ba10d876366daac0c23"
+        "sha256": "dbe2f6fec46cff52f3a1581369d5150244f905ecc6a99fee1a57c7d4edd4bbf8"
       }
     },
     {
       "name": "xlsx_insert_rows",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_insert_rows.schema.json",
-        "sha256": "d6be9d727678289055f609c5b4f0c4c21e74930e8a9789e5631e746b8f820f14"
+        "sha256": "b38096c9059168fc0c111a3e17d8764ed378516227ad599100963e571e115613"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_insert_rows.schema.json",
-        "sha256": "d6be9d727678289055f609c5b4f0c4c21e74930e8a9789e5631e746b8f820f14"
+        "sha256": "b38096c9059168fc0c111a3e17d8764ed378516227ad599100963e571e115613"
       }
     },
     {
       "name": "xlsx_inspect",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_inspect.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_inspect.schema.json",
-        "sha256": "d9db659f53d8e2e8ba2b613bb14d31e2c46e34b0884fb8e7a8683f2b3a85bd7d"
+        "sha256": "f14160d7cff99949dd3e14d60a2d532b31f520bfa72327de972c29c15b9817aa"
       }
     },
     {
       "name": "xlsx_set_cell_number_format",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_set_cell_number_format.schema.json",
-        "sha256": "331bcb38a3ae8006dbc068ea72b54af8dc2357392591dc3f4f8931ed50a01a52"
+        "sha256": "bf587b79cb474db5deff781344327d5cf68d129b17978179421a1fb47f2683e4"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_set_cell_number_format.schema.json",
-        "sha256": "331bcb38a3ae8006dbc068ea72b54af8dc2357392591dc3f4f8931ed50a01a52"
+        "sha256": "bf587b79cb474db5deff781344327d5cf68d129b17978179421a1fb47f2683e4"
       }
     },
     {
       "name": "xlsx_set_cell_value",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_set_cell_value.schema.json",
-        "sha256": "46c6d757a931dd9217ab8adea36a6eff31eabdc353ea126af15ebba4bb71c437"
+        "sha256": "e1841fe0173d01cce394b1340698ef54411bf2d2be1ad67993dedfcdf4fff358"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_set_cell_value.schema.json",
-        "sha256": "46c6d757a931dd9217ab8adea36a6eff31eabdc353ea126af15ebba4bb71c437"
+        "sha256": "e1841fe0173d01cce394b1340698ef54411bf2d2be1ad67993dedfcdf4fff358"
       }
     },
     {
       "name": "xlsx_set_column_width",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_set_column_width.schema.json",
-        "sha256": "c95f4858a947ca7b54b7beeb6d760fd0da7989d05e730d471ca91c5a95436b60"
+        "sha256": "9290866b612102d94721fb483af9f570cd4e4f9222e5af26aea606af6eb0b14d"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_set_column_width.schema.json",
-        "sha256": "c95f4858a947ca7b54b7beeb6d760fd0da7989d05e730d471ca91c5a95436b60"
+        "sha256": "9290866b612102d94721fb483af9f570cd4e4f9222e5af26aea606af6eb0b14d"
       }
     },
     {
       "name": "xlsx_set_page_setup",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_set_page_setup.schema.json",
-        "sha256": "48cb851a0089ac3bb41c26be871a818f1caf43b570edaf2eabf109393d86c605"
+        "sha256": "325b8719398188429c3e1cc4dc028de2cfc0204d6b12923704d03933b91c3896"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_set_page_setup.schema.json",
-        "sha256": "48cb851a0089ac3bb41c26be871a818f1caf43b570edaf2eabf109393d86c605"
+        "sha256": "325b8719398188429c3e1cc4dc028de2cfc0204d6b12923704d03933b91c3896"
       }
     },
     {
       "name": "xlsx_set_print_area",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_set_print_area.schema.json",
-        "sha256": "001e0206c5ba20356f12764c7e75b9b9b8b84ffb0b80f8eba8ade53ff85a4095"
+        "sha256": "e68e51b1b5932c8a09b12a8f59064581fd758e4e6005045139cd2c60403dabd0"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_set_print_area.schema.json",
-        "sha256": "001e0206c5ba20356f12764c7e75b9b9b8b84ffb0b80f8eba8ade53ff85a4095"
+        "sha256": "e68e51b1b5932c8a09b12a8f59064581fd758e4e6005045139cd2c60403dabd0"
       }
     },
     {
       "name": "xlsx_set_range_values",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_set_range_values.schema.json",
-        "sha256": "4daa4c460758aacffe9518ee54ef80d1a4f0ac489f72c09eda7f2db99f038a37"
+        "sha256": "f3246c65dd8152ca36cf478dbf7489b16e9ec5248c17c52a542fe4cc458be36c"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_set_range_values.schema.json",
-        "sha256": "4daa4c460758aacffe9518ee54ef80d1a4f0ac489f72c09eda7f2db99f038a37"
+        "sha256": "f3246c65dd8152ca36cf478dbf7489b16e9ec5248c17c52a542fe4cc458be36c"
       }
     },
     {
       "name": "xlsx_set_rich_text_cell_value",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_set_rich_text_cell_value.schema.json",
-        "sha256": "9dd87f8e578de0f1d7a915df3b49494cccc185a3d128eb70c6d292f33c708f3f"
+        "sha256": "c960f4cc0ad27df7112ca00cee3617cf50f3cefd490662d7e1e6a24145644882"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_set_rich_text_cell_value.schema.json",
-        "sha256": "9dd87f8e578de0f1d7a915df3b49494cccc185a3d128eb70c6d292f33c708f3f"
+        "sha256": "c960f4cc0ad27df7112ca00cee3617cf50f3cefd490662d7e1e6a24145644882"
       }
     },
     {
       "name": "xlsx_set_row_page_breaks",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_set_row_page_breaks.schema.json",
-        "sha256": "b4ead6d2ce4c55546c3a5ddfdd6379aaf76e26536dfde21748dfefc666492d06"
+        "sha256": "eacecbaf3042ef808054fefc9976e1dad9109e8bf1a157b5be613e5ba0022af8"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_set_row_page_breaks.schema.json",
-        "sha256": "b4ead6d2ce4c55546c3a5ddfdd6379aaf76e26536dfde21748dfefc666492d06"
+        "sha256": "eacecbaf3042ef808054fefc9976e1dad9109e8bf1a157b5be613e5ba0022af8"
       }
     },
     {
       "name": "xlsx_validate",
       "providerContract": {
         "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_validate.schema.json",
-        "sha256": "5c8aaea94b0229e6c09fc99171da6614cf4157f21774d84dfb6b3c718fc7e86c"
+        "sha256": "05e9004b5c48e85a9072ee9ad697c0585b292d2436a46c0c8eedf4c50bb48321"
       },
       "inputContract": {
         "path": "office/contracts/xlsx_validate.schema.json",
-        "sha256": "5c8aaea94b0229e6c09fc99171da6614cf4157f21774d84dfb6b3c718fc7e86c"
+        "sha256": "05e9004b5c48e85a9072ee9ad697c0585b292d2436a46c0c8eedf4c50bb48321"
       }
     }
   ]

@@ -5,7 +5,8 @@
     "input": {
       "type": "string",
       "minLength": 1,
-      "description": "Path to the current PPTX."
+      "description": "Path to the current PPTX.",
+      "x-tiwater-file-role": "read"
     },
     "changes": {
       "minItems": 1,
@@ -58,12 +59,14 @@
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "New PPTX output path. Existing files are never overwritten."
+      "description": "New PPTX output path. Existing files are never overwritten.",
+      "x-tiwater-file-role": "write"
     },
     "receiptOutput": {
       "type": "string",
       "minLength": 1,
-      "description": "New JSON receipt path. Existing files are never overwritten."
+      "description": "New JSON receipt path. Existing files are never overwritten.",
+      "x-tiwater-file-role": "write"
     }
   },
   "required": [
