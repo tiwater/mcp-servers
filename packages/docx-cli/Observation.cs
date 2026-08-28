@@ -92,6 +92,96 @@ public static class Observation
             detail);
     }
 
+    internal static DocxRevision CurrentRevision(string input)
+        => Snapshot.Open(input).Revision;
+
+    internal static string MakeReference(DocxRevision revision, string kind, string storyPart, string nativePath)
+        => MakeObjectReference(revision, kind, storyPart, nativePath);
+
+    internal static IReadOnlyList<ResolvedDocxReference> ResolveReferences(
+        string input,
+        string expectedRevision,
+        IReadOnlyList<string> references)
+    {
+        var snapshot = Snapshot.Open(input);
+        if (!StringComparer.Ordinal.Equals(expectedRevision, snapshot.Revision.Id))
+            throw new InvalidOperationException("stale-revision");
+        return references.Select(reference =>
+        {
+            if (!IsObjectReference(reference)) throw new InvalidOperationException("object-ref-invalid");
+            var selected = snapshot.Objects.FirstOrDefault(item => StringComparer.Ordinal.Equals(item.Reference, reference))
+                ?? throw new InvalidOperationException("stale-object-ref");
+            return new ResolvedDocxReference(selected.Reference, selected.Kind, selected.StoryPart, selected.NativePath);
+        }).ToList();
+    }
+
+    internal static OpenXmlElement ResolveNativePath(
+        WordprocessingDocument document,
+        string storyPart,
+        string nativePath)
+    {
+        var main = document.MainDocumentPart ?? throw new InvalidOperationException("main-document-part-not-found");
+        var stories = new List<(string Part, OpenXmlPartRootElement Root)>();
+        if (main.Document is not null) stories.Add((PartUri(main.Uri), main.Document));
+        stories.AddRange(main.HeaderParts.Where(part => part.Header is not null).Select(part => (PartUri(part.Uri), (OpenXmlPartRootElement)part.Header!)));
+        stories.AddRange(main.FooterParts.Where(part => part.Footer is not null).Select(part => (PartUri(part.Uri), (OpenXmlPartRootElement)part.Footer!)));
+        if (main.FootnotesPart?.Footnotes is not null) stories.Add((PartUri(main.FootnotesPart.Uri), main.FootnotesPart.Footnotes));
+        if (main.EndnotesPart?.Endnotes is not null) stories.Add((PartUri(main.EndnotesPart.Uri), main.EndnotesPart.Endnotes));
+        if (main.WordprocessingCommentsPart?.Comments is not null) stories.Add((PartUri(main.WordprocessingCommentsPart.Uri), main.WordprocessingCommentsPart.Comments));
+        var story = stories.SingleOrDefault(item => StringComparer.Ordinal.Equals(item.Part, storyPart));
+        if (story.Root is null) throw new InvalidOperationException("object-story-part-not-found");
+
+        var segments = nativePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0) throw new InvalidOperationException("object-native-path-invalid");
+        OpenXmlElement current = story.Root;
+        if (!SegmentMatches(current, segments[0], 1)) throw new InvalidOperationException("object-native-path-invalid");
+        foreach (var segment in segments.Skip(1))
+        {
+            if (!TryParseSegment(segment, out var prefix, out var localName, out var siblingIndex))
+                throw new InvalidOperationException("object-native-path-invalid");
+            var namespaceUri = NamespaceForPrefix(prefix);
+            var candidates = current.ChildElements
+                .Where(item => item.NamespaceUri == namespaceUri && item.LocalName == localName)
+                .ToList();
+            if (siblingIndex < 1 || siblingIndex > candidates.Count)
+                throw new InvalidOperationException("object-native-path-not-found");
+            current = candidates[siblingIndex - 1];
+        }
+        return current;
+    }
+
+    private static string PartUri(Uri uri)
+        => uri.OriginalString.StartsWith("/", StringComparison.Ordinal) ? uri.OriginalString : "/" + uri.OriginalString;
+
+    private static bool SegmentMatches(OpenXmlElement element, string segment, int expectedIndex)
+        => TryParseSegment(segment, out var prefix, out var localName, out var index)
+            && index == expectedIndex
+            && localName == element.LocalName
+            && NamespaceForPrefix(prefix) == element.NamespaceUri;
+
+    private static bool TryParseSegment(string segment, out string prefix, out string localName, out int index)
+    {
+        prefix = localName = string.Empty;
+        index = 0;
+        var colon = segment.IndexOf(':');
+        var bracket = segment.LastIndexOf('[');
+        if (colon <= 0 || bracket <= colon + 1 || !segment.EndsWith(']')) return false;
+        prefix = segment[..colon];
+        localName = segment[(colon + 1)..bracket];
+        return int.TryParse(segment[(bracket + 1)..^1], out index) && index > 0;
+    }
+
+    private static string NamespaceForPrefix(string prefix)
+        => prefix switch
+        {
+            "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+            "a" => "http://schemas.openxmlformats.org/drawingml/2006/main",
+            "wp" => "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+            "pic" => "http://schemas.openxmlformats.org/drawingml/2006/picture",
+            "r" => "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+            _ => throw new InvalidOperationException($"object-native-path-prefix-unsupported: {prefix}"),
+        };
+
     public static int DefaultPageLimit => DefaultLimit;
     public static int MaximumPageLimit => MaximumLimit;
 
@@ -419,3 +509,9 @@ public sealed record DocxObservationReadResult(
     [property: JsonPropertyName("schema")] string Schema,
     [property: JsonPropertyName("receipt")] DocxObservationReceipt Receipt,
     [property: JsonPropertyName("observation")] DocxObservationDetail Observation);
+
+internal sealed record ResolvedDocxReference(
+    string Reference,
+    string Kind,
+    string StoryPart,
+    string NativePath);

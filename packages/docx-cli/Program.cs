@@ -17,6 +17,7 @@ public static class Cli
         "list",
         "find",
         "read",
+        "copy-table-range",
         "compare",
         "validate-openxml",
         "strip-direct-formatting",
@@ -68,6 +69,7 @@ public static class Cli
                 "list" => RunList(args[1..]),
                 "find" => RunFind(args[1..]),
                 "read" => RunRead(args[1..]),
+                "copy-table-range" => Task.FromResult(TableRangeCopy.Run(args[1..])),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-openxml" => Task.FromResult(OpenXmlValidation.Run(args[1..])),
                 "strip-direct-formatting" => Task.FromResult(Transforms.RunStripDirectFormatting(args[1..])),
@@ -244,6 +246,7 @@ public static class Cli
         Console.WriteLine("  list <input.docx> <kind> [--scope <story-part>] [--limit <n>] [--continuation <token>]");
         Console.WriteLine("  find <input.docx> <literal> [--kind <kind>] [--scope <story-part>] [--limit <n>] [--continuation <token>]");
         Console.WriteLine("  read <input.docx> <ref> [--revision <id>]");
+        Console.WriteLine("  copy-table-range <request.json>");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("  strip-direct-formatting <input.docx> <output.docx>");
@@ -274,6 +277,7 @@ public static class Cli
             "list" => "tiwater-docx list <input.docx> <kind> [--scope <story-part>] [--limit <n>] [--continuation <token>]",
             "find" => "tiwater-docx find <input.docx> <literal> [--kind <kind>] [--scope <story-part>] [--limit <n>] [--continuation <token>]",
             "read" => "tiwater-docx read <input.docx> <ref> [--revision <id>]",
+            "copy-table-range" => "tiwater-docx copy-table-range <request.json>",
             "compare" => "tiwater-docx compare <old.docx> <new.docx> [--json]",
             "validate-openxml" => "tiwater-docx validate-openxml <input.docx>",
             "strip-direct-formatting" => "tiwater-docx strip-direct-formatting <input.docx> <output.docx>",
