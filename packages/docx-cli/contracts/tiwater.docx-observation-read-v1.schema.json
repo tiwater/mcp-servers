@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.docx-observation-read/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "receipt", "observation"],
+  "properties": {
+    "schema": { "const": "tiwater.docx-observation-read/v1" },
+    "receipt": { "$ref": "#/$defs/receipt" },
+    "observation": { "$ref": "#/$defs/detail" }
+  },
+  "$defs": {
+    "revision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "inputSha256", "provider", "toolVersion"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" },
+        "inputSha256": { "type": "string", "pattern": "^[0-9A-F]{64}$" },
+        "provider": { "const": "tiwater.docx.cli" },
+        "toolVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "receipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "operation", "revision", "totalCount", "returnedCount", "remaining", "continuation"],
+      "properties": {
+        "schema": { "const": "tiwater.docx-observation-receipt/v1" },
+        "operation": { "const": "read" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "totalCount": { "const": 1 },
+        "returnedCount": { "const": 1 },
+        "remaining": { "const": 0 },
+        "continuation": { "type": "null" }
+      }
+    },
+    "object": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ref", "kind", "storyPart", "nativePath", "localName", "childCount"],
+      "properties": {
+        "ref": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+        "kind": { "enum": ["part", "paragraph", "table", "row", "cell", "run", "drawing"] },
+        "storyPart": { "type": "string", "pattern": "^/[^\\s]+$" },
+        "nativePath": { "type": "string", "pattern": "^/[^\\s]+$" },
+        "localName": { "type": "string", "minLength": 1 },
+        "textPreview": { "type": ["string", "null"] },
+        "textLength": { "type": ["integer", "null"], "minimum": 0 },
+        "childCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "attribute": {
+      "type": "object", "additionalProperties": false,
+      "required": ["localName", "namespaceUri", "value"],
+      "properties": {
+        "localName": { "type": "string", "minLength": 1 },
+        "namespaceUri": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
+    "detail": {
+      "type": "object", "additionalProperties": false,
+      "required": ["object", "namespaceUri", "outerXml", "childCount", "attributes"],
+      "properties": {
+        "object": { "$ref": "#/$defs/object" },
+        "namespaceUri": { "type": "string" },
+        "outerXml": { "type": "string", "minLength": 1 },
+        "childCount": { "type": "integer", "minimum": 0 },
+        "attributes": { "type": "array", "items": { "$ref": "#/$defs/attribute" } }
+      }
+    }
+  }
+}

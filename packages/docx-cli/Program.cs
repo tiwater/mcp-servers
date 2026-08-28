@@ -14,6 +14,9 @@ public static class Cli
     [
         "inspect",
         "inspect-tables",
+        "list",
+        "find",
+        "read",
         "compare",
         "validate-openxml",
         "strip-direct-formatting",
@@ -62,6 +65,9 @@ public static class Cli
             {
                 "inspect" => RunInspectAsync(args[1..]),
                 "inspect-tables" => RunInspectTablesAsync(args[1..]),
+                "list" => RunList(args[1..]),
+                "find" => RunFind(args[1..]),
+                "read" => RunRead(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-openxml" => Task.FromResult(OpenXmlValidation.Run(args[1..])),
                 "strip-direct-formatting" => Task.FromResult(Transforms.RunStripDirectFormatting(args[1..])),
@@ -155,11 +161,89 @@ public static class Cli
         return Task.FromResult(0);
     }
 
+    private static Task<int> RunList(string[] args)
+    {
+        if (args.Length < 2)
+            throw new InvalidOperationException("list requires <input.docx> <kind> [--scope <story-part>] [--limit <n>] [--continuation <token>]");
+
+        var options = ParseObservationOptions(args[2..]);
+        WriteObservationJson(Observation.List(args[0], args[1], options.Scope, options.Limit, options.Continuation));
+        return Task.FromResult(0);
+    }
+
+    private static Task<int> RunFind(string[] args)
+    {
+        if (args.Length < 2)
+            throw new InvalidOperationException("find requires <input.docx> <literal> [--kind <kind>] [--scope <story-part>] [--limit <n>] [--continuation <token>]");
+
+        var options = ParseObservationOptions(args[2..]);
+        WriteObservationJson(Observation.Find(args[0], args[1], options.Kind, options.Scope, options.Limit, options.Continuation));
+        return Task.FromResult(0);
+    }
+
+    private static Task<int> RunRead(string[] args)
+    {
+        if (args.Length < 2)
+            throw new InvalidOperationException("read requires <input.docx> <ref> [--revision <id>]");
+
+        string? revision = null;
+        for (var index = 2; index < args.Length; index++)
+        {
+            if (args[index] != "--revision" || index + 1 >= args.Length)
+                throw new InvalidOperationException("read accepts only --revision <id>");
+            revision = args[++index];
+        }
+
+        WriteObservationJson(Observation.Read(args[0], args[1], revision));
+        return Task.FromResult(0);
+    }
+
+    private static ObservationOptions ParseObservationOptions(string[] args)
+    {
+        string? kind = null;
+        string? scope = null;
+        string? continuation = null;
+        var limit = Observation.DefaultPageLimit;
+        for (var index = 0; index < args.Length; index++)
+        {
+            var option = args[index];
+            if (index + 1 >= args.Length)
+                throw new InvalidOperationException($"{option} requires a value");
+            var value = args[++index];
+            switch (option)
+            {
+                case "--kind":
+                    if (kind is not null) throw new InvalidOperationException("--kind may be provided once");
+                    kind = value;
+                    break;
+                case "--scope":
+                    if (scope is not null) throw new InvalidOperationException("--scope may be provided once");
+                    scope = value;
+                    break;
+                case "--limit":
+                    if (!int.TryParse(value, out limit)) throw new InvalidOperationException("--limit must be an integer");
+                    break;
+                case "--continuation":
+                    if (continuation is not null) throw new InvalidOperationException("--continuation may be provided once");
+                    continuation = value;
+                    break;
+                default:
+                    throw new InvalidOperationException($"unknown observation option: {option}");
+            }
+        }
+        return new ObservationOptions(kind, scope, limit, continuation);
+    }
+
+    private sealed record ObservationOptions(string? Kind, string? Scope, int Limit, string? Continuation);
+
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
         Console.WriteLine("  inspect-tables <input.docx> [--json]");
+        Console.WriteLine("  list <input.docx> <kind> [--scope <story-part>] [--limit <n>] [--continuation <token>]");
+        Console.WriteLine("  find <input.docx> <literal> [--kind <kind>] [--scope <story-part>] [--limit <n>] [--continuation <token>]");
+        Console.WriteLine("  read <input.docx> <ref> [--revision <id>]");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("  strip-direct-formatting <input.docx> <output.docx>");
@@ -187,6 +271,9 @@ public static class Cli
         {
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
             "inspect-tables" => "tiwater-docx inspect-tables <input.docx> [--json]",
+            "list" => "tiwater-docx list <input.docx> <kind> [--scope <story-part>] [--limit <n>] [--continuation <token>]",
+            "find" => "tiwater-docx find <input.docx> <literal> [--kind <kind>] [--scope <story-part>] [--limit <n>] [--continuation <token>]",
+            "read" => "tiwater-docx read <input.docx> <ref> [--revision <id>]",
             "compare" => "tiwater-docx compare <old.docx> <new.docx> [--json]",
             "validate-openxml" => "tiwater-docx validate-openxml <input.docx>",
             "strip-direct-formatting" => "tiwater-docx strip-direct-formatting <input.docx> <output.docx>",
@@ -212,6 +299,11 @@ public static class Cli
     private static void WriteJson<T>(T value)
     {
         Console.WriteLine(JsonSerializer.Serialize(value, Json.Options));
+    }
+
+    private static void WriteObservationJson<T>(T value)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(value, Json.CamelCaseOptions));
     }
 
     private static void RenderInspect(InspectionReport report)
