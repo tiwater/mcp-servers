@@ -382,7 +382,10 @@ function buildServer() {
         ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
         ...(tool.annotations ? { annotations: tool.annotations } : {}),
       },
-      async args => createToolResult(await tool.handler(args)),
+      async args => {
+        const payload = await tool.handler(args);
+        return createToolResult(payload, { isError: payload?.summary?.pass === false });
+      },
     );
   }
   return server;
