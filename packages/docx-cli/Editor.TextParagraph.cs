@@ -6,7 +6,7 @@ using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx;
 
-public static partial class Editor
+internal static partial class Editor
 {
     private static DocxEditAppliedOperation ReplaceAnchoredText(Body body, DocxEditOperation operation)
     {
@@ -581,4 +581,3 @@ public static partial class Editor
     private static string GetParagraphText(Paragraph paragraph)
         => string.Concat(paragraph.Descendants<Text>().Select(text => text.Text));
 }
-

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -6,24 +5,8 @@ using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx;
 
-public static partial class Editor
+internal static partial class Editor
 {
-    public static int RunEdit(string[] args)
-    {
-        if (args.Length < 3)
-        {
-            throw new InvalidOperationException("edit requires <input.docx> <operations.json> <output.docx>");
-        }
-
-        var input = Path.GetFullPath(args[0]);
-        var operationsPath = Path.GetFullPath(args[1]);
-        var output = Path.GetFullPath(args[2]);
-        var request = LoadOperations(operationsPath);
-        var result = Apply(input, output, request.Operations);
-        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
-        return result.AppliedOperations.All(operation => operation.Applied) ? 0 : 1;
-    }
-
     public static DocxEditResult Apply(string input, string output, IReadOnlyList<DocxEditOperation> operations)
     {
         File.Copy(input, output, overwrite: true);
@@ -54,24 +37,6 @@ public static partial class Editor
         }
         mainPart.DocumentSettingsPart?.Settings?.Save();
         return new DocxEditResult(Path.GetFullPath(input), Path.GetFullPath(output), applied);
-    }
-
-    private static DocxEditDocument LoadOperations(string path)
-    {
-        var json = File.ReadAllText(path);
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return new DocxEditDocument([]);
-        }
-
-        using var doc = JsonDocument.Parse(json);
-        if (doc.RootElement.ValueKind == JsonValueKind.Array)
-        {
-            var ops = JsonSerializer.Deserialize<List<DocxEditOperation>>(json, Json.Options) ?? [];
-            return new DocxEditDocument(ops);
-        }
-
-        return JsonSerializer.Deserialize<DocxEditDocument>(json, Json.Options) ?? new DocxEditDocument([]);
     }
 
     private static DocxEditAppliedOperation ApplyOperation(WordprocessingDocument doc, Body body, DocxEditOperation operation)

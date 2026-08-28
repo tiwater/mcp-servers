@@ -191,7 +191,7 @@ public sealed record ComparisonReport(
     InspectionReport OldInspection,
     InspectionReport NewInspection);
 
-public sealed record DocxEditOperation(
+internal sealed record DocxEditOperation(
     string Type,
     string? CommentId = null,
     string? Text = null,
@@ -315,15 +315,12 @@ public sealed record DocxRichTextSegment(
     bool? Italic = null,
     string? VerticalAlignment = null);
 
-public sealed record DocxEditDocument(
-    IReadOnlyList<DocxEditOperation> Operations);
-
-public sealed record DocxEditAppliedOperation(
+internal sealed record DocxEditAppliedOperation(
     string Type,
     bool Applied,
     string Detail);
 
-public sealed record DocxEditResult(
+internal sealed record DocxEditResult(
     string Input,
     string Output,
     IReadOnlyList<DocxEditAppliedOperation> AppliedOperations);

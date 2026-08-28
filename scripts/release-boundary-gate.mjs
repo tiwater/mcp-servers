@@ -159,7 +159,44 @@ async function checkOfficeSourceOwnership() {
       || !officeSource.includes('tiwater-office-provider-contract-manifest-v1.json')) {
     fail(check, 'Office MCP source does not register provider-owned input contracts from the generated manifest');
   }
-  note('Office MCP source owns routing only; provider contracts own MCP input shapes');
+  if (/\boperationType\b|\bsourceFields\b|withTempJsonFile\s*\(\s*\{\s*operations\b/.test(officeSource)
+      || /runJsonCandidateChain\([^\n]*\[\s*['"]edit['"]/.test(officeSource)) {
+    fail(check, 'Office MCP adapter translates a fixed provider call into a second operation request');
+  }
+  if (!officeSource.includes('[tool, requestPath]')) {
+    fail(check, 'Office MCP adapter does not forward fixed provider calls using their published tool identity');
+  }
+  note('Office MCP source owns routing only; provider contracts own request shapes and fixed runtimes consume them directly');
+}
+
+async function checkFixedRuntimeSurface() {
+  const check = 'fixed-runtime-surface';
+  const officeSource = await readFile(path.join(serverRoot, 'office', 'index.mjs'), 'utf8');
+  const fixedNames = new Set([
+    ...[...officeSource.matchAll(/\{"name":"((?:docx|xlsx)_[^"]+)"/g)].map(match => match[1]),
+    ...[...officeSource.matchAll(/fixedEdit\('((?:docx|xlsx|pptx)_[^']+)'/g)].map(match => match[1]),
+  ]);
+  const providerSources = await Promise.all([
+    'packages/docx-cli/FixedEditCommand.cs',
+    'packages/xlsx-cli/FixedCommandRunner.cs',
+    'packages/pptx-cli/FixedCommandRunner.cs',
+  ].map(relative => readFile(path.join(repoRoot, relative), 'utf8')));
+  for (const name of fixedNames) {
+    if (!providerSources.some(source => source.includes(`"${name}"`))) {
+      fail(check, `Office MCP fixed tool has no same-name provider command: ${name}`);
+    }
+  }
+
+  const programSources = await Promise.all([
+    'packages/docx-cli/Program.cs',
+    'packages/xlsx-cli/Program.cs',
+    'packages/pptx-cli/Program.cs',
+  ].map(relative => readFile(path.join(repoRoot, relative), 'utf8')));
+  const genericPublicCommands = /"(?:edit|apply-format-edits|set-shape-geometry|replace-picture-image|apply-template)"\s*(?:,|=>)/;
+  if (programSources.some(source => genericPublicCommands.test(source))) {
+    fail(check, 'provider CLI still publishes a second generic edit/plan command');
+  }
+  note(`fixed provider runtime surface checked: ${fixedNames.size} same-name commands and no generic edit route`);
 }
 
 async function checkPackageFiles() {
@@ -591,6 +628,7 @@ async function main() {
   try {
     await checkDependencyGraph();
     await checkOfficeSourceOwnership();
+    await checkFixedRuntimeSurface();
     await checkPackageFiles();
     const { archive, manifest } = await packOfficePackage(tempRoot);
     const packageRoot = await extractArchive(archive, path.join(tempRoot, 'extracted'));

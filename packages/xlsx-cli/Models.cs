@@ -72,7 +72,7 @@ public record SheetReport(
     List<CellEvidenceReport>? Cells = null
 );
 
-public sealed record XlsxEditOperation(
+internal sealed record XlsxEditOperation(
     string Type,
     string? Sheet = null,
     string? Cell = null,
@@ -131,11 +131,7 @@ internal sealed class PrimitiveJsonValueConverter : JsonConverter<string?>
     }
 }
 
-public sealed record XlsxEditDocument(
-    IReadOnlyList<XlsxEditOperation> Operations
-);
-
-public sealed record XlsxEditAppliedOperation(
+internal sealed record XlsxEditAppliedOperation(
     string Type,
     bool Applied,
     string Detail,
@@ -145,7 +141,7 @@ public sealed record XlsxEditAppliedOperation(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ErrorCode = null
 );
 
-public sealed record XlsxEditResult(
+internal sealed record XlsxEditResult(
     string Input,
     string Output,
     IReadOnlyList<XlsxEditAppliedOperation> AppliedOperations

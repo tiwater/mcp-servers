@@ -64,96 +64,6 @@ const artifact = z.object({
   bytes: z.number().int().nonnegative(),
 }).strict();
 
-const pptxTemplateApplyResult = z.object({
-  input: z.string().min(1),
-  template: z.string().min(1),
-  output: z.string().min(1),
-  changedSlideCount: z.number().int().nonnegative(),
-  issues: z.array(z.object({
-    slideNumber: z.number().int().positive().nullable(),
-    message: z.string(),
-  }).strict()),
-  materializedLayoutShapes: z.array(z.object({
-    slideNumber: z.number().int().positive(),
-    sourceLayoutPath: z.string().min(1),
-    sourceShapeId: z.number().int().nonnegative().max(0xffffffff),
-    outputShapeId: z.number().int().nonnegative().max(0xffffffff),
-  }).strict()),
-  frozenPlaceholderCount: z.number().int().nonnegative(),
-  removedSystemPlaceholders: z.array(z.object({
-    slideNumber: z.number().int().positive(),
-    shapeId: z.number().int().nonnegative().max(0xffffffff),
-    placeholderType: z.string().min(1),
-  }).strict()),
-}).strict();
-const pptxFormatApplyResult = z.object({
-  input: z.string().min(1),
-  output: z.string().min(1),
-  operationCount: z.number().int().nonnegative(),
-  changedCount: z.number().int().nonnegative(),
-  changes: z.array(z.object({
-    slideNumber: z.number().int().positive(),
-    shapeId: z.number().int().nonnegative().max(0xffffffff),
-    runIndex: z.number().int().nonnegative(),
-    properties: z.array(z.string()),
-  }).strict()),
-  issues: z.array(z.object({
-    slideNumber: z.number().int().positive(),
-    shapeId: z.number().int().nonnegative().max(0xffffffff),
-    runIndex: z.number().int().nonnegative(),
-    message: z.string(),
-  }).strict()),
-}).strict();
-const pptxTemplateApplyOutput = z.object({
-  tool: z.literal('pptx_apply_template'),
-  runtime: runtimeIdentity,
-  receipt: artifact,
-  output: artifact.nullable(),
-  summary: z.object({
-    pass: z.boolean(),
-    changedSlideCount: z.number().int().nonnegative(),
-    issueCount: z.number().int().nonnegative(),
-  }).strict(),
-}).strict();
-const pptxFormatApplyOutput = z.object({
-  tool: z.literal('pptx_apply_format'),
-  runtime: runtimeIdentity,
-  receipt: artifact,
-  output: artifact.nullable(),
-  summary: z.object({
-    pass: z.boolean(),
-    operationCount: z.number().int().nonnegative(),
-    changedCount: z.number().int().nonnegative(),
-    issueCount: z.number().int().nonnegative(),
-  }).strict(),
-}).strict();
-const pptxObjectIssue = z.object({
-  slideNumber: z.number().int(),
-  shapeId: z.number().int().nonnegative().max(0xffffffff),
-  message: z.string().min(1),
-}).strict();
-const pptxTransform = z.object({
-  x: z.number().int(), y: z.number().int(), cx: z.number().int().positive(), cy: z.number().int().positive(),
-}).strict();
-const pptxShapeGeometryResult = z.object({
-  input: z.string().min(1), output: z.string().min(1),
-  operationCount: z.number().int().nonnegative(), appliedCount: z.number().int().nonnegative(),
-  changes: z.array(z.object({
-    slideNumber: z.number().int().positive(), shapeId: z.number().int().positive().max(0xffffffff),
-    before: pptxTransform, after: pptxTransform,
-  }).strict()),
-  issues: z.array(pptxObjectIssue),
-}).strict();
-const pptxPictureImageResult = z.object({
-  input: z.string().min(1), output: z.string().min(1),
-  operationCount: z.number().int().nonnegative(), appliedCount: z.number().int().nonnegative(),
-  changes: z.array(z.object({
-    slideNumber: z.number().int().positive(), shapeId: z.number().int().positive().max(0xffffffff), image: z.string().min(1),
-    beforeSha256: z.string().regex(/^[0-9a-f]{64}$/), afterSha256: z.string().regex(/^[0-9a-f]{64}$/),
-  }).strict()),
-  issues: z.array(pptxObjectIssue),
-}).strict();
-
 const renderFileIdentity = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   size_bytes: z.number().int().positive(),
@@ -190,81 +100,80 @@ const nativeRenderOutput = z.object({
   }).strict(),
 }).strict();
 
-const docxEditActions = [
-  {"name":"docx_set_anchored_text","operationType":"replaceAnchoredText","description":"Set text at current DOCX comment anchors.","batch":true},
-  {"name":"docx_set_paragraph_text","operationType":"replaceParagraphText","description":"Set current body paragraph text.","batch":true},
-  {"name":"docx_set_paragraph_run_text","operationType":"replaceParagraphRunText","description":"Set current body paragraph run text.","batch":true},
-  {"name":"docx_replace_body_text","operationType":"replaceBodyText","description":"Replace uniquely matched current body text.","batch":true},
-  {"name":"docx_delete_body_paragraph","operationType":"deleteBodyParagraph","description":"Delete uniquely matched current body paragraphs.","batch":true},
-  {"name":"docx_delete_body_drawing_before_paragraph","operationType":"deleteBodyDrawingBeforeParagraph","description":"Delete the drawing immediately before a uniquely matched current paragraph.","batch":true},
-  {"name":"docx_insert_body_range","operationType":"insertBodyRange","description":"Insert a bounded direct-body range from a current source DOCX before a current target body boundary, preserving supported styles and relationships.","batch":true,"sourceFields":["source"]},
-  {"name":"docx_replace_drawing_image","operationType":"replaceDrawingImage","description":"Replace the image relationship of a current body drawing while preserving its drawing geometry.","batch":true,"sourceFields":["image"]},
-  {"name":"docx_insert_body_image","operationType":"insertBodyImage","description":"Insert an image as a new inline drawing before a current direct-body boundary.","batch":true,"sourceFields":["image"]},
-  {"name":"docx_delete_body_range","operationType":"deleteBodyRange","description":"Delete uniquely bounded current body ranges.","batch":true},
-  {"name":"docx_start_section","operationType":"startSectionBeforeParagraph","description":"Start a section before a uniquely matched current paragraph.","batch":true},
-  {"name":"docx_set_header_paragraph_text","operationType":"replaceHeaderParagraphText","description":"Set current header paragraph text.","batch":true},
-  {"name":"docx_set_header_run_text","operationType":"replaceHeaderParagraphRunText","description":"Set current header run text.","batch":true},
-  {"name":"docx_replace_header_text","operationType":"replaceHeaderText","description":"Replace uniquely matched current header text.","batch":true},
-  {"name":"docx_set_footer_paragraph_text","operationType":"replaceFooterParagraphText","description":"Set current footer paragraph text.","batch":true},
-  {"name":"docx_set_footer_run_text","operationType":"replaceFooterParagraphRunText","description":"Set current footer run text.","batch":true},
-  {"name":"docx_set_table_cell_text","operationType":"replaceTableCellText","description":"Set current body table cell text.","batch":true},
-  {"name":"docx_set_table_cell_run_text","operationType":"replaceTableCellRunText","description":"Set current body table cell run text.","batch":true},
-  {"name":"docx_set_header_table_cell_text","operationType":"replaceHeaderTableCellText","description":"Set current header table cell text.","batch":true},
-  {"name":"docx_set_header_table_cell_run_text","operationType":"replaceHeaderTableCellRunText","description":"Set current header table cell run text.","batch":true},
-  {"name":"docx_set_footer_table_cell_text","operationType":"replaceFooterTableCellText","description":"Set current footer table cell text.","batch":true},
-  {"name":"docx_set_footer_table_cell_run_text","operationType":"replaceFooterTableCellRunText","description":"Set current footer table cell run text.","batch":true},
-  {"name":"docx_set_table_cell_rich_text","operationType":"replaceTableCellRichText","description":"Set current body table cell rich text.","batch":true},
-  {"name":"docx_insert_table_rows","operationType":"insertTableRows","description":"Insert rows into a current body table.","batch":true},
-  {"name":"docx_delete_table_rows","operationType":"deleteTableRows","description":"Delete current body table row ranges.","batch":true},
-  {"name":"docx_replace_table_rows","operationType":"replaceTableRows","description":"Replace current body table row ranges.","batch":true},
-  {"name":"docx_insert_table_columns","operationType":"insertTableColumns","description":"Insert columns into a current body table.","batch":true},
-  {"name":"docx_set_table_width","operationType":"setTableWidth","description":"Set current body table widths.","batch":true},
-  {"name":"docx_set_table_cell_alignment","operationType":"setTableCellAlignment","description":"Set current body table cell alignment.","batch":true},
-  {"name":"docx_set_table_cell_no_wrap","operationType":"setTableCellNoWrap","description":"Set current body table cell no-wrap state.","batch":true},
-  {"name":"docx_set_table_cell_font_size","operationType":"setTableCellFontSize","description":"Set current body table cell font size.","batch":true},
-  {"name":"docx_apply_font_policy","operationType":"applyDocumentFontPolicy","description":"Apply an explicit font policy to current document text.","batch":true},
-  {"name":"docx_set_table_row_height","operationType":"setTableRowHeight","description":"Set current body table row height.","batch":true},
-  {"name":"docx_set_table_row_cant_split","operationType":"setTableRowCantSplit","description":"Set current body table row split behavior.","batch":true},
-  {"name":"docx_set_table_row_repeat_as_header","operationType":"setTableRowRepeatAsHeader","description":"Set or unset repeat-as-header on uniquely addressed current body, header, or footer table rows.","batch":true},
-  {"name":"docx_set_table_row_keep_next","operationType":"setTableRowKeepNext","description":"Set keep-next behavior for current body table rows.","batch":true},
-  {"name":"docx_set_body_paragraph_keep_next","operationType":"setBodyParagraphKeepNext","description":"Set keep-next behavior for current body paragraphs.","batch":true},
-  {"name":"docx_set_body_paragraph_keep_lines","operationType":"setBodyParagraphKeepLines","description":"Set keep-lines behavior for current body paragraphs.","batch":true},
-  {"name":"docx_apply_toc_style_policy","operationType":"applyTocStylePolicy","description":"Apply current document table-of-contents paragraph style properties.","batch":true},
-  {"name":"docx_set_header_paragraph_font_size","operationType":"setHeaderParagraphFontSize","description":"Set current header paragraph font size.","batch":true},
-  {"name":"docx_collapse_trailing_empty_section","operationType":"collapseTrailingEmptySection","description":"Collapse a current trailing empty section.","batch":false},
-  {"name":"docx_collapse_trailing_empty_paragraphs","operationType":"collapseTrailingEmptyBodyParagraphs","description":"Collapse current trailing empty body paragraphs.","batch":false},
-  {"name":"docx_merge_table_cells","operationType":"mergeTableCells","description":"Merge current body table cells.","batch":true},
-  {"name":"docx_unmerge_table_row_cells","operationType":"unmergeTableRowHorizontalCells","description":"Unmerge current horizontal table cells.","batch":true},
-  {"name":"docx_unmerge_table_column_cells","operationType":"unmergeTableColumnVerticalCells","description":"Unmerge current vertical table cell ranges.","batch":true},
-  {"name":"docx_delete_comments","operationType":"deleteComments","description":"Delete explicit current DOCX comments.","batch":true},
-  {"name":"docx_mark_fields_dirty","operationType":"markFieldsDirty","description":"Mark current DOCX fields for native refresh.","batch":false},
-  {"name":"docx_sanitize_fields","operationType":"sanitizeFields","description":"Remove update prompts and dirty markers from current DOCX fields.","batch":false},
-  {"name":"docx_freeze_fields","operationType":"freezeFields","description":"Convert current visible DOCX field results to ordinary content.","batch":false},
+const docxFixedTools = [
+  {"name":"docx_set_anchored_text","description":"Set text at current DOCX comment anchors."},
+  {"name":"docx_set_paragraph_text","description":"Set current body paragraph text."},
+  {"name":"docx_set_paragraph_run_text","description":"Set current body paragraph run text."},
+  {"name":"docx_replace_body_text","description":"Replace uniquely matched current body text."},
+  {"name":"docx_delete_body_paragraph","description":"Delete uniquely matched current body paragraphs."},
+  {"name":"docx_delete_body_drawing_before_paragraph","description":"Delete the drawing immediately before a uniquely matched current paragraph."},
+  {"name":"docx_insert_body_range","description":"Insert a bounded direct-body range from a current source DOCX before a current target body boundary, preserving supported styles and relationships."},
+  {"name":"docx_replace_drawing_image","description":"Replace the image relationship of a current body drawing while preserving its drawing geometry."},
+  {"name":"docx_insert_body_image","description":"Insert an image as a new inline drawing before a current direct-body boundary."},
+  {"name":"docx_delete_body_range","description":"Delete uniquely bounded current body ranges."},
+  {"name":"docx_start_section","description":"Start a section before a uniquely matched current paragraph."},
+  {"name":"docx_set_header_paragraph_text","description":"Set current header paragraph text."},
+  {"name":"docx_set_header_run_text","description":"Set current header run text."},
+  {"name":"docx_replace_header_text","description":"Replace uniquely matched current header text."},
+  {"name":"docx_set_footer_paragraph_text","description":"Set current footer paragraph text."},
+  {"name":"docx_set_footer_run_text","description":"Set current footer run text."},
+  {"name":"docx_set_table_cell_text","description":"Set current body table cell text."},
+  {"name":"docx_set_table_cell_run_text","description":"Set current body table cell run text."},
+  {"name":"docx_set_header_table_cell_text","description":"Set current header table cell text."},
+  {"name":"docx_set_header_table_cell_run_text","description":"Set current header table cell run text."},
+  {"name":"docx_set_footer_table_cell_text","description":"Set current footer table cell text."},
+  {"name":"docx_set_footer_table_cell_run_text","description":"Set current footer table cell run text."},
+  {"name":"docx_set_table_cell_rich_text","description":"Set current body table cell rich text."},
+  {"name":"docx_insert_table_rows","description":"Insert rows into a current body table."},
+  {"name":"docx_delete_table_rows","description":"Delete current body table row ranges."},
+  {"name":"docx_replace_table_rows","description":"Replace current body table row ranges."},
+  {"name":"docx_insert_table_columns","description":"Insert columns into a current body table."},
+  {"name":"docx_set_table_width","description":"Set current body table widths."},
+  {"name":"docx_set_table_cell_alignment","description":"Set current body table cell alignment."},
+  {"name":"docx_set_table_cell_no_wrap","description":"Set current body table cell no-wrap state."},
+  {"name":"docx_set_table_cell_font_size","description":"Set current body table cell font size."},
+  {"name":"docx_apply_font_policy","description":"Apply an explicit font policy to current document text."},
+  {"name":"docx_set_table_row_height","description":"Set current body table row height."},
+  {"name":"docx_set_table_row_cant_split","description":"Set current body table row split behavior."},
+  {"name":"docx_set_table_row_repeat_as_header","description":"Set or unset repeat-as-header on uniquely addressed current body, header, or footer table rows."},
+  {"name":"docx_set_table_row_keep_next","description":"Set keep-next behavior for current body table rows."},
+  {"name":"docx_set_body_paragraph_keep_next","description":"Set keep-next behavior for current body paragraphs."},
+  {"name":"docx_set_body_paragraph_keep_lines","description":"Set keep-lines behavior for current body paragraphs."},
+  {"name":"docx_apply_toc_style_policy","description":"Apply current document table-of-contents paragraph style properties."},
+  {"name":"docx_set_header_paragraph_font_size","description":"Set current header paragraph font size."},
+  {"name":"docx_collapse_trailing_empty_section","description":"Collapse a current trailing empty section."},
+  {"name":"docx_collapse_trailing_empty_paragraphs","description":"Collapse current trailing empty body paragraphs."},
+  {"name":"docx_merge_table_cells","description":"Merge current body table cells."},
+  {"name":"docx_unmerge_table_row_cells","description":"Unmerge current horizontal table cells."},
+  {"name":"docx_unmerge_table_column_cells","description":"Unmerge current vertical table cell ranges."},
+  {"name":"docx_delete_comments","description":"Delete explicit current DOCX comments."},
+  {"name":"docx_mark_fields_dirty","description":"Mark current DOCX fields for native refresh."},
+  {"name":"docx_sanitize_fields","description":"Remove update prompts and dirty markers from current DOCX fields."},
+  {"name":"docx_freeze_fields","description":"Convert current visible DOCX field results to ordinary content."},
 ];
 
-const xlsxEditActions = [
-  {"name":"xlsx_set_cell_value","operationType":"setCellValue","description":"Set current workbook cell values.","batch":true},
-  {"name":"xlsx_set_cell_number_format","operationType":"setCellNumberFormat","description":"Set current workbook cell number formats.","batch":true},
-  {"name":"xlsx_set_rich_text_cell_value","operationType":"setRichTextCellValue","description":"Set current workbook rich-text cell values.","batch":true},
-  {"name":"xlsx_set_range_values","operationType":"setRangeValues","description":"Set rectangular values in a current workbook.","batch":true},
-  {"name":"xlsx_insert_rows","operationType":"insertRows","description":"Insert rows into a current worksheet.","batch":true},
-  {"name":"xlsx_delete_rows","operationType":"deleteRows","description":"Structurally delete rows from a current worksheet.","batch":true},
-  {"name":"xlsx_copy_row","operationType":"copyRow","description":"Copy current worksheet rows.","batch":true},
-  {"name":"xlsx_expand_section_rows","operationType":"expandSectionRows","description":"Expand current worksheet row sections from visible anchors.","batch":true},
-  {"name":"xlsx_set_print_area","operationType":"setPrintArea","description":"Set current worksheet print areas.","batch":true},
-  {"name":"xlsx_set_page_setup","operationType":"setPageSetup","description":"Set current worksheet page properties.","batch":true},
-  {"name":"xlsx_set_row_page_breaks","operationType":"setRowPageBreaks","description":"Set current worksheet row page breaks.","batch":true},
-  {"name":"xlsx_set_column_width","operationType":"setColumnWidth","description":"Set current worksheet column widths.","batch":true},
+const xlsxFixedTools = [
+  {"name":"xlsx_set_cell_value","description":"Set current workbook cell values."},
+  {"name":"xlsx_set_cell_number_format","description":"Set current workbook cell number formats."},
+  {"name":"xlsx_set_rich_text_cell_value","description":"Set current workbook rich-text cell values."},
+  {"name":"xlsx_set_range_values","description":"Set rectangular values in a current workbook."},
+  {"name":"xlsx_insert_rows","description":"Insert rows into a current worksheet."},
+  {"name":"xlsx_delete_rows","description":"Structurally delete rows from a current worksheet."},
+  {"name":"xlsx_copy_row","description":"Copy current worksheet rows."},
+  {"name":"xlsx_expand_section_rows","description":"Expand current worksheet row sections from visible anchors."},
+  {"name":"xlsx_set_print_area","description":"Set current worksheet print areas."},
+  {"name":"xlsx_set_page_setup","description":"Set current worksheet page properties."},
+  {"name":"xlsx_set_row_page_breaks","description":"Set current worksheet row page breaks."},
+  {"name":"xlsx_set_column_width","description":"Set current worksheet column widths."},
 ];
 
-function editToolDefinitions(actions) {
-  return actions.map(action => ({
-    name: action.name,
-    description: action.batch ? `${action.description} One call batches only this action kind.` : action.description,
-    inputSchema: inputContract(action.name),
-    outputSchema: fixedEditOutput(action.name),
-    annotations: action.batch ? undefined : { idempotentHint: true },
-    handler: args => fixedEdit(action, args),
+function fixedToolDefinitions(definitions) {
+  return definitions.map(definition => ({
+    name: definition.name,
+    description: definition.description,
+    inputSchema: inputContract(definition.name),
+    outputSchema: fixedEditOutput(definition.name),
+    handler: args => fixedEdit(definition.name, args),
   }));
 }
 
@@ -342,7 +251,7 @@ const tools = [
     inputSchema: inputContract('docx_replace_style_ids'),
     handler: docxReplaceStyleIds,
   },
-  ...editToolDefinitions(docxEditActions),
+  ...fixedToolDefinitions(docxFixedTools),
   {
     name: 'office_render_pdf',
     description: 'Render a current Office document to PDF with its required native WPS backend and write the complete provider receipt as evidence. The input extension selects Writer, Spreadsheets, or Presentation; fallback rendering is rejected.',
@@ -370,7 +279,7 @@ const tools = [
     outputSchema: artifactOutput('xlsx_export_json'),
     handler: xlsxExportJson,
   },
-  ...editToolDefinitions(xlsxEditActions),
+  ...fixedToolDefinitions(xlsxFixedTools),
   {
     name: 'xlsx_validate',
     description: 'Validate an XLSX workbook package and return Open XML validation evidence.',
@@ -396,29 +305,29 @@ const tools = [
     name: 'pptx_apply_template',
     description: 'Apply one deterministic PPTX template-application plan to a current presentation. This tool executes the published plan; it does not select a template or derive business content, slide mappings, geometry, or formatting decisions.',
     inputSchema: inputContract('pptx_apply_template'),
-    outputSchema: pptxTemplateApplyOutput,
-    handler: pptxApplyTemplate,
+    outputSchema: fixedEditOutput('pptx_apply_template'),
+    handler: args => fixedEdit('pptx_apply_template', args),
   },
   {
     name: 'pptx_apply_format',
     description: 'Apply one deterministic PPTX formatting plan to a current presentation. This tool executes published formatting operations; it does not derive values, coordinates, or business decisions.',
     inputSchema: inputContract('pptx_apply_format'),
-    outputSchema: pptxFormatApplyOutput,
-    handler: pptxApplyFormat,
+    outputSchema: fixedEditOutput('pptx_apply_format'),
+    handler: args => fixedEdit('pptx_apply_format', args),
   },
   {
     name: 'pptx_set_shape_geometry',
     description: 'Set exact native EMU bounds for uniquely identified current-slide PPTX objects. One call batches only this fixed geometry action and does not infer repair coordinates.',
     inputSchema: inputContract('pptx_set_shape_geometry'),
     outputSchema: fixedEditOutput('pptx_set_shape_geometry'),
-    handler: pptxSetShapeGeometry,
+    handler: args => fixedEdit('pptx_set_shape_geometry', args),
   },
   {
     name: 'pptx_replace_picture_image',
     description: 'Replace embedded PNG or JPEG media for uniquely identified current-slide PPTX pictures while preserving the picture object, geometry, crop, and unrelated media. One call batches only this fixed replacement action.',
     inputSchema: inputContract('pptx_replace_picture_image'),
     outputSchema: fixedEditOutput('pptx_replace_picture_image'),
-    handler: pptxReplacePictureImage,
+    handler: args => fixedEdit('pptx_replace_picture_image', args),
   },
   {
     name: 'pptx_validate',
@@ -501,59 +410,25 @@ async function copyTransform(tool, candidates, command, args, suffix = []) {
   return { tool, runtime: commandRuntime(result), output: await fileArtifact(output) };
 }
 
-async function fixedEdit(action, args) {
-  const input = path.resolve(requireString(args.input, 'input'));
+async function fixedEdit(tool, args) {
   const output = path.resolve(requireString(args.output, 'output'));
   const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
   await requireNewFile(output, 'output');
   await requireNewFile(receiptOutput, 'receiptOutput');
-  const inputArtifact = await fileArtifact(input);
-  const operations = action.batch
-    ? args.changes.map(change => ({ ...change, type: action.operationType }))
-    : [{ type: action.operationType }];
-  const sourcePaths = [...new Set((action.sourceFields ?? []).flatMap(field =>
-    (args.changes ?? []).map(change => path.resolve(requireString(change[field], field)))))];
-  const sources = await Promise.all(sourcePaths.map(fileArtifact));
-  const candidates = action.name.startsWith('docx_') ? docxCandidates : xlsxCandidates;
-  return withTempJsonFile({ operations }, async operationsPath => {
-    try {
-      const result = await runJsonCandidateChain(candidates, ['edit', input, operationsPath, output], { allowedExitCodes: [0, 1] });
-      const rawAppliedOperations = result.json?.appliedOperations ?? result.json?.AppliedOperations;
-      const appliedOperations = Array.isArray(rawAppliedOperations)
-        ? rawAppliedOperations.map(operation => ({
-            type: operation.type ?? operation.Type,
-            applied: operation.applied ?? operation.Applied,
-            detail: operation.detail ?? operation.Detail,
-          }))
-        : [];
-      const observedSources = await Promise.all(sourcePaths.map(fileArtifact));
-      const sourceBindingStable = isDeepStrictEqual(sources, observedSources);
-      const pass = sourceBindingStable && appliedOperations.length === operations.length && appliedOperations.every(operation => operation.applied === true);
-      const outputArtifact = pass ? await fileArtifact(output) : null;
-      if (!pass) await rm(output, { force: true });
-      const receipt = {
-        schema: 'tiwater.office.fixed-edit-receipt/v1',
-        tool: action.name,
-        operationType: action.operationType,
-        pass,
-        input: inputArtifact,
-        ...(sources.length > 0 ? { sources } : {}),
-        ...(sources.length > 0 ? { sourceBindingStable } : {}),
-        output: outputArtifact,
-        operationCount: operations.length,
-        appliedOperations,
-      };
-      return {
-        tool: action.name,
-        runtime: commandRuntime(result),
-        receipt: await writeJsonArtifact(receiptOutput, receipt),
-        output: outputArtifact,
-        summary: { pass, operationCount: operations.length, appliedCount: appliedOperations.filter(operation => operation.applied).length },
-      };
-    } catch (error) {
-      await rm(output, { force: true });
-      throw error;
+  const candidates = tool.startsWith('docx_') ? docxCandidates
+    : tool.startsWith('xlsx_') ? xlsxCandidates
+    : pptxCandidates;
+  return withTempJsonFile(args, async requestPath => {
+    const result = await runJsonCandidateChain(candidates, [tool, requestPath], { allowedExitCodes: [0, 1] });
+    if (result.json?.tool !== tool) throw new Error(`${tool} returned a mismatched tool identity`);
+    await requireReturnedArtifact(result.json.receipt, receiptOutput, 'receipt');
+    if (result.json.output === null) {
+      if (result.json.summary?.pass !== false) throw new Error(`${tool} omitted output without reporting failure`);
+    } else {
+      await requireReturnedArtifact(result.json.output, output, 'output');
+      if (result.json.summary?.pass !== true) throw new Error(`${tool} returned output without reporting success`);
     }
+    return { ...result.json, runtime: commandRuntime(result) };
   });
 }
 
@@ -706,143 +581,19 @@ async function pptxExportJson(args) {
   };
 }
 
-async function pptxApplyTemplate(args) {
-  return withTempJsonFile({ targetMasterPath: args.targetMasterPath, slides: args.slides }, planPath => pptxApply('pptx_apply_template', args, true, planPath));
-}
-
-async function pptxApplyFormat(args) {
-  return withTempJsonFile({ operations: args.changes }, planPath => pptxApply('pptx_apply_format', args, false, planPath));
-}
-
-async function pptxSetShapeGeometry(args) {
-  return pptxFixedObjectEdit('pptx_set_shape_geometry', 'set-shape-geometry', args, pptxShapeGeometryResult, args.changes);
-}
-
-async function pptxReplacePictureImage(args) {
-  const changes = args.changes.map(change => ({ ...change, image: path.resolve(requireString(change.image, 'image')) }));
-  return pptxFixedObjectEdit('pptx_replace_picture_image', 'replace-picture-image', args, pptxPictureImageResult, changes, changes.map(change => change.image));
-}
-
-async function pptxFixedObjectEdit(tool, command, args, resultSchema, changes, sourcePaths = []) {
-  const input = path.resolve(requireString(args.input, 'input'));
-  const output = path.resolve(requireString(args.output, 'output'));
-  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
-  if (path.extname(input).toLowerCase() !== '.pptx' || path.extname(output).toLowerCase() !== '.pptx')
-    throw Object.assign(new Error('PPTX object edits require .pptx input and output paths'), { code: -32602 });
-  await requireNewFile(output, 'output');
-  await requireNewFile(receiptOutput, 'receiptOutput');
-  const inputArtifact = await fileArtifact(input);
-  const sourceArtifacts = await Promise.all([...new Set(sourcePaths)].map(fileArtifact));
-  return withTempJsonFile({ changes }, async planPath => {
-    const requestArtifact = await fileArtifact(planPath);
-    try {
-      const result = await runJsonCandidateChain(pptxCandidates, [command, input, planPath, output], { allowedExitCodes: [0, 1] });
-      await requireArtifactUnchanged(inputArtifact, 'PPTX object edit input');
-      await requireArtifactUnchanged(requestArtifact, 'PPTX object edit request');
-      for (const source of sourceArtifacts) await requireArtifactUnchanged(source, 'PPTX replacement image');
-      const providerResult = resultSchema.parse(result.json);
-      if (path.resolve(providerResult.input) !== input || path.resolve(providerResult.output) !== output)
-        throw new Error('PPTX object edit receipt is not bound to the current input and output');
-      const sourceByPath = new Map(sourceArtifacts.map(source => [source.path, source]));
-      const providerMatchesRequest = providerResult.changes.length === changes.length && providerResult.changes.every((change, position) => {
-        const requested = changes[position];
-        if (change.slideNumber !== requested.slideNumber || change.shapeId !== requested.shapeId) return false;
-        if (tool === 'pptx_set_shape_geometry')
-          return isDeepStrictEqual(change.after, { x: requested.x, y: requested.y, cx: requested.cx, cy: requested.cy });
-        const requestedImage = path.resolve(requested.image);
-        return path.resolve(change.image) === requestedImage && change.afterSha256 === sourceByPath.get(requestedImage)?.sha256;
-      });
-      const pass = providerResult.issues.length === 0
-        && providerResult.operationCount === changes.length
-        && providerResult.appliedCount === changes.length
-        && providerMatchesRequest;
-      const outputArtifact = pass ? await fileArtifact(output) : null;
-      if (!pass) await rm(output, { force: true });
-      const receipt = {
-        schema: 'tiwater.office.pptx-fixed-object-edit-receipt/v1', tool, pass,
-        input: inputArtifact, requestSha256: requestArtifact.sha256,
-        ...(sourceArtifacts.length ? { sourceImages: sourceArtifacts } : {}),
-        output: outputArtifact, providerResult,
-      };
-      return {
-        tool, runtime: commandRuntime(result), receipt: await writeJsonArtifact(receiptOutput, receipt), output: outputArtifact,
-        summary: { pass, operationCount: providerResult.operationCount, appliedCount: providerResult.appliedCount },
-      };
-    } catch (error) {
-      await rm(output, { force: true });
-      throw error;
-    }
-  });
-}
-
-async function pptxApply(tool, args, templateMode, plan) {
-  const input = path.resolve(requireString(args.input, 'input'));
-  const template = templateMode ? path.resolve(requireString(args.template, 'template')) : null;
-  const output = path.resolve(requireString(args.output, 'output'));
-  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
-  for (const [label, candidate] of [['input', input], ['output', output], ...(template ? [['template', template]] : [])]) {
-    if (path.extname(candidate).toLowerCase() !== '.pptx') {
-      throw Object.assign(new Error(`${label} must use the .pptx extension`), { code: -32602 });
-    }
-  }
-  await requireNewFile(output, 'output');
-  await requireNewFile(receiptOutput, 'receiptOutput');
-  const inputArtifact = await fileArtifact(input);
-  const templateArtifact = template ? await fileArtifact(template) : null;
-  const planArtifact = await fileArtifact(plan);
-  await mkdir(path.dirname(output), { recursive: true });
-  try {
-    const command = templateMode ? 'apply-template' : 'apply-format-edits';
-    const commandArgs = templateMode
-      ? [command, input, template, plan, output]
-      : [command, input, plan, output];
-    const result = await runJsonCandidateChain(pptxCandidates, commandArgs, { allowedExitCodes: [0, 1] });
-    await requireArtifactUnchanged(inputArtifact, 'PPTX apply input');
-    if (templateArtifact) await requireArtifactUnchanged(templateArtifact, 'PPTX apply template');
-    await requireArtifactUnchanged(planArtifact, 'PPTX apply plan');
-    const providerResult = (templateMode ? pptxTemplateApplyResult : pptxFormatApplyResult).parse(result.json);
-    if (path.resolve(providerResult.input) !== input
-        || path.resolve(providerResult.output) !== output
-        || (templateMode && path.resolve(providerResult.template) !== template)) {
-      throw new Error('PPTX apply receipt is not bound to the current inputs and output');
-    }
-    const pass = providerResult.issues.length === 0;
-    const outputArtifact = pass ? await fileArtifact(output) : null;
-    if (!pass) await rm(output, { force: true });
-    const receipt = {
-      schema: templateMode
-        ? 'tiwater.office.pptx-template-apply-receipt/v1'
-        : 'tiwater.office.pptx-format-apply-receipt/v1',
-      pass,
-      input: inputArtifact,
-      ...(templateMode ? { template: templateArtifact } : {}),
-      requestSha256: planArtifact.sha256,
-      output: outputArtifact,
-      providerResult,
-    };
-    return {
-      tool,
-      runtime: commandRuntime(result),
-      receipt: await writeJsonArtifact(receiptOutput, receipt),
-      output: outputArtifact,
-      summary: templateMode
-        ? { pass, changedSlideCount: providerResult.changedSlideCount, issueCount: providerResult.issues.length }
-        : { pass, operationCount: providerResult.operationCount, changedCount: providerResult.changedCount, issueCount: providerResult.issues.length },
-    };
-  } catch (error) {
-    await rm(output, { force: true });
-    throw error;
-  }
-}
-
 async function pptxValidate(args) {
   const result = await runJsonCandidateChain(pptxCandidates, ['validate', requireString(args.input, 'input')], { allowedExitCodes: [0, 1] });
   return { tool: 'pptx_validate', runtime: commandRuntime(result), result: result.json };
 }
 
-async function requireArtifactUnchanged(expected, label) {
-  const current = await fileArtifact(expected.path);
-  if (!isDeepStrictEqual(current, expected)) throw new Error(`${label} changed during provider execution`);
+async function requireReturnedArtifact(returned, expectedPath, label) {
+  if (!returned || path.resolve(returned.path || '') !== expectedPath) {
+    throw new Error(`${label} artifact is not bound to the accepted provider call`);
+  }
+  const current = await fileArtifact(expectedPath);
+  if (!isDeepStrictEqual(current, returned)) {
+    throw new Error(`${label} artifact identity does not match provider output`);
+  }
 }
 
 async function writeJsonArtifact(output, payload) {

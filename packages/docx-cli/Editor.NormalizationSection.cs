@@ -6,7 +6,7 @@ using W14 = DocumentFormat.OpenXml.Office2010.Word;
 
 namespace Dockit.Docx;
 
-public static partial class Editor
+internal static partial class Editor
 {
     private static DocxEditAppliedOperation StartSectionBeforeParagraph(Body body, DocxEditOperation operation)
     {

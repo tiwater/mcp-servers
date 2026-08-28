@@ -24,9 +24,9 @@ public static class Cli
         "replace-style-ids",
         "export-json",
         "normalize-openxml",
-        "edit",
         "validate-font-policy",
         "validate-toc-style-policy",
+        .. FixedEditCommand.Commands,
     ];
 
     public static Task<int> RunAsync(string[] args)
@@ -76,9 +76,9 @@ public static class Cli
                 "replace-style-ids" => Task.FromResult(Transforms.RunReplaceStyleIds(args[1..])),
                 "export-json" => Task.FromResult(Transforms.RunExportJson(args[1..])),
                 "normalize-openxml" => Task.FromResult(DocxPackageNormalizer.RunNormalize(args[1..])),
-                "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 "validate-font-policy" => Task.FromResult(FontPolicy.RunValidate(args[1..])),
                 "validate-toc-style-policy" => Task.FromResult(TocStylePolicy.RunValidate(args[1..])),
+                _ when FixedEditCommand.IsCommand(args[0]) => Task.FromResult(FixedEditCommand.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -253,9 +253,9 @@ public static class Cli
         Console.WriteLine("  replace-style-ids <input.docx> <output.docx> <style-map.json>");
         Console.WriteLine("  export-json <input.docx> [<output.json>]");
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
-        Console.WriteLine("  edit <input.docx> <operations.json> <output.docx>");
         Console.WriteLine("  validate-font-policy <input.docx> <policy.json>");
         Console.WriteLine("  validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level>");
+        Console.WriteLine("  docx_* <request.json>  (fixed published mutation commands)");
     }
 
     private static void PrintToolDescription()
@@ -284,9 +284,9 @@ public static class Cli
             "replace-style-ids" => "tiwater-docx replace-style-ids <input.docx> <output.docx> <style-map.json>",
             "export-json" => "tiwater-docx export-json <input.docx> [<output.json>]",
             "normalize-openxml" => "tiwater-docx normalize-openxml <input.docx> <output.docx>",
-            "edit" => "tiwater-docx edit <input.docx> <operations.json> <output.docx>",
             "validate-font-policy" => "tiwater-docx validate-font-policy <input.docx> <policy.json>",
             "validate-toc-style-policy" => "tiwater-docx validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level>",
+            _ when FixedEditCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
             _ => null,
         };
         if (usage is null) return false;

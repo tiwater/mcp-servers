@@ -24,16 +24,19 @@ to an artifact path by the Office MCP.
 ## Fixed technical mutation
 
 ```bash
-tiwater-docx edit input.docx operations.json output.docx
+tiwater-docx docx_set_table_cell_text request.json
+tiwater-docx docx_insert_table_rows request.json
+tiwater-docx docx_merge_table_cells request.json
 tiwater-docx normalize-openxml input.docx output.docx
 tiwater-docx strip-direct-formatting input.docx output.docx
 tiwater-docx replace-style-ids input.docx output.docx style-map.json
 ```
 
-`edit` accepts only the currently published fixed technical actions. The
-provider validates document coordinates and Open XML constraints; callers own
-the selected objects and values. Structural mutation requires fresh
-observation before later calls.
+Each `docx_*` mutation command consumes the matching provider-owned request
+contract from `contracts/mcp-input/`. Requests contain no operation
+discriminator. The provider validates document coordinates and Open XML
+constraints; callers own the selected objects and values. Structural mutation
+requires fresh observation before later calls.
 
 ## Validation
 

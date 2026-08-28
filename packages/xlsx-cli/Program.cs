@@ -16,7 +16,6 @@ internal static class Cli
         "inspect",
         "export-json",
         "inventory-regions",
-        "edit",
         "validate",
         .. FixedCommandRunner.Commands,
     ];
@@ -53,7 +52,6 @@ internal static class Cli
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "inventory-regions" => Task.FromResult(RegionInventory.Run(args[1..])),
-                "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 "validate" => RunValidateAsync(args[1..]),
                 _ when FixedCommandRunner.IsCommand(args[0]) => Task.FromResult(FixedCommandRunner.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
@@ -105,7 +103,6 @@ internal static class Cli
         Console.WriteLine("  inspect <input.xlsx> [--json]");
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  inventory-regions <input.xlsx> [<output.json>] [--schema v1|v2]");
-        Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");
         Console.WriteLine("  validate <input.xlsx>");
         foreach (var command in FixedCommandRunner.Commands)
             Console.WriteLine($"  {command} <request.json>");
@@ -124,7 +121,6 @@ internal static class Cli
             "inspect" => PrintUsageLine("tiwater-xlsx inspect <input.xlsx> [--json]"),
             "export-json" => PrintUsageLine("tiwater-xlsx export-json <input.xlsx> [<output.json>]"),
             "inventory-regions" => PrintUsageLine("tiwater-xlsx inventory-regions <input.xlsx> [<output.json>] [--schema v1|v2]"),
-            "edit" => PrintUsageLine("tiwater-xlsx edit <input.xlsx> <operations.json> <output.xlsx>"),
             "validate" => PrintUsageLine("tiwater-xlsx validate <input.xlsx>"),
             _ => false,
         };

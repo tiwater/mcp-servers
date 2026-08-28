@@ -14,10 +14,6 @@ internal static class Cli
     [
         "inspect",
         "export-json",
-        "apply-format-edits",
-        "set-shape-geometry",
-        "replace-picture-image",
-        "apply-template",
         "validate",
         "map-render-findings",
         "validate-render-finding-map",
@@ -53,10 +49,6 @@ internal static class Cli
             {
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
-                "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
-                "set-shape-geometry" => RunSetShapeGeometryAsync(args[1..]),
-                "replace-picture-image" => RunReplacePictureImageAsync(args[1..]),
-                "apply-template" => RunApplyTemplateAsync(args[1..]),
                 "validate" => Task.FromResult(Validator.Run(args[1..])),
                 "map-render-findings" => RunMapRenderFindingsAsync(args[1..]),
                 "validate-render-finding-map" => RunValidateRenderFindingMapAsync(args[1..]),
@@ -95,44 +87,6 @@ internal static class Cli
         return Task.FromResult(0);
     }
 
-    private static Task<int> RunApplyFormatEditsAsync(string[] args)
-    {
-        if (args.Length < 3)
-        {
-            throw new InvalidOperationException("apply-format-edits requires <input.pptx> <plan.json> <output.pptx>");
-        }
-
-        var result = FormatEditor.Apply(args[0], args[1], args[2]);
-        WriteJson(result);
-        return Task.FromResult(0);
-    }
-
-    private static Task<int> RunApplyTemplateAsync(string[] args)
-    {
-        if (args.Length < 4)
-            throw new InvalidOperationException("apply-template requires <input.pptx> <template.pptx> <plan.json> <output.pptx>");
-        WriteJson(TemplateApplicator.Apply(args[0], args[1], args[2], args[3]));
-        return Task.FromResult(0);
-    }
-
-    private static Task<int> RunSetShapeGeometryAsync(string[] args)
-    {
-        if (args.Length != 3)
-            throw new InvalidOperationException("set-shape-geometry requires <input.pptx> <changes.json> <output.pptx>");
-        var result = ShapeGeometryEditor.Apply(args[0], args[1], args[2]);
-        WriteJson(result);
-        return Task.FromResult(result.Issues.Count == 0 ? 0 : 1);
-    }
-
-    private static Task<int> RunReplacePictureImageAsync(string[] args)
-    {
-        if (args.Length != 3)
-            throw new InvalidOperationException("replace-picture-image requires <input.pptx> <changes.json> <output.pptx>");
-        var result = PictureImageEditor.Apply(args[0], args[1], args[2]);
-        WriteJson(result);
-        return Task.FromResult(result.Issues.Count == 0 ? 0 : 1);
-    }
-
     private static Task<int> RunMapRenderFindingsAsync(string[] args)
     {
         if (args.Length != 4) throw new InvalidOperationException("map-render-findings requires <inspect.json> <render-manifest.json> <findings.json> <output.json>");
@@ -154,10 +108,6 @@ internal static class Cli
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.pptx> [--json]");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
-        Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
-        Console.WriteLine("  set-shape-geometry <input.pptx> <changes.json> <output.pptx>");
-        Console.WriteLine("  replace-picture-image <input.pptx> <changes.json> <output.pptx>");
-        Console.WriteLine("  apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>");
         Console.WriteLine("  validate <input.pptx>");
         Console.WriteLine("  map-render-findings <inspect.json> <render-manifest.json> <findings.json> <output.json>");
         Console.WriteLine("  validate-render-finding-map <inspect.json> <render-manifest.json> <findings.json> <map.json> <verdict.json>");

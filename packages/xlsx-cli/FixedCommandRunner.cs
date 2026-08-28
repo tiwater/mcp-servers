@@ -6,24 +6,24 @@ namespace Dockit.Xlsx;
 
 public static class FixedCommandRunner
 {
-    private sealed record Definition(string OperationType, IReadOnlySet<string> RequiredFields, IReadOnlySet<string> AllowedFields);
+    private sealed record Definition(string OperationType);
     private sealed record Artifact(string Path, string Sha256, long Bytes);
 
     private static readonly IReadOnlyDictionary<string, Definition> Definitions =
         new Dictionary<string, Definition>(StringComparer.Ordinal)
         {
-            ["xlsx_set_cell_value"] = DefinitionFor("setCellValue", ["sheet", "cell", "value"], ["sheet", "cell", "value", "valueType", "bold", "shrinkToFit", "wrapText"]),
-            ["xlsx_set_cell_number_format"] = DefinitionFor("setCellNumberFormat", ["sheet", "cell", "numberFormat"], ["sheet", "cell", "numberFormat"]),
-            ["xlsx_set_rich_text_cell_value"] = DefinitionFor("setRichTextCellValue", ["sheet", "cell", "value", "bold"], ["sheet", "cell", "value", "bold"]),
-            ["xlsx_set_range_values"] = DefinitionFor("setRangeValues", ["sheet", "startCell", "values"], ["sheet", "startCell", "values", "valueType"]),
-            ["xlsx_insert_rows"] = DefinitionFor("insertRows", ["sheet", "startRow", "count"], ["sheet", "startRow", "count", "preserveHorizontalMergedRanges", "expandAdjacentVerticalMergedRanges"]),
-            ["xlsx_delete_rows"] = DefinitionFor("deleteRows", ["sheet", "startRow", "count"], ["sheet", "startRow", "count"]),
-            ["xlsx_copy_row"] = DefinitionFor("copyRow", ["sheet", "sourceRow", "targetRow"], ["sheet", "sourceRow", "targetRow", "translateFormulas"]),
-            ["xlsx_expand_section_rows"] = DefinitionFor("expandSectionRows", ["sheet", "anchorText", "exampleRows", "targetRows"], ["sheet", "anchorText", "exampleRows", "targetRows", "preserveStyle", "preserveFormulas", "preserveMergedRanges"]),
-            ["xlsx_set_print_area"] = DefinitionFor("setPrintArea", ["sheet", "range"], ["sheet", "range"]),
-            ["xlsx_set_page_setup"] = DefinitionFor("setPageSetup", ["sheet"], ["sheet", "fitToPagesWide", "fitToPagesTall", "orientation", "paperSize", "repeatRowsStart", "repeatRowsEnd", "repeatColsStart", "repeatColsEnd"]),
-            ["xlsx_set_row_page_breaks"] = DefinitionFor("setRowPageBreaks", ["sheet", "breakBeforeRows"], ["sheet", "breakBeforeRows"]),
-            ["xlsx_set_column_width"] = DefinitionFor("setColumnWidth", ["sheet", "column", "width"], ["sheet", "column", "width"]),
+            ["xlsx_set_cell_value"] = new("setCellValue"),
+            ["xlsx_set_cell_number_format"] = new("setCellNumberFormat"),
+            ["xlsx_set_rich_text_cell_value"] = new("setRichTextCellValue"),
+            ["xlsx_set_range_values"] = new("setRangeValues"),
+            ["xlsx_insert_rows"] = new("insertRows"),
+            ["xlsx_delete_rows"] = new("deleteRows"),
+            ["xlsx_copy_row"] = new("copyRow"),
+            ["xlsx_expand_section_rows"] = new("expandSectionRows"),
+            ["xlsx_set_print_area"] = new("setPrintArea"),
+            ["xlsx_set_page_setup"] = new("setPageSetup"),
+            ["xlsx_set_row_page_breaks"] = new("setRowPageBreaks"),
+            ["xlsx_set_column_width"] = new("setColumnWidth"),
         };
 
     public static IReadOnlyCollection<string> Commands => Definitions.Keys.ToArray();
@@ -40,13 +40,11 @@ public static class FixedCommandRunner
         string? output = null;
         string? receiptOutput = null;
         Artifact? inputArtifact = null;
-        var outputMayBeRemoved = false;
 
         try
         {
             var root = JsonNode.Parse(File.ReadAllText(args[0])) as JsonObject
                 ?? throw new InvalidOperationException("fixed-xlsx-request-invalid");
-            RequireOnly(root, ["input", "output", "receiptOutput", "changes"]);
             var input = RequirePath(root, "input");
             output = RequirePath(root, "output");
             receiptOutput = RequirePath(root, "receiptOutput");
@@ -64,11 +62,9 @@ public static class FixedCommandRunner
             var operations = BuildOperations(definition, changes);
             inputArtifact = Describe(input);
             var editResult = Editor.Apply(input, output, operations);
-            outputMayBeRemoved = File.Exists(output);
             var applied = editResult.AppliedOperations.Select((operation, index) => new
             {
                 index,
-                type = operation.Type,
                 applied = operation.Applied,
                 detail = operation.Detail,
                 errorCode = operation.ErrorCode,
@@ -81,8 +77,7 @@ public static class FixedCommandRunner
 
             var receiptPayload = new
             {
-                schema = "tiwater.xlsx.fixed-command-receipt/v1",
-                provider = "tiwater-xlsx",
+                schema = "tiwater.office.fixed-edit-receipt/v2",
                 tool = command,
                 pass,
                 input = inputArtifact,
@@ -90,7 +85,6 @@ public static class FixedCommandRunner
                 output = outputArtifact,
                 operationCount = operations.Count,
                 appliedOperations = applied,
-                providerResult = editResult,
             };
             var receipt = WriteJsonArtifact(receiptOutput, receiptPayload);
             Console.WriteLine(JsonSerializer.Serialize(new
@@ -109,7 +103,7 @@ public static class FixedCommandRunner
         }
         catch (Exception error)
         {
-            if (outputMayBeRemoved && output is not null && File.Exists(output)) File.Delete(output);
+            if (output is not null && File.Exists(output)) File.Delete(output);
 
             if (receiptOutput is not null && !File.Exists(receiptOutput))
             {
@@ -117,8 +111,7 @@ public static class FixedCommandRunner
                 {
                     var receiptPayload = new
                     {
-                        schema = "tiwater.xlsx.fixed-command-receipt/v1",
-                        provider = "tiwater-xlsx",
+                        schema = "tiwater.office.fixed-edit-receipt/v2",
                         tool = command,
                         pass = false,
                         input = inputArtifact,
@@ -146,21 +139,11 @@ public static class FixedCommandRunner
         }
     }
 
-    private static Definition DefinitionFor(string operationType, string[] required, string[] allowed)
-        => new(operationType, new HashSet<string>(required, StringComparer.Ordinal), new HashSet<string>(allowed, StringComparer.Ordinal));
-
     private static IReadOnlyList<XlsxEditOperation> BuildOperations(Definition definition, JsonArray changes)
         => changes.Select(change =>
         {
             var operation = change as JsonObject
                 ?? throw new InvalidOperationException("change-must-be-an-object");
-            RequireOnly(operation, definition.AllowedFields);
-            foreach (var required in definition.RequiredFields)
-            {
-                if (!operation.ContainsKey(required) || operation[required] is null && required != "value")
-                    throw new InvalidOperationException($"{required}-is-required");
-            }
-
             var normalized = operation.DeepClone() as JsonObject
                 ?? throw new InvalidOperationException("change-must-be-an-object");
             if (definition.OperationType is "setCellValue" or "setRangeValues")
@@ -208,16 +191,6 @@ public static class FixedCommandRunner
         if (root[property] is not JsonValue value || !value.TryGetValue<string>(out var path) || string.IsNullOrWhiteSpace(path))
             throw new InvalidOperationException($"{property}-is-required");
         return Path.GetFullPath(path);
-    }
-
-    private static void RequireOnly(JsonObject value, IEnumerable<string> allowed)
-    {
-        var allowedSet = allowed is IReadOnlySet<string> set
-            ? set
-            : new HashSet<string>(allowed, StringComparer.Ordinal);
-        var unexpected = value.Select(property => property.Key).FirstOrDefault(key => !allowedSet.Contains(key));
-        if (unexpected is not null)
-            throw new InvalidOperationException($"unexpected-property: {unexpected}");
     }
 
     private static void RequireNewPath(string path, string property)
