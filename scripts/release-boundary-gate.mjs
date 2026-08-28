@@ -669,6 +669,26 @@ async function smokeInstalledPackage(archive, tempRoot) {
   return response.tools || [];
 }
 
+function checkSourceBoundObservationOutputs(tools) {
+  const check = 'source-bound-observation-output';
+  const names = [
+    'docx_inspect', 'docx_inspect_tables', 'docx_export_json',
+    'xlsx_inspect', 'xlsx_export_json', 'pptx_inspect', 'pptx_export_json',
+  ];
+  for (const name of names) {
+    const schema = tools.find(tool => tool?.name === name)?.outputSchema;
+    const source = schema?.properties?.source;
+    if (schema?.type !== 'object'
+      || !Array.isArray(schema.required)
+      || !schema.required.includes('source')
+      || source?.type !== 'object'
+      || !['path', 'sha256', 'bytes'].every(key => source.required?.includes(key))) {
+      fail(check, `${name} does not publish an exact source artifact identity`);
+    }
+  }
+  note(`${names.length} inspect/export outputs bind their exact source artifacts`);
+}
+
 async function main() {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'tiwater-office-boundary-'));
   try {
@@ -681,6 +701,7 @@ async function main() {
     await checkPackedPackage(manifest, packageRoot);
     await checkPublicSchemas(packageRoot);
     const toolNames = await smokeInstalledPackage(archive, tempRoot);
+    checkSourceBoundObservationOutputs(toolNames);
     const packedPackage = await readJson(path.join(packageRoot, 'package.json'));
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);
   } catch (error) {

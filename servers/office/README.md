@@ -6,6 +6,9 @@ The server owns technical observation, native conversion, fixed-action edits,
 package validation, and native WPS rendering. Callers own document selections,
 values, business mappings, workflow decisions, and delivery status.
 
+Every inspect/export result binds its observation artifact to the exact source
+file path, SHA-256, and byte count used by that invocation.
+
 Every filesystem argument is identified in the published MCP input schema by
 `x-tiwater-file-role`. `read` marks an existing provider input; `write` marks a
 new provider artifact. Strings without this metadata are document values or
