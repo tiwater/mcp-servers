@@ -10,8 +10,37 @@ internal static class Program
 
 internal static class Cli
 {
+    private static readonly string[] DiscoverableCommands =
+    [
+        "inspect",
+        "export-json",
+        "apply-format-edits",
+        "set-shape-geometry",
+        "replace-picture-image",
+        "apply-template",
+        "validate",
+        "map-render-findings",
+        "validate-render-finding-map",
+        .. FixedCommandRunner.Commands,
+    ];
+
     public static Task<int> RunAsync(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--list-tools")
+        {
+            WriteJson(new { schema = "tiwater.provider-tool-list/v1", commands = DiscoverableCommands });
+            return Task.FromResult(0);
+        }
+
+        if (args.Length == 1 && args[0] is "--help" or "-h")
+        {
+            PrintUsage();
+            return Task.FromResult(0);
+        }
+
+        if (args.Length == 2 && args[1] is "--help" or "-h" && PrintCommandUsage(args[0]))
+            return Task.FromResult(0);
+
         if (args.Length == 0)
         {
             PrintUsage();
@@ -31,6 +60,7 @@ internal static class Cli
                 "validate" => Task.FromResult(Validator.Run(args[1..])),
                 "map-render-findings" => RunMapRenderFindingsAsync(args[1..]),
                 "validate-render-finding-map" => RunValidateRenderFindingMapAsync(args[1..]),
+                _ when FixedCommandRunner.IsCommand(args[0]) => Task.FromResult(FixedCommandRunner.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -131,6 +161,19 @@ internal static class Cli
         Console.WriteLine("  validate <input.pptx>");
         Console.WriteLine("  map-render-findings <inspect.json> <render-manifest.json> <findings.json> <output.json>");
         Console.WriteLine("  validate-render-finding-map <inspect.json> <render-manifest.json> <findings.json> <map.json> <verdict.json>");
+        foreach (var command in FixedCommandRunner.Commands)
+            Console.WriteLine($"  {command} <request.json>");
+    }
+
+    private static bool PrintCommandUsage(string command)
+    {
+        if (FixedCommandRunner.IsCommand(command))
+        {
+            Console.WriteLine($"tiwater-pptx {command} <request.json>");
+            return true;
+        }
+
+        return false;
     }
 
     private static Task<int> FailUnknown(string command)
