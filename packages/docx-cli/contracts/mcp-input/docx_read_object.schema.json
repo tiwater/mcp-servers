@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^dox1_[0-9a-f]{64}$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^docx-rev-v1-[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "input",
+    "ref"
+  ],
+  "additionalProperties": false,
+  "$id": "tiwater.office-mcp-input/docx_read_object/v1"
+}

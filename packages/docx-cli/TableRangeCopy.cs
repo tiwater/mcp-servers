@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DocumentFormat.OpenXml;
@@ -11,11 +12,22 @@ public static class TableRangeCopy
 {
     public static int Run(string[] args)
     {
-        if (args.Length != 1) throw new InvalidOperationException("copy-table-range requires <request.json>");
+        if (args.Length != 1) throw new InvalidOperationException("docx_copy_table_range requires <request.json>");
         var request = JsonSerializer.Deserialize<DocxCopyTableRangeRequest>(File.ReadAllText(args[0]), Json.Options)
             ?? throw new InvalidOperationException("copy-table-range-request-invalid");
         var receipt = Apply(request);
-        Console.WriteLine(JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            tool = "docx_copy_table_range",
+            receipt = Describe(request.ReceiptOutput),
+            output = Describe(receipt.Output),
+            summary = new
+            {
+                pass = true,
+                operationCount = receipt.SourceRowCount,
+                appliedCount = receipt.OutputRows.Count,
+            },
+        }, Json.CamelCaseOptions));
         return 0;
     }
 
@@ -173,6 +185,15 @@ public static class TableRangeCopy
             throw new InvalidOperationException($"{name}-directory-not-found");
     }
 
+    private static DocxCopyTableRangeArtifact Describe(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return new DocxCopyTableRangeArtifact(
+            Path.GetFullPath(path),
+            Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant(),
+            stream.Length);
+    }
+
     private static void EnsureContiguousRows(IReadOnlyList<TableRow> rows, string label)
     {
         if (rows.Count == 0 || rows.Any(row => row.Parent is not Table))
@@ -286,6 +307,7 @@ public sealed record DocxCopyTableRangeSource(string Input, string Revision, IRe
 public sealed record DocxCopyTableRangeTarget(string Input, string Revision, string TableRef, IReadOnlyList<string> RowPatternRefs);
 public sealed record DocxCopyTableRangeColumn(int SourceGridColumn, int TargetGridColumn);
 public sealed record DocxCopyTableRangeReadbackRow(string Ref, string NativePath, IReadOnlyList<string> Values);
+public sealed record DocxCopyTableRangeArtifact(string Path, string Sha256, long Bytes);
 
 public sealed record DocxCopyTableRangeReceipt(
     string Schema,

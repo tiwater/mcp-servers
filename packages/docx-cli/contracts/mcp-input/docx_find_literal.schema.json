@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1
+    },
+    "literal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "part",
+        "paragraph",
+        "table",
+        "row",
+        "cell",
+        "run",
+        "drawing"
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "minLength": 1
+    },
+    "limit": {
+      "default": 100,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "continuation": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "input",
+    "literal"
+  ],
+  "additionalProperties": false,
+  "$id": "tiwater.office-mcp-input/docx_find_literal/v1"
+}

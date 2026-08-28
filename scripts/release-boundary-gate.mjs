@@ -175,8 +175,10 @@ async function checkFixedRuntimeSurface() {
   const fixedNames = new Set([
     ...[...officeSource.matchAll(/\{"name":"((?:docx|xlsx)_[^"]+)"/g)].map(match => match[1]),
     ...[...officeSource.matchAll(/fixedEdit\('((?:docx|xlsx|pptx)_[^']+)'/g)].map(match => match[1]),
+    ...[...officeSource.matchAll(/docxObservation\('([^']+)'/g)].map(match => match[1]),
   ]);
   const providerSources = await Promise.all([
+    'packages/docx-cli/ObservationCommand.cs',
     'packages/docx-cli/FixedEditCommand.cs',
     'packages/xlsx-cli/FixedCommandRunner.cs',
     'packages/pptx-cli/FixedCommandRunner.cs',
@@ -192,7 +194,7 @@ async function checkFixedRuntimeSurface() {
     'packages/xlsx-cli/Program.cs',
     'packages/pptx-cli/Program.cs',
   ].map(relative => readFile(path.join(repoRoot, relative), 'utf8')));
-  const genericPublicCommands = /"(?:edit|apply-format-edits|set-shape-geometry|replace-picture-image|apply-template)"\s*(?:,|=>)/;
+  const genericPublicCommands = /"(?:edit|list|find|read|copy-table-range|apply-format-edits|set-shape-geometry|replace-picture-image|apply-template)"\s*(?:,|=>)/;
   if (programSources.some(source => genericPublicCommands.test(source))) {
     fail(check, 'provider CLI still publishes a second generic edit/plan command');
   }

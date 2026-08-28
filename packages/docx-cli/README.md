@@ -13,6 +13,9 @@ workflow protocol.
 ```bash
 tiwater-docx inspect input.docx --json
 tiwater-docx inspect-tables input.docx --json
+tiwater-docx docx_list_objects request.json
+tiwater-docx docx_find_literal request.json
+tiwater-docx docx_read_object request.json
 tiwater-docx export-json input.docx output.json
 tiwater-docx compare old.docx new.docx --json
 ```
@@ -27,6 +30,7 @@ to an artifact path by the Office MCP.
 tiwater-docx docx_set_table_cell_text request.json
 tiwater-docx docx_insert_table_rows request.json
 tiwater-docx docx_merge_table_cells request.json
+tiwater-docx docx_copy_table_range request.json
 tiwater-docx normalize-openxml input.docx output.docx
 tiwater-docx strip-direct-formatting input.docx output.docx
 tiwater-docx replace-style-ids input.docx output.docx style-map.json

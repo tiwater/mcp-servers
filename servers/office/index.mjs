@@ -205,6 +205,34 @@ const tools = [
     handler: docxInspectTables,
   },
   {
+    name: 'docx_list_objects',
+    description: 'List one bounded page of revision-bound native DOCX objects by kind and optional story-part scope.',
+    inputSchema: inputContract('docx_list_objects'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: args => docxObservation('docx_list_objects', args),
+  },
+  {
+    name: 'docx_find_literal',
+    description: 'Find literal current text in revision-bound native DOCX objects with bounded paging and optional kind or story-part scope.',
+    inputSchema: inputContract('docx_find_literal'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: args => docxObservation('docx_find_literal', args),
+  },
+  {
+    name: 'docx_read_object',
+    description: 'Read one revision-bound native DOCX object in full technical Open XML detail.',
+    inputSchema: inputContract('docx_read_object'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: args => docxObservation('docx_read_object', args),
+  },
+  {
+    name: 'docx_copy_table_range',
+    description: 'Copy selected source DOCX rows into a selected target row pattern with an explicit one-to-one grid-column mapping while preserving target structure and formatting.',
+    inputSchema: inputContract('docx_copy_table_range'),
+    outputSchema: fixedEditOutput('docx_copy_table_range'),
+    handler: args => fixedEdit('docx_copy_table_range', args),
+  },
+  {
     name: 'docx_compare',
     description: 'Compare two DOCX files and report package, metric, and style differences.',
     inputSchema: inputContract('docx_compare'),
@@ -373,6 +401,13 @@ async function docxInspect(args) {
 async function docxInspectTables(args) {
   const result = await runJsonCandidateChain(docxCandidates, ['inspect-tables', requireString(args.input, 'input'), '--json']);
   return { tool: 'docx_inspect_tables', runtime: commandRuntime(result), artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json) };
+}
+
+async function docxObservation(tool, args) {
+  return withTempJsonFile(args, async requestPath => {
+    const result = await runJsonCandidateChain(docxCandidates, [tool, requestPath]);
+    return { ...result.json, runtime: commandRuntime(result) };
+  });
 }
 
 async function docxValidate(args) {
