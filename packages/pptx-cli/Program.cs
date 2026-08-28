@@ -1,8 +1,5 @@
 using System.Text.Json;
-using System.Runtime.CompilerServices;
 using Dockit.Pptx;
-
-[assembly: InternalsVisibleTo("pptx-cli.tests")]
 
 namespace Dockit.Pptx.Cli;
 
@@ -13,8 +10,33 @@ internal static class Program
 
 internal static class Cli
 {
+    private static readonly string[] DiscoverableCommands =
+    [
+        "inspect",
+        "export-json",
+        "validate",
+        "map-render-findings",
+        "validate-render-finding-map",
+        .. FixedCommandRunner.Commands,
+    ];
+
     public static Task<int> RunAsync(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--list-tools")
+        {
+            WriteJson(new { schema = "tiwater.provider-tool-list/v1", commands = DiscoverableCommands });
+            return Task.FromResult(0);
+        }
+
+        if (args.Length == 1 && args[0] is "--help" or "-h")
+        {
+            PrintUsage();
+            return Task.FromResult(0);
+        }
+
+        if (args.Length == 2 && args[1] is "--help" or "-h" && PrintCommandUsage(args[0]))
+            return Task.FromResult(0);
+
         if (args.Length == 0)
         {
             PrintUsage();
@@ -27,14 +49,10 @@ internal static class Cli
             {
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
-                "fill-template" => RunFillTemplateAsync(args[1..]),
-                "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
-                "set-shape-geometry" => RunSetShapeGeometryAsync(args[1..]),
-                "replace-picture-image" => RunReplacePictureImageAsync(args[1..]),
-                "apply-template" => RunApplyTemplateAsync(args[1..]),
                 "validate" => Task.FromResult(Validator.Run(args[1..])),
                 "map-render-findings" => RunMapRenderFindingsAsync(args[1..]),
                 "validate-render-finding-map" => RunValidateRenderFindingMapAsync(args[1..]),
+                _ when FixedCommandRunner.IsCommand(args[0]) => Task.FromResult(FixedCommandRunner.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -69,44 +87,6 @@ internal static class Cli
         return Task.FromResult(0);
     }
 
-    private static Task<int> RunApplyFormatEditsAsync(string[] args)
-    {
-        if (args.Length < 3)
-        {
-            throw new InvalidOperationException("apply-format-edits requires <input.pptx> <plan.json> <output.pptx>");
-        }
-
-        var result = FormatEditor.Apply(args[0], args[1], args[2]);
-        WriteJson(result);
-        return Task.FromResult(0);
-    }
-
-    private static Task<int> RunApplyTemplateAsync(string[] args)
-    {
-        if (args.Length < 4)
-            throw new InvalidOperationException("apply-template requires <input.pptx> <template.pptx> <plan.json> <output.pptx>");
-        WriteJson(TemplateApplicator.Apply(args[0], args[1], args[2], args[3]));
-        return Task.FromResult(0);
-    }
-
-    private static Task<int> RunSetShapeGeometryAsync(string[] args)
-    {
-        if (args.Length != 3)
-            throw new InvalidOperationException("set-shape-geometry requires <input.pptx> <changes.json> <output.pptx>");
-        var result = ShapeGeometryEditor.Apply(args[0], args[1], args[2]);
-        WriteJson(result);
-        return Task.FromResult(result.Issues.Count == 0 ? 0 : 1);
-    }
-
-    private static Task<int> RunReplacePictureImageAsync(string[] args)
-    {
-        if (args.Length != 3)
-            throw new InvalidOperationException("replace-picture-image requires <input.pptx> <changes.json> <output.pptx>");
-        var result = PictureImageEditor.Apply(args[0], args[1], args[2]);
-        WriteJson(result);
-        return Task.FromResult(result.Issues.Count == 0 ? 0 : 1);
-    }
-
     private static Task<int> RunMapRenderFindingsAsync(string[] args)
     {
         if (args.Length != 4) throw new InvalidOperationException("map-render-findings requires <inspect.json> <render-manifest.json> <findings.json> <output.json>");
@@ -123,35 +103,27 @@ internal static class Cli
         return Task.FromResult(result.Pass ? 0 : 1);
     }
 
-    private static Task<int> RunFillTemplateAsync(string[] args)
-    {
-        if (args.Length < 3)
-        {
-            throw new InvalidOperationException("fill-template requires <template.pptx> <data.json> <output.pptx>");
-        }
-
-        var template = args[0];
-        var dataPath = args[1];
-        var output = args[2];
-
-        var result = TemplateFiller.Fill(template, dataPath, output);
-        WriteJson(result);
-        return Task.FromResult(0);
-    }
-
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.pptx> [--json]");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
-        Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
-        Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
-        Console.WriteLine("  set-shape-geometry <input.pptx> <changes.json> <output.pptx>");
-        Console.WriteLine("  replace-picture-image <input.pptx> <changes.json> <output.pptx>");
-        Console.WriteLine("  apply-template <input.pptx> <template.pptx> <plan.json> <output.pptx>");
         Console.WriteLine("  validate <input.pptx>");
         Console.WriteLine("  map-render-findings <inspect.json> <render-manifest.json> <findings.json> <output.json>");
         Console.WriteLine("  validate-render-finding-map <inspect.json> <render-manifest.json> <findings.json> <map.json> <verdict.json>");
+        foreach (var command in FixedCommandRunner.Commands)
+            Console.WriteLine($"  {command} <request.json>");
+    }
+
+    private static bool PrintCommandUsage(string command)
+    {
+        if (FixedCommandRunner.IsCommand(command))
+        {
+            Console.WriteLine($"tiwater-pptx {command} <request.json>");
+            return true;
+        }
+
+        return false;
     }
 
     private static Task<int> FailUnknown(string command)

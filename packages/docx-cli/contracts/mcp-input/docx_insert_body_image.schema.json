@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New document output path. Existing files are never overwritten."
+    },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New JSON receipt path. Existing files are never overwritten."
+    },
+    "changes": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "targetBodyIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "image": {
+            "type": "string",
+            "minLength": 1
+          },
+          "widthEmu": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "heightEmu": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "altText": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetBodyIndex",
+          "image",
+          "widthEmu",
+          "heightEmu"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "input",
+    "output",
+    "receiptOutput",
+    "changes"
+  ],
+  "additionalProperties": false
+}

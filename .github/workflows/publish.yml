@@ -160,10 +160,9 @@ jobs:
 
       - name: Verify package and server contract
         run: |
-          cd servers
-          npm ci
-          npm test
-          npm pack --dry-run
+          npm --prefix servers ci
+          npm run release:boundary
+          npm pack ./servers --dry-run
 
       - name: Publish Office MCP
         working-directory: servers

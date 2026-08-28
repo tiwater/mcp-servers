@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to the current PPTX."
+    },
+    "changes": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "slideNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "shapeId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "runIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "fontFamily": {
+            "type": "string"
+          },
+          "fontSize": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "color": {
+            "type": "string"
+          },
+          "bold": {
+            "type": "boolean"
+          },
+          "paragraphAlignment": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slideNumber",
+          "shapeId",
+          "runIndex"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New PPTX output path. Existing files are never overwritten."
+    },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New JSON receipt path. Existing files are never overwritten."
+    }
+  },
+  "required": [
+    "input",
+    "changes",
+    "output",
+    "receiptOutput"
+  ],
+  "additionalProperties": false
+}

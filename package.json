@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "generate:office-contracts": "node scripts/generate-office-contracts.mjs",
     "office": "node servers/office/index.mjs",
-    "pdf": "node servers/pdf/index.mjs"
+    "pdf": "node servers/pdf/index.mjs",
+    "release:boundary": "node scripts/release-boundary-gate.mjs"
   }
 }

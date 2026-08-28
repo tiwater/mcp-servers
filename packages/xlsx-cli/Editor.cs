@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using DocumentFormat.OpenXml;
@@ -9,7 +8,7 @@ using Xdr = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 namespace Dockit.Xlsx;
 
-public static class Editor
+internal static class Editor
 {
     private const int MaximumWorksheetRow = 1_048_576;
     private const int MaximumWorksheetColumn = 16_384;
@@ -19,22 +18,6 @@ public static class Editor
     private static readonly Regex PrintAreaRangePattern = new(@"^\$?(?<startColumn>[A-Za-z]{1,3})\$?(?<startRow>[1-9]\d*):\$?(?<endColumn>[A-Za-z]{1,3})\$?(?<endRow>[1-9]\d*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex PrintTitleRowRangePattern = new(@"^\$[1-9]\d*:\$[1-9]\d*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex PrintTitleColumnRangePattern = new(@"^\$[A-Za-z]{1,3}:\$[A-Za-z]{1,3}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    public static int RunEdit(string[] args)
-    {
-        if (args.Length < 3)
-        {
-            throw new InvalidOperationException("edit requires <input.xlsx> <operations.json> <output.xlsx>");
-        }
-
-        var input = Path.GetFullPath(args[0]);
-        var operationsPath = Path.GetFullPath(args[1]);
-        var output = Path.GetFullPath(args[2]);
-        var request = LoadOperations(operationsPath);
-        var result = Apply(input, output, request.Operations);
-        Console.WriteLine(JsonSerializer.Serialize(result, Json.Options));
-        return result.AppliedOperations.All(operation => operation.Applied) ? 0 : 1;
-    }
 
     public static XlsxEditResult Apply(string input, string output, IReadOnlyList<XlsxEditOperation> operations)
     {
@@ -90,24 +73,6 @@ public static class Editor
                 File.Delete(temporaryOutput);
             }
         }
-    }
-
-    private static XlsxEditDocument LoadOperations(string path)
-    {
-        var json = File.ReadAllText(path);
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return new XlsxEditDocument([]);
-        }
-
-        using var doc = JsonDocument.Parse(json);
-        if (doc.RootElement.ValueKind == JsonValueKind.Array)
-        {
-            var ops = JsonSerializer.Deserialize<List<XlsxEditOperation>>(json, Json.Options) ?? [];
-            return new XlsxEditDocument(ops);
-        }
-
-        return JsonSerializer.Deserialize<XlsxEditDocument>(json, Json.Options) ?? new XlsxEditDocument([]);
     }
 
     private static XlsxEditAppliedOperation ApplyOperation(WorkbookPart workbookPart, XlsxEditOperation operation)

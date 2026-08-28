@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New document output path. Existing files are never overwritten."
+    },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New JSON receipt path. Existing files are never overwritten."
+    },
+    "changes": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "findText": {
+            "type": "string",
+            "minLength": 1
+          },
+          "endFindText": {
+            "type": "string"
+          },
+          "matchMode": {
+            "type": "string"
+          },
+          "endMatchMode": {
+            "type": "string"
+          },
+          "paragraphStyle": {
+            "type": "string"
+          },
+          "endParagraphStyle": {
+            "type": "string"
+          },
+          "deleteToBodyEnd": {
+            "type": "boolean"
+          },
+          "removePrecedingPageBreak": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "findText"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "input",
+    "output",
+    "receiptOutput",
+    "changes"
+  ],
+  "additionalProperties": false
+}
