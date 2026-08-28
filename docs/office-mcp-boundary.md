@@ -166,6 +166,32 @@ Office capabilities do not own:
 - orchestration lifecycle, evidence closure, platform state, or delivery status;
 - hidden fallback parsing, prompt repair, or business-package compatibility.
 
+## Enforced isolation
+
+The boundary is a release condition rather than a documentation convention.
+
+- Provider processes receive document bytes or paths, provider-issued revision
+  and object identities, fixed technical values, and artifact destinations.
+  Business-rule packages, orchestration workspaces, and delivery state are not
+  mounted, passed, imported, or fetched.
+- Office MCP registrations are generated from the provider-owned machine
+  contracts. The adapter cannot hand-author another tool, request schema,
+  description, or compatibility branch.
+- Public requests and results contain only native object identities, typed
+  technical values, artifacts, revisions, receipts, and technical failures.
+  Business choices and workflow terminals are not valid contract types.
+- The release gate checks the package dependency graph, generated MCP manifest,
+  public schemas, and a clean installed-package launch with no business-rule or
+  orchestration repository available. A dependency, contract, or tool outside
+  this boundary stops publication.
+- A new public verb requires a separate design-only boundary change and closure
+  review before implementation. A new object kind or typed Open XML property
+  under an existing verb does not create another workflow or protocol.
+
+Source-word checks may detect accidental business terminology, but they are
+only a backstop. Isolation, closed machine types, generated registration, and
+the release gate are the enforcing mechanisms.
+
 ## Compatibility and closure
 
 Existing fixed Open XML actions may be retained when they fit the boundary and
