@@ -1,210 +1,173 @@
 # Office MCP boundary
 
-## Goal
+Status: frozen target design
 
-The published Office MCP server is the Agent-facing surface for Word, Excel,
-and PowerPoint technical capabilities. It is installed from a package registry
-and uses the exact published Office runtimes. Production does not require this
-repository or discover Office work through command-line help.
+## Purpose
 
-The server uses the official MCP SDK for protocol negotiation, stdio framing,
-argument validation, and structured-result validation. The adapter declares
-each public tool once; it does not maintain a second protocol implementation or
-hand-written validator for the same contract.
+The published Office MCP server is the Agent-facing technical surface for
+Word, Excel, PowerPoint, and native Office rendering. Its public concepts are
+the document objects already defined by Open XML: parts, paragraphs, runs,
+tables, rows, cells, drawings, worksheets, ranges, slides, and shapes.
 
-Large observations are durable artifacts, not model messages. The caller
-chooses a new run-local JSON path; the adapter writes the complete provider
-result once and returns only its path, hash, and size. A choice catalog remains
-an opaque durable artifact. A bounded semantic query reads the same current
-source and baseline directly, so the Agent never parses or relays catalog
-storage.
+The server does not define a document migration language, a business workflow,
+or a second document object model. New business packages compose the same
+Office capabilities and do not add an Office tool or field.
 
-Command-line programs remain implementation and compatibility surfaces. They
-may expose diagnostic commands, but those commands do not become an Agent
-workflow.
+Every capability has one published machine input, one machine output, one
+owner, and one stated non-goal. The MCP adapter publishes that contract and
+invokes the exact installed runtime without translating it into another
+request shape. Command-line entry points may expose the same contract for
+diagnostics; they are not a second Agent-facing protocol.
 
-## Template migration
+## Authority and decision flow
 
-Template migration has four public operations:
+- Open XML defines document structure and physical identity.
+- The provider observes that structure and performs technical operations on it.
+- The business-rule owner defines meaning, source and target roles, and
+  acceptance semantics.
+- The Agent reads current documents, applies those rules, and chooses
+  the source, target, value, and terminal disposition.
+- The orchestrator sequences calls and preserves accepted provider calls and
+  evidence unchanged.
+- Luna independently reviews final business content and rendered appearance.
 
-- list the current migration choices;
-- query a bounded source page or the targets for one source choice;
-- migrate the current document after receiving one typed batch of choices;
-- independently verify the result from the same current inputs and choices.
+Information flows in that direction only. The provider never proposes a
+business mapping, and the orchestrator never reinterprets an Office object or
+rewrites a provider call.
 
-The first operation writes every source item that still needs business judgment
-and the current baseline targets to an evidence artifact. The query operation
-re-observes the same current source and baseline, then returns a bounded source
-page, provider-validated action-and-target alternatives for one source identity,
-or cleanup targets. Literal visible-text and action filtering are optional.
-Alternatives remain pageable and complete; their display order uses only current
-visible text and local document context such as neighboring text and table
-headers. That search order is not a business recommendation or selection.
-The Agent selects identities and actions without parsing the artifact format or
-reconstructing technical target compatibility. It does not author document
-content, selectors, coordinates, edit operations, plans, or intermediate files.
-Query results give sources and cleanup targets short references such as
-`S1-a1b2c3d4` and `T1-a1b2c3d4`. A targeted alternative additionally binds its
-source, action, and target. Reference suffixes bind these identities to the
-freshly observed source and baseline; the adapter deterministically restores
-the provider identity before invoking the Word runtime. The MCP surface accepts
-only references returned by the current query. Legacy provider identities
-remain command-line compatibility inputs and are not a second Agent-facing
-identity branch.
-The final batch selects a returned alternative as one unit. It does not combine
-an action from one alternative with a target from another. Source exclusions
-and genuine local review remain explicit target-free terminal choices.
-Every returned alternative is independently valid for that source and target;
-an alternative never requires the Agent to add a second, hidden companion
-choice. Structural label alignment may preserve one target for more than one
-current label observation because it does not claim or rewrite the target's
-business value. Provider-internal parent/value dependencies are not exposed as
-Agent choices.
-An option-selection alternative is returned only when the selected target is
-a provider-recognized selectable control label; ordinary visible text runs are
-not option targets. A local-review terminal may cover every current source in
-one indistinguishable source group. The provider expands that terminal to the
-group's current members and preserves each member in source conservation.
-Cleanup alternatives contain only target-owned text capacity that can be
-removed without deleting dynamic fields, drawings, or other non-text Office
-structure. The Word runtime independently rejects a cleanup whose selected
-cell or row contains such protected content, even if a caller bypasses the
-catalog. Cleanup is conditional baseline capacity: when the same final batch
-assigns a current source to that target, the adapter omits the cleanup before
-calling the Word runtime. The current-source assignment owns the target; the
-Agent does not reconcile opaque target identities across choice and cleanup
-references.
+## Document revision and object identity
 
-The third operation validates the complete batch, derives the technical plan,
-edits a temporary copy of the baseline, reads the result back, and returns the
-output and a complete receipt. A missing, stale, duplicate, or incompatible
-choice fails before mutation. Genuine business ambiguity remains local review;
-it does not erase determinate choices or become a guessed mapping.
+Every observation is bound to the exact input bytes and published runtime
+version. Every returned object identity belongs to that revision.
 
-The fourth operation independently repeats admission and readback from the
-current source, baseline, choices, and output. It does not trust the migration
-operation's embedded verdict.
+Word identities address an Open XML story part and an object within that part,
+including the main document, headers, footers, comments, text boxes, footnotes,
+and endnotes.
+Workbook identities use the workbook revision, worksheet identity, and native
+A1 cell or range address. Presentation identities use the presentation
+revision, slide part, and native shape identity. Child objects retain their
+native parent relationship.
 
-All four operations publish MCP input and output schemas and return structured
-content. Text content is a human-readable projection of the same result, not a
-second contract.
+Provider-issued identities are opaque to callers but remain traceable to these
+native coordinates in evidence. They are not semantic selectors and do not
+contain business roles. Mutation creates a new revision; callers re-observe it
+instead of reusing stale identities. The provider rejects stale, missing,
+ambiguous, cross-document, or wrong-kind identities before writing output.
 
-The Agent-facing server does not expose target search, incremental draft,
-record, revise, replay, plan construction, apply, legacy candidate commands, or
-low-level mutation payloads such as style-id maps. Those may remain command-line
-compatibility or diagnostic operations, but the Agent does not assemble them.
+## Observation capabilities
 
-## Decision boundary
+Observation is progressively disclosed through four orthogonal capabilities:
 
-Deterministic code owns document inventory, exact technical matches, identity
-and uniqueness checks, target occupancy, operation generation, mutation, and
-readback. The Agent owns only a business choice among alternatives presented by
-the tool and allowed by the current scenario knowledge.
+- inspect the package and return its revision, parts, top-level structure, and
+  bounded summaries;
+- list objects of a requested native kind and scope;
+- find literal current text within a native scope;
+- read the selected current objects in full technical detail.
 
-Forty unresolved items are forty choices, not a reason to invent another
-abstraction. This boundary deliberately does not introduce region expansion, a
-knowledge compiler, a scenario schema registry, or an incremental decision
-protocol. If a future reusable Office behavior cannot be expressed by the
-existing choices, that behavior receives a separate capability review; a new
-scenario alone does not change the Office interface.
+Inspection may also write a complete durable artifact for evidence. Paging and
+result limits bound transport only; they do not silently discard matches or
+turn excess results into a business decision. A bounded result reports the
+remaining count and a continuation mechanism.
 
-Scenario knowledge remains natural-language business authority. Its quality can
-change which business choice the Agent makes, but malformed prose does not alter
-the tool protocol or cause the Office runtime to guess fields, commands, or JSON
-shapes.
+Observation reports facts present in the current document. It does not infer
+field names, headings, semantic roles, source-target compatibility, preferred
+targets, cleanup candidates, or review status.
+
+## Mutation capabilities
+
+Mutation consists of fixed Open XML actions. Each public operation has one verb,
+optionally batches independent objects of the same valid kind, and produces a
+new document plus a receipt. There is no generic operation discriminator,
+expression language, plan compiler, or provider-owned workflow.
+
+The public operation list is closed over these verbs:
+
+| Operation | Valid native objects and effect |
+| --- | --- |
+| set content | Replace content in selected Word text containers, workbook cells, or presentation text and table cells without replacing their containers. |
+| copy content | Copy current content from selected source containers to selected target containers; target structure and formatting remain authoritative unless a fixed formatting mode is explicitly selected. |
+| copy table range | Copy a source row range into a target row pattern using caller-selected source-to-target columns; the provider expands rows and preserves target grid, merge, pagination, formula, style, and relationship mechanics. |
+| insert object | Insert a caller-supplied native object of an allowed kind into a selected native container. |
+| copy object | Copy selected paragraphs, contiguous story ranges, tables, rows, columns, worksheets, slides, or shapes with required parts and relationships. |
+| move object | Move selected objects within one current document without changing their content. |
+| delete object | Delete selected objects and remove relationships that become unreferenced. |
+| set properties | Set published typed Open XML properties for selected text, paragraph, table, row, cell, section, worksheet, slide, or shape objects. |
+| merge cells | Merge a selected rectangular Word-table or worksheet-cell range when the native format permits it. |
+| split cells | Split a selected merged Word-table or worksheet-cell range when the native format permits it. |
+| replace media | Replace selected drawing or picture bytes while preserving the selected container and its declared geometry. |
+| apply layout | Apply a caller-selected Word style, worksheet presentation policy, or presentation master/layout without selecting it on business grounds. |
+| validate package | Validate package integrity and the exact requested technical postconditions. |
+| convert format | Convert a supported Office-family input through its declared native application. |
+| render document | Render a supported Office-family input through its declared native application with provenance. |
+
+Each format publishes only the operations valid for its native objects. The
+format prefix and action verb identify the public operation; object kind is
+validated from the provider identity rather than selected through a nested
+operation payload. Adding support for another typed property or native object
+does not create a new verb.
+
+A direct copy receives current source identities and current target identities.
+The Agent supplies their relationship; the provider performs the package work
+needed to preserve runs, styles, table grids, merges, formulas, drawings, and
+relationships according to the selected fixed action. This keeps Open XML
+mechanics out of Agent glue without moving semantic selection into code.
+
+The provider may reject a technically impossible action with a precise reason.
+It must not guess another target, alter the requested business value, expand a
+selection semantically, or convert rejection into a review decision.
+
+## Execution and receipts
+
+Mutation preflights every selected object against the same current revision,
+applies the fixed action to a temporary output, validates the package, and only
+then publishes the output. Failure leaves the input and requested output
+unchanged.
+
+The receipt binds the provider version, input revision, accepted call, output
+revision, applied objects, and technical postconditions. The orchestrator stores
+the receipt and exact accepted call; it does not derive a second operation
+representation. Large read results and receipts may be durable artifacts, but their
+paths are transport details rather than document identities.
+
+Provider validation proves package integrity and requested technical effects.
+It does not prove that the Agent selected the correct business source, target,
+value, or disposition. The independent reviewer determines those from current
+authoritative inputs, business rules, final readback, and native render.
 
 ## Native rendering
 
-Office rendering is one public operation. It accepts a current Word, Excel, or
-PowerPoint-family document and a new PDF and receipt path. The input extension
-selects the already published `tiwater-convert` operation and its required WPS
-backend: Writer, Spreadsheets, or Presentation. The adapter rejects fallback
-rendering and independently binds the provider receipt to the current input and
-created PDF by path, format, backend, byte count, page count, and content hash.
+Rendering accepts one current Word, Excel, or PowerPoint-family document and
+uses the matching declared WPS application. Its receipt binds the input,
+backend, output PDF, page count, byte count, and content hashes. Rendering does
+not inspect appearance or make a delivery decision.
 
-The operation does not inspect page appearance, make a delivery decision, or
-interpret scenario requirements. Lucid remains responsible for rendering pages
-from the resulting PDF, visual review, and final workflow closure.
+Legacy `.xls` conversion belongs to the workbook conversion capability and
+uses the declared ET/WPS spreadsheet backend before Open XML workbook
+operations begin. OCR remains a PDF capability and is not performed by an
+Office document tool.
 
-## Workbook editing
+## Non-goals
 
-Workbook editing is one public execution operation. Its primary input is a
-current `.xlsx` workbook plus one durable `tiwater.xlsx-edit/v1` artifact from a
-deterministic caller. Its machine output is a new workbook and a receipt binding
-the current input, operation artifact, output, and every applied operation.
+Office capabilities do not own:
 
-The operation invokes the published workbook runtime and does not choose values,
-coordinates, business meaning, or delivery status. Independent workbook
-inspection, business readback, native rendering, and delivery closure remain
-outside this operation. Existing workbook inspection, export, and validation
-tools remain separate read-only capabilities.
+- business fields, identities, mappings, acceptance rules, or current-job
+  answers;
+- inferred candidates, recommended alternatives, cleanup suggestions, source
+  conservation verdicts, or human-review terminals;
+- migration choices, drafts, plans, compilers, registries, replay protocols, or
+  independent business validators;
+- orchestration lifecycle, evidence closure, platform state, or delivery status;
+- hidden fallback parsing, prompt repair, or business-package compatibility.
 
-## Presentation editing
+## Compatibility and closure
 
-Presentation editing exposes four public execution operations. Template
-application consumes a current presentation, a selected current template, and a
-deterministic plan. Formatting consumes a current presentation and deterministic
-text-format operations. Shape geometry sets exact native bounds for uniquely
-identified current-slide objects. Picture replacement swaps embedded PNG or JPEG
-media for uniquely identified current-slide pictures. Each produces a new
-presentation plus a receipt binding the input artifacts, output, and published
-runtime result.
+Existing fixed Open XML actions may be retained when they fit the boundary and
+adopt the single revision identity. Business decision, candidate, plan,
+builder, apply-workflow, and business-validator surfaces do not fit it and are
+removed rather than preserved as an alternate Agent path.
 
-These operations do not choose a template, derive business content, infer slide
-mapping, repair coordinates, image selection, or delivery. Geometry and picture
-replacement are fixed technical actions with slide-number and shape-id
-references; they do not expose semantic roles or a generic operation plan.
-Template application and formatting remain separate so each intermediate
-presentation can be freshly inspected and independently validated before the
-next mutation.
-
-## Word table stories
-
-Word table inspection observes body, header, and footer stories under the
-additive `tiwater.docx.inspect-tables/v1` contract. The existing body `Tables`
-view is unchanged; header/footer topology is published separately as
-`StoryTables`. Header/footer story identity binds the existing
-relationship-sorted part coordinate to section index and reference type.
-Direct story tables expose fixed mutation addresses; nested tables remain
-visible topology with a typed unsupported mutation boundary.
-
-Repeat-as-header is one fixed technical row-property action. It accepts only
-existing body/header/footer coordinates and a boolean state, batches only that
-action kind, and preflights every target before mutation. It does not infer
-which rows are business headers or expose an edit-plan language.
-
-## Ownership
-
-- The scenario package owns business identity, allowed ambiguity, and terminal
-  meaning.
-- The Agent chooses among the tool's typed current alternatives.
-- The published Word runtime owns document observation, including local table
-  context, deterministic planning, editing, and readback.
-- The published conversion runtime owns native Office-to-PDF rendering and its
-  provenance receipt.
-- The Office MCP adapter publishes the typed surface, orders complete technical
-  alternatives for bounded discovery, and invokes the exact installed
-  runtime; it does not interpret scenario rules or choose a target.
-- Lucid owns workflow ordering, evidence handoff, delivery verification, and
-  platform boundaries.
-
-## Rejected alternatives
-
-Incremental find-record-revise was rejected because it exposes bookkeeping,
-multiplies tool calls with document size, and asks the Agent to manage provider
-state. The bounded query is stateless discovery: it records no decision and the
-final migration still receives one complete choice batch. Region-level
-automatic expansion was rejected because it requires a new semantic inference
-model and risks moving scenario meaning into the Word runtime. A single opaque
-migration operation with no independent verifier was rejected because it
-weakens evidence and makes producer errors self-validating.
-
-## Compatibility and acceptance
-
-- Existing command-line callers continue to work.
-- A clean machine can install and start the MCP server without a repository
-  checkout or source fallback.
-- Tool discovery lists only supported Agent-facing operations.
-- Rejected choices leave source, baseline, output, and prior evidence unchanged.
-- Different valid document shapes use the same public operations.
-- Adding a scenario does not add an Office tool.
+An interface change is justified only by a reusable Open XML technical
+responsibility that cannot be composed from these families. A business package,
+issue, current job, customer value, filename, table coordinate, or known answer can
+never justify one. Different valid document shapes must use the same published
+capabilities, and adding business packages must not increase the capability families.
