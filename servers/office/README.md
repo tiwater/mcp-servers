@@ -3,13 +3,13 @@
 Published generic Office capabilities for DOCX, XLS/XLSX, and PPTX.
 
 The server owns technical observation, native conversion, fixed-action edits,
-package validation, and native WPS rendering. It owns no scenario meaning,
-template-migration workflow, customer mapping, or Lucid lifecycle.
+package validation, and native WPS rendering. Callers own document selections,
+values, business mappings, workflow decisions, and delivery status.
 
 ## Capability families
 
 - DOCX: inspect document/tables, export, compare, validate OpenXML, font, and table-of-contents styles
-  policy, fill placeholders, transform styles, and batch one fixed edit action.
+  policy, transform styles, and batch one fixed edit action.
 - XLS/XLSX: convert legacy XLS with ET, inspect/export/fill, validate, and batch
   one fixed workbook edit action.
 - PPTX: inspect/export/fill, bind selected masters/layouts, apply text formatting,
@@ -48,10 +48,10 @@ coordinates plus section/reference bindings, and only supported direct-story
 tables expose mutation addresses.
 
 The catalog is intentionally open to new generic document capabilities, but a
-scenario, template, customer, issue, work item, or model difference does not
-justify a new tool. Add a tool only for a stable technical responsibility that
-cannot be composed from the existing public capabilities; merge or remove
-overlapping capabilities.
+specific workflow, template, customer, issue, input document, or model
+difference does not justify a new tool. Add a tool only for a stable technical
+responsibility that cannot be composed from the existing public capabilities;
+merge or remove overlapping capabilities.
 
 ## Run
 

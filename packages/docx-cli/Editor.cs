@@ -97,7 +97,6 @@ public static class Editor
             "replaceHeaderText" => ReplaceHeaderText(doc, operation),
             "replaceTableCellText" => ReplaceTableCellText(body, operation),
             "replaceTableCellRunText" => ReplaceTableCellRunText(body, operation),
-            "setTableCellChoiceState" => SetTableCellChoiceState(doc, body, operation),
             "replaceHeaderTableCellText" => ReplacePartTableCellText(doc, operation, "header"),
             "replaceHeaderTableCellRunText" => ReplacePartTableCellRunText(doc, operation, "header"),
             "replaceFooterTableCellText" => ReplacePartTableCellText(doc, operation, "footer"),
@@ -126,7 +125,6 @@ public static class Editor
             "mergeTableCells" => MergeTableCells(body, operation),
             "unmergeTableRowHorizontalCells" => UnmergeTableRowHorizontalCells(body, operation),
             "unmergeTableColumnVerticalCells" => UnmergeTableColumnVerticalCells(body, operation),
-            "fillTableSemantically" => FillTableSemantically(body, operation),
             "deleteComment" => DeleteComments(doc, operation.CommentId is { Length: > 0 } id ? [id] : []),
             "deleteComments" => DeleteComments(doc, operation.CommentIds ?? []),
             "markFieldsDirty" => MarkFieldsDirty(doc),
@@ -713,29 +711,6 @@ public static class Editor
         }
         var location = partIndex is null ? scope : $"{scope}[{partIndex}]";
         return new DocxEditAppliedOperation(operation.Type, true, $"Updated {location}.table[{operation.TableIndex}].row[{operation.RowIndex}].cell[{operation.CellIndex}].paragraph[{operation.ParagraphIndex}].run[{operation.RunIndex}]");
-    }
-
-    private static DocxEditAppliedOperation SetTableCellChoiceState(WordprocessingDocument document, Body body, DocxEditOperation operation)
-    {
-        if (operation.TableIndex is null || operation.RowIndex is null || operation.CellIndex is null || operation.ParagraphIndex is null || operation.RunIndex is null || operation.Text != "selected")
-            return new DocxEditAppliedOperation(operation.Type, false, "table/row/cell/paragraph/run and selected state are required");
-        var tables = body.Elements<Table>().ToList();
-        if (operation.TableIndex < 0 || operation.TableIndex >= tables.Count) return new DocxEditAppliedOperation(operation.Type, false, "table out of range");
-        var rows = tables[operation.TableIndex.Value].Elements<TableRow>().ToList();
-        if (operation.RowIndex < 0 || operation.RowIndex >= rows.Count) return new DocxEditAppliedOperation(operation.Type, false, "row out of range");
-        var cells = rows[operation.RowIndex.Value].Elements<TableCell>().ToList();
-        if (operation.CellIndex < 0 || operation.CellIndex >= cells.Count) return new DocxEditAppliedOperation(operation.Type, false, "cell out of range");
-        var paragraphs = cells[operation.CellIndex.Value].Elements<Paragraph>().ToList();
-        if (operation.ParagraphIndex < 0 || operation.ParagraphIndex >= paragraphs.Count) return new DocxEditAppliedOperation(operation.Type, false, "paragraph out of range");
-        var runs = paragraphs[operation.ParagraphIndex.Value].Elements<Run>().ToList();
-        if (operation.RunIndex < 0 || operation.RunIndex >= runs.Count || !runs[operation.RunIndex.Value].Descendants<Drawing>().Any()) return new DocxEditAppliedOperation(operation.Type, false, "choice glyph run invalid");
-        var run = runs[operation.RunIndex.Value];
-        var blip = run.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().SingleOrDefault();
-        if (blip?.Embed?.Value is null || document.MainDocumentPart is null) return new DocxEditAppliedOperation(operation.Type, false, "choice glyph image missing");
-        var image = document.MainDocumentPart.AddImagePart(ImagePartType.Png);
-        using (var stream = new MemoryStream(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAqUlEQVR42u1XQQ6AMAhbG///ZTx5MWPMQWBRuehhWUuhChCRVhlsxXFcLwBSpRARbKHAPiXoyRMdvTK/vwRWczMDfESCWZlrJFghe0kTas5iRvYjW7NK+nACGrj1UWNEZqvgUwQsL3vAhwQAiOVlL/iQgHaJpcjTHxlXvBt1fqoHepc+9frWAwkjpPUMMPTW1zs9caXJ7s/UiSgSfN+pOHNJ+RcTfH47PgF+MWNBTx+7qwAAAABJRU5ErkJggg=="))) image.FeedData(stream);
-        blip.Embed = document.MainDocumentPart.GetIdOfPart(image);
-        return new DocxEditAppliedOperation(operation.Type, true, "Selected target choice");
     }
 
     private static bool TryReplaceRunText(IReadOnlyList<Paragraph> paragraphs, int paragraphIndex, int runIndex, string text, out string error)
@@ -3360,56 +3335,6 @@ public static class Editor
             operation.Type,
             true,
             $"Unmerged vertical cells in table[{operation.TableIndex}].cell[{cellIndex}].rows[{startRowIndex}..{endRowIndex}], removed {changed} vMerge marker(s)");
-    }
-
-    private static DocxEditAppliedOperation FillTableSemantically(Body body, DocxEditOperation operation)
-    {
-        if (operation.TableIndex is null || operation.Cells is null)
-        {
-            return new DocxEditAppliedOperation(operation.Type, false, "tableIndex and cells are required");
-        }
-
-        var tables = body.Descendants<Table>().ToList();
-        if (operation.TableIndex.Value < 0 || operation.TableIndex.Value >= tables.Count)
-        {
-            return new DocxEditAppliedOperation(operation.Type, false, $"tableIndex {operation.TableIndex} is out of range");
-        }
-
-        var table = tables[operation.TableIndex.Value];
-        var gridMap = new TableGridMap(table);
-        var appliedCount = 0;
-
-        foreach (var rule in operation.Cells)
-        {
-            for (var r = 0; r < gridMap.RowCount; r++)
-            {
-                var rowContext = gridMap.GetRowContext(r);
-                var rowMatches = rule.RowPatterns.All(p => rowContext.Contains(p, StringComparison.OrdinalIgnoreCase));
-                if (!rowMatches)
-                {
-                    continue;
-                }
-
-                for (var col = 0; col < gridMap.ColumnCount; col++)
-                {
-                    var colContext = gridMap.GetColumnContext(col);
-                    var colMatches = rule.ColPatterns.All(p => colContext.Contains(p, StringComparison.OrdinalIgnoreCase));
-                    if (!colMatches)
-                    {
-                        continue;
-                    }
-
-                    var cell = gridMap.Grid[r, col];
-                    if (cell != null)
-                    {
-                        ReplaceTableCellText(cell, rule.Text);
-                        appliedCount++;
-                    }
-                }
-            }
-        }
-
-        return new DocxEditAppliedOperation(operation.Type, true, $"Successfully applied semantic fills to {appliedCount} cell(s) in table[{operation.TableIndex}]");
     }
 
     private static string GetParagraphText(Paragraph paragraph)

@@ -242,7 +242,6 @@ const docxEditActions = [
   editAction('docx_set_footer_run_text', 'replaceFooterParagraphRunText', 'Set current footer run text.', z.object({ footerIndex: index, paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
   editAction('docx_set_table_cell_text', 'replaceTableCellText', 'Set current body table cell text.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, text: z.string(), alignment: z.string().optional() }).strict()),
   editAction('docx_set_table_cell_run_text', 'replaceTableCellRunText', 'Set current body table cell run text.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_table_cell_choice_state', 'setTableCellChoiceState', 'Set the selected state represented by current table-cell content.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, text: z.string() }).strict()),
   editAction('docx_set_header_table_cell_text', 'replaceHeaderTableCellText', 'Set current header table cell text.', z.object({ headerIndex: index, tableIndex: index, rowIndex: index, cellIndex: index, text: z.string() }).strict()),
   editAction('docx_set_header_table_cell_run_text', 'replaceHeaderTableCellRunText', 'Set current header table cell run text.', z.object({ headerIndex: index, tableIndex: index, rowIndex: index, cellIndex: index, paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
   editAction('docx_set_footer_table_cell_text', 'replaceFooterTableCellText', 'Set current footer table cell text.', z.object({ footerIndex: index, tableIndex: index, rowIndex: index, cellIndex: index, text: z.string() }).strict()),
@@ -382,12 +381,6 @@ const tools = [
     inputSchema: z.object({ input: pathInput, output: pathInput, styleMap: z.record(z.string(), z.string()) }).strict(),
     handler: docxReplaceStyleIds,
   },
-  {
-    name: 'docx_fill_template',
-    description: 'Fill current DOCX placeholders from an explicit data object.',
-    inputSchema: z.object({ template: pathInput, output: pathInput, data: z.record(z.string(), z.unknown()) }).strict(),
-    handler: docxFillTemplate,
-  },
   ...editToolDefinitions(docxEditActions),
   {
     name: 'office_render_pdf',
@@ -521,7 +514,7 @@ function buildServer() {
   const server = new McpServer(
     { name: 'tiwater-office', version: packageMetadata.version },
     {
-      instructions: 'Use these tools only for generic Office observation, conversion, editing, validation, and native rendering. Derive business meaning from the active scenario knowledge and current documents; the provider owns no scenario workflow.',
+      instructions: 'Use these tools only for generic Office observation, conversion, editing, validation, and native rendering. Callers own all selected objects, values, and business decisions.',
     },
   );
   for (const tool of tools) {
@@ -579,10 +572,6 @@ async function docxStripDirectFormatting(args) {
 
 async function docxReplaceStyleIds(args) {
   return withTempJsonFile(args.styleMap, styleMapPath => copyTransform('docx_replace_style_ids', docxCandidates, ['replace-style-ids'], args, [styleMapPath]));
-}
-
-async function docxFillTemplate(args) {
-  return withTempJsonFile(args.data, dataPath => templateFill('docx_fill_template', docxCandidates, args, dataPath));
 }
 
 async function xlsxFillTemplate(args) {
