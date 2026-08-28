@@ -95,7 +95,8 @@ The public operation list is closed over these verbs:
 | merge cells | Merge a selected rectangular Word-table or worksheet-cell range when the native format permits it. |
 | split cells | Split a selected merged Word-table or worksheet-cell range when the native format permits it. |
 | replace media | Replace selected drawing or picture bytes while preserving the selected container and its declared geometry. |
-| apply layout | Apply a caller-selected Word style, worksheet presentation policy, or presentation master/layout without selecting it on business grounds. |
+| apply layout | Apply a caller-selected Word style, worksheet presentation policy, or presentation master/layout without selecting it on business grounds. For presentations, a selected master/layout/theme may come from another current revision; the provider imports its complete related-part dependency closure while preserving target slide content, count, and order. |
+| refresh fields | Refresh caller-selected Word field scopes through the declared native Writer backend and preserve unrelated document content. |
 | validate package | Validate package integrity and the exact requested technical postconditions. |
 | convert format | Convert a supported Office-family input through its declared native application. |
 | render document | Render a supported Office-family input through its declared native application with provenance. |
@@ -111,6 +112,12 @@ The Agent supplies their relationship; the provider performs the package work
 needed to preserve runs, styles, table grids, merges, formulas, drawings, and
 relationships according to the selected fixed action. This keeps Open XML
 mechanics out of Agent glue without moving semantic selection into code.
+
+Cross-document copy and presentation layout import bind both current revisions
+explicitly. They are valid only for the fixed operations that declare source
+and target documents; an identity cannot otherwise be spliced into another
+document call. Presentation layout import copies system parts and dependencies,
+not template slide content.
 
 The provider may reject a technically impossible action with a precise reason.
 It must not guess another target, alter the requested business value, expand a
