@@ -185,7 +185,7 @@ function fixedEditOutput(tool) {
 }
 
 function artifactOutput(tool) {
-  return z.object({ tool: z.literal(tool), runtime: runtimeIdentity, artifact }).strict();
+  return z.object({ tool: z.literal(tool), runtime: runtimeIdentity, source: artifact, artifact }).strict();
 }
 
 const tools = [
@@ -392,18 +392,20 @@ function buildServer() {
 }
 
 async function docxInspect(args) {
-  const input = requireString(args.input, 'input');
+  const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(docxCandidates, ['inspect', input, '--json']);
   return {
     tool: 'docx_inspect',
     runtime: commandRuntime(result),
+    source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
 }
 
 async function docxInspectTables(args) {
-  const result = await runJsonCandidateChain(docxCandidates, ['inspect-tables', requireString(args.input, 'input'), '--json']);
-  return { tool: 'docx_inspect_tables', runtime: commandRuntime(result), artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json) };
+  const input = path.resolve(requireString(args.input, 'input'));
+  const result = await runJsonCandidateChain(docxCandidates, ['inspect-tables', input, '--json']);
+  return { tool: 'docx_inspect_tables', runtime: commandRuntime(result), source: await fileArtifact(input), artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json) };
 }
 
 async function docxObservation(tool, args) {
@@ -478,11 +480,12 @@ async function docxCompare(args) {
 }
 
 async function docxExportJson(args) {
-  const input = requireString(args.input, 'input');
+  const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(docxCandidates, ['export-json', input]);
   return {
     tool: 'docx_export_json',
     runtime: commandRuntime(result),
+    source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
 }
@@ -570,17 +573,18 @@ function nativeRenderBackend(sourceFormat) {
 }
 
 async function xlsxInspect(args) {
-  const input = requireString(args.input, 'input');
+  const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(xlsxCandidates, ['inspect', input, '--json']);
   return {
     tool: 'xlsx_inspect',
     runtime: commandRuntime(result),
+    source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
 }
 
 async function xlsxExportJson(args) {
-  const input = requireString(args.input, 'input');
+  const input = path.resolve(requireString(args.input, 'input'));
   const cmdArgs = ['export-json', input];
   if (args.resolveMergedCells) {
     cmdArgs.push('--resolve-merged-cells');
@@ -589,6 +593,7 @@ async function xlsxExportJson(args) {
   return {
     tool: 'xlsx_export_json',
     runtime: commandRuntime(result),
+    source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
 }
@@ -600,21 +605,23 @@ async function xlsxValidate(args) {
 }
 
 async function pptxInspect(args) {
-  const input = requireString(args.input, 'input');
+  const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json']);
   return {
     tool: 'pptx_inspect',
     runtime: commandRuntime(result),
+    source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
 }
 
 async function pptxExportJson(args) {
-  const input = requireString(args.input, 'input');
+  const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(pptxCandidates, ['export-json', input]);
   return {
     tool: 'pptx_export_json',
     runtime: commandRuntime(result),
+    source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
   };
 }
