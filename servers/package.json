@@ -19,6 +19,7 @@
     "_shared/tool-runtime.mjs",
     "office/index.mjs",
     "office/README.md",
+    "office/contracts/tiwater-office-provider-contract-manifest-v1.json",
     "office/contracts/*.schema.json"
   ],
   "publishConfig": {

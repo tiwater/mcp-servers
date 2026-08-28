@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to the current Office document."
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New PDF output path. Existing files are never overwritten."
+    },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New JSON receipt path. Existing files are never overwritten."
+    }
+  },
+  "required": [
+    "input",
+    "output",
+    "receiptOutput"
+  ],
+  "additionalProperties": false
+}

@@ -17,7 +17,25 @@ import {
 } from '../_shared/tool-runtime.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const inputContractManifest = JSON.parse(await readFile(
+  new URL('./contracts/tiwater-office-provider-contract-manifest-v1.json', import.meta.url),
+  'utf8',
+));
+if (inputContractManifest.provider?.id !== packageMetadata.name
+    || inputContractManifest.provider?.version !== packageMetadata.version) {
+  throw new Error('Office MCP input contract manifest does not match the installed provider package');
+}
+const inputContracts = new Map(await Promise.all(inputContractManifest.tools.map(async entry => {
+  const schema = JSON.parse(await readFile(new URL(`./contracts/${entry.name}.schema.json`, import.meta.url), 'utf8'));
+  return [entry.name, z.fromJSONSchema(schema)];
+})));
 const invocationCwd = process.cwd();
+
+function inputContract(toolName) {
+  const contract = inputContracts.get(toolName);
+  if (!contract) throw new Error(`Missing provider-owned MCP input contract: ${toolName}`);
+  return contract;
+}
 
 const docxCandidates = [
   commandCandidate('tiwater-docx', [], { cwd: invocationCwd }),
@@ -35,18 +53,11 @@ const convertCandidates = [
   commandCandidate('tiwater-convert', [], { cwd: invocationCwd }),
 ];
 
-const pathInput = z.string().trim().min(1);
-
 const runtimeIdentity = z.object({
   command: z.string(),
   cwd: z.string(),
 }).strict();
 
-const inputOnly = z.object({ input: pathInput }).strict();
-const artifactInput = z.object({
-  input: pathInput,
-  output: pathInput.describe('New JSON artifact path. Existing files are never overwritten.'),
-}).strict();
 const artifact = z.object({
   path: z.string(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -179,128 +190,78 @@ const nativeRenderOutput = z.object({
   }).strict(),
 }).strict();
 
-const index = z.number().int().nonnegative();
-const positiveIndex = z.number().int().positive();
-const optionalTextMatch = {
-  matchMode: z.string().optional(),
-  paragraphStyle: z.string().optional(),
-};
-const richTextSegment = z.object({
-  text: z.string(),
-  color: z.string().optional(),
-  underline: z.boolean().optional(),
-  bold: z.boolean().optional(),
-  fontName: z.string().optional(),
-  italic: z.boolean().optional(),
-  verticalAlignment: z.enum(['baseline', 'superscript', 'subscript']).optional(),
-}).strict();
-const tableCellInput = z.object({
-  text: z.string().optional(),
-  gridSpan: positiveIndex.optional(),
-  vMerge: z.string().optional(),
-  bold: z.boolean().optional(),
-  header: z.boolean().optional(),
-  shading: z.string().optional(),
-  alignment: z.string().optional(),
-  richText: z.array(richTextSegment).optional(),
-}).strict();
-const tableRowRepeatBase = {
-  tableIndex: index,
-  rowIndex: index,
-  repeatAsHeader: z.boolean(),
-};
-const tableRowRepeatAddress = z.union([
-  z.object(tableRowRepeatBase).strict(),
-  z.object({ ...tableRowRepeatBase, headerIndex: index }).strict(),
-  z.object({ ...tableRowRepeatBase, footerIndex: index }).strict(),
-]);
-
-function editAction(name, operationType, description, changeSchema, options = {}) {
-  return { name, operationType, description, changeSchema, batch: true, ...options };
-}
-
-function documentAction(name, operationType, description) {
-  return { name, operationType, description, batch: false };
-}
-
 const docxEditActions = [
-  editAction('docx_set_anchored_text', 'replaceAnchoredText', 'Set text at current DOCX comment anchors.', z.object({ commentId: pathInput, text: z.string() }).strict()),
-  editAction('docx_set_paragraph_text', 'replaceParagraphText', 'Set current body paragraph text.', z.object({ paragraphIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_paragraph_run_text', 'replaceParagraphRunText', 'Set current body paragraph run text.', z.object({ paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
-  editAction('docx_replace_body_text', 'replaceBodyText', 'Replace uniquely matched current body text.', z.object({ findText: pathInput, text: z.string() }).strict()),
-  editAction('docx_delete_body_paragraph', 'deleteBodyParagraph', 'Delete uniquely matched current body paragraphs.', z.object({ findText: pathInput, ...optionalTextMatch }).strict()),
-  editAction('docx_delete_body_drawing_before_paragraph', 'deleteBodyDrawingBeforeParagraph', 'Delete the drawing immediately before a uniquely matched current paragraph.', z.object({ findText: pathInput, ...optionalTextMatch }).strict()),
-  editAction('docx_insert_body_range', 'insertBodyRange', 'Insert a bounded direct-body range from a current source DOCX before a current target body boundary, preserving supported styles and relationships.', z.object({ source: pathInput, sourceStartBodyIndex: index, sourceEndBodyIndex: index, targetBodyIndex: index }).strict(), { sourceFields: ['source'] }),
-  editAction('docx_replace_drawing_image', 'replaceDrawingImage', 'Replace the image relationship of a current body drawing while preserving its drawing geometry.', z.object({ paragraphIndex: index, drawingIndex: index, image: pathInput }).strict(), { sourceFields: ['image'] }),
-  editAction('docx_insert_body_image', 'insertBodyImage', 'Insert an image as a new inline drawing before a current direct-body boundary.', z.object({ targetBodyIndex: index, image: pathInput, widthEmu: z.number().int().positive(), heightEmu: z.number().int().positive(), altText: z.string().optional() }).strict(), { sourceFields: ['image'] }),
-  editAction('docx_delete_body_range', 'deleteBodyRange', 'Delete uniquely bounded current body ranges.', z.object({ findText: pathInput, endFindText: z.string().optional(), matchMode: z.string().optional(), endMatchMode: z.string().optional(), paragraphStyle: z.string().optional(), endParagraphStyle: z.string().optional(), deleteToBodyEnd: z.boolean().optional(), removePrecedingPageBreak: z.boolean().optional() }).strict()),
-  editAction('docx_start_section', 'startSectionBeforeParagraph', 'Start a section before a uniquely matched current paragraph.', z.object({ findText: pathInput, orientation: z.enum(['portrait', 'landscape']) }).strict()),
-  editAction('docx_set_header_paragraph_text', 'replaceHeaderParagraphText', 'Set current header paragraph text.', z.object({ headerIndex: index, paragraphIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_header_run_text', 'replaceHeaderParagraphRunText', 'Set current header run text.', z.object({ headerIndex: index, paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
-  editAction('docx_replace_header_text', 'replaceHeaderText', 'Replace uniquely matched current header text.', z.object({ findText: pathInput, text: z.string() }).strict()),
-  editAction('docx_set_footer_paragraph_text', 'replaceFooterParagraphText', 'Set current footer paragraph text.', z.object({ footerIndex: index, paragraphIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_footer_run_text', 'replaceFooterParagraphRunText', 'Set current footer run text.', z.object({ footerIndex: index, paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_table_cell_text', 'replaceTableCellText', 'Set current body table cell text.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, text: z.string(), alignment: z.string().optional() }).strict()),
-  editAction('docx_set_table_cell_run_text', 'replaceTableCellRunText', 'Set current body table cell run text.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_header_table_cell_text', 'replaceHeaderTableCellText', 'Set current header table cell text.', z.object({ headerIndex: index, tableIndex: index, rowIndex: index, cellIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_header_table_cell_run_text', 'replaceHeaderTableCellRunText', 'Set current header table cell run text.', z.object({ headerIndex: index, tableIndex: index, rowIndex: index, cellIndex: index, paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_footer_table_cell_text', 'replaceFooterTableCellText', 'Set current footer table cell text.', z.object({ footerIndex: index, tableIndex: index, rowIndex: index, cellIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_footer_table_cell_run_text', 'replaceFooterTableCellRunText', 'Set current footer table cell run text.', z.object({ footerIndex: index, tableIndex: index, rowIndex: index, cellIndex: index, paragraphIndex: index, runIndex: index, text: z.string() }).strict()),
-  editAction('docx_set_table_cell_rich_text', 'replaceTableCellRichText', 'Set current body table cell rich text.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, richText: z.array(richTextSegment) }).strict()),
-  editAction('docx_insert_table_rows', 'insertTableRows', 'Insert rows into a current body table.', z.object({ tableIndex: index, rowIndex: index, templateRowIndex: index.optional(), rows: z.array(z.array(tableCellInput)) }).strict()),
-  editAction('docx_delete_table_rows', 'deleteTableRows', 'Delete current body table row ranges.', z.object({ tableIndex: index, startRowIndex: index, endRowIndex: index }).strict()),
-  editAction('docx_replace_table_rows', 'replaceTableRows', 'Replace current body table row ranges.', z.object({ tableIndex: index, startRowIndex: index, endRowIndex: index, templateRowIndex: index.optional(), rows: z.array(z.array(tableCellInput)) }).strict()),
-  editAction('docx_insert_table_columns', 'insertTableColumns', 'Insert columns into a current body table.', z.object({ tableIndex: index, columnIndex: index, columnCount: positiveIndex.optional(), templateColumnIndex: index.optional() }).strict()),
-  editAction('docx_set_table_width', 'setTableWidth', 'Set current body table widths.', z.object({ tableIndex: index, width: pathInput, widthType: z.enum(['pct', 'dxa', 'auto', 'nil']) }).strict()),
-  editAction('docx_set_table_cell_alignment', 'setTableCellAlignment', 'Set current body table cell alignment.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, alignment: pathInput }).strict()),
-  editAction('docx_set_table_cell_no_wrap', 'setTableCellNoWrap', 'Set current body table cell no-wrap state.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, noWrap: z.boolean() }).strict()),
-  editAction('docx_set_table_cell_font_size', 'setTableCellFontSize', 'Set current body table cell font size.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index, fontSize: pathInput }).strict()),
-  editAction('docx_apply_font_policy', 'applyDocumentFontPolicy', 'Apply an explicit font policy to current document text.', z.object({ fontPolicy: z.object({ schema: pathInput, body: z.record(z.string(), z.string()), table: z.record(z.string(), z.string()) }).strict() }).strict()),
-  editAction('docx_set_table_row_height', 'setTableRowHeight', 'Set current body table row height.', z.object({ tableIndex: index, rowIndex: index, height: pathInput, heightRule: z.string().optional() }).strict()),
-  editAction('docx_set_table_row_cant_split', 'setTableRowCantSplit', 'Set current body table row split behavior.', z.object({ tableIndex: index, rowIndex: index, cantSplit: z.boolean() }).strict()),
-  editAction('docx_set_table_row_repeat_as_header', 'setTableRowRepeatAsHeader', 'Set or unset repeat-as-header on uniquely addressed current body, header, or footer table rows.', tableRowRepeatAddress),
-  editAction('docx_set_table_row_keep_next', 'setTableRowKeepNext', 'Set keep-next behavior for current body table rows.', z.object({ tableIndex: index, rowIndex: index, keepNext: z.boolean() }).strict()),
-  editAction('docx_set_body_paragraph_keep_next', 'setBodyParagraphKeepNext', 'Set keep-next behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepNext: z.boolean() }).strict()),
-  editAction('docx_set_body_paragraph_keep_lines', 'setBodyParagraphKeepLines', 'Set keep-lines behavior for current body paragraphs.', z.object({ paragraphIndex: index, keepLines: z.boolean() }).strict()),
-  editAction('docx_apply_toc_style_policy', 'applyTocStylePolicy', 'Apply current document table-of-contents paragraph style properties.', z.object({ italic: z.boolean(), indentCharactersPerLevel: index }).strict()),
-  editAction('docx_set_header_paragraph_font_size', 'setHeaderParagraphFontSize', 'Set current header paragraph font size.', z.object({ headerIndex: index, paragraphIndex: index, fontSize: pathInput }).strict()),
-  documentAction('docx_collapse_trailing_empty_section', 'collapseTrailingEmptySection', 'Collapse a current trailing empty section.'),
-  documentAction('docx_collapse_trailing_empty_paragraphs', 'collapseTrailingEmptyBodyParagraphs', 'Collapse current trailing empty body paragraphs.'),
-  editAction('docx_merge_table_cells', 'mergeTableCells', 'Merge current body table cells.', z.object({ tableIndex: index, rowIndex: index.optional(), startCellIndex: index.optional(), endCellIndex: index.optional(), startRowIndex: index.optional(), endRowIndex: index.optional(), cellIndex: index.optional(), gridColumn: index.optional() }).strict()),
-  editAction('docx_unmerge_table_row_cells', 'unmergeTableRowHorizontalCells', 'Unmerge current horizontal table cells.', z.object({ tableIndex: index, rowIndex: index, cellIndex: index }).strict()),
-  editAction('docx_unmerge_table_column_cells', 'unmergeTableColumnVerticalCells', 'Unmerge current vertical table cell ranges.', z.object({ tableIndex: index, cellIndex: index, startRowIndex: index, endRowIndex: index }).strict()),
-  editAction('docx_delete_comments', 'deleteComments', 'Delete explicit current DOCX comments.', z.object({ commentIds: z.array(pathInput).min(1) }).strict()),
-  documentAction('docx_mark_fields_dirty', 'markFieldsDirty', 'Mark current DOCX fields for native refresh.'),
-  documentAction('docx_sanitize_fields', 'sanitizeFields', 'Remove update prompts and dirty markers from current DOCX fields.'),
-  documentAction('docx_freeze_fields', 'freezeFields', 'Convert current visible DOCX field results to ordinary content.'),
+  {"name":"docx_set_anchored_text","operationType":"replaceAnchoredText","description":"Set text at current DOCX comment anchors.","batch":true},
+  {"name":"docx_set_paragraph_text","operationType":"replaceParagraphText","description":"Set current body paragraph text.","batch":true},
+  {"name":"docx_set_paragraph_run_text","operationType":"replaceParagraphRunText","description":"Set current body paragraph run text.","batch":true},
+  {"name":"docx_replace_body_text","operationType":"replaceBodyText","description":"Replace uniquely matched current body text.","batch":true},
+  {"name":"docx_delete_body_paragraph","operationType":"deleteBodyParagraph","description":"Delete uniquely matched current body paragraphs.","batch":true},
+  {"name":"docx_delete_body_drawing_before_paragraph","operationType":"deleteBodyDrawingBeforeParagraph","description":"Delete the drawing immediately before a uniquely matched current paragraph.","batch":true},
+  {"name":"docx_insert_body_range","operationType":"insertBodyRange","description":"Insert a bounded direct-body range from a current source DOCX before a current target body boundary, preserving supported styles and relationships.","batch":true,"sourceFields":["source"]},
+  {"name":"docx_replace_drawing_image","operationType":"replaceDrawingImage","description":"Replace the image relationship of a current body drawing while preserving its drawing geometry.","batch":true,"sourceFields":["image"]},
+  {"name":"docx_insert_body_image","operationType":"insertBodyImage","description":"Insert an image as a new inline drawing before a current direct-body boundary.","batch":true,"sourceFields":["image"]},
+  {"name":"docx_delete_body_range","operationType":"deleteBodyRange","description":"Delete uniquely bounded current body ranges.","batch":true},
+  {"name":"docx_start_section","operationType":"startSectionBeforeParagraph","description":"Start a section before a uniquely matched current paragraph.","batch":true},
+  {"name":"docx_set_header_paragraph_text","operationType":"replaceHeaderParagraphText","description":"Set current header paragraph text.","batch":true},
+  {"name":"docx_set_header_run_text","operationType":"replaceHeaderParagraphRunText","description":"Set current header run text.","batch":true},
+  {"name":"docx_replace_header_text","operationType":"replaceHeaderText","description":"Replace uniquely matched current header text.","batch":true},
+  {"name":"docx_set_footer_paragraph_text","operationType":"replaceFooterParagraphText","description":"Set current footer paragraph text.","batch":true},
+  {"name":"docx_set_footer_run_text","operationType":"replaceFooterParagraphRunText","description":"Set current footer run text.","batch":true},
+  {"name":"docx_set_table_cell_text","operationType":"replaceTableCellText","description":"Set current body table cell text.","batch":true},
+  {"name":"docx_set_table_cell_run_text","operationType":"replaceTableCellRunText","description":"Set current body table cell run text.","batch":true},
+  {"name":"docx_set_header_table_cell_text","operationType":"replaceHeaderTableCellText","description":"Set current header table cell text.","batch":true},
+  {"name":"docx_set_header_table_cell_run_text","operationType":"replaceHeaderTableCellRunText","description":"Set current header table cell run text.","batch":true},
+  {"name":"docx_set_footer_table_cell_text","operationType":"replaceFooterTableCellText","description":"Set current footer table cell text.","batch":true},
+  {"name":"docx_set_footer_table_cell_run_text","operationType":"replaceFooterTableCellRunText","description":"Set current footer table cell run text.","batch":true},
+  {"name":"docx_set_table_cell_rich_text","operationType":"replaceTableCellRichText","description":"Set current body table cell rich text.","batch":true},
+  {"name":"docx_insert_table_rows","operationType":"insertTableRows","description":"Insert rows into a current body table.","batch":true},
+  {"name":"docx_delete_table_rows","operationType":"deleteTableRows","description":"Delete current body table row ranges.","batch":true},
+  {"name":"docx_replace_table_rows","operationType":"replaceTableRows","description":"Replace current body table row ranges.","batch":true},
+  {"name":"docx_insert_table_columns","operationType":"insertTableColumns","description":"Insert columns into a current body table.","batch":true},
+  {"name":"docx_set_table_width","operationType":"setTableWidth","description":"Set current body table widths.","batch":true},
+  {"name":"docx_set_table_cell_alignment","operationType":"setTableCellAlignment","description":"Set current body table cell alignment.","batch":true},
+  {"name":"docx_set_table_cell_no_wrap","operationType":"setTableCellNoWrap","description":"Set current body table cell no-wrap state.","batch":true},
+  {"name":"docx_set_table_cell_font_size","operationType":"setTableCellFontSize","description":"Set current body table cell font size.","batch":true},
+  {"name":"docx_apply_font_policy","operationType":"applyDocumentFontPolicy","description":"Apply an explicit font policy to current document text.","batch":true},
+  {"name":"docx_set_table_row_height","operationType":"setTableRowHeight","description":"Set current body table row height.","batch":true},
+  {"name":"docx_set_table_row_cant_split","operationType":"setTableRowCantSplit","description":"Set current body table row split behavior.","batch":true},
+  {"name":"docx_set_table_row_repeat_as_header","operationType":"setTableRowRepeatAsHeader","description":"Set or unset repeat-as-header on uniquely addressed current body, header, or footer table rows.","batch":true},
+  {"name":"docx_set_table_row_keep_next","operationType":"setTableRowKeepNext","description":"Set keep-next behavior for current body table rows.","batch":true},
+  {"name":"docx_set_body_paragraph_keep_next","operationType":"setBodyParagraphKeepNext","description":"Set keep-next behavior for current body paragraphs.","batch":true},
+  {"name":"docx_set_body_paragraph_keep_lines","operationType":"setBodyParagraphKeepLines","description":"Set keep-lines behavior for current body paragraphs.","batch":true},
+  {"name":"docx_apply_toc_style_policy","operationType":"applyTocStylePolicy","description":"Apply current document table-of-contents paragraph style properties.","batch":true},
+  {"name":"docx_set_header_paragraph_font_size","operationType":"setHeaderParagraphFontSize","description":"Set current header paragraph font size.","batch":true},
+  {"name":"docx_collapse_trailing_empty_section","operationType":"collapseTrailingEmptySection","description":"Collapse a current trailing empty section.","batch":false},
+  {"name":"docx_collapse_trailing_empty_paragraphs","operationType":"collapseTrailingEmptyBodyParagraphs","description":"Collapse current trailing empty body paragraphs.","batch":false},
+  {"name":"docx_merge_table_cells","operationType":"mergeTableCells","description":"Merge current body table cells.","batch":true},
+  {"name":"docx_unmerge_table_row_cells","operationType":"unmergeTableRowHorizontalCells","description":"Unmerge current horizontal table cells.","batch":true},
+  {"name":"docx_unmerge_table_column_cells","operationType":"unmergeTableColumnVerticalCells","description":"Unmerge current vertical table cell ranges.","batch":true},
+  {"name":"docx_delete_comments","operationType":"deleteComments","description":"Delete explicit current DOCX comments.","batch":true},
+  {"name":"docx_mark_fields_dirty","operationType":"markFieldsDirty","description":"Mark current DOCX fields for native refresh.","batch":false},
+  {"name":"docx_sanitize_fields","operationType":"sanitizeFields","description":"Remove update prompts and dirty markers from current DOCX fields.","batch":false},
+  {"name":"docx_freeze_fields","operationType":"freezeFields","description":"Convert current visible DOCX field results to ordinary content.","batch":false},
 ];
 
-const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 const xlsxEditActions = [
-  editAction('xlsx_set_cell_value', 'setCellValue', 'Set current workbook cell values.', z.object({ sheet: pathInput, cell: pathInput, value: scalar, valueType: z.string().optional(), bold: z.boolean().optional(), shrinkToFit: z.boolean().optional(), wrapText: z.boolean().optional() }).strict()),
-  editAction('xlsx_set_cell_number_format', 'setCellNumberFormat', 'Set current workbook cell number formats.', z.object({ sheet: pathInput, cell: pathInput, numberFormat: pathInput }).strict()),
-  editAction('xlsx_set_rich_text_cell_value', 'setRichTextCellValue', 'Set current workbook rich-text cell values.', z.object({ sheet: pathInput, cell: pathInput, value: z.string(), bold: z.boolean() }).strict()),
-  editAction('xlsx_set_range_values', 'setRangeValues', 'Set rectangular values in a current workbook.', z.object({ sheet: pathInput, startCell: pathInput, values: z.array(z.array(scalar)), valueType: z.string().optional() }).strict()),
-  editAction('xlsx_insert_rows', 'insertRows', 'Insert rows into a current worksheet.', z.object({ sheet: pathInput, startRow: positiveIndex, count: positiveIndex, preserveHorizontalMergedRanges: z.boolean().optional(), expandAdjacentVerticalMergedRanges: z.boolean().optional() }).strict()),
-  editAction('xlsx_delete_rows', 'deleteRows', 'Structurally delete rows from a current worksheet.', z.object({ sheet: pathInput, startRow: positiveIndex, count: positiveIndex }).strict()),
-  editAction('xlsx_copy_row', 'copyRow', 'Copy current worksheet rows.', z.object({ sheet: pathInput, sourceRow: positiveIndex, targetRow: positiveIndex, translateFormulas: z.boolean().optional() }).strict()),
-  editAction('xlsx_expand_section_rows', 'expandSectionRows', 'Expand current worksheet row sections from visible anchors.', z.object({ sheet: pathInput, anchorText: pathInput, exampleRows: positiveIndex, targetRows: positiveIndex, preserveStyle: z.boolean().optional(), preserveFormulas: z.boolean().optional(), preserveMergedRanges: z.boolean().optional() }).strict()),
-  editAction('xlsx_set_print_area', 'setPrintArea', 'Set current worksheet print areas.', z.object({ sheet: pathInput, range: pathInput }).strict()),
-  editAction('xlsx_set_page_setup', 'setPageSetup', 'Set current worksheet page properties.', z.object({ sheet: pathInput, fitToPagesWide: positiveIndex.optional(), fitToPagesTall: positiveIndex.optional(), orientation: z.enum(['portrait', 'landscape']).optional(), paperSize: z.enum(['letter', 'legal', 'a3', 'a4']).optional(), repeatRowsStart: positiveIndex.optional(), repeatRowsEnd: positiveIndex.optional(), repeatColsStart: positiveIndex.optional(), repeatColsEnd: positiveIndex.optional() }).strict()),
-  editAction('xlsx_set_row_page_breaks', 'setRowPageBreaks', 'Set current worksheet row page breaks.', z.object({ sheet: pathInput, breakBeforeRows: z.array(positiveIndex) }).strict()),
-  editAction('xlsx_set_column_width', 'setColumnWidth', 'Set current worksheet column widths.', z.object({ sheet: pathInput, column: pathInput, width: z.number().positive().max(255) }).strict()),
+  {"name":"xlsx_set_cell_value","operationType":"setCellValue","description":"Set current workbook cell values.","batch":true},
+  {"name":"xlsx_set_cell_number_format","operationType":"setCellNumberFormat","description":"Set current workbook cell number formats.","batch":true},
+  {"name":"xlsx_set_rich_text_cell_value","operationType":"setRichTextCellValue","description":"Set current workbook rich-text cell values.","batch":true},
+  {"name":"xlsx_set_range_values","operationType":"setRangeValues","description":"Set rectangular values in a current workbook.","batch":true},
+  {"name":"xlsx_insert_rows","operationType":"insertRows","description":"Insert rows into a current worksheet.","batch":true},
+  {"name":"xlsx_delete_rows","operationType":"deleteRows","description":"Structurally delete rows from a current worksheet.","batch":true},
+  {"name":"xlsx_copy_row","operationType":"copyRow","description":"Copy current worksheet rows.","batch":true},
+  {"name":"xlsx_expand_section_rows","operationType":"expandSectionRows","description":"Expand current worksheet row sections from visible anchors.","batch":true},
+  {"name":"xlsx_set_print_area","operationType":"setPrintArea","description":"Set current worksheet print areas.","batch":true},
+  {"name":"xlsx_set_page_setup","operationType":"setPageSetup","description":"Set current worksheet page properties.","batch":true},
+  {"name":"xlsx_set_row_page_breaks","operationType":"setRowPageBreaks","description":"Set current worksheet row page breaks.","batch":true},
+  {"name":"xlsx_set_column_width","operationType":"setColumnWidth","description":"Set current worksheet column widths.","batch":true},
 ];
 
 function editToolDefinitions(actions) {
   return actions.map(action => ({
     name: action.name,
     description: action.batch ? `${action.description} One call batches only this action kind.` : action.description,
-    inputSchema: z.object({
-      input: pathInput,
-      output: pathInput.describe('New document output path. Existing files are never overwritten.'),
-      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
-      ...(action.batch ? { changes: z.array(action.changeSchema).min(1) } : {}),
-    }).strict(),
+    inputSchema: inputContract(action.name),
     outputSchema: fixedEditOutput(action.name),
     annotations: action.batch ? undefined : { idempotentHint: true },
     handler: args => fixedEdit(action, args),
@@ -322,14 +283,14 @@ const tools = [
   {
     name: 'docx_inspect',
     description: 'Inspect a DOCX document and write one unified JSON observation containing placeholders, comments, anchors, tables, fields, flow, fonts, and formatting metrics.',
-    inputSchema: artifactInput,
+    inputSchema: inputContract('docx_inspect'),
     outputSchema: artifactOutput('docx_inspect'),
     handler: docxInspect,
   },
   {
     name: 'docx_inspect_tables',
     description: 'Inspect current DOCX tables, cells, merges, paragraphs, runs, and formatting.',
-    inputSchema: artifactInput,
+    inputSchema: inputContract('docx_inspect_tables'),
     outputSchema: artifactOutput('docx_inspect_tables'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxInspectTables,
@@ -337,83 +298,75 @@ const tools = [
   {
     name: 'docx_compare',
     description: 'Compare two DOCX files and report package, metric, and style differences.',
-    inputSchema: z.object({ baseline: pathInput, updated: pathInput }).strict(),
+    inputSchema: inputContract('docx_compare'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxCompare,
   },
   {
     name: 'docx_export_json',
     description: 'Export DOCX body content to a new JSON artifact without returning the full document through MCP.',
-    inputSchema: artifactInput,
+    inputSchema: inputContract('docx_export_json'),
     outputSchema: artifactOutput('docx_export_json'),
     handler: docxExportJson,
   },
   {
     name: 'docx_validate',
     description: 'Validate a current DOCX package against the published OpenXML contract.',
-    inputSchema: inputOnly,
+    inputSchema: inputContract('docx_validate'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxValidate,
   },
   {
     name: 'docx_validate_font_policy',
     description: 'Validate current DOCX text against an explicit font policy.',
-    inputSchema: z.object({ input: pathInput, policy: z.object({ schema: pathInput, body: z.record(z.string(), z.string()), table: z.record(z.string(), z.string()) }).strict() }).strict(),
+    inputSchema: inputContract('docx_validate_font_policy'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxValidateFontPolicy,
   },
   {
     name: 'docx_validate_toc_style_policy',
     description: 'Validate current DOCX table-of-contents paragraph styles against an explicit policy.',
-    inputSchema: z.object({ input: pathInput, italic: z.boolean(), indentCharactersPerLevel: index }).strict(),
+    inputSchema: inputContract('docx_validate_toc_style_policy'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxValidateTocStylePolicy,
   },
   {
     name: 'docx_strip_direct_formatting',
     description: 'Remove direct paragraph and run formatting while preserving styles.',
-    inputSchema: z.object({ input: pathInput, output: pathInput }).strict(),
+    inputSchema: inputContract('docx_strip_direct_formatting'),
     handler: docxStripDirectFormatting,
   },
   {
     name: 'docx_replace_style_ids',
     description: 'Replace current DOCX style IDs from an explicit style map.',
-    inputSchema: z.object({ input: pathInput, output: pathInput, styleMap: z.record(z.string(), z.string()) }).strict(),
+    inputSchema: inputContract('docx_replace_style_ids'),
     handler: docxReplaceStyleIds,
   },
   ...editToolDefinitions(docxEditActions),
   {
     name: 'office_render_pdf',
     description: 'Render a current Office document to PDF with its required native WPS backend and write the complete provider receipt as evidence. The input extension selects Writer, Spreadsheets, or Presentation; fallback rendering is rejected.',
-    inputSchema: z.object({
-      input: pathInput.describe('Path to the current Office document.'),
-      output: pathInput.describe('New PDF output path. Existing files are never overwritten.'),
-      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
-    }).strict(),
+    inputSchema: inputContract('office_render_pdf'),
     outputSchema: nativeRenderOutput,
     handler: officeRenderPdf,
   },
   {
     name: 'xlsx_convert_legacy',
     description: 'Convert a current legacy XLS workbook to XLSX using the published native ET backend.',
-    inputSchema: z.object({ input: pathInput, output: pathInput, receiptOutput: pathInput }).strict(),
+    inputSchema: inputContract('xlsx_convert_legacy'),
     handler: xlsxConvertLegacy,
   },
   {
     name: 'xlsx_inspect',
     description: 'Inspect a current XLSX workbook or legacy XLS workbook and write one JSON observation containing workbook structure, exported values, formulas, styles, merged ranges, and any published legacy-format conversion evidence.',
-    inputSchema: artifactInput,
+    inputSchema: inputContract('xlsx_inspect'),
     outputSchema: artifactOutput('xlsx_inspect'),
     handler: xlsxInspect,
   },
   {
     name: 'xlsx_export_json',
     description: 'Export workbook sheet data from XLSX as structured JSON.',
-    inputSchema: z.object({
-      input: pathInput,
-      output: pathInput.describe('New JSON artifact path. Existing files are never overwritten.'),
-      resolveMergedCells: z.boolean().optional().describe('Resolve merged cells to project values.'),
-    }).strict(),
+    inputSchema: inputContract('xlsx_export_json'),
     outputSchema: artifactOutput('xlsx_export_json'),
     handler: xlsxExportJson,
   },
@@ -421,78 +374,56 @@ const tools = [
   {
     name: 'xlsx_validate',
     description: 'Validate an XLSX workbook package and return Open XML validation evidence.',
-    inputSchema: inputOnly,
+    inputSchema: inputContract('xlsx_validate'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxValidate,
   },
   {
     name: 'pptx_inspect',
     description: 'Inspect a PPTX file and write one detailed JSON observation containing slides, masters, layouts, shapes, transforms, paragraphs, runs, and placeholders.',
-    inputSchema: artifactInput,
+    inputSchema: inputContract('pptx_inspect'),
     outputSchema: artifactOutput('pptx_inspect'),
     handler: pptxInspect,
   },
   {
     name: 'pptx_export_json',
     description: 'Export PPTX slide text, notes, and placeholder hints to a new JSON artifact without returning the full presentation through MCP.',
-    inputSchema: artifactInput,
+    inputSchema: inputContract('pptx_export_json'),
     outputSchema: artifactOutput('pptx_export_json'),
     handler: pptxExportJson,
   },
   {
     name: 'pptx_apply_template',
     description: 'Apply one deterministic PPTX template-application plan to a current presentation. This tool executes the published plan; it does not select a template or derive business content, slide mappings, geometry, or formatting decisions.',
-    inputSchema: z.object({
-      input: pathInput.describe('Path to the current source PPTX.'),
-      template: pathInput.describe('Path to the selected current template PPTX.'),
-      targetMasterPath: pathInput,
-      slides: z.array(z.object({ slideNumber: positiveIndex, targetLayoutPath: pathInput, contentBounds: z.object({ x: index, y: index, cx: positiveIndex, cy: positiveIndex }).strict().optional(), contentShapeIds: z.array(positiveIndex).min(1).optional(), sourceLayoutShapeIdsToPreserve: z.array(positiveIndex).optional() }).strict()).min(1),
-      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
-      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
-    }).strict(),
+    inputSchema: inputContract('pptx_apply_template'),
     outputSchema: pptxTemplateApplyOutput,
     handler: pptxApplyTemplate,
   },
   {
     name: 'pptx_apply_format',
     description: 'Apply one deterministic PPTX formatting plan to a current presentation. This tool executes published formatting operations; it does not derive values, coordinates, or business decisions.',
-    inputSchema: z.object({
-      input: pathInput.describe('Path to the current PPTX.'),
-      changes: z.array(z.object({ slideNumber: positiveIndex, shapeId: positiveIndex, runIndex: index, fontFamily: z.string().optional(), fontSize: z.number().positive().optional(), color: z.string().optional(), bold: z.boolean().optional(), paragraphAlignment: z.string().optional() }).strict()).min(1),
-      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
-      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
-    }).strict(),
+    inputSchema: inputContract('pptx_apply_format'),
     outputSchema: pptxFormatApplyOutput,
     handler: pptxApplyFormat,
   },
   {
     name: 'pptx_set_shape_geometry',
     description: 'Set exact native EMU bounds for uniquely identified current-slide PPTX objects. One call batches only this fixed geometry action and does not infer repair coordinates.',
-    inputSchema: z.object({
-      input: pathInput.describe('Path to the current PPTX.'),
-      changes: z.array(z.object({ slideNumber: positiveIndex, shapeId: positiveIndex.max(0xffffffff), x: z.number().int(), y: z.number().int(), cx: positiveIndex, cy: positiveIndex }).strict()).min(1),
-      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
-      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
-    }).strict(),
+    inputSchema: inputContract('pptx_set_shape_geometry'),
     outputSchema: fixedEditOutput('pptx_set_shape_geometry'),
     handler: pptxSetShapeGeometry,
   },
   {
     name: 'pptx_replace_picture_image',
     description: 'Replace embedded PNG or JPEG media for uniquely identified current-slide PPTX pictures while preserving the picture object, geometry, crop, and unrelated media. One call batches only this fixed replacement action.',
-    inputSchema: z.object({
-      input: pathInput.describe('Path to the current PPTX.'),
-      changes: z.array(z.object({ slideNumber: positiveIndex, shapeId: positiveIndex.max(0xffffffff), image: pathInput }).strict()).min(1),
-      output: pathInput.describe('New PPTX output path. Existing files are never overwritten.'),
-      receiptOutput: pathInput.describe('New JSON receipt path. Existing files are never overwritten.'),
-    }).strict(),
+    inputSchema: inputContract('pptx_replace_picture_image'),
     outputSchema: fixedEditOutput('pptx_replace_picture_image'),
     handler: pptxReplacePictureImage,
   },
   {
     name: 'pptx_validate',
     description: 'Validate a current PPTX package against the published OpenXML contract.',
-    inputSchema: inputOnly,
+    inputSchema: inputContract('pptx_validate'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: pptxValidate,
   },
