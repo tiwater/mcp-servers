@@ -58,7 +58,9 @@
                     "maximum": 9007199254740991
                   },
                   "vMerge": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": ["restart", "continue", "none"],
+                    "description": "Vertical merge state for this cell. Use none to clear a merge inherited from the template row."
                   },
                   "bold": {
                     "type": "boolean"
