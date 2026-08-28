@@ -11,12 +11,39 @@ internal static class Program
 
 internal static class Cli
 {
+    private static readonly string[] DiscoverableCommands =
+    [
+        "inspect",
+        "export-json",
+        "inventory-regions",
+        "edit",
+        "validate",
+        .. FixedCommandRunner.Commands,
+    ];
+
     public static Task<int> RunAsync(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--list-tools")
+        {
+            WriteJson(new { schema = "tiwater.provider-tool-list/v1", commands = DiscoverableCommands });
+            return Task.FromResult(0);
+        }
+
+        if (args.Length == 1 && args[0] is "--help" or "-h")
+        {
+            PrintUsage();
+            return Task.FromResult(0);
+        }
+
         if (args.Length == 0)
         {
             PrintUsage();
             return Task.FromResult(1);
+        }
+
+        if (args.Length == 2 && args[1] is "--help" or "-h" && PrintCommandUsage(args[0]))
+        {
+            return Task.FromResult(0);
         }
 
         try
@@ -28,6 +55,7 @@ internal static class Cli
                 "inventory-regions" => Task.FromResult(RegionInventory.Run(args[1..])),
                 "edit" => Task.FromResult(Editor.RunEdit(args[1..])),
                 "validate" => RunValidateAsync(args[1..]),
+                _ when FixedCommandRunner.IsCommand(args[0]) => Task.FromResult(FixedCommandRunner.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -79,6 +107,33 @@ internal static class Cli
         Console.WriteLine("  inventory-regions <input.xlsx> [<output.json>] [--schema v1|v2]");
         Console.WriteLine("  edit <input.xlsx> <operations.json> <output.xlsx>");
         Console.WriteLine("  validate <input.xlsx>");
+        foreach (var command in FixedCommandRunner.Commands)
+            Console.WriteLine($"  {command} <request.json>");
+    }
+
+    private static bool PrintCommandUsage(string command)
+    {
+        if (FixedCommandRunner.IsCommand(command))
+        {
+            Console.WriteLine($"tiwater-xlsx {command} <request.json>");
+            return true;
+        }
+
+        return command switch
+        {
+            "inspect" => PrintUsageLine("tiwater-xlsx inspect <input.xlsx> [--json]"),
+            "export-json" => PrintUsageLine("tiwater-xlsx export-json <input.xlsx> [<output.json>]"),
+            "inventory-regions" => PrintUsageLine("tiwater-xlsx inventory-regions <input.xlsx> [<output.json>] [--schema v1|v2]"),
+            "edit" => PrintUsageLine("tiwater-xlsx edit <input.xlsx> <operations.json> <output.xlsx>"),
+            "validate" => PrintUsageLine("tiwater-xlsx validate <input.xlsx>"),
+            _ => false,
+        };
+    }
+
+    private static bool PrintUsageLine(string usage)
+    {
+        Console.WriteLine(usage);
+        return true;
     }
 
     private static Task<int> FailUnknown(string command)
