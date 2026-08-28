@@ -32,7 +32,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="convert-cli.tests" />
     <InternalsVisibleTo Include="WpsLeaseProbe" />
   </ItemGroup>
 

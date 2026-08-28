@@ -1,8 +1,5 @@
 using System.Text.Json;
-using System.Runtime.CompilerServices;
 using Dockit.Pptx;
-
-[assembly: InternalsVisibleTo("pptx-cli.tests")]
 
 namespace Dockit.Pptx.Cli;
 

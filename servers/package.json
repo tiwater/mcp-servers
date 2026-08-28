@@ -21,17 +21,11 @@
     "office/README.md",
     "office/contracts/*.schema.json"
   ],
-  "scripts": {
-    "test": "node --test office/*.test.mjs pdf/*.test.mjs"
-  },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
     "zod": "4.4.3"
-  },
-  "devDependencies": {
-    "ajv": "8.20.0"
   }
 }
