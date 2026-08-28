@@ -10,9 +10,9 @@ values, business mappings, workflow decisions, and delivery status.
 
 - DOCX: inspect document/tables, export, compare, validate OpenXML, font, and table-of-contents styles
   policy, transform styles, and batch one fixed edit action.
-- XLS/XLSX: convert legacy XLS with ET, inspect/export/fill, validate, and batch
+- XLS/XLSX: convert legacy XLS with ET, inspect/export, validate, and batch
   one fixed workbook edit action.
-- PPTX: inspect/export/fill, bind selected masters/layouts, apply text formatting,
+- PPTX: inspect/export, bind selected masters/layouts, apply text formatting,
   set exact top-level object geometry, replace existing picture media, and
   validate OpenXML.
 - Office: render DOC/DOCX/XLS/XLSX/PPT/PPTX to PDF with the corresponding native

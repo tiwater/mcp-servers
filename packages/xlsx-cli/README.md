@@ -61,36 +61,7 @@ facts only: it does not infer business date meaning, locale intent, headers,
 record identities, methods, or samples. The v2 schema is packaged as
 `contracts/tiwater.xlsx-region-inventory-v2.schema.json`.
 
-### 3. Fill a Template
-
-Injects the defined JSON payload directly into an active Excel sheet, replacing matched placeholders and rendering the final result document.
-
-```bash
-tiwater-xlsx fill-template <template.xlsx> <data.json> <output.xlsx>
-```
-
-#### Expected JSON Model
-
-The structured shape of `<data.json>` expected by `fill-template` must look like the following:
-
-```json
-{
-  "cellValues": {
-    "controlledNumber": "260359",
-    "calculationResult": "0.98",
-    "placeholder_name": "example_value"
-  },
-  "tableData": {
-    "peakAreas": [
-      ["Peak1", "Area1", "RT1"],
-      ["Peak2", "Area2", "RT2"]
-    ]
-  }
-}
-```
-
-
-### 4. Apply Explicit Edit Operations
+### 3. Apply Explicit Edit Operations
 Applies a batch of explicit fixed-layout workbook edits. Supported operation types are:
 - `setCellValue` with required `sheet`, `cell`, and `value`; optional `valueType`, `bold`, `shrinkToFit`, and `wrapText`
 - `setCellNumberFormat` with required target `sheet` and existing target `cell`; provide exactly one of an explicit `numberFormat` code or a same-workbook `sourceSheet` / `sourceCell` peer whose observed number format should be copied. Only the target cell's number-format component changes; its value and all other style components are preserved.

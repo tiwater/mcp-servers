@@ -72,11 +72,6 @@ public record SheetReport(
     List<CellEvidenceReport>? Cells = null
 );
 
-public record FillData(
-    Dictionary<string, string> CellValues,
-    Dictionary<string, List<List<string>>>? TableData
-);
-
 public sealed record XlsxEditOperation(
     string Type,
     string? Sheet = null,

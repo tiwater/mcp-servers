@@ -24,7 +24,6 @@ internal static class Cli
             {
                 "inspect" => RunInspectAsync(args[1..]),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
-                "fill-template" => RunFillTemplateAsync(args[1..]),
                 "apply-format-edits" => RunApplyFormatEditsAsync(args[1..]),
                 "set-shape-geometry" => RunSetShapeGeometryAsync(args[1..]),
                 "replace-picture-image" => RunReplacePictureImageAsync(args[1..]),
@@ -120,28 +119,11 @@ internal static class Cli
         return Task.FromResult(result.Pass ? 0 : 1);
     }
 
-    private static Task<int> RunFillTemplateAsync(string[] args)
-    {
-        if (args.Length < 3)
-        {
-            throw new InvalidOperationException("fill-template requires <template.pptx> <data.json> <output.pptx>");
-        }
-
-        var template = args[0];
-        var dataPath = args[1];
-        var output = args[2];
-
-        var result = TemplateFiller.Fill(template, dataPath, output);
-        WriteJson(result);
-        return Task.FromResult(0);
-    }
-
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.pptx> [--json]");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
-        Console.WriteLine("  fill-template <template.pptx> <data.json> <output.pptx>");
         Console.WriteLine("  apply-format-edits <input.pptx> <plan.json> <output.pptx>");
         Console.WriteLine("  set-shape-geometry <input.pptx> <changes.json> <output.pptx>");
         Console.WriteLine("  replace-picture-image <input.pptx> <changes.json> <output.pptx>");

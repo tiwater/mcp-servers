@@ -417,12 +417,6 @@ const tools = [
     outputSchema: artifactOutput('xlsx_export_json'),
     handler: xlsxExportJson,
   },
-  {
-    name: 'xlsx_fill_template',
-    description: 'Fill current XLSX placeholders from an explicit data object.',
-    inputSchema: z.object({ template: pathInput, output: pathInput, data: z.record(z.string(), z.unknown()) }).strict(),
-    handler: xlsxFillTemplate,
-  },
   ...editToolDefinitions(xlsxEditActions),
   {
     name: 'xlsx_validate',
@@ -444,12 +438,6 @@ const tools = [
     inputSchema: artifactInput,
     outputSchema: artifactOutput('pptx_export_json'),
     handler: pptxExportJson,
-  },
-  {
-    name: 'pptx_fill_template',
-    description: 'Fill current PPTX placeholders from an explicit data object.',
-    inputSchema: z.object({ template: pathInput, output: pathInput, data: z.record(z.string(), z.unknown()) }).strict(),
-    handler: pptxFillTemplate,
   },
   {
     name: 'pptx_apply_template',
@@ -572,22 +560,6 @@ async function docxStripDirectFormatting(args) {
 
 async function docxReplaceStyleIds(args) {
   return withTempJsonFile(args.styleMap, styleMapPath => copyTransform('docx_replace_style_ids', docxCandidates, ['replace-style-ids'], args, [styleMapPath]));
-}
-
-async function xlsxFillTemplate(args) {
-  return withTempJsonFile(args.data, dataPath => templateFill('xlsx_fill_template', xlsxCandidates, args, dataPath));
-}
-
-async function pptxFillTemplate(args) {
-  return withTempJsonFile(args.data, dataPath => templateFill('pptx_fill_template', pptxCandidates, args, dataPath));
-}
-
-async function templateFill(tool, candidates, args, dataPath) {
-  const template = path.resolve(requireString(args.template, 'template'));
-  const output = path.resolve(requireString(args.output, 'output'));
-  await requireNewFile(output, 'output');
-  const result = await runJsonCandidateChain(candidates, ['fill-template', template, dataPath, output]);
-  return { tool, runtime: commandRuntime(result), output: await fileArtifact(output), result: result.json };
 }
 
 async function copyTransform(tool, candidates, command, args, suffix = []) {

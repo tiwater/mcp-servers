@@ -37,14 +37,6 @@ public sealed record NoteExport(
     IReadOnlyList<string> Texts
 );
 
-public sealed record FillResult(
-    string Template,
-    string Output,
-    int ChangedSlides,
-    int ChangedNotes,
-    int PlaceholderCount
-);
-
 public sealed record PresentationDetailReport(
     string File,
     string ArtifactSha256,
