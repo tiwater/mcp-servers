@@ -47,7 +47,7 @@ public static partial class Editor
         var settingsPart = mainPart.DocumentSettingsPart ?? mainPart.AddNewPart<DocumentSettingsPart>();
         settingsPart.Settings ??= new Settings();
         settingsPart.Settings.RemoveAllChildren<UpdateFieldsOnOpen>();
-        settingsPart.Settings.AppendChild(new UpdateFieldsOnOpen { Val = true });
+        settingsPart.Settings.AddChild(new UpdateFieldsOnOpen { Val = true }, true);
 
         foreach (var field in Inspector.GetRoots(doc).SelectMany(root => root.Descendants<SimpleField>()))
         {
