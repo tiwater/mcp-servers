@@ -27,6 +27,9 @@ Each mutation tool fixes its provider operation type. Callers submit only the
 coordinates and values for that action, so they cannot provide an arbitrary
 operation discriminator or a multi-action plan language. A call may batch
 multiple changes only when every change has the same action kind.
+When a completed mutation receipt reports `summary.pass=false`, the MCP result
+also sets the standard `isError` field; consumers do not need a private failure
+interpretation.
 
 Structural worksheet row deletion is exposed as `xlsx_delete_rows`. Each change
 contains only `sheet`, `startRow`, and `count`; unsupported dependent workbook

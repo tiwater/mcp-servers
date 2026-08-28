@@ -8,8 +8,9 @@ import { spawn } from 'node:child_process';
 const sharedDir = path.dirname(fileURLToPath(import.meta.url));
 export const repoRoot = path.resolve(sharedDir, '..', '..');
 
-export function createToolResult(payload) {
+export function createToolResult(payload, { isError = false } = {}) {
   return {
+    ...(isError ? { isError: true } : {}),
     structuredContent: payload,
     content: [
       {
