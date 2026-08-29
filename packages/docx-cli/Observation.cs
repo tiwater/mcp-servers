@@ -89,6 +89,11 @@ public static class Observation
             selected.Element.ChildElements.Count,
             selected.Element.GetAttributes()
                 .Select(attribute => new DocxOpenXmlAttribute(attribute.LocalName, attribute.NamespaceUri, attribute.Value ?? string.Empty))
+                .ToList(),
+            snapshot.Objects
+                .Where(item => !ReferenceEquals(item.Element, selected.Element)
+                    && item.Element.Ancestors().Any(ancestor => ReferenceEquals(ancestor, selected.Element)))
+                .Select(ToObject)
                 .ToList());
         return new DocxObservationReadResult(
             "tiwater.docx-observation-read/v1",
@@ -552,7 +557,8 @@ public sealed record DocxObservationDetail(
     [property: JsonPropertyName("namespaceUri")] string NamespaceUri,
     [property: JsonPropertyName("outerXml")] string OuterXml,
     [property: JsonPropertyName("childCount")] int ChildCount,
-    [property: JsonPropertyName("attributes")] IReadOnlyList<DocxOpenXmlAttribute> Attributes);
+    [property: JsonPropertyName("attributes")] IReadOnlyList<DocxOpenXmlAttribute> Attributes,
+    [property: JsonPropertyName("descendants")] IReadOnlyList<DocxObservationObject> Descendants);
 
 public sealed record DocxObservationListResult(
     [property: JsonPropertyName("schema")] string Schema,
