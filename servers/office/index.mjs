@@ -195,6 +195,36 @@ const docxObjectIdentity = z.object({
   verticalMerge: z.string().nullable(),
 }).strict();
 
+const docxObservationReceipt = z.object({
+  schema: z.literal('tiwater.docx-observation-receipt/v1'),
+  operation: z.enum(['list', 'find', 'read']),
+  revision: docxRevision,
+  totalCount: z.number().int().nonnegative(),
+  returnedCount: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+  continuation: z.string().nullable(),
+}).strict();
+
+const docxListObjectsOutput = z.object({
+  schema: z.literal('tiwater.docx-observation-list/v1'),
+  receipt: docxObservationReceipt,
+  objects: z.array(docxObjectIdentity),
+  runtime: runtimeIdentity,
+}).strict();
+
+const docxFindLiteralOutput = z.object({
+  schema: z.literal('tiwater.docx-observation-find/v1'),
+  receipt: docxObservationReceipt,
+  matches: z.array(z.object({
+    object: docxObjectIdentity,
+    matches: z.array(z.object({
+      offset: z.number().int().nonnegative(),
+      length: z.number().int().positive(),
+    }).strict()),
+  }).strict()),
+  runtime: runtimeIdentity,
+}).strict();
+
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   revision: docxRevision,
   object: docxObjectIdentity,
@@ -214,6 +244,7 @@ const tools = [
     name: 'docx_list_objects',
     description: 'List one small page of revision-bound nearest-child identities. Use parentRef to restrict any container, such as body paragraphs, table rows, or row cells; use docx_find_literal when selecting by text.',
     inputSchema: inputContract('docx_list_objects'),
+    outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_list_objects', args),
   },
@@ -221,6 +252,7 @@ const tools = [
     name: 'docx_find_literal',
     description: 'Find exact current text in one small page of revision-bound native DOCX objects. With kind table or row, matching includes descendant cell text.',
     inputSchema: inputContract('docx_find_literal'),
+    outputSchema: docxFindLiteralOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_find_literal', args),
   },
@@ -509,7 +541,20 @@ async function docxInspect(args) {
 async function docxObservation(tool, args) {
   return withTempJsonFile(args, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, [tool, requestPath]);
-    return { ...result.json, runtime: commandRuntime(result) };
+    const payload = { ...result.json, runtime: commandRuntime(result) };
+    if (tool === 'docx_list_objects') {
+      return { ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
+    }
+    if (tool === 'docx_find_literal') {
+      return {
+        ...payload,
+        matches: payload.matches.map(match => ({
+          object: compactDocxObjectIdentity(match.object),
+          matches: match.matches,
+        })),
+      };
+    }
+    throw new Error(`unsupported-docx-observation-tool:${tool}`);
   });
 }
 
