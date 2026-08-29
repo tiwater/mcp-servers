@@ -18,24 +18,38 @@ public static class NativeObjectMutation
     public static int Run(string command, string[] args)
     {
         if (args.Length != 1) throw new InvalidOperationException($"{command} requires <request.json>");
-        object receipt = command switch
+        var requestJson = File.ReadAllText(args[0]);
+        object request;
+        object receipt;
+        if (command == CopyCommand)
         {
-            CopyCommand => Copy(JsonSerializer.Deserialize<CopyObjectRequest>(File.ReadAllText(args[0]), Json.Options)
-                ?? throw new InvalidOperationException("copy-object-request-invalid")),
-            DeleteCommand => Delete(JsonSerializer.Deserialize<DeleteObjectRequest>(File.ReadAllText(args[0]), Json.Options)
-                ?? throw new InvalidOperationException("delete-object-request-invalid")),
-            _ => throw new InvalidOperationException("native-object-command-invalid"),
-        };
+            request = JsonSerializer.Deserialize<CopyObjectRequest>(requestJson, Json.Options)
+                ?? throw new InvalidOperationException("copy-object-request-invalid");
+            receipt = Copy((CopyObjectRequest)request);
+        }
+        else if (command == DeleteCommand)
+        {
+            request = JsonSerializer.Deserialize<DeleteObjectRequest>(requestJson, Json.Options)
+                ?? throw new InvalidOperationException("delete-object-request-invalid");
+            receipt = Delete((DeleteObjectRequest)request);
+        }
+        else throw new InvalidOperationException("native-object-command-invalid");
         var output = command == CopyCommand ? ((CopyObjectReceipt)receipt).Output : ((DeleteObjectReceipt)receipt).Output;
         var receiptOutput = command == CopyCommand
             ? ((CopyObjectReceipt)receipt).ReceiptOutput
             : ((DeleteObjectReceipt)receipt).ReceiptOutput;
+        var operationCount = command == CopyCommand
+            ? ((CopyObjectRequest)request).Changes.Count
+            : ((DeleteObjectRequest)request).Changes.Count;
+        var appliedCount = command == CopyCommand
+            ? ((CopyObjectReceipt)receipt).Changes.Count
+            : ((DeleteObjectReceipt)receipt).DeletedRefs.Count;
         Console.WriteLine(JsonSerializer.Serialize(new
         {
             tool = command,
             receipt = Describe(receiptOutput),
             output = Describe(output),
-            summary = new { pass = true },
+            summary = new { pass = true, operationCount, appliedCount },
         }, Json.CamelCaseOptions));
         return 0;
     }
