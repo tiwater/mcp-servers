@@ -24,8 +24,14 @@
       ]
     },
     "scope": {
+      "description": "Exact story-part URI such as /word/document.xml.",
       "type": "string",
       "minLength": 1
+    },
+    "parentRef": {
+      "description": "Optional revision-bound parent object ref. Searches only its nearest published child objects, not every recursive descendant.",
+      "type": "string",
+      "pattern": "^dox1_[0-9a-f]{64}$"
     },
     "limit": {
       "default": 100,

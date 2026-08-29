@@ -24,13 +24,16 @@ public static class Observation
         string input,
         string kind,
         string? scope,
+        string? parentReference,
         int limit,
         string? continuation)
     {
         var snapshot = Snapshot.Open(input);
         ValidateKind(kind);
-        var objects = snapshot.Objects.Where(item => item.Kind == kind && InScope(item, scope)).ToList();
-        var selection = SelectionKey("list", kind, scope, null);
+        var objects = SelectObjects(snapshot, scope, parentReference)
+            .Where(item => item.Kind == kind)
+            .ToList();
+        var selection = SelectionKey("list", kind, scope, parentReference, null);
         var page = Page(objects, snapshot.Revision, selection, limit, continuation);
         return new DocxObservationListResult(
             "tiwater.docx-observation-list/v1",
@@ -43,6 +46,7 @@ public static class Observation
         string literal,
         string? kind,
         string? scope,
+        string? parentReference,
         int limit,
         string? continuation)
     {
@@ -51,13 +55,13 @@ public static class Observation
 
         var snapshot = Snapshot.Open(input);
         if (kind is not null) ValidateKind(kind);
-        var matches = snapshot.Objects
-            .Where(item => (kind is null || item.Kind == kind) && InScope(item, scope))
+        var matches = SelectObjects(snapshot, scope, parentReference)
+            .Where(item => kind is null || item.Kind == kind)
             .Select(item => new { Item = item, Ranges = FindRanges(TechnicalText(item.Element), literal) })
             .Where(item => item.Ranges.Count > 0)
             .Select(item => new DocxObservationMatch(ToObject(item.Item), item.Ranges))
             .ToList();
-        var selection = SelectionKey("find", kind, scope, literal);
+        var selection = SelectionKey("find", kind, scope, parentReference, literal);
         var page = Page(matches, snapshot.Revision, selection, limit, continuation);
         return new DocxObservationFindResult(
             "tiwater.docx-observation-find/v1",
@@ -232,9 +236,20 @@ public static class Observation
         return new PageResult<T>(items.Count, pageItems, remaining, next);
     }
 
-    private static string SelectionKey(string operation, string? kind, string? scope, string? literal)
+    private static string SelectionKey(
+        string operation,
+        string? kind,
+        string? scope,
+        string? parentReference,
+        string? literal)
     {
-        var value = string.Join("\0", operation, kind ?? string.Empty, scope ?? string.Empty, literal ?? string.Empty);
+        var value = string.Join(
+            "\0",
+            operation,
+            kind ?? string.Empty,
+            scope ?? string.Empty,
+            parentReference ?? string.Empty,
+            literal ?? string.Empty);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
 
@@ -271,6 +286,42 @@ public static class Observation
 
     private static bool InScope(NativeObject item, string? scope)
         => scope is null || StringComparer.Ordinal.Equals(item.StoryPart, scope);
+
+    private static IEnumerable<NativeObject> SelectObjects(
+        Snapshot snapshot,
+        string? scope,
+        string? parentReference)
+    {
+        if (parentReference is null)
+            return snapshot.Objects.Where(item => InScope(item, scope));
+        if (!IsObjectReference(parentReference))
+            throw new InvalidOperationException("parent-ref-invalid");
+
+        var parent = snapshot.Objects.FirstOrDefault(item =>
+            StringComparer.Ordinal.Equals(item.Reference, parentReference))
+            ?? throw new InvalidOperationException("stale-parent-ref");
+        if (scope is not null && !StringComparer.Ordinal.Equals(parent.StoryPart, scope))
+            throw new InvalidOperationException("parent-ref-outside-scope");
+
+        return snapshot.Objects.Where(item =>
+            InScope(item, scope) && IsDirectPublishedChild(snapshot, item, parent));
+    }
+
+    private static bool IsDirectPublishedChild(
+        Snapshot snapshot,
+        NativeObject item,
+        NativeObject parent)
+    {
+        if (ReferenceEquals(item.Element, parent.Element)) return false;
+        var current = item.Element.Parent;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, parent.Element)) return true;
+            if (snapshot.PublishedElements.Contains(current)) return false;
+            current = current.Parent;
+        }
+        return false;
+    }
 
     private static IReadOnlyList<DocxTextMatch> FindRanges(string text, string literal)
     {
@@ -338,10 +389,14 @@ public static class Observation
         {
             Revision = revision;
             Objects = objects;
+            PublishedElements = objects
+                .Select(item => item.Element)
+                .ToHashSet<OpenXmlElement>(ReferenceEqualityComparer.Instance);
         }
 
         public DocxRevision Revision { get; }
         public IReadOnlyList<NativeObject> Objects { get; }
+        public IReadOnlySet<OpenXmlElement> PublishedElements { get; }
 
         public static Snapshot Open(string input)
         {

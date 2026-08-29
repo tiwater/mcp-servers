@@ -25,6 +25,11 @@
       "type": "string",
       "minLength": 1
     },
+    "parentRef": {
+      "description": "Optional revision-bound parent object ref. Returns only its nearest published child objects: a part yields top-level story blocks, a table yields rows, a row yields cells. This is not recursive descendant search.",
+      "type": "string",
+      "pattern": "^dox1_[0-9a-f]{64}$"
+    },
     "limit": {
       "description": "Maximum objects in this page. Follow continuation for another bounded page; do not raise the limit to replace semantic filtering.",
       "default": 100,

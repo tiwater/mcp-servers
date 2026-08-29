@@ -206,14 +206,14 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one bounded page of revision-bound native DOCX objects by kind. scope is an exact story-part URI, not a table or ancestor filter. For table transfer, list or find rows and read only the selected table or rows; do not enumerate document-wide cells or runs.',
+    description: 'List one bounded page of revision-bound native DOCX objects by kind. Use parentRef to return only the nearest published children of a selected object: a part yields top-level story blocks and a table yields rows. Without parentRef the request is story-wide; scope is only an exact story-part URI.',
     inputSchema: inputContract('docx_list_objects'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_list_objects', args),
   },
   {
     name: 'docx_find_literal',
-    description: 'Find literal current text in revision-bound native DOCX objects with bounded paging and optional kind or story-part scope.',
+    description: 'Find exact current text in revision-bound native DOCX objects with bounded paging. Use parentRef to search only the nearest published children of a selected part, table, row, cell, or paragraph; this is not recursive descendant search.',
     inputSchema: inputContract('docx_find_literal'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_find_literal', args),
