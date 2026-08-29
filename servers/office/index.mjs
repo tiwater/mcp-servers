@@ -206,7 +206,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one bounded page of revision-bound native DOCX objects by kind and optional story-part scope.',
+    description: 'List one bounded page of revision-bound native DOCX objects by kind. scope is an exact story-part URI, not a table or ancestor filter. For table transfer, list or find rows and read only the selected table or rows; do not enumerate document-wide cells or runs.',
     inputSchema: inputContract('docx_list_objects'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_list_objects', args),
@@ -220,14 +220,14 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one revision-bound native DOCX object in full technical Open XML detail.',
+    description: 'Read one selected revision-bound native DOCX object in full technical Open XML detail. Use a table or row ref from list/find to inspect grid spans and merges without enumerating document-wide cells.',
     inputSchema: inputContract('docx_read_object'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_read_object', args),
   },
   {
     name: 'docx_copy_table_range',
-    description: 'Copy selected source DOCX rows into a selected target row pattern with an explicit one-to-one grid-column mapping while preserving target structure and formatting.',
+    description: 'Copy contiguous source row refs into contiguous target row-pattern refs with an explicit one-to-one logical grid-column mapping. Get row refs from list/find with kind=row; merged cells span grid columns, and one physical cell may be selected only once.',
     inputSchema: inputContract('docx_copy_table_range'),
     outputSchema: fixedEditOutput('docx_copy_table_range'),
     handler: args => fixedEdit('docx_copy_table_range', args),

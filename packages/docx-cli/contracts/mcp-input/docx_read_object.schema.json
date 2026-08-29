@@ -8,10 +8,12 @@
       "x-tiwater-file-role": "read"
     },
     "ref": {
+      "description": "One object ref returned by docx_list_objects or docx_find_literal. Read a selected table or row to inspect grid spans and merges without listing all cells.",
       "type": "string",
       "pattern": "^dox1_[0-9a-f]{64}$"
     },
     "revision": {
+      "description": "Optional expected revision id from the observation receipt; a changed document fails as stale.",
       "type": "string",
       "pattern": "^docx-rev-v1-[0-9a-f]{64}$"
     }

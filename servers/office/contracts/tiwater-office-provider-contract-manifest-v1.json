@@ -2,7 +2,7 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.15.5"
+    "version": "0.15.6"
   },
   "tools": [
     {
@@ -64,11 +64,11 @@
       "name": "docx_copy_table_range",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_copy_table_range.schema.json",
-        "sha256": "203719ca85561647c6cef62eef803f6413290c8f13802cdbcb6cc67bb4892f31"
+        "sha256": "7e5bed1cd36e41058a2d0c26b16c758d8f6a0751d0964689d68c9c2ef0eb1b26"
       },
       "inputContract": {
         "path": "office/contracts/docx_copy_table_range.schema.json",
-        "sha256": "203719ca85561647c6cef62eef803f6413290c8f13802cdbcb6cc67bb4892f31"
+        "sha256": "7e5bed1cd36e41058a2d0c26b16c758d8f6a0751d0964689d68c9c2ef0eb1b26"
       }
     },
     {
@@ -229,11 +229,11 @@
       "name": "docx_list_objects",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_list_objects.schema.json",
-        "sha256": "cdbe75c9f10cf72dffad22debb4dd5f96d8bf3f314dee362dd8e313e30f8ee32"
+        "sha256": "0b9701d46ebce82369fb8483bdbebb5867cb02a6e52627413a8428d3ddd49b2b"
       },
       "inputContract": {
         "path": "office/contracts/docx_list_objects.schema.json",
-        "sha256": "cdbe75c9f10cf72dffad22debb4dd5f96d8bf3f314dee362dd8e313e30f8ee32"
+        "sha256": "0b9701d46ebce82369fb8483bdbebb5867cb02a6e52627413a8428d3ddd49b2b"
       }
     },
     {
@@ -262,11 +262,11 @@
       "name": "docx_read_object",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_read_object.schema.json",
-        "sha256": "bc8dd92c05fad110ed5875e6bef189a85e595bb857b7008e2451212ac6231f99"
+        "sha256": "66637468203435e04545045c9be0ac118956d353501b14e12e9ceae03ac4bd9a"
       },
       "inputContract": {
         "path": "office/contracts/docx_read_object.schema.json",
-        "sha256": "bc8dd92c05fad110ed5875e6bef189a85e595bb857b7008e2451212ac6231f99"
+        "sha256": "66637468203435e04545045c9be0ac118956d353501b14e12e9ceae03ac4bd9a"
       }
     },
     {
