@@ -19,7 +19,15 @@
         "type": "object",
         "properties": {
           "targetTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-          "targetRows": { "$ref": "#/$defs/rowRange" },
+          "targetRows": {
+            "type": "object",
+            "properties": {
+              "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+              "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
+            },
+            "required": ["firstRef", "lastRef"],
+            "additionalProperties": false
+          },
           "sourceDocument": {
             "type": "object",
             "properties": {
@@ -37,9 +45,7 @@
               "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
               "excludeRefs": {
                 "type": "array",
-                "items": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-                "uniqueItems": true,
-                "default": []
+                "items": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
               }
             },
             "required": ["firstRef", "lastRef"],
@@ -73,16 +79,5 @@
     }
   },
   "required": ["targetDocument", "changes", "output", "receiptOutput"],
-  "additionalProperties": false,
-  "$defs": {
-    "rowRange": {
-      "type": "object",
-      "properties": {
-        "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-        "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
-      },
-      "required": ["firstRef", "lastRef"],
-      "additionalProperties": false
-    }
-  }
+  "additionalProperties": false
 }

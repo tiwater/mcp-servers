@@ -213,6 +213,13 @@ const tools = [
     handler: args => fixedEdit('docx_copy_content', args),
   },
   {
+    name: 'docx_copy_table_rows',
+    description: 'Create a new DOCX by replacing selected target table row ranges with selected source rows, using explicit source-to-target header cell mappings while retaining target presentation.',
+    inputSchema: inputContract('docx_copy_table_rows'),
+    outputSchema: fixedEditOutput('docx_copy_table_rows'),
+    handler: args => fixedEdit('docx_copy_table_rows', args),
+  },
+  {
     name: 'docx_copy_object',
     description: 'Create a new output by copying targetDocument and applying one or more selected-object insertions under selected target parent objects.',
     inputSchema: inputContract('docx_copy_object'),

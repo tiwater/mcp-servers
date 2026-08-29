@@ -187,7 +187,7 @@ public static class NativeContentCopy
         };
     }
 
-    private static Paragraph CloneParagraph(Paragraph paragraph)
+    internal static Paragraph CloneParagraph(Paragraph paragraph)
     {
         var clone = (Paragraph)paragraph.CloneNode(true);
         clone.ParagraphProperties?.Remove();
@@ -223,7 +223,7 @@ public static class NativeContentCopy
         return builder.ToString();
     }
 
-    private static void ReplaceCellContent(TableCell target, IReadOnlyList<Paragraph> sourceParagraphs)
+    internal static void ReplaceCellContent(TableCell target, IReadOnlyList<Paragraph> sourceParagraphs)
     {
         var template = target.Elements<Paragraph>().FirstOrDefault();
         var paragraphProperties = template?.ParagraphProperties?.CloneNode(true) as ParagraphProperties;

@@ -23,6 +23,7 @@ public static class Cli
         "validate-toc-style-policy",
         .. ObservationCommand.Commands,
         NativeContentCopy.Command,
+        NativeTableRowCopy.Command,
         NativeObjectMutation.CopyCommand,
         NativeObjectMutation.DeleteCommand,
         NativeCellMutation.MergeCommand,
@@ -75,6 +76,7 @@ public static class Cli
                 "validate-toc-style-policy" => Task.FromResult(TocStylePolicy.RunValidate(args[1..])),
                 _ when ObservationCommand.IsCommand(args[0]) => Task.FromResult(ObservationCommand.Run(args[0], args[1..])),
                 _ when args[0] == NativeContentCopy.Command => Task.FromResult(NativeContentCopy.Run(args[1..])),
+                _ when args[0] == NativeTableRowCopy.Command => Task.FromResult(NativeTableRowCopy.Run(args[1..])),
                 _ when args[0] is NativeObjectMutation.CopyCommand or NativeObjectMutation.DeleteCommand
                     => Task.FromResult(NativeObjectMutation.Run(args[0], args[1..])),
                 _ when args[0] is NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
@@ -174,6 +176,7 @@ public static class Cli
         {
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
             _ when ObservationCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
+            _ when command == NativeTableRowCopy.Command => $"tiwater-docx {command} <request.json>",
             "compare" => "tiwater-docx compare <old.docx> <new.docx> [--json]",
             "validate-openxml" => "tiwater-docx validate-openxml <input.docx>",
             "strip-direct-formatting" => "tiwater-docx strip-direct-formatting <input.docx> <output.docx>",
