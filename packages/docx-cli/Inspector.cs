@@ -177,10 +177,12 @@ public static class Inspector
         using var doc = WordprocessingDocument.Open(path, false);
         var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
         var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+        var revision = Observation.CurrentRevision(path);
         var details = new List<TableDetail>();
         var nextTableIndex = 0;
         void AddTable(
             Table table,
+            string storyPart,
             IReadOnlyList<string> containmentPath,
             string? parentCellAddress,
             TableStoryIdentity story,
@@ -205,7 +207,7 @@ public static class Inspector
                     var cell = cells[cellIndex];
                     var properties = cell.TableCellProperties;
                     var gridSpan = Math.Max(1, properties?.GridSpan?.Val?.Value ?? 1);
-                    var paragraphDetails = BuildTableParagraphDetails(cell);
+                    var paragraphDetails = BuildTableParagraphDetails(cell, revision, storyPart);
                     var vMerge = properties?.VerticalMerge is null
                         ? null
                         : GetValAttribute(properties.VerticalMerge) ?? "continue";
@@ -216,6 +218,7 @@ public static class Inspector
                     var text = string.Join("\n", paragraphDetails.Select(paragraph => paragraph.Text)).Trim();
 
                     cellDetails.Add(new TableCellDetail(
+                        Ref: Observation.MakeReference(revision, "cell", storyPart, Observation.NativePathFor(cell)),
                         CellIndex: cellIndex,
                         GridColumnStart: gridColumn,
                         GridColumnEnd: gridColumn + gridSpan - 1,
@@ -234,6 +237,7 @@ public static class Inspector
                 var gridWidth = gridColumn + gridAfter;
                 columnCount = Math.Max(columnCount, gridWidth);
                 rowDetails.Add(new TableRowDetail(
+                    Ref: Observation.MakeReference(revision, "row", storyPart, Observation.NativePathFor(row)),
                     RowIndex: rowIndex,
                     GridBefore: gridBefore,
                     GridAfter: gridAfter,
@@ -250,6 +254,7 @@ public static class Inspector
             while (declaredGridWidths.Count < gridColumnCount) declaredGridWidths.Add(null);
             var tableWidth = table.GetFirstChild<TableProperties>()?.GetFirstChild<TableWidth>();
             details.Add(new TableDetail(
+                Ref: Observation.MakeReference(revision, "table", storyPart, Observation.NativePathFor(table)),
                 TableIndex: tableIndex,
                 ContainmentPath: containmentPath,
                 ParentCellAddress: parentCellAddress,
@@ -273,6 +278,7 @@ public static class Inspector
                     var cellAddress = $"table:{tableIndex}:row:{rowIndex}:cell:{cellIndex}";
                     AddTable(
                         nested[nestedIndex],
+                        storyPart,
                         [.. containmentPath, $"row:{rowIndex}", $"cell:{cellIndex}", $"table:{nestedIndex}"],
                         cellAddress,
                         story,
@@ -284,7 +290,7 @@ public static class Inspector
         var bodyStory = new TableStoryIdentity("body", null, null, []);
         var bodyTables = body.Elements<Table>().ToList();
         for (var index = 0; index < bodyTables.Count; index++)
-            AddTable(bodyTables[index], ["body", $"table:{index}"], null, bodyStory, new TableMutationAddress("body", index));
+            AddTable(bodyTables[index], "/word/document.xml", ["body", $"table:{index}"], null, bodyStory, new TableMutationAddress("body", index));
         var bodyTableDetailCount = details.Count;
 
         var sections = body.Descendants<SectionProperties>().ToList();
@@ -297,7 +303,7 @@ public static class Inspector
             var story = new TableStoryIdentity("header", headerIndex, null, references);
             var tables = headers[headerIndex].Header!.Elements<Table>().ToList();
             for (var tableIndex = 0; tableIndex < tables.Count; tableIndex++)
-                AddTable(tables[tableIndex], ["header", $"header:{headerIndex}", $"table:{tableIndex}"], null, story, new TableMutationAddress("header", tableIndex, HeaderIndex: headerIndex));
+                AddTable(tables[tableIndex], NormalizePartUri(headers[headerIndex].Uri), ["header", $"header:{headerIndex}", $"table:{tableIndex}"], null, story, new TableMutationAddress("header", tableIndex, HeaderIndex: headerIndex));
         }
 
         var footers = mainPart.FooterParts.Where(part => part.Footer is not null)
@@ -309,13 +315,14 @@ public static class Inspector
             var story = new TableStoryIdentity("footer", null, footerIndex, references);
             var tables = footers[footerIndex].Footer!.Elements<Table>().ToList();
             for (var tableIndex = 0; tableIndex < tables.Count; tableIndex++)
-                AddTable(tables[tableIndex], ["footer", $"footer:{footerIndex}", $"table:{tableIndex}"], null, story, new TableMutationAddress("footer", tableIndex, FooterIndex: footerIndex));
+                AddTable(tables[tableIndex], NormalizePartUri(footers[footerIndex].Uri), ["footer", $"footer:{footerIndex}", $"table:{tableIndex}"], null, story, new TableMutationAddress("footer", tableIndex, FooterIndex: footerIndex));
         }
 
         var version = typeof(Inspector).Assembly.GetName().Version?.ToString() ?? "unknown";
         return new TableInspectionReport(
             "tiwater.docx.inspect-tables/v1",
             version,
+            revision,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["revisionView"] = "package-current",
@@ -492,7 +499,10 @@ public static class Inspector
     public static string GetParagraphText(Paragraph paragraph)
         => GetInlineText(paragraph).Trim();
 
-    private static IReadOnlyList<TableParagraphDetail> BuildTableParagraphDetails(TableCell cell)
+    private static string NormalizePartUri(Uri uri)
+        => uri.OriginalString.StartsWith("/", StringComparison.Ordinal) ? uri.OriginalString : "/" + uri.OriginalString;
+
+    private static IReadOnlyList<TableParagraphDetail> BuildTableParagraphDetails(TableCell cell, DocxRevision revision, string storyPart)
     {
         var paragraphs = cell.Elements<Paragraph>().ToList();
         var result = new List<TableParagraphDetail>(paragraphs.Count);
@@ -503,10 +513,11 @@ public static class Inspector
             var runDetails = new List<TableRunDetail>(runs.Count);
             for (var runIndex = 0; runIndex < runs.Count; runIndex++)
             {
-                runDetails.Add(BuildTableRunDetail(runs[runIndex], runIndex));
+                runDetails.Add(BuildTableRunDetail(runs[runIndex], runIndex, revision, storyPart));
             }
 
             result.Add(new TableParagraphDetail(
+                Ref: Observation.MakeReference(revision, "paragraph", storyPart, Observation.NativePathFor(paragraph)),
                 ParagraphIndex: paragraphIndex,
                 Text: GetParagraphText(paragraph),
                 Style: paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
@@ -517,11 +528,12 @@ public static class Inspector
         return result;
     }
 
-    private static TableRunDetail BuildTableRunDetail(Run run, int runIndex)
+    private static TableRunDetail BuildTableRunDetail(Run run, int runIndex, DocxRevision revision, string storyPart)
     {
         var properties = run.RunProperties;
         var fonts = properties?.RunFonts;
         return new TableRunDetail(
+            Ref: Observation.MakeReference(revision, "run", storyPart, Observation.NativePathFor(run)),
             RunIndex: runIndex,
             Text: GetInlineText(run),
             Style: properties?.RunStyle?.Val?.Value,
