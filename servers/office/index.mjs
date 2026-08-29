@@ -265,7 +265,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object and requested descendants. Select the smallest useful object; for a large table, page rows with docx_list_objects and read only the selected rows.',
+    description: 'Read one selected native DOCX object and requested descendants. Read a complete small or medium table once with row, cell, and paragraph descendants; add run or text only for an exact inline selection. Page rows only when the complete table is too large for one response.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
