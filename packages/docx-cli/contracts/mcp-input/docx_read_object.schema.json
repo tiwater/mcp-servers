@@ -16,11 +16,18 @@
       "description": "Optional expected revision id from the observation receipt; a changed document fails as stale.",
       "type": "string",
       "pattern": "^docx-rev-v1-[0-9a-f]{64}$"
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path for a new JSON artifact containing the complete native object observation.",
+      "x-tiwater-file-role": "write"
     }
   },
   "required": [
     "input",
-    "ref"
+    "ref",
+    "output"
   ],
   "additionalProperties": false,
   "$id": "tiwater.office-mcp-input/docx_read_object/v1"

@@ -219,10 +219,11 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected revision-bound native DOCX object in full technical Open XML detail. Use a table or row ref from list/find to inspect grid spans and merges without enumerating document-wide cells.',
+    description: 'Write one selected revision-bound native DOCX object in full technical Open XML detail to a new JSON artifact. Use a table or row ref from list/find to inspect grid spans and merges without enumerating document-wide cells.',
     inputSchema: inputContract('docx_read_object'),
+    outputSchema: artifactOutput('docx_read_object'),
     annotations: { readOnlyHint: true, idempotentHint: true },
-    handler: args => docxObservation('docx_read_object', args),
+    handler: docxReadObject,
   },
   {
     name: 'docx_copy_content',
@@ -425,6 +426,21 @@ async function docxObservation(tool, args) {
   return withTempJsonFile(args, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, [tool, requestPath]);
     return { ...result.json, runtime: commandRuntime(result) };
+  });
+}
+
+async function docxReadObject(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const output = requireString(args.output, 'output');
+  const { output: _output, ...request } = args;
+  return withTempJsonFile(request, async requestPath => {
+    const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
+    return {
+      tool: 'docx_read_object',
+      runtime: commandRuntime(result),
+      source: await fileArtifact(input),
+      artifact: await writeJsonArtifact(output, result.json),
+    };
   });
 }
 
