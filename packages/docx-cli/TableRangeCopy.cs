@@ -65,6 +65,7 @@ public static class TableRangeCopy
             throw new InvalidOperationException("grid-columns-must-be-nonnegative");
 
         IReadOnlyList<IReadOnlyList<string>> sourceValues;
+        IReadOnlyList<IReadOnlyList<string>> sourceVerticalMerges;
         IReadOnlyList<TableRow> patternRows;
         Table targetTable;
         int targetStartRowIndex;
@@ -99,6 +100,11 @@ public static class TableRangeCopy
                 EnsureTextOnly(cell, "source");
                 return string.Join("\n", cell.Elements<Paragraph>().Select(paragraph => paragraph.InnerText));
             }).ToList()).ToList();
+            sourceVerticalMerges = sourceRows.Select(row => (IReadOnlyList<string>)request.Columns.Select(mapping =>
+            {
+                var cell = CellAtGridColumn(row, mapping.SourceGridColumn)!;
+                return VerticalMergeState(cell);
+            }).ToList()).ToList();
 
             foreach (var patternRow in patternRows)
             {
@@ -111,6 +117,10 @@ public static class TableRangeCopy
                     EnsureTextOnly(cell, "target");
                 }
             }
+            EnsureMatchingVerticalMergeTopology(
+                sourceVerticalMerges,
+                patternRows,
+                request.Columns);
             baselineValidationIssues = ValidationIssueCounts(targetDocument);
         }
 
@@ -211,6 +221,30 @@ public static class TableRangeCopy
     private static bool HasVerticalMerge(IEnumerable<TableRow> rows)
         => rows.SelectMany(row => row.Elements<TableCell>())
             .Any(cell => cell.TableCellProperties?.VerticalMerge is not null);
+
+    private static void EnsureMatchingVerticalMergeTopology(
+        IReadOnlyList<IReadOnlyList<string>> sourceStates,
+        IReadOnlyList<TableRow> patternRows,
+        IReadOnlyList<DocxCopyTableRangeColumn> columns)
+    {
+        for (var rowIndex = 0; rowIndex < sourceStates.Count; rowIndex++)
+        {
+            var pattern = patternRows[rowIndex % patternRows.Count];
+            for (var columnIndex = 0; columnIndex < columns.Count; columnIndex++)
+            {
+                var targetCell = CellAtGridColumn(pattern, columns[columnIndex].TargetGridColumn)!;
+                if (sourceStates[rowIndex][columnIndex] != VerticalMergeState(targetCell))
+                    throw new InvalidOperationException("source-target-vertical-merge-topology-mismatch");
+            }
+        }
+    }
+
+    private static string VerticalMergeState(TableCell cell)
+    {
+        var merge = cell.TableCellProperties?.VerticalMerge;
+        if (merge is null) return "none";
+        return merge.Val?.Value == MergedCellValues.Restart ? "restart" : "continue";
+    }
 
     private static TableCell? CellAtGridColumn(TableRow row, int gridColumn)
     {
