@@ -19,6 +19,7 @@ const serverLockPath = path.join(serverRoot, 'package-lock.json');
 const generatedManifestRelativePath = 'office/contracts/tiwater-office-provider-contract-manifest-v1.json';
 const generatedContractDeclaration = 'office/contracts/*.schema.json';
 const fileRoleKey = 'x-tiwater-file-role';
+const fileEffectKey = 'x-tiwater-file-effect';
 const expectedFileRolesByProperty = new Map([
   ['input', 'read'],
   ['baseline', 'read'],
@@ -28,6 +29,9 @@ const expectedFileRolesByProperty = new Map([
   ['source', 'read'],
   ['output', 'write'],
   ['receiptOutput', 'write'],
+]);
+const expectedFileEffectsByProperty = new Map([
+  ['receiptOutput', false],
 ]);
 const requiredPackageFiles = [
   'package.json',
@@ -524,6 +528,7 @@ function checkFileArgumentRoles(schema, toolName, check) {
   function visit(node, location, propertyName = '') {
     if (!node || typeof node !== 'object' || Array.isArray(node)) return;
     const declaredRole = node[fileRoleKey];
+    const declaredEffect = node[fileEffectKey];
     if (declaredRole !== undefined) {
       if (node.type !== 'string' || !['read', 'write'].includes(declaredRole)) {
         fail(check, `tool ${toolName} has invalid ${fileRoleKey} at ${location}`);
@@ -531,9 +536,17 @@ function checkFileArgumentRoles(schema, toolName, check) {
         count += 1;
       }
     }
+    if (declaredEffect !== undefined
+      && (declaredRole !== 'write' || typeof declaredEffect !== 'boolean')) {
+      fail(check, `tool ${toolName} has invalid ${fileEffectKey} at ${location}`);
+    }
     const expectedRole = node.type === 'string' ? expectedFileRolesByProperty.get(propertyName) : undefined;
     if (expectedRole && declaredRole !== expectedRole) {
       fail(check, `tool ${toolName} must declare ${location} as a ${expectedRole} file argument`);
+    }
+    const expectedEffect = expectedFileEffectsByProperty.get(propertyName);
+    if (expectedEffect !== undefined && declaredEffect !== expectedEffect) {
+      fail(check, `tool ${toolName} must declare ${location} ${fileEffectKey} as ${expectedEffect}`);
     }
     for (const [name, child] of Object.entries(node.properties || {})) {
       visit(child, `${location}.properties.${name}`, name);

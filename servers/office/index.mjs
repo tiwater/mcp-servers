@@ -126,7 +126,7 @@ const docxFixedTools = [
   {"name":"docx_set_table_cell_rich_text","description":"Set current body table cell rich text."},
   {"name":"docx_insert_table_rows","description":"Insert rows into a current body table."},
   {"name":"docx_delete_table_rows","description":"Delete current body table row ranges."},
-  {"name":"docx_replace_table_rows","description":"Replace a current body table range with explicit final rows. Use when values must be regrouped, filtered, assigned to different semantic columns, or given explicit gridSpan/vMerge states; matching template-row styles are retained."},
+  {"name":"docx_replace_table_rows","description":"Replace an inclusive range of existing current body table rows with explicit final rows. startRowIndex/endRowIndex address existing rows and do not describe the number of replacement rows; rows may contain a different count. Use when values must be regrouped, filtered, assigned to different semantic columns, or given explicit gridSpan/vMerge states; matching template-row styles are retained."},
   {"name":"docx_insert_table_columns","description":"Insert columns into a current body table."},
   {"name":"docx_set_table_width","description":"Set current body table widths."},
   {"name":"docx_set_table_cell_alignment","description":"Set current body table cell alignment."},
