@@ -43,11 +43,6 @@ DOCX mutations accept revision-bound native object references. Physical table,
 row, column, paragraph, run, drawing, and body indexes are not public mutation
 addresses.
 
-`docx_inspect_tables` preserves the v1 body `Tables` view and additively exposes
-header/footer topology in `StoryTables`. Header/footer tables carry part
-coordinates plus section/reference bindings, and only supported direct-story
-tables expose mutation addresses.
-
 The catalog is intentionally open to new generic document capabilities, but a
 specific workflow, template, customer, issue, input document, or model
 difference does not justify a new tool. Add a tool only for a stable technical

@@ -13,7 +13,6 @@ public static class Cli
     private static readonly string[] DiscoverableCommands =
     [
         "inspect",
-        "inspect-tables",
         "compare",
         "validate-openxml",
         "strip-direct-formatting",
@@ -66,7 +65,6 @@ public static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
-                "inspect-tables" => RunInspectTablesAsync(args[1..]),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-openxml" => Task.FromResult(OpenXmlValidation.Run(args[1..])),
                 "strip-direct-formatting" => Task.FromResult(Transforms.RunStripDirectFormatting(args[1..])),
@@ -118,29 +116,6 @@ public static class Cli
         return Task.FromResult(0);
     }
 
-    private static Task<int> RunInspectTablesAsync(string[] args)
-    {
-        if (args.Length < 1)
-        {
-            throw new InvalidOperationException("inspect-tables requires <input.docx>");
-        }
-
-        var input = args[0];
-        var json = args.Skip(1).Contains("--json", StringComparer.Ordinal);
-        var report = Inspector.InspectTables(input);
-
-        if (json)
-        {
-            WriteJson(report);
-        }
-        else
-        {
-            RenderInspectTables(report);
-        }
-
-        return Task.FromResult(0);
-    }
-
     private static Task<int> RunCompareAsync(string[] args)
     {
         if (args.Length < 2)
@@ -169,7 +144,6 @@ public static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
-        Console.WriteLine("  inspect-tables <input.docx> [--json]");
         Console.WriteLine("  docx_list_objects <request.json>");
         Console.WriteLine("  docx_find_literal <request.json>");
         Console.WriteLine("  docx_read_object <request.json>");
@@ -199,7 +173,6 @@ public static class Cli
         var usage = command switch
         {
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
-            "inspect-tables" => "tiwater-docx inspect-tables <input.docx> [--json]",
             _ when ObservationCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
             "compare" => "tiwater-docx compare <old.docx> <new.docx> [--json]",
             "validate-openxml" => "tiwater-docx validate-openxml <input.docx>",
@@ -285,26 +258,6 @@ public static class Cli
         foreach (var diff in report.MetricDiffs.Where(d => d.OldValue != d.NewValue))
         {
             Console.WriteLine($"  {diff.Name}: {diff.OldValue} -> {diff.NewValue}");
-        }
-    }
-
-    private static void RenderInspectTables(TableInspectionReport report)
-    {
-        Console.WriteLine($"File: {report.File}");
-        var tables = report.Tables.Concat(report.StoryTables ?? []).ToList();
-        Console.WriteLine($"Tables: {tables.Count}");
-        foreach (var table in tables)
-        {
-            var story = table.Story?.Kind ?? "body";
-            Console.WriteLine($"Table {table.TableIndex} ({story}): {table.RowCount} row(s), {table.ColumnCount} column(s)");
-            foreach (var row in table.Rows.Take(5))
-            {
-                var cells = row.Cells
-                    .Take(5)
-                    .Select(cell => $"[{cell.GridColumnStart}-{cell.GridColumnEnd} {cell.VMerge ?? "-"}] {cell.Text}")
-                    .ToArray();
-                Console.WriteLine($"  Row {row.RowIndex}: {string.Join(" | ", cells)}");
-            }
         }
     }
 
