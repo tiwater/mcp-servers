@@ -214,7 +214,7 @@ const tools = [
   },
   {
     name: 'docx_copy_content',
-    description: 'Create a new output by copying targetDocument and applying one or more content changes to selected target cells, retaining target cell formatting and source inline meaning.',
+    description: 'Replace content in existing target cells while retaining target cell formatting and source inline meaning. Use this directly or after docx_copy_table_rows when a target cell needs an exact observed subset of source content. A source selection copies a whole object by ref, or an exact substring when range is attached to a run or text ref.',
     inputSchema: inputContract('docx_copy_content'),
     outputSchema: fixedEditOutput('docx_copy_content'),
     handler: args => fixedEdit('docx_copy_content', args),

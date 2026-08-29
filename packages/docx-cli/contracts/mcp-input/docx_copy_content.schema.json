@@ -18,7 +18,11 @@
       "items": {
         "type": "object",
         "properties": {
-          "targetRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+          "targetRef": {
+            "type": "string",
+            "pattern": "^dox1_[0-9a-f]{64}$",
+            "description": "Target cell ref whose content is replaced while its cell formatting is retained."
+          },
           "sourceDocument": {
             "type": "object",
             "properties": {
@@ -31,12 +35,18 @@
           "sourceSelections": {
             "type": "array",
             "minItems": 1,
+            "description": "Ordered source content copied into the target cell. Select a whole observed object by ref alone, or select an exact substring by adding range to an observed run or text ref. Multiple selections are copied in this array order.",
             "items": {
               "type": "object",
               "properties": {
-                "ref": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+                "ref": {
+                  "type": "string",
+                  "pattern": "^dox1_[0-9a-f]{64}$",
+                  "description": "Observed source object ref. When range is present this must be a run or text ref, not a paragraph, cell, row, or table ref."
+                },
                 "range": {
                   "type": "object",
+                  "description": "Zero-based substring within the selected run or text object. Omit range to copy the whole selected object.",
                   "properties": {
                     "start": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
                     "length": { "type": "integer", "exclusiveMinimum": 0, "maximum": 2147483647 }
