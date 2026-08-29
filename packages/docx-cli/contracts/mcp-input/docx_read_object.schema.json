@@ -8,7 +8,7 @@
       "x-tiwater-file-role": "read"
     },
     "ref": {
-      "description": "One object ref returned by docx_list_objects or docx_find_literal. Select the smallest object that contains the needed detail; for a large table, page its rows first and read only the selected rows.",
+      "description": "One object ref returned by docx_list_objects or docx_find_literal. Read a complete small or medium table once; page rows only when the complete table is too large for one response.",
       "type": "string",
       "pattern": "^dox1_[0-9a-f]{64}$"
     },
