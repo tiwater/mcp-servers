@@ -187,6 +187,19 @@ const docxObjectIdentity = z.object({
   verticalMerge: z.string().nullable(),
 }).strict();
 
+const docxNestedObjectIdentity = docxObjectIdentity.pick({
+  ref: true,
+  kind: true,
+  textPreview: true,
+}).extend({
+  gridSpan: z.number().int().positive().optional(),
+  verticalMerge: z.string().optional(),
+}).strict();
+const docxObservationNode = z.lazy(() => z.object({
+  object: docxNestedObjectIdentity,
+  children: z.array(docxObservationNode).optional(),
+}).strict());
+
 const docxObservationReceipt = z.object({
   schema: z.literal('tiwater.docx-observation-receipt/v1'),
   operation: z.enum(['list', 'find', 'read']),
@@ -219,8 +232,7 @@ const docxFindLiteralOutput = z.object({
 
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   revision: docxRevision,
-  object: docxObjectIdentity,
-  objects: z.array(docxObjectIdentity).min(1),
+  observation: docxObservationNode,
 }).strict();
 
 const tools = [
@@ -514,15 +526,24 @@ function compactDocxObjectIdentity(object) {
   };
 }
 
-function compactDocxObservationObjects(observation) {
-  const objects = [];
-  function visit(node) {
-    if (!node?.object) return;
-    objects.push(compactDocxObjectIdentity(node.object));
-    for (const child of node.children ?? []) visit(child);
+function compactDocxObservation(observation) {
+  if (!observation?.object) throw new Error('docx-read-object-missing-observation');
+  function compactNode(node) {
+    const identity = compactDocxObjectIdentity(node.object);
+    const object = {
+      ref: identity.ref,
+      kind: identity.kind,
+      textPreview: identity.textPreview,
+      ...(identity.gridSpan === null ? {} : { gridSpan: identity.gridSpan }),
+      ...(identity.verticalMerge === null ? {} : { verticalMerge: identity.verticalMerge }),
+    };
+    const children = (node.children ?? []).map(compactNode);
+    return {
+      object,
+      ...(children.length === 0 ? {} : { children }),
+    };
   }
-  visit(observation);
-  return objects;
+  return compactNode(observation);
 }
 
 async function docxInspect(args) {
@@ -569,8 +590,7 @@ async function docxReadObject(args) {
       source: await fileArtifact(input),
       artifact: await writeJsonArtifact(output, result.json),
       revision: result.json.receipt.revision,
-      object: compactDocxObjectIdentity(result.json.observation.object),
-      objects: compactDocxObservationObjects(result.json.observation),
+      observation: compactDocxObservation(result.json.observation),
     };
   });
 }
