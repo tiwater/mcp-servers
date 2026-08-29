@@ -19,8 +19,9 @@
         "type": "object",
         "properties": {
           "targetTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-          "targetRows": {
-            "type": "object",
+      "targetRows": {
+        "type": "object",
+        "description": "Complete target data-row range to replace. Exclude every header row, including continuation rows in a multi-row header; the range cannot start or end inside a vertical merge.",
             "properties": {
               "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
               "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
@@ -38,8 +39,9 @@
             "additionalProperties": false
           },
           "sourceTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-          "sourceRows": {
-            "type": "object",
+      "sourceRows": {
+        "type": "object",
+        "description": "Contiguous source business-row range. Do not begin on an unlabeled continuation row from an excluded business group. If another column's visible merge began before the range, the provider carries its origin value into a new merge start.",
             "properties": {
               "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
               "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
@@ -51,9 +53,10 @@
             "required": ["firstRef", "lastRef"],
             "additionalProperties": false
           },
-          "columns": {
-            "type": "array",
-            "minItems": 1,
+      "columns": {
+        "type": "array",
+        "minItems": 1,
+        "description": "One mapping per logical header cell. A header cell owns its full OpenXML gridSpan; do not add separate mappings for physical grid columns inside that span.",
             "items": {
               "type": "object",
               "properties": {
