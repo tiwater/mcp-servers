@@ -176,14 +176,14 @@ const tools = [
   },
   {
     name: 'docx_copy_content',
-    description: 'Copy selected current DOCX content directly into selected current target cells while retaining target cell formatting and source inline meaning.',
+    description: 'Create a new output by copying targetDocument and applying one or more content changes to selected target cells, retaining target cell formatting and source inline meaning.',
     inputSchema: inputContract('docx_copy_content'),
     outputSchema: fixedEditOutput('docx_copy_content'),
     handler: args => fixedEdit('docx_copy_content', args),
   },
   {
     name: 'docx_copy_object',
-    description: 'Copy selected current DOCX objects directly under a selected current target parent object.',
+    description: 'Create a new output by copying targetDocument and applying one or more selected-object insertions under selected target parent objects.',
     inputSchema: inputContract('docx_copy_object'),
     outputSchema: fixedEditOutput('docx_copy_object'),
     handler: args => fixedEdit('docx_copy_object', args),
