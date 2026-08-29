@@ -392,6 +392,11 @@ public static class Observation
     private static DocxObservationObject ToObject(Snapshot snapshot, NativeObject item)
     {
         var text = item.Kind == "part" ? null : TechnicalText(item.Element);
+        var cellProperties = (item.Element as TableCell)?.TableCellProperties;
+        var verticalMerge = cellProperties?.VerticalMerge is null
+            ? null
+            : cellProperties.VerticalMerge.GetAttributes()
+                .FirstOrDefault(attribute => attribute.LocalName == "val").Value ?? "continue";
         return new DocxObservationObject(
             item.Reference,
             PublishedParentReference(snapshot, item),
@@ -401,7 +406,9 @@ public static class Observation
             item.Element.LocalName,
             text is null ? null : Clip(text, 160),
             text?.Length,
-            item.Element.ChildElements.Count);
+            item.Element.ChildElements.Count,
+            cellProperties is null ? null : Math.Max(1, cellProperties.GridSpan?.Val?.Value ?? 1),
+            verticalMerge);
     }
 
     private static string? PublishedParentReference(Snapshot snapshot, NativeObject item)
@@ -598,7 +605,9 @@ public sealed record DocxObservationObject(
     [property: JsonPropertyName("localName")] string LocalName,
     [property: JsonPropertyName("textPreview")] string? TextPreview,
     [property: JsonPropertyName("textLength")] int? TextLength,
-    [property: JsonPropertyName("childCount")] int ChildCount);
+    [property: JsonPropertyName("childCount")] int ChildCount,
+    [property: JsonPropertyName("gridSpan")] int? GridSpan,
+    [property: JsonPropertyName("verticalMerge")] string? VerticalMerge);
 
 public sealed record DocxTextMatch(
     [property: JsonPropertyName("offset")] int Offset,

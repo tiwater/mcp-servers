@@ -166,6 +166,8 @@ const docxObjectIdentity = z.object({
   parentRef: z.string().regex(/^dox1_[0-9a-f]{64}$/).nullable(),
   kind: z.string(),
   textPreview: z.string().nullable(),
+  gridSpan: z.number().int().positive().nullable(),
+  verticalMerge: z.string().nullable(),
 }).strict();
 
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
@@ -417,6 +419,8 @@ function compactDocxObjectIdentity(object) {
     parentRef: object.parentRef,
     kind: object.kind,
     textPreview: object.textPreview,
+    gridSpan: object.gridSpan,
+    verticalMerge: object.verticalMerge,
   };
 }
 
