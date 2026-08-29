@@ -191,64 +191,6 @@ public sealed record ComparisonReport(
     InspectionReport OldInspection,
     InspectionReport NewInspection);
 
-internal sealed record DocxEditOperation(
-    string Type,
-    string? CommentId = null,
-    string? Text = null,
-    string? FindText = null,
-    int? HeaderIndex = null,
-    int? FooterIndex = null,
-    int? ParagraphIndex = null,
-    int? RunIndex = null,
-    int? TableIndex = null,
-    int? RowIndex = null,
-    int? CellIndex = null,
-    int? GridColumn = null,
-    IReadOnlyList<IReadOnlyList<DocxTableCellInput>>? Rows = null,
-    IReadOnlyList<string>? CommentIds = null,
-    int? StartCellIndex = null,
-    int? EndCellIndex = null,
-    int? StartRowIndex = null,
-    int? EndRowIndex = null,
-    int? TemplateRowIndex = null,
-    int? ColumnIndex = null,
-    int? ColumnCount = null,
-    int? TemplateColumnIndex = null,
-    string? Alignment = null,
-    string? Width = null,
-    string? WidthType = null,
-    string? Orientation = null,
-    string? FontSize = null,
-    string? Height = null,
-    string? HeightRule = null,
-    string? EndFindText = null,
-    string? MatchMode = null,
-    string? EndMatchMode = null,
-    string? ParagraphStyle = null,
-    string? EndParagraphStyle = null,
-    bool? DeleteToBodyEnd = null,
-    bool? RemovePrecedingPageBreak = null,
-    bool? NoWrap = null,
-    bool? CantSplit = null,
-    bool? KeepNext = null,
-    bool? KeepLines = null,
-    bool? Italic = null,
-    int? IndentCharactersPerLevel = null,
-    bool? RepeatAsHeader = null,
-    IReadOnlyList<DocxRichTextSegment>? RichText = null,
-    DocxFontPolicy? FontPolicy = null,
-    IReadOnlyList<string>? ParagraphTexts = null,
-    int? ExpectedCount = null,
-    string? Source = null,
-    int? SourceStartBodyIndex = null,
-    int? SourceEndBodyIndex = null,
-    int? TargetBodyIndex = null,
-    string? Image = null,
-    int? DrawingIndex = null,
-    long? WidthEmu = null,
-    long? HeightEmu = null,
-    string? AltText = null);
-
 public sealed record DocxFontRule(string EastAsia, string Latin, string Size);
 
 public sealed record DocxFontPolicy(string Schema, DocxFontRule Body, DocxFontRule Table);
@@ -295,35 +237,6 @@ public sealed record DocxFontInspectionReport(
     int BodyRunCount,
     int TableRunCount,
     IReadOnlyList<DocxFontRunObservation> Runs);
-
-public sealed record DocxTableCellInput(
-    string? Text = null,
-    int? GridSpan = null,
-    string? VMerge = null,
-    bool? Bold = null,
-    bool? Header = null,
-    string? Shading = null,
-    string? Alignment = null,
-    IReadOnlyList<DocxRichTextSegment>? RichText = null);
-
-public sealed record DocxRichTextSegment(
-    string Text,
-    string? Color = null,
-    bool? Underline = null,
-    bool? Bold = null,
-    string? FontName = null,
-    bool? Italic = null,
-    string? VerticalAlignment = null);
-
-internal sealed record DocxEditAppliedOperation(
-    string Type,
-    bool Applied,
-    string Detail);
-
-internal sealed record DocxEditResult(
-    string Input,
-    string Output,
-    IReadOnlyList<DocxEditAppliedOperation> AppliedOperations);
 
 public static class Json
 {
