@@ -1,0 +1,114 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
+using DocumentFormat.OpenXml.Wordprocessing;
+
+namespace Dockit.Docx;
+
+internal static class NativeMutationSupport
+{
+    public static (string Input, string Output, string Receipt) Paths(
+        ObjectDocument targetDocument,
+        string output,
+        string receiptOutput)
+    {
+        var inputPath = Path.GetFullPath(targetDocument.Input);
+        var outputPath = Path.GetFullPath(output);
+        var receiptPath = Path.GetFullPath(receiptOutput);
+        RequireNewPath(outputPath, "output");
+        RequireNewPath(receiptPath, "receiptOutput");
+        if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath))
+            throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
+        if (StringComparer.OrdinalIgnoreCase.Equals(inputPath, outputPath))
+            throw new InvalidOperationException("output-must-not-overwrite-input");
+        var revision = Observation.CurrentRevision(inputPath);
+        if (!StringComparer.Ordinal.Equals(revision.Id, targetDocument.Revision))
+            throw new InvalidOperationException("stale-revision");
+        return (inputPath, outputPath, receiptPath);
+    }
+
+    public static IReadOnlyDictionary<string, int> ValidationIssueCounts(WordprocessingDocument document)
+        => new OpenXmlValidator().Validate(document)
+            .GroupBy(issue => $"{issue.Id}\0{issue.Description}", StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+    public static void RejectAddedValidationIssues(
+        WordprocessingDocument document,
+        IReadOnlyDictionary<string, int> baseline)
+    {
+        var added = ValidationIssueCounts(document)
+            .FirstOrDefault(item => item.Value > baseline.GetValueOrDefault(item.Key));
+        if (added.Key is not null)
+            throw new InvalidOperationException($"output-added-openxml-validation-issues: {added.Key}");
+    }
+
+    public static ObjectArtifact Describe(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return new ObjectArtifact(
+            Path.GetFullPath(path),
+            Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant(),
+            stream.Length);
+    }
+
+    public static string JsonSha256<T>(T value)
+    {
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(value, Json.CamelCaseOptions);
+        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    }
+
+    public static string ContentSha256(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    public static void RejectOverlappingTargets(IReadOnlyList<OpenXmlElement> targets)
+    {
+        for (var left = 0; left < targets.Count; left++)
+        for (var right = left + 1; right < targets.Count; right++)
+            if (targets[left].Ancestors().Contains(targets[right])
+                || targets[right].Ancestors().Contains(targets[left]))
+                throw new InvalidOperationException("target-refs-must-not-overlap");
+    }
+
+    public static void RequirePlainTextContainer(OpenXmlElement target)
+    {
+        if (target is TableCell cell)
+        {
+            if (cell.ChildElements.Any(child => child is not TableCellProperties and not Paragraph))
+                throw new InvalidOperationException("target-cell-must-contain-only-plain-text-paragraphs");
+            foreach (var cellParagraph in cell.Elements<Paragraph>()) RequirePlainTextParagraph(cellParagraph, false);
+            return;
+        }
+        if (target is Paragraph paragraph)
+        {
+            RequirePlainTextParagraph(paragraph, true);
+            return;
+        }
+        throw new InvalidOperationException("target-ref-must-be-paragraph-or-cell");
+    }
+
+    private static void RequirePlainTextParagraph(Paragraph paragraph, bool allowBookmarks)
+    {
+        if (paragraph.ChildElements.Any(child => child is not ParagraphProperties and not Run and not ProofError
+                && (!allowBookmarks || child is not BookmarkStart and not BookmarkEnd))
+            || paragraph.Elements<Run>().Any(run =>
+                run.ChildElements.Any(child => child is not RunProperties and not Text and not LastRenderedPageBreak)))
+            throw new InvalidOperationException("target-paragraph-must-contain-only-plain-text-runs");
+    }
+
+    public static void Cleanup(params string[] paths)
+    {
+        foreach (var path in paths) if (File.Exists(path)) File.Delete(path);
+    }
+
+    private static void RequireNewPath(string path, string name)
+    {
+        if (File.Exists(path) || Directory.Exists(path))
+            throw new InvalidOperationException($"{name}-already-exists");
+        var directory = Path.GetDirectoryName(path);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            throw new InvalidOperationException($"{name}-directory-not-found");
+    }
+}

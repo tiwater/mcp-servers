@@ -53,13 +53,13 @@ public static class FontPolicy
     {
         var properties = run.RunProperties ?? run.PrependChild(new RunProperties());
         properties.RemoveAllChildren<RunFonts>();
-        properties.PrependChild(new RunFonts { Ascii = rule.Latin, HighAnsi = rule.Latin, EastAsia = rule.EastAsia, ComplexScript = rule.Latin });
+        properties.AddChild(new RunFonts { Ascii = rule.Latin, HighAnsi = rule.Latin, EastAsia = rule.EastAsia, ComplexScript = rule.Latin }, true);
         if (rule.Size != "preserve")
         {
             properties.RemoveAllChildren<FontSize>();
             properties.RemoveAllChildren<FontSizeComplexScript>();
-            properties.AppendChild(new FontSize { Val = rule.Size });
-            properties.AppendChild(new FontSizeComplexScript { Val = rule.Size });
+            properties.AddChild(new FontSize { Val = rule.Size }, true);
+            properties.AddChild(new FontSizeComplexScript { Val = rule.Size }, true);
         }
     }
 

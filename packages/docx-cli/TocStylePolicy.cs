@@ -6,6 +6,40 @@ namespace Dockit.Docx;
 
 public static class TocStylePolicy
 {
+    public static int Apply(WordprocessingDocument document, bool italic, int indentCharactersPerLevel)
+    {
+        if (indentCharactersPerLevel < 0)
+            throw new InvalidOperationException("indent-characters-per-level-must-be-nonnegative");
+        var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles
+            ?? throw new InvalidOperationException("document-styles-not-found");
+        var matched = 0;
+        foreach (var style in TocStyles(styles))
+        {
+            var level = TocLevel(style);
+            var paragraph = style.StyleParagraphProperties;
+            if (paragraph is null)
+            {
+                paragraph = new StyleParagraphProperties();
+                style.AddChild(paragraph, true);
+            }
+            paragraph.RemoveAllChildren<Indentation>();
+            paragraph.AddChild(new Indentation { LeftChars = (level - 1) * indentCharactersPerLevel * 100 }, true);
+            var run = style.StyleRunProperties;
+            if (run is null)
+            {
+                run = new StyleRunProperties();
+                style.AddChild(run, true);
+            }
+            run.RemoveAllChildren<Italic>();
+            run.RemoveAllChildren<ItalicComplexScript>();
+            run.AddChild(new Italic { Val = italic }, true);
+            run.AddChild(new ItalicComplexScript { Val = italic }, true);
+            matched++;
+        }
+        if (matched == 0) throw new InvalidOperationException("toc-styles-not-found");
+        return matched;
+    }
+
     public static int RunValidate(string[] args)
     {
         if (args.Length != 3 || !bool.TryParse(args[1], out var italic)
@@ -24,13 +58,10 @@ public static class TocStylePolicy
         var matched = 0;
         if (styles is not null)
         {
-            foreach (var style in styles.Elements<Style>().Where(style => style.Type?.Value == StyleValues.Paragraph))
+            foreach (var style in TocStyles(styles))
             {
                 var id = style.StyleId?.Value ?? string.Empty;
-                var name = style.StyleName?.Val?.Value ?? string.Empty;
-                var token = id.StartsWith("TOC", StringComparison.OrdinalIgnoreCase) ? id[3..]
-                    : name.StartsWith("toc ", StringComparison.OrdinalIgnoreCase) ? name[4..] : string.Empty;
-                if (!int.TryParse(token, out var level) || level < 1) continue;
+                var level = TocLevel(style);
                 matched += 1;
                 var expectedIndent = (level - 1) * indentCharactersPerLevel * 100;
                 var actualIndent = style.StyleParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value;
@@ -44,6 +75,19 @@ public static class TocStylePolicy
         if (matched == 0) findings.Add(new("", 0, "toc-styles", "at-least-one", "none"));
         return new("tiwater.docx-toc-style-validation/v1", RuntimeIdentity.Version, findings.Count == 0,
             input, italic, indentCharactersPerLevel, matched, findings);
+    }
+
+    private static IEnumerable<Style> TocStyles(Styles styles)
+        => styles.Elements<Style>()
+            .Where(style => style.Type?.Value == StyleValues.Paragraph && TocLevel(style) >= 1);
+
+    private static int TocLevel(Style style)
+    {
+        var id = style.StyleId?.Value ?? string.Empty;
+        var name = style.StyleName?.Val?.Value ?? string.Empty;
+        var token = id.StartsWith("TOC", StringComparison.OrdinalIgnoreCase) ? id[3..]
+            : name.StartsWith("toc ", StringComparison.OrdinalIgnoreCase) ? name[4..] : string.Empty;
+        return int.TryParse(token, out var level) ? level : 0;
     }
 
     private static bool? OnOff(OnOffType? value) => value is null ? null : value.Val?.Value ?? true;
