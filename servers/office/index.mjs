@@ -139,14 +139,14 @@ function artifactOutput(tool) {
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Write the default single full-document DOCX observation containing body content, structure, placeholders, comments, anchors, tables, fields, flow, fonts, and formatting metrics. Do not also call docx_export_json for the same observation.',
+    description: 'Write the default single full-document DOCX observation containing body content, structure, placeholders, comments, anchors, tables, fields, flow, fonts, and formatting metrics. Its tables section includes the current revision and native refs for every observed table, row, cell, paragraph, and run; use those refs directly for mutation instead of listing the same descendants again. Do not also call docx_export_json for the same observation.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: artifactOutput('docx_inspect'),
     handler: docxInspect,
   },
   {
     name: 'docx_inspect_tables',
-    description: 'Inspect current DOCX tables, cells, merges, paragraphs, runs, and formatting.',
+    description: 'Inspect current DOCX tables, cells, merges, paragraphs, runs, and formatting, returning the current revision and native refs for every observed table, row, cell, paragraph, and run. Use those refs directly for mutation instead of listing the same descendants again.',
     inputSchema: inputContract('docx_inspect_tables'),
     outputSchema: artifactOutput('docx_inspect_tables'),
     annotations: { readOnlyHint: true, idempotentHint: true },
