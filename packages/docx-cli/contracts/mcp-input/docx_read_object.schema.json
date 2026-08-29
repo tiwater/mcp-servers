@@ -18,7 +18,7 @@
       "pattern": "^docx-rev-v1-[0-9a-f]{64}$"
     },
     "kinds": {
-      "description": "Object kinds required by the next operation. Both the response and artifact contain only matching descendant identities.",
+      "description": "Object kinds required by the next operation. Both the response and artifact contain only matching descendant identities. Include paragraph whenever paragraph boundaries affect a later content selection such as docx_copy_table_rows first-paragraph versus all-paragraphs.",
       "type": "array",
       "items": {
         "type": "string",

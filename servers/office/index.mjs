@@ -206,7 +206,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object as an ordered native hierarchy. For a table, request row and cell kinds once; each row contains its ordered cells with text, grid span, and vertical merge state.',
+    description: 'Read one selected native DOCX object as an ordered native hierarchy. For a table, request row and cell kinds once; each row contains its ordered cells with text, grid span, and vertical merge state. Also request paragraph when paragraph boundaries determine what a later copy operation must retain.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -221,7 +221,7 @@ const tools = [
   },
   {
     name: 'docx_copy_table_rows',
-    description: 'Populate existing target tables by replacing selected data-row ranges with selected source rows. Use this whenever the target table already exists; explicit header-cell mappings preserve target presentation and native source grouping even when source and target grid spans differ.',
+    description: 'Populate existing target tables by replacing selected data-row ranges with selected source rows. Use this whenever the target table already exists; explicit header-cell mappings preserve target presentation and native source grouping even when source and target grid spans differ. Each column must explicitly copy all source-cell paragraphs or only the first; inspect paragraph children before choosing.',
     inputSchema: inputContract('docx_copy_table_rows'),
     outputSchema: fixedEditOutput('docx_copy_table_rows'),
     handler: args => fixedEdit('docx_copy_table_rows', args),
