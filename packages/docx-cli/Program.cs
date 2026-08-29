@@ -23,6 +23,11 @@ public static class Cli
         "validate-font-policy",
         "validate-toc-style-policy",
         .. ObservationCommand.Commands,
+        NativeContentCopy.Command,
+        NativeObjectMutation.CopyCommand,
+        NativeObjectMutation.DeleteCommand,
+        NativeCellMutation.MergeCommand,
+        NativeCellMutation.SplitCommand,
         .. FixedEditCommand.Commands,
     ];
 
@@ -72,6 +77,11 @@ public static class Cli
                 "validate-font-policy" => Task.FromResult(FontPolicy.RunValidate(args[1..])),
                 "validate-toc-style-policy" => Task.FromResult(TocStylePolicy.RunValidate(args[1..])),
                 _ when ObservationCommand.IsCommand(args[0]) => Task.FromResult(ObservationCommand.Run(args[0], args[1..])),
+                _ when args[0] == NativeContentCopy.Command => Task.FromResult(NativeContentCopy.Run(args[1..])),
+                _ when args[0] is NativeObjectMutation.CopyCommand or NativeObjectMutation.DeleteCommand
+                    => Task.FromResult(NativeObjectMutation.Run(args[0], args[1..])),
+                _ when args[0] is NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
+                    => Task.FromResult(NativeCellMutation.Run(args[0], args[1..])),
                 _ when FixedEditCommand.IsCommand(args[0]) => Task.FromResult(FixedEditCommand.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
             };
@@ -165,7 +175,6 @@ public static class Cli
         Console.WriteLine("  docx_list_objects <request.json>");
         Console.WriteLine("  docx_find_literal <request.json>");
         Console.WriteLine("  docx_read_object <request.json>");
-        Console.WriteLine("  docx_copy_table_range <request.json>");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("  strip-direct-formatting <input.docx> <output.docx>");

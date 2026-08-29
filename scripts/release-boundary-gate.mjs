@@ -192,12 +192,15 @@ async function checkFixedRuntimeSurface() {
     ...[...officeSource.matchAll(/fixedEdit\('((?:docx|xlsx|pptx)_[^']+)'/g)].map(match => match[1]),
     ...[...officeSource.matchAll(/docxObservation\('([^']+)'/g)].map(match => match[1]),
   ]);
-  const providerSources = await Promise.all([
-    'packages/docx-cli/ObservationCommand.cs',
-    'packages/docx-cli/FixedEditCommand.cs',
-    'packages/xlsx-cli/FixedCommandRunner.cs',
-    'packages/pptx-cli/FixedCommandRunner.cs',
-  ].map(relative => readFile(path.join(repoRoot, relative), 'utf8')));
+  const providerSources = (await Promise.all([
+    'packages/docx-cli',
+    'packages/xlsx-cli',
+    'packages/pptx-cli',
+  ].map(async relative => {
+    const directory = path.join(repoRoot, relative);
+    const files = (await readdir(directory)).filter(name => name.endsWith('.cs'));
+    return Promise.all(files.map(name => readFile(path.join(directory, name), 'utf8')));
+  }))).flat();
   for (const name of fixedNames) {
     if (!providerSources.some(source => source.includes(`"${name}"`))) {
       fail(check, `Office MCP fixed tool has no same-name provider command: ${name}`);

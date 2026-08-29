@@ -17,7 +17,7 @@ public static class Observation
 
     private static readonly IReadOnlySet<string> Kinds = new HashSet<string>(StringComparer.Ordinal)
     {
-        "part", "paragraph", "table", "row", "cell", "run", "drawing"
+        "part", "paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"
     };
 
     public static DocxObservationListResult List(
@@ -101,6 +101,8 @@ public static class Observation
 
     internal static string MakeReference(DocxRevision revision, string kind, string storyPart, string nativePath)
         => MakeObjectReference(revision, kind, storyPart, nativePath);
+
+    internal static string NativePathFor(OpenXmlElement element) => Snapshot.NativePath(element);
 
     internal static IReadOnlyList<ResolvedDocxReference> ResolveReferences(
         string input,
@@ -469,14 +471,16 @@ public static class Observation
             {
                 Paragraph => "paragraph",
                 Table => "table",
+                GridColumn => "gridColumn",
                 TableRow => "row",
                 TableCell => "cell",
                 Run => "run",
+                Text => "text",
                 Drawing => "drawing",
                 _ => null,
             };
 
-        private static string NativePath(OpenXmlElement element)
+        internal static string NativePath(OpenXmlElement element)
         {
             var segments = new Stack<string>();
             OpenXmlElement? current = element;
