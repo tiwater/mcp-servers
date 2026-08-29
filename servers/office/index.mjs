@@ -191,7 +191,7 @@ function artifactOutput(tool) {
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect a DOCX document and write one unified JSON observation containing placeholders, comments, anchors, tables, fields, flow, fonts, and formatting metrics.',
+    description: 'Write the default single full-document DOCX observation containing body content, structure, placeholders, comments, anchors, tables, fields, flow, fonts, and formatting metrics. Do not also call docx_export_json for the same observation.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: artifactOutput('docx_inspect'),
     handler: docxInspect,
@@ -241,7 +241,7 @@ const tools = [
   },
   {
     name: 'docx_export_json',
-    description: 'Export DOCX body content to a new JSON artifact without returning the full document through MCP.',
+    description: 'Write a body-only DOCX JSON projection only when a downstream consumer explicitly requires that format. It is not a companion to docx_inspect and does not replace bounded list/find/read object selection.',
     inputSchema: inputContract('docx_export_json'),
     outputSchema: artifactOutput('docx_export_json'),
     handler: docxExportJson,
