@@ -12,12 +12,9 @@ export function createToolResult(payload, { isError = false } = {}) {
   return {
     ...(isError ? { isError: true } : {}),
     structuredContent: payload,
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(payload, null, 2),
-      },
-    ],
+    content: isError
+      ? [{ type: 'text', text: JSON.stringify(payload) }]
+      : [],
   };
 }
 

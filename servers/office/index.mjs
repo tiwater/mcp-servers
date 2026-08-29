@@ -166,12 +166,7 @@ const docxObjectIdentity = z.object({
   ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
   parentRef: z.string().regex(/^dox1_[0-9a-f]{64}$/).nullable(),
   kind: z.string(),
-  storyPart: z.string(),
-  nativePath: z.string(),
-  localName: z.string(),
   textPreview: z.string().nullable(),
-  textLength: z.number().int().nonnegative().nullable(),
-  childCount: z.number().int().nonnegative(),
 }).strict();
 
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
@@ -437,6 +432,15 @@ function compactDocxTableIndex(report) {
   return { revision: report.Revision, tables };
 }
 
+function compactDocxObjectIdentity(object) {
+  return {
+    ref: object.ref,
+    parentRef: object.parentRef,
+    kind: object.kind,
+    textPreview: object.textPreview,
+  };
+}
+
 async function docxInspect(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(docxCandidates, ['inspect', input, '--json']);
@@ -480,8 +484,8 @@ async function docxReadObject(args) {
       source: await fileArtifact(input),
       artifact: await writeJsonArtifact(output, result.json),
       revision: result.json.receipt.revision,
-      object: result.json.observation.object,
-      descendants: result.json.observation.descendants,
+      object: compactDocxObjectIdentity(result.json.observation.object),
+      descendants: result.json.observation.descendants.map(compactDocxObjectIdentity),
     };
   });
 }
