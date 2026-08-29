@@ -214,14 +214,14 @@ const tools = [
   },
   {
     name: 'docx_copy_table_rows',
-    description: 'Create a new DOCX by replacing selected target table row ranges with selected source rows, using explicit source-to-target header cell mappings while retaining target presentation.',
+    description: 'Populate existing target tables by replacing selected data-row ranges with selected source rows. Use this whenever the target table already exists; explicit header-cell mappings preserve target presentation and native source grouping even when source and target grid spans differ.',
     inputSchema: inputContract('docx_copy_table_rows'),
     outputSchema: fixedEditOutput('docx_copy_table_rows'),
     handler: args => fixedEdit('docx_copy_table_rows', args),
   },
   {
     name: 'docx_copy_object',
-    description: 'Create a new output by copying targetDocument and applying one or more selected-object insertions under selected target parent objects.',
+    description: 'Insert selected objects only when the target needs a new object under an existing parent. Do not use this to populate or replace rows in an existing target table; use docx_copy_table_rows instead.',
     inputSchema: inputContract('docx_copy_object'),
     outputSchema: fixedEditOutput('docx_copy_object'),
     handler: args => fixedEdit('docx_copy_object', args),
