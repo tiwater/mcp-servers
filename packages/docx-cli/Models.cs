@@ -62,6 +62,7 @@ public sealed record TableMetadata(
     IReadOnlyList<IReadOnlyList<string>> PreviewRows);
 
 public sealed record TableRunDetail(
+    string Ref,
     int RunIndex,
     string Text,
     string? Style,
@@ -78,6 +79,7 @@ public sealed record TableRunDetail(
     bool HasTextFill);
 
 public sealed record TableParagraphDetail(
+    string Ref,
     int ParagraphIndex,
     string Text,
     string? Style,
@@ -85,6 +87,7 @@ public sealed record TableParagraphDetail(
     IReadOnlyList<TableRunDetail> Runs);
 
 public sealed record TableCellDetail(
+    string Ref,
     int CellIndex,
     int GridColumnStart,
     int GridColumnEnd,
@@ -98,6 +101,7 @@ public sealed record TableCellDetail(
     IReadOnlyList<TableParagraphDetail> Paragraphs);
 
 public sealed record TableRowDetail(
+    string Ref,
     int RowIndex,
     int GridBefore,
     int GridAfter,
@@ -126,6 +130,7 @@ public sealed record TableMutationAddress(
     int? FooterIndex = null);
 
 public sealed record TableDetail(
+    string Ref,
     int TableIndex,
     IReadOnlyList<string> ContainmentPath,
     string? ParentCellAddress,
@@ -142,6 +147,7 @@ public sealed record TableDetail(
 public sealed record TableInspectionReport(
     string Schema,
     string ToolVersion,
+    DocxRevision Revision,
     IReadOnlyDictionary<string, string> ExtractionView,
     string File,
     IReadOnlyList<TableDetail> Tables,
