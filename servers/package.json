@@ -1,6 +1,6 @@
 {
   "name": "@tiwater/office-mcp",
-  "version": "0.16.8",
+  "version": "0.16.9",
   "description": "Published MCP server for Tiwater Office document capabilities",
   "type": "module",
   "license": "MIT",

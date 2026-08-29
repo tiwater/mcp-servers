@@ -184,14 +184,6 @@ const tools = [
     handler: docxInspect,
   },
   {
-    name: 'docx_inspect_tables',
-    description: 'Inspect current DOCX tables. The response returns the revision and a bounded table identity index; the complete table observation remains in the evidence artifact.',
-    inputSchema: inputContract('docx_inspect_tables'),
-    outputSchema: docxInspectionOutput('docx_inspect_tables'),
-    annotations: { readOnlyHint: true, idempotentHint: true },
-    handler: docxInspectTables,
-  },
-  {
     name: 'docx_list_objects',
     description: 'List one small page of revision-bound DOCX object identities for structure discovery, not selection by text. To select a table or row by any descendant cell text, call docx_find_literal with kind table or row instead of listing the document. After selecting a table or row, call docx_read_object once to obtain every descendant ref; do not list its rows and cells separately. Use parentRef only when nearest-child paging itself is the requested observation.',
     inputSchema: inputContract('docx_list_objects'),
@@ -450,18 +442,6 @@ async function docxInspect(args) {
     source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
     ...compactDocxTableIndex(result.json.tables),
-  };
-}
-
-async function docxInspectTables(args) {
-  const input = path.resolve(requireString(args.input, 'input'));
-  const result = await runJsonCandidateChain(docxCandidates, ['inspect-tables', input, '--json']);
-  return {
-    tool: 'docx_inspect_tables',
-    runtime: commandRuntime(result),
-    source: await fileArtifact(input),
-    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
-    ...compactDocxTableIndex(result.json),
   };
 }
 

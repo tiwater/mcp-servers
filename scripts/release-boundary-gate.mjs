@@ -688,7 +688,7 @@ async function smokeInstalledPackage(archive, tempRoot) {
 function checkSourceBoundObservationOutputs(tools) {
   const check = 'source-bound-observation-output';
   const names = [
-    'docx_inspect', 'docx_inspect_tables', 'docx_export_json',
+    'docx_inspect', 'docx_export_json',
     'xlsx_inspect', 'xlsx_export_json', 'pptx_inspect', 'pptx_export_json',
   ];
   for (const name of names) {
