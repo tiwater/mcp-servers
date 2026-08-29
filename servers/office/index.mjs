@@ -126,7 +126,7 @@ const docxFixedTools = [
   {"name":"docx_set_table_cell_rich_text","description":"Set current body table cell rich text."},
   {"name":"docx_insert_table_rows","description":"Insert rows into a current body table."},
   {"name":"docx_delete_table_rows","description":"Delete current body table row ranges."},
-  {"name":"docx_replace_table_rows","description":"Replace current body table row ranges."},
+  {"name":"docx_replace_table_rows","description":"Replace a current body table range with explicit final rows. Use when values must be regrouped, filtered, assigned to different semantic columns, or given explicit gridSpan/vMerge states; matching template-row styles are retained."},
   {"name":"docx_insert_table_columns","description":"Insert columns into a current body table."},
   {"name":"docx_set_table_width","description":"Set current body table widths."},
   {"name":"docx_set_table_cell_alignment","description":"Set current body table cell alignment."},
@@ -227,7 +227,7 @@ const tools = [
   },
   {
     name: 'docx_copy_table_range',
-    description: 'Copy contiguous source row refs into contiguous target row-pattern refs with an explicit one-to-one logical grid-column mapping. Get row refs from list/find with kind=row; merged cells span grid columns, and one physical cell may be selected only once.',
+    description: 'Copy contiguous source rows verbatim, one source row per output row, into a repeating target row pattern whose mapped vertical-merge topology already matches the source. This does not regroup rows, change semantic columns, remove translations, or rewrite values; use docx_replace_table_rows for those operations. Get row refs from list/find with kind=row; a merged physical cell may be selected only once.',
     inputSchema: inputContract('docx_copy_table_range'),
     outputSchema: fixedEditOutput('docx_copy_table_range'),
     handler: args => fixedEdit('docx_copy_table_range', args),
