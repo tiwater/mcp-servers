@@ -18,7 +18,8 @@
       "type": "string",
       "minLength": 1,
       "description": "New JSON receipt path. Existing files are never overwritten.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
   "required": [
