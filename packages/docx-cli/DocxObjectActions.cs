@@ -189,19 +189,19 @@ internal static class DocxObjectActions
         return false;
     }
 
-    private static IEnumerable<OpenXmlElement> DescendantsAndSelf(OpenXmlElement element)
+    internal static IEnumerable<OpenXmlElement> DescendantsAndSelf(OpenXmlElement element)
     {
         yield return element;
         foreach (var descendant in element.Descendants()) yield return descendant;
     }
 
-    private static IEnumerable<string> RelationshipIds(IEnumerable<OpenXmlElement> roots)
+    internal static IEnumerable<string> RelationshipIds(IEnumerable<OpenXmlElement> roots)
         => roots.SelectMany(DescendantsAndSelf)
             .SelectMany(element => element.GetAttributes())
             .Where(attribute => attribute.NamespaceUri == RelationshipsNamespace && !string.IsNullOrWhiteSpace(attribute.Value))
             .Select(attribute => attribute.Value!);
 
-    private static bool CanCopyRelationship(MainDocumentPart source, string id, out string error)
+    internal static bool CanCopyRelationship(MainDocumentPart source, string id, out string error)
     {
         error = string.Empty;
         if (PartByIdOrNull(source, id) is ImagePart or HeaderPart or FooterPart) return true;
@@ -210,7 +210,7 @@ internal static class DocxObjectActions
         return false;
     }
 
-    private static string CopyRelationship(MainDocumentPart source, MainDocumentPart target, string id)
+    internal static string CopyRelationship(MainDocumentPart source, MainDocumentPart target, string id)
     {
         var part = PartByIdOrNull(source, id);
         return part switch
@@ -228,7 +228,7 @@ internal static class DocxObjectActions
         catch (ArgumentOutOfRangeException) { return null; }
     }
 
-    private static void RewriteRelationships(OpenXmlElement root, IReadOnlyDictionary<string, string> map)
+    internal static void RewriteRelationships(OpenXmlElement root, IReadOnlyDictionary<string, string> map)
     {
         foreach (var element in DescendantsAndSelf(root))
         foreach (var attribute in element.GetAttributes().Where(item => item.NamespaceUri == RelationshipsNamespace).ToList())
@@ -236,7 +236,7 @@ internal static class DocxObjectActions
                 element.SetAttribute(new OpenXmlAttribute(attribute.Prefix, attribute.LocalName, attribute.NamespaceUri, replacement));
     }
 
-    private static void RemapDrawingIds(Body targetBody, IReadOnlyList<OpenXmlElement> clones)
+    internal static void RemapDrawingIds(Body targetBody, IReadOnlyList<OpenXmlElement> clones)
     {
         var nextId = targetBody.Descendants<DW.DocProperties>().Select(item => item.Id?.Value ?? 0U).DefaultIfEmpty().Max() + 1U;
         foreach (var drawing in clones.SelectMany(DescendantsAndSelf).OfType<Drawing>())
@@ -273,7 +273,7 @@ internal static class DocxObjectActions
         return result;
     }
 
-    private static bool TryImportStyles(MainDocumentPart source, MainDocumentPart target, IReadOnlyList<OpenXmlElement> roots, bool apply, out string error)
+    internal static bool TryImportStyles(MainDocumentPart source, MainDocumentPart target, IReadOnlyList<OpenXmlElement> roots, bool apply, out string error)
     {
         error = string.Empty;
         var requested = RequiredStyleIds(roots);
@@ -309,7 +309,7 @@ internal static class DocxObjectActions
         return true;
     }
 
-    private static bool TryImportNumbering(MainDocumentPart source, MainDocumentPart target, IReadOnlyList<OpenXmlElement> roots, bool apply, out string error)
+    internal static bool TryImportNumbering(MainDocumentPart source, MainDocumentPart target, IReadOnlyList<OpenXmlElement> roots, bool apply, out string error)
     {
         error = string.Empty;
         var requested = roots.SelectMany(DescendantsAndSelf).OfType<NumberingId>()

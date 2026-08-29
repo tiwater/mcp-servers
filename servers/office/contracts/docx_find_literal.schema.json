@@ -17,9 +17,11 @@
         "part",
         "paragraph",
         "table",
+        "gridColumn",
         "row",
         "cell",
         "run",
+        "text",
         "drawing"
       ]
     },

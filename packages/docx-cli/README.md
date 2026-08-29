@@ -29,7 +29,7 @@ to an artifact path by the Office MCP.
 ```bash
 tiwater-docx docx_set_table_cell_text request.json
 tiwater-docx docx_insert_table_rows request.json
-tiwater-docx docx_merge_table_cells request.json
+tiwater-docx docx_merge_cells request.json
 tiwater-docx normalize-openxml input.docx output.docx
 tiwater-docx strip-direct-formatting input.docx output.docx
 tiwater-docx replace-style-ids input.docx output.docx style-map.json

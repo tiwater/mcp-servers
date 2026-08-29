@@ -102,6 +102,8 @@ public static class Observation
     internal static string MakeReference(DocxRevision revision, string kind, string storyPart, string nativePath)
         => MakeObjectReference(revision, kind, storyPart, nativePath);
 
+    internal static string NativePathFor(OpenXmlElement element) => Snapshot.NativePath(element);
+
     internal static IReadOnlyList<ResolvedDocxReference> ResolveReferences(
         string input,
         string expectedRevision,
@@ -478,7 +480,7 @@ public static class Observation
                 _ => null,
             };
 
-        private static string NativePath(OpenXmlElement element)
+        internal static string NativePath(OpenXmlElement element)
         {
             var segments = new Stack<string>();
             OpenXmlElement? current = element;

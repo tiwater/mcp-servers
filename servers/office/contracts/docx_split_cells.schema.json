@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_split_cells",
+  "type": "object",
+  "properties": {
+    "targetDocument": {
+      "type": "object",
+      "properties": {
+        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
+        "revision": { "type": "string", "minLength": 1 }
+      },
+      "required": ["input", "revision"],
+      "additionalProperties": false
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "cellRefs": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
+          }
+        },
+        "required": ["cellRefs"],
+        "additionalProperties": false
+      }
+    },
+    "output": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write" },
+    "receiptOutput": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write", "x-tiwater-file-effect": false }
+  },
+  "required": ["targetDocument", "changes", "output", "receiptOutput"],
+  "additionalProperties": false
+}
