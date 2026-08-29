@@ -213,14 +213,14 @@ const docxObservationReceipt = z.object({
   continuation: z.string().nullable(),
 }).strict();
 
-const docxListObjectsOutput = z.object({
+const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
   schema: z.literal('tiwater.docx-observation-list/v1'),
   receipt: docxObservationReceipt,
   objects: z.array(docxObjectIdentity),
   runtime: runtimeIdentity,
 }).strict();
 
-const docxFindLiteralOutput = z.object({
+const docxFindLiteralOutput = artifactOutput('docx_find_literal').extend({
   schema: z.literal('tiwater.docx-observation-find/v1'),
   receipt: docxObservationReceipt,
   matches: z.array(z.object({
@@ -249,7 +249,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of revision-bound nearest-child identities. Use parentRef to restrict any container, such as body paragraphs, table rows, or row cells; use docx_find_literal when selecting by text.',
+    description: 'List one small page of revision-bound nearest-child identities and retain the exact page at output for later reuse. Use parentRef to restrict any container, such as body paragraphs, table rows, or row cells; use docx_find_literal when selecting by text.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -257,7 +257,7 @@ const tools = [
   },
   {
     name: 'docx_find_literal',
-    description: 'Find exact current text in one small page of revision-bound native DOCX objects. With kind table or row, matching includes descendant cell text.',
+    description: 'Find exact current text in one small page of revision-bound native DOCX objects and retain the exact page at output for later reuse. With kind table or row, matching includes descendant cell text.',
     inputSchema: inputContract('docx_find_literal'),
     outputSchema: docxFindLiteralOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -567,14 +567,24 @@ async function docxInspect(args) {
 }
 
 async function docxObservation(tool, args) {
-  return withTempJsonFile(args, async requestPath => {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const output = requireString(args.output, 'output');
+  const { output: _output, ...request } = args;
+  return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, [tool, requestPath]);
     const payload = { ...result.json, runtime: commandRuntime(result) };
+    const retained = {
+      tool,
+      runtime: payload.runtime,
+      source: await fileArtifact(input),
+      artifact: await writeJsonArtifact(output, result.json),
+    };
     if (tool === 'docx_list_objects') {
-      return { ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
+      return { ...retained, ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
     }
     if (tool === 'docx_find_literal') {
       return {
+        ...retained,
         ...payload,
         matches: payload.matches.map(match => ({
           object: compactDocxObjectIdentity(match.object),
