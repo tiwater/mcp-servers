@@ -212,7 +212,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of revision-bound DOCX object identities. Use parentRef to page a selected table\'s rows; use docx_find_literal when selecting by text.',
+    description: 'List one small page of revision-bound nearest-child identities. Use parentRef to restrict any container, such as body paragraphs, table rows, or row cells; use docx_find_literal when selecting by text.',
     inputSchema: inputContract('docx_list_objects'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_list_objects', args),
