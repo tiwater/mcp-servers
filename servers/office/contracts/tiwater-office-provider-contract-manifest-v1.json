@@ -141,11 +141,11 @@
       "name": "docx_read_object",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_read_object.schema.json",
-        "sha256": "29ba026050f1120219491f918e74c344551224795b1d15e49ec886d4e81e092a"
+        "sha256": "1050e1f221ba9bf8e354ae505525d8106e8e29457f49c5562c7bad02fd9b4945"
       },
       "inputContract": {
         "path": "office/contracts/docx_read_object.schema.json",
-        "sha256": "29ba026050f1120219491f918e74c344551224795b1d15e49ec886d4e81e092a"
+        "sha256": "1050e1f221ba9bf8e354ae505525d8106e8e29457f49c5562c7bad02fd9b4945"
       }
     },
     {
