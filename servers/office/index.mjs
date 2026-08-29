@@ -168,21 +168,12 @@ const docxRevision = z.object({
   toolVersion: z.string(),
 }).strict();
 
-const docxTableIndexEntry = z.object({
-  ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
-  parentRef: z.string().regex(/^dox1_[0-9a-f]{64}$/).nullable(),
-  storyPart: z.string(),
-  nativePath: z.string(),
-  rowCount: z.number().int().nonnegative(),
-  columnCount: z.number().int().nonnegative(),
-  textPreview: z.string(),
-  textLength: z.number().int().nonnegative(),
-}).strict();
-
 function docxInspectionOutput(tool) {
   return artifactOutput(tool).extend({
     revision: docxRevision,
-    tables: z.array(docxTableIndexEntry),
+    summary: z.object({
+      tableCount: z.number().int().nonnegative(),
+    }).strict(),
   }).strict();
 }
 
@@ -234,7 +225,7 @@ const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX. The response returns its revision and a bounded table identity index for the next selection; the complete observation remains in the evidence artifact.',
+    description: 'Inspect one current DOCX. The response returns its revision and table count; use paged docx_find_literal or docx_list_objects to select native objects. The complete inspection remains in the evidence artifact.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -497,11 +488,11 @@ function buildServer() {
   return server;
 }
 
-function compactDocxTableIndex(report) {
+function compactDocxInspection(report) {
   if (!report?.revision || !Array.isArray(report.tables)) {
     throw new Error('docx-table-inspection-result-invalid');
   }
-  return { revision: report.revision, tables: report.tables };
+  return { revision: report.revision, summary: { tableCount: report.tables.length } };
 }
 
 function compactDocxObjectIdentity(object) {
@@ -534,7 +525,7 @@ async function docxInspect(args) {
     runtime: commandRuntime(result),
     source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
-    ...compactDocxTableIndex(result.json.tables),
+    ...compactDocxInspection(result.json.tables),
   };
 }
 
