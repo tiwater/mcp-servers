@@ -41,7 +41,7 @@
           "sourceTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
       "sourceRows": {
         "type": "object",
-        "description": "Contiguous source business-row range. Do not begin on an unlabeled continuation row from an excluded business group. If another column's visible merge began before the range, the provider carries its origin value into a new merge start.",
+      "description": "Contiguous source business-row range. excludeRefs contains every physical row to remove; excluding a vertically merged group requires its restart row and all continuation rows. Do not begin on an unlabeled continuation row. If another column's visible merge began before the range, the provider carries its origin value into a new merge start.",
             "properties": {
               "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
               "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },

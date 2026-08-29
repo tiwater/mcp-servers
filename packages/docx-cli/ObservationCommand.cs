@@ -42,7 +42,8 @@ public static class ObservationCommand
             "docx_read_object" => Observation.Read(
                 input,
                 RequireString(request, "ref"),
-                OptionalString(request, "revision")),
+                OptionalString(request, "revision"),
+                RequireStringArray(request, "kinds")),
             _ => throw new InvalidOperationException($"Unknown DOCX observation command: {command}"),
         };
         Console.WriteLine(JsonSerializer.Serialize(result, Json.CamelCaseOptions));
@@ -62,4 +63,14 @@ public static class ObservationCommand
 
     private static int? OptionalInt(JsonObject request, string property)
         => request[property] is JsonValue value && value.TryGetValue<int>(out var number) ? number : null;
+
+    private static IReadOnlySet<string> RequireStringArray(JsonObject request, string property)
+    {
+        if (request[property] is not JsonArray array || array.Count == 0)
+            throw new InvalidOperationException($"{property}-is-required");
+        var values = array.Select(item => item?.GetValue<string>() ?? string.Empty).ToHashSet(StringComparer.Ordinal);
+        if (values.Any(string.IsNullOrWhiteSpace))
+            throw new InvalidOperationException($"{property}-is-invalid");
+        return values;
+    }
 }

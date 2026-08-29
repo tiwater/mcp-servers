@@ -19,6 +19,7 @@ public static class Observation
     {
         "part", "paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"
     };
+    private static readonly IReadOnlySet<string> ReadKinds = new HashSet<string>(Kinds.Where(kind => kind != "part"), StringComparer.Ordinal);
 
     public static DocxObservationListResult List(
         string input,
@@ -69,9 +70,16 @@ public static class Observation
             page.Items);
     }
 
-    public static DocxObservationReadResult Read(string input, string reference, string? expectedRevision)
+    public static DocxObservationReadResult Read(
+        string input,
+        string reference,
+        string? expectedRevision,
+        IReadOnlySet<string> kinds)
     {
         var snapshot = Snapshot.Open(input);
+        if (kinds.Count == 0) throw new InvalidOperationException("kinds-is-required");
+        foreach (var kind in kinds)
+            if (!ReadKinds.Contains(kind)) throw new InvalidOperationException($"unsupported-read-kind: {kind}");
         if (!IsObjectReference(reference))
             throw new InvalidOperationException("object-ref-invalid");
         if (expectedRevision is not null && !StringComparer.Ordinal.Equals(expectedRevision, snapshot.Revision.Id))
@@ -92,6 +100,7 @@ public static class Observation
                 .ToList(),
             snapshot.Objects
                 .Where(item => !ReferenceEquals(item.Element, selected.Element)
+                    && kinds.Contains(item.Kind)
                     && item.Element.Ancestors().Any(ancestor => ReferenceEquals(ancestor, selected.Element)))
                 .Select(item => ToObject(snapshot, item))
                 .ToList());
@@ -99,6 +108,42 @@ public static class Observation
             "tiwater.docx-observation-read/v1",
             Receipt("read", snapshot.Revision, 1, 1, 0, null),
             detail);
+    }
+
+    public static DocxTableIndexResult TableIndex(string input)
+    {
+        var snapshot = Snapshot.Open(input);
+        var tables = snapshot.Objects.Where(item => item.Kind == "table").Select(item =>
+        {
+            var identity = ToObject(snapshot, item);
+            var table = (Table)item.Element;
+            var rows = table.Elements<TableRow>().ToList();
+            var columnCount = Math.Max(
+                table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count() ?? 0,
+                rows.Select(TableRowWidth).DefaultIfEmpty(0).Max());
+            return new DocxTableIndexEntry(
+                identity.Reference,
+                identity.ParentReference,
+                identity.StoryPart,
+                identity.NativePath,
+                rows.Count,
+                columnCount,
+                identity.TextPreview ?? string.Empty,
+                identity.TextLength ?? 0);
+        }).ToList();
+        return new DocxTableIndexResult("tiwater.docx-table-index/v1", snapshot.Revision, tables);
+    }
+
+    private static int TableRowWidth(TableRow row)
+        => RowOffset(row.TableRowProperties, "gridBefore")
+            + row.Elements<TableCell>().Sum(cell => Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1))
+            + RowOffset(row.TableRowProperties, "gridAfter");
+
+    private static int RowOffset(OpenXmlElement? properties, string localName)
+    {
+        var value = properties?.ChildElements.FirstOrDefault(child => child.LocalName == localName)
+            ?.GetAttributes().FirstOrDefault(attribute => attribute.LocalName == "val").Value;
+        return int.TryParse(value, out var result) ? result : 0;
     }
 
     internal static DocxRevision CurrentRevision(string input)
@@ -347,6 +392,11 @@ public static class Observation
     private static DocxObservationObject ToObject(Snapshot snapshot, NativeObject item)
     {
         var text = item.Kind == "part" ? null : TechnicalText(item.Element);
+        var cellProperties = (item.Element as TableCell)?.TableCellProperties;
+        var verticalMerge = cellProperties?.VerticalMerge is null
+            ? null
+            : cellProperties.VerticalMerge.GetAttributes()
+                .FirstOrDefault(attribute => attribute.LocalName == "val").Value ?? "continue";
         return new DocxObservationObject(
             item.Reference,
             PublishedParentReference(snapshot, item),
@@ -356,7 +406,9 @@ public static class Observation
             item.Element.LocalName,
             text is null ? null : Clip(text, 160),
             text?.Length,
-            item.Element.ChildElements.Count);
+            item.Element.ChildElements.Count,
+            cellProperties is null ? null : Math.Max(1, cellProperties.GridSpan?.Val?.Value ?? 1),
+            verticalMerge);
     }
 
     private static string? PublishedParentReference(Snapshot snapshot, NativeObject item)
@@ -553,7 +605,9 @@ public sealed record DocxObservationObject(
     [property: JsonPropertyName("localName")] string LocalName,
     [property: JsonPropertyName("textPreview")] string? TextPreview,
     [property: JsonPropertyName("textLength")] int? TextLength,
-    [property: JsonPropertyName("childCount")] int ChildCount);
+    [property: JsonPropertyName("childCount")] int ChildCount,
+    [property: JsonPropertyName("gridSpan")] int? GridSpan,
+    [property: JsonPropertyName("verticalMerge")] string? VerticalMerge);
 
 public sealed record DocxTextMatch(
     [property: JsonPropertyName("offset")] int Offset,
@@ -590,6 +644,21 @@ public sealed record DocxObservationReadResult(
     [property: JsonPropertyName("schema")] string Schema,
     [property: JsonPropertyName("receipt")] DocxObservationReceipt Receipt,
     [property: JsonPropertyName("observation")] DocxObservationDetail Observation);
+
+public sealed record DocxTableIndexEntry(
+    [property: JsonPropertyName("ref")] string Reference,
+    [property: JsonPropertyName("parentRef")] string? ParentReference,
+    [property: JsonPropertyName("storyPart")] string StoryPart,
+    [property: JsonPropertyName("nativePath")] string NativePath,
+    [property: JsonPropertyName("rowCount")] int RowCount,
+    [property: JsonPropertyName("columnCount")] int ColumnCount,
+    [property: JsonPropertyName("textPreview")] string TextPreview,
+    [property: JsonPropertyName("textLength")] int TextLength);
+
+public sealed record DocxTableIndexResult(
+    [property: JsonPropertyName("schema")] string Schema,
+    [property: JsonPropertyName("revision")] DocxRevision Revision,
+    [property: JsonPropertyName("tables")] IReadOnlyList<DocxTableIndexEntry> Tables);
 
 internal sealed record ResolvedDocxReference(
     string Reference,
