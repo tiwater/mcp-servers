@@ -8,7 +8,7 @@
       "x-tiwater-file-role": "read"
     },
     "ref": {
-      "description": "One object ref returned by docx_list_objects or docx_find_literal. Read a selected table or row to inspect grid spans and merges without listing all cells.",
+      "description": "One object ref returned by docx_list_objects or docx_find_literal. Select the smallest object that contains the needed detail; for a large table, page its rows first and read only the selected rows.",
       "type": "string",
       "pattern": "^dox1_[0-9a-f]{64}$"
     },
@@ -18,7 +18,7 @@
       "pattern": "^docx-rev-v1-[0-9a-f]{64}$"
     },
     "kinds": {
-      "description": "Object kinds required by the next operation. Both the response and artifact contain only matching descendant identities. Include paragraph whenever paragraph boundaries affect a later content selection such as docx_copy_table_rows first-paragraph versus all-paragraphs.",
+      "description": "Object kinds required by the next operation. Include paragraph when paragraph boundaries affect a later content selection.",
       "type": "array",
       "items": {
         "type": "string",
