@@ -8,6 +8,7 @@ values, business mappings, workflow decisions, and delivery status.
 
 Every inspect/export result binds its observation artifact to the exact source
 file path, SHA-256, and byte count used by that invocation.
+Full native object reads are also written as artifacts instead of being inlined.
 
 Every filesystem argument is identified in the published MCP input schema by
 `x-tiwater-file-role`. `read` marks an existing provider input; `write` marks a
