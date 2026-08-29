@@ -105,7 +105,7 @@ public static class Cli
             WriteJson(new
             {
                 document = Inspector.Inspect(input),
-                tables = Inspector.InspectTables(input),
+                tables = Observation.TableIndex(input),
                 flow = Inspector.InspectDocumentFlow(input),
                 fonts = FontPolicy.Inspect(input),
             });

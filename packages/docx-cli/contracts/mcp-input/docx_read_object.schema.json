@@ -18,7 +18,7 @@
       "pattern": "^docx-rev-v1-[0-9a-f]{64}$"
     },
     "kinds": {
-      "description": "Object kinds required by the next operation. The response returns only matching descendant identities; the artifact retains the complete object.",
+      "description": "Object kinds required by the next operation. Both the response and artifact contain only matching descendant identities.",
       "type": "array",
       "items": {
         "type": "string",
@@ -38,7 +38,7 @@
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "Absolute path for a new JSON artifact containing the complete native object observation.",
+      "description": "Absolute path for a new JSON artifact containing the selected native object and only the requested descendant kinds.",
       "x-tiwater-file-role": "write"
     }
   },

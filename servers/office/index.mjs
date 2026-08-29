@@ -145,10 +145,9 @@ const docxRevision = z.object({
 
 const docxTableIndexEntry = z.object({
   ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
-  tableIndex: z.number().int().nonnegative(),
-  containmentPath: z.array(z.string()),
-  parentCellAddress: z.string().nullable(),
-  storyKind: z.string(),
+  parentRef: z.string().regex(/^dox1_[0-9a-f]{64}$/).nullable(),
+  storyPart: z.string(),
+  nativePath: z.string(),
   rowCount: z.number().int().nonnegative(),
   columnCount: z.number().int().nonnegative(),
   textPreview: z.string(),
@@ -406,29 +405,10 @@ function buildServer() {
 }
 
 function compactDocxTableIndex(report) {
-  if (!report?.Revision || !Array.isArray(report.Tables)
-      || (report.StoryTables !== null && !Array.isArray(report.StoryTables))) {
+  if (!report?.revision || !Array.isArray(report.tables)) {
     throw new Error('docx-table-inspection-result-invalid');
   }
-  const tables = [...report.Tables, ...(report.StoryTables ?? [])].map(table => {
-    const text = table.Rows.flatMap(row => row.Cells.map(cell => cell.Text))
-      .filter(value => typeof value === 'string' && value.length > 0)
-      .join(' ')
-      .replace(/\s+/gu, ' ')
-      .trim();
-    return {
-      ref: table.Ref,
-      tableIndex: table.TableIndex,
-      containmentPath: table.ContainmentPath,
-      parentCellAddress: table.ParentCellAddress ?? null,
-      storyKind: table.Story.Kind,
-      rowCount: table.RowCount,
-      columnCount: table.ColumnCount,
-      textPreview: text.length <= 160 ? text : `${text.slice(0, 160)}...`,
-      textLength: text.length,
-    };
-  });
-  return { revision: report.Revision, tables };
+  return { revision: report.revision, tables: report.tables };
 }
 
 function compactDocxObjectIdentity(object) {
@@ -462,7 +442,6 @@ async function docxObservation(tool, args) {
 async function docxReadObject(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const output = requireString(args.output, 'output');
-  const kinds = new Set(args.kinds);
   const { output: _output, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
@@ -474,7 +453,6 @@ async function docxReadObject(args) {
       revision: result.json.receipt.revision,
       object: compactDocxObjectIdentity(result.json.observation.object),
       descendants: result.json.observation.descendants
-        .filter(identity => kinds.has(identity.kind))
         .map(compactDocxObjectIdentity),
     };
   });
