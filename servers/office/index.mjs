@@ -199,7 +199,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object. The response returns that object and every descendant identity for the next operation; full Open XML remains in the evidence artifact.',
+    description: 'Read one selected native DOCX object. Declare only the descendant kinds required by the next operation; the response returns those identities and the evidence artifact retains the complete object.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -462,6 +462,7 @@ async function docxObservation(tool, args) {
 async function docxReadObject(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const output = requireString(args.output, 'output');
+  const kinds = new Set(args.kinds);
   const { output: _output, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
@@ -472,7 +473,9 @@ async function docxReadObject(args) {
       artifact: await writeJsonArtifact(output, result.json),
       revision: result.json.receipt.revision,
       object: compactDocxObjectIdentity(result.json.observation.object),
-      descendants: result.json.observation.descendants.map(compactDocxObjectIdentity),
+      descendants: result.json.observation.descendants
+        .filter(identity => kinds.has(identity.kind))
+        .map(compactDocxObjectIdentity),
     };
   });
 }
