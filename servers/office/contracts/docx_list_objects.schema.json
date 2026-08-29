@@ -8,6 +8,7 @@
       "x-tiwater-file-role": "read"
     },
     "kind": {
+      "description": "Object granularity. Use row for table-range discovery; use cell or run only when the task directly targets that object kind.",
       "type": "string",
       "enum": [
         "part",
@@ -20,10 +21,12 @@
       ]
     },
     "scope": {
+      "description": "Exact story-part URI such as /word/document.xml. This is not a table nativePath or ancestor filter.",
       "type": "string",
       "minLength": 1
     },
     "limit": {
+      "description": "Maximum objects in this page. Follow continuation for another bounded page; do not raise the limit to replace semantic filtering.",
       "default": 100,
       "type": "integer",
       "minimum": 1,
