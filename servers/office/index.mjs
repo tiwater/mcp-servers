@@ -170,10 +170,15 @@ const docxObjectIdentity = z.object({
   verticalMerge: z.string().nullable(),
 }).strict();
 
+const docxObjectNode = z.lazy(() => z.object({
+  object: docxObjectIdentity,
+  children: z.array(docxObjectNode),
+}).strict());
+
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   revision: docxRevision,
   object: docxObjectIdentity,
-  descendants: z.array(docxObjectIdentity),
+  children: z.array(docxObjectNode),
 }).strict();
 
 const tools = [
@@ -182,6 +187,7 @@ const tools = [
     description: 'Inspect one current DOCX. The response returns its revision and a bounded table identity index for the next selection; the complete observation remains in the evidence artifact.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxInspect,
   },
   {
@@ -200,7 +206,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object. Declare only the descendant kinds required by the next operation; the response returns those identities and the evidence artifact retains the complete object.',
+    description: 'Read one selected native DOCX object as an ordered native hierarchy. For a table, request row and cell kinds once; each row contains its ordered cells with text, grid span, and vertical merge state.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -456,10 +462,16 @@ async function docxReadObject(args) {
       artifact: await writeJsonArtifact(output, result.json),
       revision: result.json.receipt.revision,
       object: compactDocxObjectIdentity(result.json.observation.object),
-      descendants: result.json.observation.descendants
-        .map(compactDocxObjectIdentity),
+      children: result.json.observation.children.map(compactDocxObjectNode),
     };
   });
+}
+
+function compactDocxObjectNode(node) {
+  return {
+    object: compactDocxObjectIdentity(node.object),
+    children: node.children.map(compactDocxObjectNode),
+  };
 }
 
 async function docxValidate(args) {

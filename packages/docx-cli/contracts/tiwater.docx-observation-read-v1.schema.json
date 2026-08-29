@@ -35,37 +35,35 @@
     },
     "object": {
       "type": "object", "additionalProperties": false,
-      "required": ["ref", "parentRef", "kind", "storyPart", "nativePath", "localName", "childCount"],
+      "required": ["ref", "parentRef", "kind", "storyPart", "nativePath", "localName", "textPreview", "textLength", "childCount", "gridSpan", "verticalMerge"],
       "properties": {
         "ref": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
         "parentRef": { "type": ["string", "null"], "pattern": "^dox1_[0-9a-f]{64}$" },
-        "kind": { "enum": ["part", "paragraph", "table", "row", "cell", "run", "drawing"] },
+        "kind": { "enum": ["part", "paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"] },
         "storyPart": { "type": "string", "pattern": "^/[^\\s]+$" },
         "nativePath": { "type": "string", "pattern": "^/[^\\s]+$" },
         "localName": { "type": "string", "minLength": 1 },
         "textPreview": { "type": ["string", "null"] },
         "textLength": { "type": ["integer", "null"], "minimum": 0 },
-        "childCount": { "type": "integer", "minimum": 0 }
+        "childCount": { "type": "integer", "minimum": 0 },
+        "gridSpan": { "type": ["integer", "null"], "minimum": 1 },
+        "verticalMerge": { "type": ["string", "null"], "enum": ["restart", "continue", null] }
       }
     },
-    "attribute": {
+    "node": {
       "type": "object", "additionalProperties": false,
-      "required": ["localName", "namespaceUri", "value"],
+      "required": ["object", "children"],
       "properties": {
-        "localName": { "type": "string", "minLength": 1 },
-        "namespaceUri": { "type": "string" },
-        "value": { "type": "string" }
+        "object": { "$ref": "#/$defs/object" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
       }
     },
     "detail": {
       "type": "object", "additionalProperties": false,
-      "required": ["object", "namespaceUri", "outerXml", "childCount", "attributes"],
+      "required": ["object", "children"],
       "properties": {
         "object": { "$ref": "#/$defs/object" },
-        "namespaceUri": { "type": "string" },
-        "outerXml": { "type": "string", "minLength": 1 },
-        "childCount": { "type": "integer", "minimum": 0 },
-        "attributes": { "type": "array", "items": { "$ref": "#/$defs/attribute" } }
+        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
       }
     }
   }

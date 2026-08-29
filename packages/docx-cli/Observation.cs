@@ -90,20 +90,38 @@ public static class Observation
         if (selected is null)
             throw new InvalidOperationException("stale-object-ref");
 
+        var included = new Dictionary<OpenXmlElement, NativeObject>(ReferenceEqualityComparer.Instance);
+        foreach (var item in snapshot.Objects.Where(item =>
+            !ReferenceEquals(item.Element, selected.Element)
+            && kinds.Contains(item.Kind)
+            && item.Element.Ancestors().Any(ancestor => ReferenceEquals(ancestor, selected.Element))))
+            included.Add(item.Element, item);
+        DocxObservationNode Node(NativeObject item)
+        {
+            var children = included.Values.Where(candidate =>
+            {
+                var parent = candidate.Element.Parent;
+                while (parent is not null && !ReferenceEquals(parent, item.Element))
+                {
+                    if (included.ContainsKey(parent)) return false;
+                    parent = parent.Parent;
+                }
+                return ReferenceEquals(parent, item.Element);
+            }).Select(Node).ToList();
+            return new DocxObservationNode(ToObject(snapshot, item), children);
+        }
         var detail = new DocxObservationDetail(
             ToObject(snapshot, selected),
-            selected.Element.NamespaceUri,
-            selected.Element.OuterXml,
-            selected.Element.ChildElements.Count,
-            selected.Element.GetAttributes()
-                .Select(attribute => new DocxOpenXmlAttribute(attribute.LocalName, attribute.NamespaceUri, attribute.Value ?? string.Empty))
-                .ToList(),
-            snapshot.Objects
-                .Where(item => !ReferenceEquals(item.Element, selected.Element)
-                    && kinds.Contains(item.Kind)
-                    && item.Element.Ancestors().Any(ancestor => ReferenceEquals(ancestor, selected.Element)))
-                .Select(item => ToObject(snapshot, item))
-                .ToList());
+            included.Values.Where(item =>
+            {
+                var parent = item.Element.Parent;
+                while (parent is not null && !ReferenceEquals(parent, selected.Element))
+                {
+                    if (included.ContainsKey(parent)) return false;
+                    parent = parent.Parent;
+                }
+                return ReferenceEquals(parent, selected.Element);
+            }).Select(Node).ToList());
         return new DocxObservationReadResult(
             "tiwater.docx-observation-read/v1",
             Receipt("read", snapshot.Revision, 1, 1, 0, null),
@@ -617,18 +635,13 @@ public sealed record DocxObservationMatch(
     [property: JsonPropertyName("object")] DocxObservationObject Object,
     [property: JsonPropertyName("matches")] IReadOnlyList<DocxTextMatch> Matches);
 
-public sealed record DocxOpenXmlAttribute(
-    [property: JsonPropertyName("localName")] string LocalName,
-    [property: JsonPropertyName("namespaceUri")] string NamespaceUri,
-    [property: JsonPropertyName("value")] string Value);
-
 public sealed record DocxObservationDetail(
     [property: JsonPropertyName("object")] DocxObservationObject Object,
-    [property: JsonPropertyName("namespaceUri")] string NamespaceUri,
-    [property: JsonPropertyName("outerXml")] string OuterXml,
-    [property: JsonPropertyName("childCount")] int ChildCount,
-    [property: JsonPropertyName("attributes")] IReadOnlyList<DocxOpenXmlAttribute> Attributes,
-    [property: JsonPropertyName("descendants")] IReadOnlyList<DocxObservationObject> Descendants);
+    [property: JsonPropertyName("children")] IReadOnlyList<DocxObservationNode> Children);
+
+public sealed record DocxObservationNode(
+    [property: JsonPropertyName("object")] DocxObservationObject Object,
+    [property: JsonPropertyName("children")] IReadOnlyList<DocxObservationNode> Children);
 
 public sealed record DocxObservationListResult(
     [property: JsonPropertyName("schema")] string Schema,
