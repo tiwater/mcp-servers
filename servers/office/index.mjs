@@ -170,15 +170,9 @@ const docxObjectIdentity = z.object({
   verticalMerge: z.string().nullable(),
 }).strict();
 
-const docxObjectNode = z.lazy(() => z.object({
-  object: docxObjectIdentity,
-  children: z.array(docxObjectNode),
-}).strict());
-
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   revision: docxRevision,
   object: docxObjectIdentity,
-  children: z.array(docxObjectNode),
 }).strict();
 
 const tools = [
@@ -206,7 +200,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object as an ordered native hierarchy. For a table, request row and cell kinds once; each row contains its ordered cells with text, grid span, and vertical merge state. Also request paragraph when paragraph boundaries determine what a later copy operation must retain.',
+    description: 'Read one selected native DOCX object as an ordered native hierarchy written to the requested output artifact. The tool response only identifies that artifact and the selected root object; read the artifact for descendant refs and content. For a table, request row and cell kinds once; each row contains its ordered cells with text, grid span, and vertical merge state. Also request paragraph when paragraph boundaries determine what a later copy operation must retain.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -462,16 +456,8 @@ async function docxReadObject(args) {
       artifact: await writeJsonArtifact(output, result.json),
       revision: result.json.receipt.revision,
       object: compactDocxObjectIdentity(result.json.observation.object),
-      children: result.json.observation.children.map(compactDocxObjectNode),
     };
   });
-}
-
-function compactDocxObjectNode(node) {
-  return {
-    object: compactDocxObjectIdentity(node.object),
-    children: node.children.map(compactDocxObjectNode),
-  };
 }
 
 async function docxValidate(args) {
