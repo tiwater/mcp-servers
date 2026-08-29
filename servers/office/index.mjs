@@ -200,7 +200,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object as an ordered native hierarchy written to the requested output artifact. The tool response only identifies that artifact and the selected root object; read the artifact for descendant refs and content. For a table, request row and cell kinds once; each row contains its ordered cells with text, grid span, and vertical merge state. Also request paragraph when paragraph boundaries determine what a later copy operation must retain.',
+    description: 'Read one selected native DOCX object as an ordered native hierarchy written to the requested output artifact. The tool response only identifies that artifact and the selected root object; read the artifact for descendant refs and content. For a table, request row and cell once. Add paragraph for whole-paragraph choices; add run and text for exact content selections.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -208,14 +208,14 @@ const tools = [
   },
   {
     name: 'docx_copy_content',
-    description: 'Replace content in existing target cells while retaining target cell formatting and source inline meaning. Use this directly or after docx_copy_table_rows when a target cell needs an exact observed subset of source content. A source selection copies a whole object by ref, or an exact substring when range is attached to a run or text ref.',
+    description: 'Replace content in existing target cells while retaining target cell formatting and source inline meaning. Batch cells that need exact observed subsets after docx_copy_table_rows. A selection copies a whole object by ref, or an exact substring when range is attached to a run or text ref.',
     inputSchema: inputContract('docx_copy_content'),
     outputSchema: fixedEditOutput('docx_copy_content'),
     handler: args => fixedEdit('docx_copy_content', args),
   },
   {
     name: 'docx_copy_table_rows',
-    description: 'Populate existing target tables by replacing selected data-row ranges with selected source rows. Use this whenever the target table already exists; explicit header-cell mappings preserve target presentation and native source grouping even when source and target grid spans differ. Each column must explicitly copy all source-cell paragraphs or only the first; inspect paragraph children before choosing.',
+    description: 'Populate existing target tables by replacing selected data-row ranges with selected source rows. Explicit header-cell mappings preserve target presentation and source grouping. A column content mode applies to every copied cell in that column; when cells need different subsets, copy the row structure first and batch those cells with docx_copy_content.',
     inputSchema: inputContract('docx_copy_table_rows'),
     outputSchema: fixedEditOutput('docx_copy_table_rows'),
     handler: args => fixedEdit('docx_copy_table_rows', args),
