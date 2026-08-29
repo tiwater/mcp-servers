@@ -460,6 +460,10 @@ async function fixedEdit(tool, args) {
     : pptxCandidates;
   return withTempJsonFile(args, async requestPath => {
     const result = await runJsonCandidateChain(candidates, [tool, requestPath], { allowedExitCodes: [0, 1] });
+    if (result.code !== 0) {
+      const detail = result.stderr.trim() || result.stdout.trim() || `${tool} failed with exit code ${result.code}`;
+      throw new Error(detail);
+    }
     if (result.json?.tool !== tool) throw new Error(`${tool} returned a mismatched tool identity`);
     await requireReturnedArtifact(result.json.receipt, receiptOutput, 'receipt');
     if (result.json.output === null) {
