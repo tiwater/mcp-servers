@@ -10,7 +10,6 @@ public static class ObservationCommand
         "docx_list_objects",
         "docx_find_literal",
         "docx_read_object",
-        "docx_copy_table_range",
     };
 
     public static IReadOnlyCollection<string> Commands => CommandSet.ToArray();
@@ -20,8 +19,6 @@ public static class ObservationCommand
     {
         if (!IsCommand(command)) throw new InvalidOperationException($"Unknown DOCX observation command: {command}");
         if (args.Length != 1) throw new InvalidOperationException($"{command} requires <request.json>");
-        if (command == "docx_copy_table_range") return TableRangeCopy.Run(args);
-
         var request = JsonNode.Parse(File.ReadAllText(args[0])) as JsonObject
             ?? throw new InvalidOperationException("docx-observation-request-invalid");
         var input = RequireString(request, "input");

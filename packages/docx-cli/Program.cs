@@ -165,7 +165,6 @@ public static class Cli
         Console.WriteLine("  docx_list_objects <request.json>");
         Console.WriteLine("  docx_find_literal <request.json>");
         Console.WriteLine("  docx_read_object <request.json>");
-        Console.WriteLine("  docx_copy_table_range <request.json>");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");
         Console.WriteLine("  validate-openxml <input.docx>");
         Console.WriteLine("  strip-direct-formatting <input.docx> <output.docx>");

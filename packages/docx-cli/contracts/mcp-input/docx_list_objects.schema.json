@@ -8,15 +8,17 @@
       "x-tiwater-file-role": "read"
     },
     "kind": {
-      "description": "Object granularity for structure discovery, not document-text extraction. Use table to locate tables and row with a table parentRef for table-range discovery; use cell or run only when the task directly targets that object kind.",
+      "description": "Open XML object kind to list. Use parentRef to walk only the native structure needed for the direct operation.",
       "type": "string",
       "enum": [
         "part",
         "paragraph",
         "table",
+        "gridColumn",
         "row",
         "cell",
         "run",
+        "text",
         "drawing"
       ]
     },
@@ -26,7 +28,7 @@
       "minLength": 1
     },
     "parentRef": {
-      "description": "Optional revision-bound parent object ref. Returns only its nearest published child objects: a part yields top-level story blocks, a table yields rows, a row yields cells. This is not recursive descendant search.",
+      "description": "Optional revision-bound parent object ref. Returns only its nearest published child objects; this is not recursive descendant search.",
       "type": "string",
       "pattern": "^dox1_[0-9a-f]{64}$"
     },

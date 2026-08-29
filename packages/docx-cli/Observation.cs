@@ -17,7 +17,7 @@ public static class Observation
 
     private static readonly IReadOnlySet<string> Kinds = new HashSet<string>(StringComparer.Ordinal)
     {
-        "part", "paragraph", "table", "row", "cell", "run", "drawing"
+        "part", "paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"
     };
 
     public static DocxObservationListResult List(
@@ -469,9 +469,11 @@ public static class Observation
             {
                 Paragraph => "paragraph",
                 Table => "table",
+                GridColumn => "gridColumn",
                 TableRow => "row",
                 TableCell => "cell",
                 Run => "run",
+                Text => "text",
                 Drawing => "drawing",
                 _ => null,
             };

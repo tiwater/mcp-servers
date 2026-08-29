@@ -226,13 +226,6 @@ const tools = [
     handler: args => docxObservation('docx_read_object', args),
   },
   {
-    name: 'docx_copy_table_range',
-    description: 'Copy contiguous source rows verbatim, one source row per output row, into a repeating target row pattern whose mapped vertical-merge topology already matches the source. This does not regroup rows, change semantic columns, remove translations, or rewrite values; use docx_replace_table_rows for those operations. Get row refs from list/find with kind=row; a merged physical cell may be selected only once.',
-    inputSchema: inputContract('docx_copy_table_range'),
-    outputSchema: fixedEditOutput('docx_copy_table_range'),
-    handler: args => fixedEdit('docx_copy_table_range', args),
-  },
-  {
     name: 'docx_compare',
     description: 'Compare two DOCX files and report package, metric, and style differences.',
     inputSchema: inputContract('docx_compare'),
