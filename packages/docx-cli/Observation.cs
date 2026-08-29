@@ -38,7 +38,7 @@ public static class Observation
         return new DocxObservationListResult(
             "tiwater.docx-observation-list/v1",
             Receipt("list", snapshot.Revision, page.TotalCount, page.Items.Count, page.Remaining, page.Continuation),
-            page.Items.Select(ToObject).ToList());
+            page.Items.Select(item => ToObject(snapshot, item)).ToList());
     }
 
     public static DocxObservationFindResult Find(
@@ -59,7 +59,7 @@ public static class Observation
             .Where(item => kind is null || item.Kind == kind)
             .Select(item => new { Item = item, Ranges = FindRanges(TechnicalText(item.Element), literal) })
             .Where(item => item.Ranges.Count > 0)
-            .Select(item => new DocxObservationMatch(ToObject(item.Item), item.Ranges))
+            .Select(item => new DocxObservationMatch(ToObject(snapshot, item.Item), item.Ranges))
             .ToList();
         var selection = SelectionKey("find", kind, scope, parentReference, literal);
         var page = Page(matches, snapshot.Revision, selection, limit, continuation);
@@ -83,7 +83,7 @@ public static class Observation
             throw new InvalidOperationException("stale-object-ref");
 
         var detail = new DocxObservationDetail(
-            ToObject(selected),
+            ToObject(snapshot, selected),
             selected.Element.NamespaceUri,
             selected.Element.OuterXml,
             selected.Element.ChildElements.Count,
@@ -93,7 +93,7 @@ public static class Observation
             snapshot.Objects
                 .Where(item => !ReferenceEquals(item.Element, selected.Element)
                     && item.Element.Ancestors().Any(ancestor => ReferenceEquals(ancestor, selected.Element)))
-                .Select(ToObject)
+                .Select(item => ToObject(snapshot, item))
                 .ToList());
         return new DocxObservationReadResult(
             "tiwater.docx-observation-read/v1",
@@ -344,11 +344,12 @@ public static class Observation
         return result;
     }
 
-    private static DocxObservationObject ToObject(NativeObject item)
+    private static DocxObservationObject ToObject(Snapshot snapshot, NativeObject item)
     {
         var text = item.Kind == "part" ? null : TechnicalText(item.Element);
         return new DocxObservationObject(
             item.Reference,
+            PublishedParentReference(snapshot, item),
             item.Kind,
             item.StoryPart,
             item.NativePath,
@@ -356,6 +357,17 @@ public static class Observation
             text is null ? null : Clip(text, 160),
             text?.Length,
             item.Element.ChildElements.Count);
+    }
+
+    private static string? PublishedParentReference(Snapshot snapshot, NativeObject item)
+    {
+        var current = item.Element.Parent;
+        while (current is not null)
+        {
+            if (snapshot.ObjectsByElement.TryGetValue(current, out var parent)) return parent.Reference;
+            current = current.Parent;
+        }
+        return null;
     }
 
     private static bool IsObjectReference(string value)
@@ -388,7 +400,7 @@ public static class Observation
         string NativePath,
         OpenXmlElement Element);
 
-    private sealed record Story(string Part, OpenXmlPartRootElement Root);
+    private sealed record Story(string Part, OpenXmlElement Root);
 
     private sealed class Snapshot
     {
@@ -396,13 +408,16 @@ public static class Observation
         {
             Revision = revision;
             Objects = objects;
-            PublishedElements = objects
-                .Select(item => item.Element)
-                .ToHashSet<OpenXmlElement>(ReferenceEqualityComparer.Instance);
+            ObjectsByElement = objects.ToDictionary<NativeObject, OpenXmlElement, NativeObject>(
+                item => item.Element,
+                item => item,
+                ReferenceEqualityComparer.Instance);
+            PublishedElements = ObjectsByElement.Keys.ToHashSet<OpenXmlElement>(ReferenceEqualityComparer.Instance);
         }
 
         public DocxRevision Revision { get; }
         public IReadOnlyList<NativeObject> Objects { get; }
+        public IReadOnlyDictionary<OpenXmlElement, NativeObject> ObjectsByElement { get; }
         public IReadOnlySet<OpenXmlElement> PublishedElements { get; }
 
         public static Snapshot Open(string input)
@@ -443,7 +458,7 @@ public static class Observation
         private static IEnumerable<Story> Stories(WordprocessingDocument document)
         {
             var main = document.MainDocumentPart ?? throw new InvalidOperationException("main-document-part-not-found");
-            if (main.Document is not null) yield return new Story(PartUri(main.Uri), main.Document);
+            if (main.Document?.Body is not null) yield return new Story(PartUri(main.Uri), main.Document.Body);
 
             foreach (var part in main.HeaderParts.OrderBy(part => main.GetIdOfPart(part), StringComparer.Ordinal))
                 if (part.Header is not null) yield return new Story(PartUri(part.Uri), part.Header);
@@ -531,6 +546,7 @@ public sealed record DocxObservationReceipt(
 
 public sealed record DocxObservationObject(
     [property: JsonPropertyName("ref")] string Reference,
+    [property: JsonPropertyName("parentRef")] string? ParentReference,
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("storyPart")] string StoryPart,
     [property: JsonPropertyName("nativePath")] string NativePath,

@@ -53,11 +53,13 @@
           },
           "targetParentRef": {
             "type": "string",
-            "pattern": "^dox1_[0-9a-f]{64}$"
+            "pattern": "^dox1_[0-9a-f]{64}$",
+            "description": "Revision-bound parent ref returned as parentRef on its direct children."
           },
           "beforeRef": {
             "type": "string",
-            "pattern": "^dox1_[0-9a-f]{64}$"
+            "pattern": "^dox1_[0-9a-f]{64}$",
+            "description": "Optional direct child whose returned parentRef equals targetParentRef."
           },
           "repeat": {
             "type": "integer",
