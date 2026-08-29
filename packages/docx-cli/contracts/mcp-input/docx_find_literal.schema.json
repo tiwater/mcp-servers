@@ -34,10 +34,11 @@
       "pattern": "^dox1_[0-9a-f]{64}$"
     },
     "limit": {
-      "default": 100,
+      "description": "Maximum matches in this small page. Refine the literal or parentRef when more matches remain; do not raise the page size to extract the document.",
+      "default": 50,
       "type": "integer",
       "minimum": 1,
-      "maximum": 1000
+      "maximum": 100
     },
     "continuation": {
       "type": "string",
