@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -292,21 +294,91 @@ internal static class DocxObjectActions
         {
             if (!seen.Add(id)) continue;
             if (!sourceStyles.TryGetValue(id, out var sourceStyle)) { error = $"source style is missing: {id}"; return false; }
-            if (targetStyles.TryGetValue(id, out var targetStyle))
-            {
-                if (sourceStyle.OuterXml != targetStyle.OuterXml) { error = $"target style conflicts with source style: {id}"; return false; }
-                continue;
-            }
             ordered.Add(sourceStyle);
             foreach (var dependency in new[] { sourceStyle.BasedOn?.Val?.Value, sourceStyle.NextParagraphStyle?.Val?.Value, sourceStyle.LinkedStyle?.Val?.Value })
                 if (!string.IsNullOrWhiteSpace(dependency)) queue.Enqueue(dependency);
         }
         if (!apply) return true;
+
         targetStylesPart ??= target.AddNewPart<StyleDefinitionsPart>();
         targetStylesPart.Styles ??= new Styles();
-        foreach (var style in ordered.AsEnumerable().Reverse()) targetStylesPart.Styles.AppendChild((Style)style.CloneNode(true));
+        var usedIds = targetStyles.Keys.Concat(sourceStyles.Keys).ToHashSet(StringComparer.Ordinal);
+        var remapped = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var sourceStyle in ordered)
+        {
+            var id = sourceStyle.StyleId!.Value!;
+            if (!targetStyles.TryGetValue(id, out var targetStyle)
+                || sourceStyle.OuterXml == targetStyle.OuterXml)
+            {
+                remapped[id] = id;
+                continue;
+            }
+
+            var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceStyle.OuterXml)))
+                .ToLowerInvariant()[..16];
+            var candidate = $"tw_{digest}";
+            for (var suffix = 2; usedIds.Contains(candidate); suffix++) candidate = $"tw_{digest}_{suffix}";
+            usedIds.Add(candidate);
+            remapped[id] = candidate;
+        }
+
+        foreach (var sourceStyle in ordered.AsEnumerable().Reverse())
+        {
+            var sourceId = sourceStyle.StyleId!.Value!;
+            var targetId = remapped[sourceId];
+            if (targetStyles.TryGetValue(sourceId, out var identical)
+                && sourceId == targetId
+                && sourceStyle.OuterXml == identical.OuterXml) continue;
+
+            var clone = NormalizeStyle(sourceStyle);
+            clone.StyleId = targetId;
+            RewriteStyleDependencies(clone, remapped);
+            if (clone.Default?.Value == true && targetStylesPart.Styles.Elements<Style>()
+                .Any(style => style.Type?.Value == clone.Type?.Value && style.Default?.Value == true))
+                clone.Default = null;
+            targetStylesPart.Styles.AppendChild(clone);
+        }
+        foreach (var root in roots) RewriteStyleReferences(root, remapped);
         targetStylesPart.Styles.Save();
         return true;
+    }
+
+    private static Style NormalizeStyle(Style source)
+    {
+        var normalized = (Style)source.CloneNode(false);
+        foreach (var child in source.ChildElements)
+            if (!normalized.AddChild(child.CloneNode(true), true))
+                throw new InvalidOperationException($"source style child is unsupported: {child.LocalName}");
+        return normalized;
+    }
+
+    private static void RewriteStyleReferences(OpenXmlElement root, IReadOnlyDictionary<string, string> remapped)
+    {
+        foreach (var element in DescendantsAndSelf(root))
+        {
+            switch (element)
+            {
+                case ParagraphStyleId paragraph when paragraph.Val?.Value is { } id && remapped.TryGetValue(id, out var replacement):
+                    paragraph.Val = replacement;
+                    break;
+                case RunStyle run when run.Val?.Value is { } id && remapped.TryGetValue(id, out var replacement):
+                    run.Val = replacement;
+                    break;
+                case TableStyle table when table.Val?.Value is { } id && remapped.TryGetValue(id, out var replacement):
+                    table.Val = replacement;
+                    break;
+            }
+        }
+    }
+
+    private static void RewriteStyleDependencies(Style style, IReadOnlyDictionary<string, string> remapped)
+    {
+        if (style.BasedOn?.Val?.Value is { } basedOn && remapped.TryGetValue(basedOn, out var mappedBasedOn))
+            style.BasedOn.Val = mappedBasedOn;
+        if (style.NextParagraphStyle?.Val?.Value is { } next && remapped.TryGetValue(next, out var mappedNext))
+            style.NextParagraphStyle.Val = mappedNext;
+        if (style.LinkedStyle?.Val?.Value is { } linked && remapped.TryGetValue(linked, out var mappedLinked))
+            style.LinkedStyle.Val = mappedLinked;
     }
 
     internal static bool TryImportNumbering(MainDocumentPart source, MainDocumentPart target, IReadOnlyList<OpenXmlElement> roots, bool apply, out string error)
