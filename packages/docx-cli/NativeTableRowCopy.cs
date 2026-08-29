@@ -147,29 +147,16 @@ public static class NativeTableRowCopy
                 change.SourceTableRef,
                 change.SourceRows.FirstRef,
                 change.SourceRows.LastRef,
-            }.Concat(change.SourceRows.ExcludeRefs ?? [])
-             .Concat(change.Columns.Select(column => column.SourceHeaderRef)).ToArray();
+            }.Concat(change.Columns.Select(column => column.SourceHeaderRef)).ToArray();
             var sourceResolved = Observation.ResolveReferences(sourcePath, change.SourceDocument.Revision, sourceReferences);
-            RequireKinds(sourceResolved, "table", "row", "row", (change.SourceRows.ExcludeRefs?.Count ?? 0) + change.Columns.Count, null, "source");
+            RequireKinds(sourceResolved, "table", "row", "row", change.Columns.Count, "cell", "source");
             var sourceTable = Resolve<Table>(sourceDocument, sourceResolved[0], "source-table");
             var allSourceRows = sourceTable.Elements<TableRow>().ToArray();
             var sourceRange = Range(allSourceRows,
                 Resolve<TableRow>(sourceDocument, sourceResolved[1], "source-first-row"),
                 Resolve<TableRow>(sourceDocument, sourceResolved[2], "source-last-row"), "source");
-            var excludedCount = change.SourceRows.ExcludeRefs?.Count ?? 0;
-            if (change.SourceRows.ExcludeRefs is { } excludeRefs
-                && excludeRefs.Distinct(StringComparer.Ordinal).Count() != excludeRefs.Count)
-                throw new InvalidOperationException("source-excluded-row-ref-duplicate");
-            var excluded = sourceResolved.Skip(3).Take(excludedCount)
-                .Select(item => Resolve<TableRow>(sourceDocument, item, "source-excluded-row"))
-                .ToHashSet(ReferenceEqualityComparer.Instance);
-            if (excluded.Any(row => !sourceRange.Contains(row, ReferenceEqualityComparer.Instance)))
-                throw new InvalidOperationException("source-excluded-row-outside-range");
-            var sourceRows = sourceRange.Where(row => !excluded.Contains(row)).ToArray();
-            if (sourceRows.Length == 0) throw new InvalidOperationException("source-row-selection-must-not-be-empty");
-            var sourceHeaders = sourceResolved.Skip(3 + excludedCount).ToArray();
-            if (sourceHeaders.Any(item => item.Kind != "cell"))
-                throw new InvalidOperationException("source-header-ref-must-be-cell");
+            var sourceRows = sourceRange.ToArray();
+            var sourceHeaders = sourceResolved.Skip(3).ToArray();
             var sourceHeaderCells = sourceHeaders.Select(item =>
                 Resolve<TableCell>(sourceDocument, item, "source-header-cell")).ToArray();
             RequireOneHeaderRow(sourceHeaderCells, sourceRange, "source");
@@ -793,10 +780,9 @@ internal static class TableRowCopyReferenceExtensions
 
 public sealed record TableRowCopyDocument(string Input, string Revision);
 public sealed record TableRowCopyRange(string FirstRef, string LastRef);
-public sealed record TableRowCopySourceRange(string FirstRef, string LastRef, IReadOnlyList<string>? ExcludeRefs = null);
 public sealed record TableRowCopyColumn(string SourceHeaderRef, string TargetHeaderRef, string Content);
 public sealed record TableRowCopyChange(string TargetTableRef, TableRowCopyRange TargetRows,
-    TableRowCopyDocument SourceDocument, string SourceTableRef, TableRowCopySourceRange SourceRows,
+    TableRowCopyDocument SourceDocument, string SourceTableRef, TableRowCopyRange SourceRows,
     IReadOnlyList<TableRowCopyColumn> Columns);
 public sealed record TableRowCopyRequest(TableRowCopyDocument TargetDocument,
     IReadOnlyList<TableRowCopyChange> Changes, string Output, string ReceiptOutput);
