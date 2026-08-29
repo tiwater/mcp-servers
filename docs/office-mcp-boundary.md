@@ -86,7 +86,6 @@ The public operation list is closed over these verbs:
 | --- | --- |
 | set content | Replace content in selected Word text containers, workbook cells, or presentation text and table cells without replacing their containers. |
 | copy content | Copy current content from selected source containers to selected target containers; target structure and formatting remain authoritative unless a fixed formatting mode is explicitly selected. |
-| copy table range | Copy a source row range into a target row pattern using caller-selected source-to-target columns; the provider expands rows and preserves target grid, merge, pagination, formula, style, and relationship mechanics. |
 | insert object | Insert a caller-supplied native object of an allowed kind into a selected native container. |
 | copy object | Copy selected paragraphs, contiguous story ranges, tables, rows, columns, worksheets, slides, or shapes with required parts and relationships. |
 | move object | Move selected objects within one current document without changing their content. |
@@ -112,6 +111,13 @@ The Agent supplies their relationship; the provider performs the package work
 needed to preserve runs, styles, table grids, merges, formulas, drawings, and
 relationships according to the selected fixed action. This keeps Open XML
 mechanics out of Agent glue without moving semantic selection into code.
+
+Table transformation is a composition of the same native-object actions, not a
+separate table language. Copying row or grid-column objects establishes target
+structure; setting or copying cell content fills that structure; setting typed
+properties changes presentation; merging or splitting cells changes topology;
+moving or deleting objects changes order and extent. None of these actions
+infers a row group, column meaning, source-target mapping, or business value.
 
 Cross-document copy and presentation layout import bind both current revisions
 explicitly. They are valid only for the fixed operations that declare source
