@@ -115,11 +115,18 @@ public static class Inspector
     public static IReadOnlyList<object> InspectDocumentFlow(string input)
     {
         var path = Path.GetFullPath(input);
+        var revision = Observation.CurrentRevision(path);
         using var doc = WordprocessingDocument.Open(path, false);
-        var body = doc.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+        var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
+        var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
+        static string PartUri(OpenXmlPart part)
+            => part.Uri.OriginalString.StartsWith("/", StringComparison.Ordinal)
+                ? part.Uri.OriginalString : "/" + part.Uri.OriginalString;
+        string ParagraphReference(OpenXmlPart part, Paragraph paragraph)
+            => Observation.MakeReference(revision, "paragraph", PartUri(part), Observation.NativePathFor(paragraph));
         var nodes = new List<object>();
         var headerIndex = 0;
-        foreach (var headerPart in doc.MainDocumentPart?.HeaderParts ?? [])
+        foreach (var headerPart in mainPart.HeaderParts)
         {
             if (headerPart.Header is null) continue;
             var paragraphIndex = 0;
@@ -133,7 +140,11 @@ public static class Inspector
                     .Distinct()
                     .OrderBy(value => value, StringComparer.Ordinal)
                     .ToArray();
-                if (!string.IsNullOrEmpty(text)) nodes.Add(new { type = "headerParagraph", headerIndex, paragraphIndex, style, fontSizes, text });
+                if (!string.IsNullOrEmpty(text)) nodes.Add(new
+                {
+                    type = "headerParagraph", headerIndex, paragraphIndex,
+                    objectRef = ParagraphReference(headerPart, paragraph), style, fontSizes, text,
+                });
                 paragraphIndex += 1;
             }
             headerIndex += 1;
@@ -154,9 +165,19 @@ public static class Inspector
                 var keepLines = paragraph.ParagraphProperties?.GetFirstChild<KeepLines>() is not null;
                 var drawingCount = paragraph.Descendants<Drawing>().Count();
                 if (drawingCount > 0)
-                    nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, keepLines, drawingCount, text });
+                    nodes.Add(new
+                    {
+                        type = "paragraph", paragraphIndex = bodyParagraphIndex,
+                        objectRef = ParagraphReference(mainPart, paragraph), style, numberingId,
+                        numberingLevel, keepNext, keepLines, drawingCount, text,
+                    });
                 else
-                    nodes.Add(new { type = "paragraph", paragraphIndex = bodyParagraphIndex, style, numberingId, numberingLevel, keepNext, keepLines, text });
+                    nodes.Add(new
+                    {
+                        type = "paragraph", paragraphIndex = bodyParagraphIndex,
+                        objectRef = ParagraphReference(mainPart, paragraph), style, numberingId,
+                        numberingLevel, keepNext, keepLines, text,
+                    });
                 bodyParagraphIndex += 1;
             }
             else if (element is Table table)
