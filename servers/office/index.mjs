@@ -136,19 +136,63 @@ function artifactOutput(tool) {
   return z.object({ tool: z.literal(tool), runtime: runtimeIdentity, source: artifact, artifact }).strict();
 }
 
+const docxRevision = z.object({
+  id: z.string().regex(/^docx-rev-v1-[0-9a-f]{64}$/),
+  inputSha256: z.string().regex(/^[A-F0-9]{64}$/),
+  provider: z.literal('tiwater.docx.cli'),
+  toolVersion: z.string(),
+}).strict();
+
+const docxTableIndexEntry = z.object({
+  ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
+  tableIndex: z.number().int().nonnegative(),
+  containmentPath: z.array(z.string()),
+  parentCellAddress: z.string().nullable(),
+  storyKind: z.string(),
+  rowCount: z.number().int().nonnegative(),
+  columnCount: z.number().int().nonnegative(),
+  textPreview: z.string(),
+  textLength: z.number().int().nonnegative(),
+}).strict();
+
+function docxInspectionOutput(tool) {
+  return artifactOutput(tool).extend({
+    revision: docxRevision,
+    tables: z.array(docxTableIndexEntry),
+  }).strict();
+}
+
+const docxObjectIdentity = z.object({
+  ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
+  parentRef: z.string().regex(/^dox1_[0-9a-f]{64}$/).nullable(),
+  kind: z.string(),
+  storyPart: z.string(),
+  nativePath: z.string(),
+  localName: z.string(),
+  textPreview: z.string().nullable(),
+  textLength: z.number().int().nonnegative().nullable(),
+  childCount: z.number().int().nonnegative(),
+}).strict();
+
+const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
+  revision: docxRevision,
+  object: docxObjectIdentity,
+  descendants: z.array(docxObjectIdentity),
+}).strict();
+
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Write the default single full-document DOCX observation containing body content, structure, placeholders, comments, anchors, tables, fields, flow, fonts, and formatting metrics. Its tables section includes the current revision and native refs for every observed table, row, cell, paragraph, and run; use those refs directly for mutation instead of listing the same descendants again. Do not also call docx_export_json for the same observation.',
+    description: 'Inspect one current DOCX. The response returns its revision and a bounded table identity index for the next selection; the complete observation remains in the evidence artifact.',
     inputSchema: inputContract('docx_inspect'),
-    outputSchema: artifactOutput('docx_inspect'),
+    outputSchema: docxInspectionOutput('docx_inspect'),
     handler: docxInspect,
   },
   {
     name: 'docx_inspect_tables',
-    description: 'Inspect current DOCX tables, cells, merges, paragraphs, runs, and formatting, returning the current revision and native refs for every observed table, row, cell, paragraph, and run. Use those refs directly for mutation instead of listing the same descendants again.',
+    description: 'Inspect current DOCX tables. The response returns the revision and a bounded table identity index; the complete table observation remains in the evidence artifact.',
     inputSchema: inputContract('docx_inspect_tables'),
-    outputSchema: artifactOutput('docx_inspect_tables'),
+    outputSchema: docxInspectionOutput('docx_inspect_tables'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxInspectTables,
   },
@@ -168,9 +212,9 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Write one selected revision-bound native DOCX object, its Open XML, and every descendant object ref to a new JSON artifact. One table read provides all row, cell, paragraph, run, text, and drawing refs needed for mutation; do not enumerate those descendants with repeated list calls.',
+    description: 'Read one selected native DOCX object. The response returns that object and every descendant identity for the next operation; full Open XML remains in the evidence artifact.',
     inputSchema: inputContract('docx_read_object'),
-    outputSchema: artifactOutput('docx_read_object'),
+    outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxReadObject,
   },
@@ -367,6 +411,32 @@ function buildServer() {
   return server;
 }
 
+function compactDocxTableIndex(report) {
+  if (!report?.Revision || !Array.isArray(report.Tables)
+      || (report.StoryTables !== null && !Array.isArray(report.StoryTables))) {
+    throw new Error('docx-table-inspection-result-invalid');
+  }
+  const tables = [...report.Tables, ...(report.StoryTables ?? [])].map(table => {
+    const text = table.Rows.flatMap(row => row.Cells.map(cell => cell.Text))
+      .filter(value => typeof value === 'string' && value.length > 0)
+      .join(' ')
+      .replace(/\s+/gu, ' ')
+      .trim();
+    return {
+      ref: table.Ref,
+      tableIndex: table.TableIndex,
+      containmentPath: table.ContainmentPath,
+      parentCellAddress: table.ParentCellAddress ?? null,
+      storyKind: table.Story.Kind,
+      rowCount: table.RowCount,
+      columnCount: table.ColumnCount,
+      textPreview: text.length <= 160 ? text : `${text.slice(0, 160)}...`,
+      textLength: text.length,
+    };
+  });
+  return { revision: report.Revision, tables };
+}
+
 async function docxInspect(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(docxCandidates, ['inspect', input, '--json']);
@@ -375,13 +445,20 @@ async function docxInspect(args) {
     runtime: commandRuntime(result),
     source: await fileArtifact(input),
     artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
+    ...compactDocxTableIndex(result.json.tables),
   };
 }
 
 async function docxInspectTables(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(docxCandidates, ['inspect-tables', input, '--json']);
-  return { tool: 'docx_inspect_tables', runtime: commandRuntime(result), source: await fileArtifact(input), artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json) };
+  return {
+    tool: 'docx_inspect_tables',
+    runtime: commandRuntime(result),
+    source: await fileArtifact(input),
+    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
+    ...compactDocxTableIndex(result.json),
+  };
 }
 
 async function docxObservation(tool, args) {
@@ -402,6 +479,9 @@ async function docxReadObject(args) {
       runtime: commandRuntime(result),
       source: await fileArtifact(input),
       artifact: await writeJsonArtifact(output, result.json),
+      revision: result.json.receipt.revision,
+      object: result.json.observation.object,
+      descendants: result.json.observation.descendants,
     };
   });
 }
