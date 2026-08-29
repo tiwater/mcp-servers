@@ -31,6 +31,7 @@ public static class ObservationCommand
                 input,
                 RequireString(request, "kind"),
                 OptionalString(request, "scope"),
+                OptionalString(request, "parentRef"),
                 OptionalInt(request, "limit") ?? Observation.DefaultPageLimit,
                 OptionalString(request, "continuation")),
             "docx_find_literal" => Observation.Find(
@@ -38,6 +39,7 @@ public static class ObservationCommand
                 RequireString(request, "literal"),
                 OptionalString(request, "kind"),
                 OptionalString(request, "scope"),
+                OptionalString(request, "parentRef"),
                 OptionalInt(request, "limit") ?? Observation.DefaultPageLimit,
                 OptionalString(request, "continuation")),
             "docx_read_object" => Observation.Read(
