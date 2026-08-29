@@ -260,6 +260,7 @@ const tools = [
     description: 'Write a body-only DOCX JSON projection only when a downstream consumer explicitly requires that format. It is not a companion to docx_inspect and does not replace bounded list/find/read object selection.',
     inputSchema: inputContract('docx_export_json'),
     outputSchema: artifactOutput('docx_export_json'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxExportJson,
   },
   {
@@ -313,6 +314,7 @@ const tools = [
     description: 'Inspect a current XLSX workbook or legacy XLS workbook and write one JSON observation containing workbook structure, exported values, formulas, styles, merged ranges, and any published legacy-format conversion evidence.',
     inputSchema: inputContract('xlsx_inspect'),
     outputSchema: artifactOutput('xlsx_inspect'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxInspect,
   },
   {
@@ -320,6 +322,7 @@ const tools = [
     description: 'Export workbook sheet data from XLSX as structured JSON.',
     inputSchema: inputContract('xlsx_export_json'),
     outputSchema: artifactOutput('xlsx_export_json'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxExportJson,
   },
   ...fixedToolDefinitions(xlsxFixedTools),
@@ -335,6 +338,7 @@ const tools = [
     description: 'Inspect a PPTX file and write one detailed JSON observation containing slides, masters, layouts, shapes, transforms, paragraphs, runs, and placeholders.',
     inputSchema: inputContract('pptx_inspect'),
     outputSchema: artifactOutput('pptx_inspect'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
     handler: pptxInspect,
   },
   {
@@ -342,6 +346,7 @@ const tools = [
     description: 'Export PPTX slide text, notes, and placeholder hints to a new JSON artifact without returning the full presentation through MCP.',
     inputSchema: inputContract('pptx_export_json'),
     outputSchema: artifactOutput('pptx_export_json'),
+    annotations: { readOnlyHint: true, idempotentHint: true },
     handler: pptxExportJson,
   },
   {
