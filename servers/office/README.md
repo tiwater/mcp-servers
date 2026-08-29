@@ -43,6 +43,13 @@ DOCX mutations accept revision-bound native object references. Physical table,
 row, column, paragraph, run, drawing, and body indexes are not public mutation
 addresses.
 
+Table-row copying is a distinct bulk table responsibility: the caller selects
+current source and target tables, bounded row regions, excluded source rows,
+and source/target columns. The provider expands the target region, preserves
+target presentation, carries selected source paragraph content, and reproduces
+the selected source row order and merge topology. It does not infer business
+identity, language, row scope, or column meaning.
+
 The catalog is intentionally open to new generic document capabilities, but a
 specific workflow, template, customer, issue, input document, or model
 difference does not justify a new tool. Add a tool only for a stable technical
