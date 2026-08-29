@@ -1,6 +1,6 @@
 # tiwater-docx
 
-`tiwater-docx` provides technical DOCX observation, fixed Open XML mutation,
+`tiwater-docx` provides technical DOCX observation, native Open XML mutation,
 normalization, comparison, and package validation. It does not own business
 mappings, template migration, workflow decisions, or delivery status.
 
@@ -24,22 +24,24 @@ Inspection reports current package, story, paragraph, run, table, row, cell,
 field, drawing, font, flow, and formatting facts. Complete JSON can be written
 to an artifact path by the Office MCP.
 
-## Fixed technical mutation
+## Native object mutation
 
 ```bash
-tiwater-docx docx_set_table_cell_text request.json
-tiwater-docx docx_insert_table_rows request.json
+tiwater-docx docx_copy_content request.json
+tiwater-docx docx_copy_object request.json
+tiwater-docx docx_delete_object request.json
 tiwater-docx docx_merge_cells request.json
+tiwater-docx docx_split_cells request.json
 tiwater-docx normalize-openxml input.docx output.docx
 tiwater-docx strip-direct-formatting input.docx output.docx
 tiwater-docx replace-style-ids input.docx output.docx style-map.json
 ```
 
 Each `docx_*` mutation command consumes the matching provider-owned request
-contract from `contracts/mcp-input/`. Requests contain no operation
-discriminator. The provider validates document coordinates and Open XML
-constraints; callers own the selected objects and values. Structural mutation
-requires fresh observation before later calls.
+contract from `contracts/mcp-input/`. The provider validates revision-bound
+native object references and Open XML constraints; callers own the selected
+objects and values. Structural mutation requires fresh observation before later
+calls.
 
 ## Validation
 

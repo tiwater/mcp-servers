@@ -39,20 +39,9 @@ Structural worksheet row deletion is exposed as `xlsx_delete_rows`. Each change
 contains only `sheet`, `startRow`, and `count`; unsupported dependent workbook
 structures fail atomically and are reported by the provider receipt.
 
-The bounded DOCX object actions are:
-
-- `docx_insert_body_range`: copies inclusive direct-body indexes from a bound
-  source DOCX before a target direct-body boundary. Source documents are hashed
-  into the receipt. Whole sections preserve supported style, numbering, media,
-  hyperlink, header, and footer relationships; partial or unsafe sections fail.
-- `docx_replace_drawing_image`: replaces one body drawing's embedded image while
-  preserving its drawing geometry. Image inputs are hashed into the receipt.
-- `docx_insert_body_image`: inserts one inline body drawing with explicit EMU
-  dimensions. Image inputs are hashed into the receipt.
-- `docx_set_table_row_repeat_as_header`: sets or unsets native repeat-as-header
-  state on uniquely addressed direct body, header, or footer table rows. The
-  whole same-action batch is validated before mutation; nested, missing,
-  ambiguous, duplicate, or invalid targets fail closed.
+DOCX mutations accept revision-bound native object references. Physical table,
+row, column, paragraph, run, drawing, and body indexes are not public mutation
+addresses.
 
 `docx_inspect_tables` preserves the v1 body `Tables` view and additively exposes
 header/footer topology in `StoryTables`. Header/footer tables carry part

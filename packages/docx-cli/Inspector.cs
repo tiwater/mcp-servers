@@ -83,8 +83,8 @@ public static class Inspector
                 ParagraphCount: allParagraphs.Count,
                 TableCount: allTables.Count,
                 SectionCount: body.Descendants<SectionProperties>().Count(),
-                HasTrailingEmptySection: Editor.HasTrailingEmptySection(body),
-                TrailingEmptyBodyParagraphCount: Editor.GetTrailingEmptyBodyParagraphs(body).Count,
+                HasTrailingEmptySection: HasTrailingEmptySection(body),
+                TrailingEmptyBodyParagraphCount: GetTrailingEmptyBodyParagraphs(body).Count,
                 HeaderPartCount: mainPart.HeaderParts.Count(),
                 FooterPartCount: mainPart.FooterParts.Count(),
                 Headings: headings.Take(50).ToList(),
@@ -757,4 +757,44 @@ public static class Inspector
 
     private static string? ClipNullable(string? text, int max)
         => string.IsNullOrWhiteSpace(text) ? null : Clip(text, max);
+
+    private static IReadOnlyList<Paragraph> GetTrailingEmptyBodyParagraphs(Body body)
+    {
+        var children = body.ChildElements.ToList();
+        if (children.LastOrDefault() is not SectionProperties) return [];
+        var result = new List<Paragraph>();
+        for (var index = children.Count - 2; index >= 0; index--)
+        {
+            if (children[index] is not Paragraph paragraph || !IsEmptyBodyParagraph(paragraph)) break;
+            result.Add(paragraph);
+        }
+        result.Reverse();
+        return result;
+    }
+
+    private static bool HasTrailingEmptySection(Body body)
+    {
+        var children = body.ChildElements.ToList();
+        if (children.LastOrDefault() is not SectionProperties) return false;
+        var boundaryIndex = -1;
+        for (var index = children.Count - 2; index >= 0; index--)
+        {
+            if (children[index] is Paragraph paragraph && paragraph.ParagraphProperties?.SectionProperties is not null)
+            {
+                boundaryIndex = index;
+                break;
+            }
+        }
+        if (boundaryIndex < 0) return false;
+        var trailing = children.Skip(boundaryIndex + 1).Take(children.Count - boundaryIndex - 2)
+            .Where(child => child is not BookmarkStart and not BookmarkEnd)
+            .ToArray();
+        return trailing.Length > 0 && trailing.All(child => child is Paragraph paragraph && IsEmptyBodyParagraph(paragraph));
+    }
+
+    private static bool IsEmptyBodyParagraph(Paragraph paragraph)
+        => string.IsNullOrWhiteSpace(paragraph.InnerText)
+           && !paragraph.Descendants().Any(element => element is Drawing or Break or TabChar or CarriageReturn
+               or FieldChar or FieldCode or FootnoteReference or EndnoteReference or CommentReference
+               or BookmarkStart or BookmarkEnd or Hyperlink);
 }

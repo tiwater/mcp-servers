@@ -28,7 +28,6 @@ public static class Cli
         NativeObjectMutation.DeleteCommand,
         NativeCellMutation.MergeCommand,
         NativeCellMutation.SplitCommand,
-        .. FixedEditCommand.Commands,
     ];
 
     public static Task<int> RunAsync(string[] args)
@@ -82,7 +81,6 @@ public static class Cli
                     => Task.FromResult(NativeObjectMutation.Run(args[0], args[1..])),
                 _ when args[0] is NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
                     => Task.FromResult(NativeCellMutation.Run(args[0], args[1..])),
-                _ when FixedEditCommand.IsCommand(args[0]) => Task.FromResult(FixedEditCommand.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
             };
         }
@@ -211,7 +209,6 @@ public static class Cli
             "normalize-openxml" => "tiwater-docx normalize-openxml <input.docx> <output.docx>",
             "validate-font-policy" => "tiwater-docx validate-font-policy <input.docx> <policy.json>",
             "validate-toc-style-policy" => "tiwater-docx validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level>",
-            _ when FixedEditCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
             _ => null,
         };
         if (usage is null) return false;
