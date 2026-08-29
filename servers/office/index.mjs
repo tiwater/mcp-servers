@@ -205,14 +205,14 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of revision-bound DOCX object identities for structure discovery, not document-text extraction. For content, use docx_find_literal and then docx_read_object on the selected table or row. Use parentRef for nearest children: a part yields top-level story blocks and a table yields rows. Without parentRef the request is story-wide; scope is only an exact story-part URI.',
+    description: 'List one small page of revision-bound DOCX object identities for structure discovery, not selection by text. To select a table or row by any descendant cell text, call docx_find_literal with kind table or row instead of listing the document. Use parentRef for nearest children: a part yields top-level story blocks and a table yields rows. Without parentRef the request is story-wide; scope is only an exact story-part URI.',
     inputSchema: inputContract('docx_list_objects'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_list_objects', args),
   },
   {
     name: 'docx_find_literal',
-    description: 'Find exact current text in one small page of revision-bound native DOCX objects, then pass a selected table or row ref to docx_read_object. Use parentRef to search only the nearest published children of a selected part, table, row, cell, or paragraph; this is not recursive descendant search.',
+    description: 'Find exact current text in one small page of revision-bound native DOCX objects. With kind table or row, matching includes all descendant cell text, so no prior paragraph, cell, or document-wide list is needed. Use parentRef only to search nearest published children of a selected object.',
     inputSchema: inputContract('docx_find_literal'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_find_literal', args),
