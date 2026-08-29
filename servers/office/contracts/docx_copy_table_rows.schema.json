@@ -57,14 +57,9 @@
               "type": "object",
               "properties": {
                 "sourceHeaderRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-                "targetHeaderRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-                "content": {
-                  "type": "string",
-                  "enum": ["all-paragraphs", "first-paragraph"],
-                  "description": "Content copied from each mapped source cell. all-paragraphs preserves every source paragraph in order. first-paragraph copies only the first source paragraph. Before choosing first-paragraph, read the selected source table with docx_read_object kinds row, cell, and paragraph to prove later paragraphs are intentionally omitted."
-                }
+                "targetHeaderRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
               },
-              "required": ["sourceHeaderRef", "targetHeaderRef", "content"],
+              "required": ["sourceHeaderRef", "targetHeaderRef"],
               "additionalProperties": false
             }
           }
