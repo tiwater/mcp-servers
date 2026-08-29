@@ -201,9 +201,7 @@ public static class NativeTableRowCopy
                 mapping.SourceStart, mapping.SourceSpan, mapping.TargetStart, mapping.TargetSpan)).Order().ToArray();
             if (!targetPositions.SequenceEqual(Enumerable.Range(targetPositions[0], targetPositions.Length)))
                 throw new InvalidOperationException("source-cell-maps-to-noncontiguous-target-columns");
-            var contentModes = selected.Select(mapping => mapping.Content).Distinct(StringComparer.Ordinal).ToArray();
-            if (contentModes.Length != 1) throw new InvalidOperationException("source-cell-content-mode-conflict");
-            var paragraphs = CloneCellParagraphs(cell.Cell, contentModes[0]);
+            var paragraphs = CloneCellParagraphs(cell.Cell);
             prepared.Add(new PreparedCell(
                 cell.Start,
                 cell.Span,
@@ -288,15 +286,12 @@ public static class NativeTableRowCopy
         throw new InvalidOperationException("source-vertical-merge-origin-not-found");
     }
 
-    private static IReadOnlyList<Paragraph> CloneCellParagraphs(TableCell cell, string contentMode)
+    private static IReadOnlyList<Paragraph> CloneCellParagraphs(TableCell cell)
     {
         if (cell.ChildElements.Any(element => element is not TableCellProperties
             and not Paragraph and not BookmarkStart and not BookmarkEnd))
             throw new InvalidOperationException("source-cell-contains-non-paragraph-content");
-        IEnumerable<Paragraph> paragraphs = cell.Elements<Paragraph>();
-        if (contentMode == "first-paragraph") paragraphs = paragraphs.Take(1);
-        else if (contentMode != "all-paragraphs") throw new InvalidOperationException("column-content-invalid");
-        return paragraphs.Select(NativeContentCopy.CloneParagraph).ToArray();
+        return cell.Elements<Paragraph>().Select(NativeContentCopy.CloneParagraph).ToArray();
     }
 
     private static void PreflightImports(WordprocessingDocument targetDocument, IReadOnlyList<PreparedChange> changes)
@@ -499,7 +494,7 @@ public static class NativeTableRowCopy
         {
             var targetSpan = Math.Max(item.Source.Span, item.Target.Span);
             result.Add(new ColumnMapping(item.Source.Start, item.Source.Span,
-                item.Target.Start, item.Target.Span, targetStart, targetSpan, item.Column.Content));
+                item.Target.Start, item.Target.Span, targetStart, targetSpan));
             targetStart += targetSpan;
         }
         return result;
@@ -758,7 +753,7 @@ public static class NativeTableRowCopy
 
     private sealed record CellSlot(TableCell Cell, int Start, int Span);
     private sealed record ColumnMapping(int SourceStart, int SourceSpan,
-        int OldTargetStart, int OldTargetSpan, int TargetStart, int TargetSpan, string Content);
+        int OldTargetStart, int OldTargetSpan, int TargetStart, int TargetSpan);
     private sealed record TargetColumnReshape(int OldStart, int OldSpan, int NewStart, int NewSpan);
     private sealed record PreparedCell(int SourceColumn, int SourceSpan, int TargetColumn,
         IReadOnlyList<Paragraph> Paragraphs, VerticalMerge? VerticalMerge, int TargetSpan);
@@ -780,7 +775,7 @@ internal static class TableRowCopyReferenceExtensions
 
 public sealed record TableRowCopyDocument(string Input, string Revision);
 public sealed record TableRowCopyRange(string FirstRef, string LastRef);
-public sealed record TableRowCopyColumn(string SourceHeaderRef, string TargetHeaderRef, string Content);
+public sealed record TableRowCopyColumn(string SourceHeaderRef, string TargetHeaderRef);
 public sealed record TableRowCopyChange(string TargetTableRef, TableRowCopyRange TargetRows,
     TableRowCopyDocument SourceDocument, string SourceTableRef, TableRowCopyRange SourceRows,
     IReadOnlyList<TableRowCopyColumn> Columns);
