@@ -35,9 +35,10 @@
     },
     "object": {
       "type": "object", "additionalProperties": false,
-      "required": ["ref", "kind", "storyPart", "nativePath", "localName", "childCount"],
+      "required": ["ref", "parentRef", "kind", "storyPart", "nativePath", "localName", "childCount"],
       "properties": {
         "ref": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+        "parentRef": { "type": ["string", "null"], "pattern": "^dox1_[0-9a-f]{64}$" },
         "kind": { "enum": ["part", "paragraph", "table", "row", "cell", "run", "drawing"] },
         "storyPart": { "type": "string", "pattern": "^/[^\\s]+$" },
         "nativePath": { "type": "string", "pattern": "^/[^\\s]+$" },

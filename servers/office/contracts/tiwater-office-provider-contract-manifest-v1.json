@@ -2,7 +2,7 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.16.4"
+    "version": "0.16.5"
   },
   "tools": [
     {
@@ -31,11 +31,11 @@
       "name": "docx_copy_object",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_copy_object.schema.json",
-        "sha256": "45d30d97ba58ece704beb352ea41b4105f64cf9f43f11e94b6fb3de52b0b5823"
+        "sha256": "5f0bfc826d68f451055aba20390686e0e0df2182797fc36ff285f42d09084104"
       },
       "inputContract": {
         "path": "office/contracts/docx_copy_object.schema.json",
-        "sha256": "45d30d97ba58ece704beb352ea41b4105f64cf9f43f11e94b6fb3de52b0b5823"
+        "sha256": "5f0bfc826d68f451055aba20390686e0e0df2182797fc36ff285f42d09084104"
       }
     },
     {
@@ -97,11 +97,11 @@
       "name": "docx_list_objects",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_list_objects.schema.json",
-        "sha256": "7f0c3213addbeab2ff96579bcdd860ad65b8ae95c9e6b1e3fb7e5497f3e5a89d"
+        "sha256": "d8894a1b453fc780c1d2b355f34de27759a055ef6859333796665ac6439dd464"
       },
       "inputContract": {
         "path": "office/contracts/docx_list_objects.schema.json",
-        "sha256": "7f0c3213addbeab2ff96579bcdd860ad65b8ae95c9e6b1e3fb7e5497f3e5a89d"
+        "sha256": "d8894a1b453fc780c1d2b355f34de27759a055ef6859333796665ac6439dd464"
       }
     },
     {

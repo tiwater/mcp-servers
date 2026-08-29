@@ -8,7 +8,7 @@
       "x-tiwater-file-role": "read"
     },
     "kind": {
-      "description": "Open XML object kind to list. Use parentRef to walk only the native structure needed for the direct operation.",
+      "description": "Open XML object kind to list. Returned parentRef is the valid targetParentRef for inserting beside that object.",
       "type": "string",
       "enum": [
         "part",
