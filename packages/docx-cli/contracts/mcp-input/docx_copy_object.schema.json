@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_copy_object",
+  "type": "object",
+  "properties": {
+    "targetDocument": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "minLength": 1,
+          "x-tiwater-file-role": "read"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact revision id returned by the current observation."
+        }
+      },
+      "required": ["input", "revision"],
+      "additionalProperties": false
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "sourceDocument": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "string",
+                "minLength": 1,
+                "x-tiwater-file-role": "read"
+              },
+              "revision": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Exact revision id returned by the source observation."
+              }
+            },
+            "required": ["input", "revision"],
+            "additionalProperties": false
+          },
+          "sourceRefs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^dox1_[0-9a-f]{64}$"
+            }
+          },
+          "targetParentRef": {
+            "type": "string",
+            "pattern": "^dox1_[0-9a-f]{64}$"
+          },
+          "beforeRef": {
+            "type": "string",
+            "pattern": "^dox1_[0-9a-f]{64}$"
+          },
+          "repeat": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": ["sourceDocument", "sourceRefs", "targetParentRef"],
+        "additionalProperties": false
+      }
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "write",
+      "description": "New DOCX output path; an existing path is rejected."
+    },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false,
+      "description": "New JSON receipt path; an existing path is rejected."
+    }
+  },
+  "required": ["targetDocument", "changes", "output", "receiptOutput"],
+  "additionalProperties": false
+}
