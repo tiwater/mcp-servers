@@ -17,8 +17,9 @@ OpenXML-internal identifiers, not filesystem arguments.
 
 ## Capability families
 
-- DOCX: inspect document/tables, export, compare, validate OpenXML, font, and table-of-contents styles
-  policy, transform styles, and batch one fixed edit action.
+- DOCX: inspect document/tables, export, compare, validate OpenXML, apply or validate font and
+  table-of-contents style policies, refresh document fields, replace object text, transform styles,
+  and batch one fixed edit action.
 - XLS/XLSX: convert legacy XLS with ET, inspect/export, validate, and batch
   one fixed workbook edit action.
 - PPTX: inspect/export, bind selected masters/layouts, apply text formatting,

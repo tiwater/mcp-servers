@@ -47,8 +47,8 @@ public static class NativeContentCopy
             targetPath,
             request.TargetDocument.Revision,
             request.Changes.Select(change => change.TargetRef).ToArray());
-        if (targetRefs.Any(item => item.Kind != "cell" || item.StoryPart != MainStory))
-            throw new InvalidOperationException("target-ref-must-be-main-document-cell");
+        if (targetRefs.Any(item => item.Kind is not "paragraph" and not "cell" || item.StoryPart != MainStory))
+            throw new InvalidOperationException("target-ref-must-be-main-document-paragraph-or-cell");
         if (targetRefs.Select(item => item.Reference).Distinct(StringComparer.Ordinal).Count() != targetRefs.Count)
             throw new InvalidOperationException("target-ref-duplicate");
 
@@ -56,6 +56,10 @@ public static class NativeContentCopy
         IReadOnlyDictionary<string, int> baselineIssues;
         using (var targetDocument = WordprocessingDocument.Open(targetPath, false))
         {
+            var targets = targetRefs.Select(item =>
+                Observation.ResolveNativePath(targetDocument, item.StoryPart, item.NativePath)).ToArray();
+            NativeMutationSupport.RejectOverlappingTargets(targets);
+            foreach (var target in targets) NativeMutationSupport.RequirePlainTextContainer(target);
             baselineIssues = ValidationIssueCounts(targetDocument);
             PreflightImports(targetDocument, prepared);
         }
@@ -148,8 +152,7 @@ public static class NativeContentCopy
         var outputMain = outputDocument.MainDocumentPart ?? throw new InvalidOperationException("target-main-part-not-found");
         var outputBody = outputMain.Document?.Body ?? throw new InvalidOperationException("target-body-not-found");
         var targets = changes.Select(change =>
-            Observation.ResolveNativePath(outputDocument, change.Target.StoryPart, change.Target.NativePath) as TableCell
-            ?? throw new InvalidOperationException("target-cell-not-found-in-output")).ToArray();
+            Observation.ResolveNativePath(outputDocument, change.Target.StoryPart, change.Target.NativePath)).ToArray();
 
         foreach (var group in changes.Select((change, index) => (change, index))
                      .GroupBy(item => item.change.SourcePath, StringComparer.OrdinalIgnoreCase))
@@ -168,7 +171,7 @@ public static class NativeContentCopy
                 var paragraphs = item.change.Paragraphs.Select(paragraph => (Paragraph)paragraph.CloneNode(true)).ToArray();
                 foreach (var paragraph in paragraphs) DocxObjectActions.RewriteRelationships(paragraph, relationshipMap);
                 DocxObjectActions.RemapDrawingIds(outputBody, paragraphs.Cast<OpenXmlElement>().ToArray());
-                ReplaceCellContent(targets[item.index], paragraphs);
+                ReplaceTargetContent(targets[item.index], paragraphs);
             }
         }
     }
@@ -194,6 +197,9 @@ public static class NativeContentCopy
         foreach (var bookmark in clone.Descendants<BookmarkStart>().Cast<OpenXmlElement>()
                      .Concat(clone.Descendants<BookmarkEnd>()).ToArray())
             bookmark.Remove();
+        foreach (var cached in clone.Descendants<ProofError>().Cast<OpenXmlElement>()
+                     .Concat(clone.Descendants<LastRenderedPageBreak>()).ToArray())
+            cached.Remove();
         return clone;
     }
 
@@ -238,6 +244,37 @@ public static class NativeContentCopy
             foreach (var run in paragraph.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>())
                 run.RunProperties = MergeRunProperties(targetRunProperties, run.RunProperties);
             target.Append(paragraph);
+        }
+    }
+
+    private static void ReplaceTargetContent(OpenXmlElement target, IReadOnlyList<Paragraph> sourceParagraphs)
+    {
+        if (target is TableCell cell)
+        {
+            ReplaceCellContent(cell, sourceParagraphs);
+            return;
+        }
+        if (target is not Paragraph paragraph)
+            throw new InvalidOperationException("target-ref-must-be-main-document-paragraph-or-cell");
+        var targetRunProperties = paragraph.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>()
+            .FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
+        var insertionIndex = paragraph.ChildElements
+            .TakeWhile(child => child is not DocumentFormat.OpenXml.Wordprocessing.Run and not ProofError).Count();
+        foreach (var child in paragraph.ChildElements
+                     .Where(child => child is DocumentFormat.OpenXml.Wordprocessing.Run or ProofError).ToArray())
+            child.Remove();
+        var nextIndex = Math.Min(insertionIndex, paragraph.ChildElements.Count);
+        foreach (var source in sourceParagraphs)
+        {
+            foreach (var child in source.ChildElements.Where(child => child is not ParagraphProperties))
+            {
+                var clone = child.CloneNode(true);
+                foreach (var run in clone.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>())
+                    run.RunProperties = MergeRunProperties(targetRunProperties, run.RunProperties);
+                if (clone is DocumentFormat.OpenXml.Wordprocessing.Run directRun)
+                    directRun.RunProperties = MergeRunProperties(targetRunProperties, directRun.RunProperties);
+                paragraph.InsertAt(clone, nextIndex++);
+            }
         }
     }
 
@@ -296,16 +333,15 @@ public static class NativeContentCopy
         using var document = WordprocessingDocument.Open(output, false);
         return changes.Select(change =>
         {
-            var cell = Observation.ResolveNativePath(document, change.Target.StoryPart, change.Target.NativePath) as TableCell
-                ?? throw new InvalidOperationException("output-target-cell-not-found");
+            var target = Observation.ResolveNativePath(document, change.Target.StoryPart, change.Target.NativePath);
             var expected = string.Concat(change.Paragraphs.Select(paragraph => paragraph.InnerText));
-            if (!StringComparer.Ordinal.Equals(cell.InnerText, expected))
+            if (!StringComparer.Ordinal.Equals(target.InnerText, expected))
                 throw new InvalidOperationException("output-readback-content-mismatch");
             return new CopyContentReadback(
-                Observation.MakeReference(revision, "cell", change.Target.StoryPart, change.Target.NativePath),
+                Observation.MakeReference(revision, change.Target.Kind, change.Target.StoryPart, change.Target.NativePath),
                 change.Target.NativePath,
-                cell.InnerText,
-                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cell.InnerXml))).ToLowerInvariant());
+                target.InnerText,
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(target.InnerXml))).ToLowerInvariant());
         }).ToArray();
     }
 

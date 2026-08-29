@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to the current DOCX document.",
+      "x-tiwater-file-role": "read"
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New DOCX output path. Existing files are never overwritten.",
+      "x-tiwater-file-role": "write"
+    },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New JSON receipt path. Existing files are never overwritten.",
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
+    }
+  },
+  "required": ["input", "output", "receiptOutput"],
+  "additionalProperties": false
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_set_text",
+  "type": "object",
+  "properties": {
+    "targetDocument": {
+      "type": "object",
+      "properties": {
+        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
+        "revision": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" }
+      },
+      "required": ["input", "revision"],
+      "additionalProperties": false
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "targetRef": {
+            "type": "string",
+            "pattern": "^dox1_[0-9a-f]{64}$",
+            "description": "Observed plain-text paragraph or cell ref whose whole text content is replaced. Paragraph bookmarks are preserved; targets containing fields, drawings, nested tables, controls, links, or other non-text content are rejected."
+          },
+          "text": { "type": "string" }
+        },
+        "required": ["targetRef", "text"],
+        "additionalProperties": false
+      }
+    },
+    "output": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write" },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
+    }
+  },
+  "required": ["targetDocument", "changes", "output", "receiptOutput"],
+  "additionalProperties": false
+}

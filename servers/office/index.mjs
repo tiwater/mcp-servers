@@ -100,6 +100,31 @@ const nativeRenderOutput = z.object({
   }).strict(),
 }).strict();
 
+const docxFieldRefreshReceipt = z.object({
+  schema: z.literal('tiwater.convert-refresh-docx-fields/v1'),
+  status: z.literal('ok'),
+  input: z.string(),
+  input_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  output: z.string(),
+  output_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  source_format: z.literal('docx'),
+  target_format: z.literal('docx'),
+  version: z.string(),
+  backend: z.literal('wps'),
+  refresh_scope: z.array(z.enum(['table-of-contents', 'table-of-figures'])).min(1),
+}).strict();
+
+const docxFieldRefreshOutput = z.object({
+  tool: z.literal('docx_refresh_fields'),
+  runtime: runtimeIdentity,
+  output: artifact,
+  receipt: artifact,
+  summary: z.object({
+    backend: z.literal('wps'),
+    refreshScope: z.array(z.enum(['table-of-contents', 'table-of-figures'])).min(1),
+  }).strict(),
+}).strict();
+
 const xlsxFixedTools = [
   {"name":"xlsx_set_cell_value","description":"Set current workbook cell values."},
   {"name":"xlsx_set_cell_number_format","description":"Set current workbook cell number formats."},
@@ -208,10 +233,17 @@ const tools = [
   },
   {
     name: 'docx_copy_content',
-    description: 'Replace content in existing target cells while retaining target cell formatting and source inline meaning. Batch cells that need exact observed subsets after docx_copy_table_rows. A selection copies a whole object by ref, or an exact substring when range is attached to a run or text ref.',
+    description: 'Replace content in existing plain-text target paragraphs or cells while retaining target container formatting and source inline meaning. Targets containing non-text objects are rejected. Batch cells that need exact observed subsets after docx_copy_table_rows. A selection copies a whole object by ref, or an exact substring when range is attached to a run or text ref.',
     inputSchema: inputContract('docx_copy_content'),
     outputSchema: fixedEditOutput('docx_copy_content'),
     handler: args => fixedEdit('docx_copy_content', args),
+  },
+  {
+    name: 'docx_set_text',
+    description: 'Replace the whole text content of observed plain-text paragraph or cell objects while retaining their target formatting. Targets containing non-text objects are rejected. This sets already-derived text; it does not insert objects, copy source formatting, or decide business wording.',
+    inputSchema: inputContract('docx_set_text'),
+    outputSchema: fixedEditOutput('docx_set_text'),
+    handler: args => fixedEdit('docx_set_text', args),
   },
   {
     name: 'docx_copy_table_rows',
@@ -278,11 +310,32 @@ const tools = [
     handler: docxValidateFontPolicy,
   },
   {
+    name: 'docx_apply_font_policy',
+    description: 'Apply one explicit font family and size policy to current main-document body and table text. It does not derive a policy or alter other run semantics.',
+    inputSchema: inputContract('docx_apply_font_policy'),
+    outputSchema: fixedEditOutput('docx_apply_font_policy'),
+    handler: args => fixedEdit('docx_apply_font_policy', args),
+  },
+  {
     name: 'docx_validate_toc_style_policy',
     description: 'Validate current DOCX table-of-contents paragraph styles against an explicit policy.',
     inputSchema: inputContract('docx_validate_toc_style_policy'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxValidateTocStylePolicy,
+  },
+  {
+    name: 'docx_apply_toc_style_policy',
+    description: 'Apply explicit italic and per-level indentation values to current built-in table-of-contents paragraph styles. It does not change heading text or refresh fields.',
+    inputSchema: inputContract('docx_apply_toc_style_policy'),
+    outputSchema: fixedEditOutput('docx_apply_toc_style_policy'),
+    handler: args => fixedEdit('docx_apply_toc_style_policy', args),
+  },
+  {
+    name: 'docx_refresh_fields',
+    description: 'Refresh table-of-contents and table-of-figures field results in a current DOCX through native WPS Writer. It does not change headings, captions, or field definitions.',
+    inputSchema: inputContract('docx_refresh_fields'),
+    outputSchema: docxFieldRefreshOutput,
+    handler: docxRefreshFields,
   },
   {
     name: 'docx_strip_direct_formatting',
@@ -490,6 +543,42 @@ async function docxStripDirectFormatting(args) {
 
 async function docxReplaceStyleIds(args) {
   return withTempJsonFile(args.styleMap, styleMapPath => copyTransform('docx_replace_style_ids', docxCandidates, ['replace-style-ids'], args, [styleMapPath]));
+}
+
+async function docxRefreshFields(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const output = path.resolve(requireString(args.output, 'output'));
+  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
+  if (path.extname(input).toLowerCase() !== '.docx' || path.extname(output).toLowerCase() !== '.docx') {
+    throw Object.assign(new Error('DOCX field refresh requires .docx input and output'), { code: -32602 });
+  }
+  await requireNewFile(output, 'output');
+  await requireNewFile(receiptOutput, 'receiptOutput');
+  const inputArtifact = await fileArtifact(input);
+  try {
+    const result = await runJsonCandidateChain(convertCandidates, ['refresh-docx-fields', input, output]);
+    const providerReceipt = docxFieldRefreshReceipt.parse(result.json);
+    const outputArtifact = await fileArtifact(output);
+    if (path.resolve(providerReceipt.input) !== input
+        || path.resolve(providerReceipt.output) !== output
+        || providerReceipt.input_sha256 !== inputArtifact.sha256
+        || providerReceipt.output_sha256 !== outputArtifact.sha256) {
+      throw new Error('DOCX field refresh receipt is not bound to the current input and output');
+    }
+    return {
+      tool: 'docx_refresh_fields',
+      runtime: commandRuntime(result),
+      output: outputArtifact,
+      receipt: await writeJsonArtifact(receiptOutput, providerReceipt),
+      summary: {
+        backend: providerReceipt.backend,
+        refreshScope: providerReceipt.refresh_scope,
+      },
+    };
+  } catch (error) {
+    await rm(output, { force: true });
+    throw error;
+  }
 }
 
 async function copyTransform(tool, candidates, command, args, suffix = []) {

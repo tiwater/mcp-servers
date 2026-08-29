@@ -2,9 +2,31 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.16.20"
+    "version": "0.17.0"
   },
   "tools": [
+    {
+      "name": "docx_apply_font_policy",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_apply_font_policy.schema.json",
+        "sha256": "153e50e2f6577b5ea70fd1d3522f8ccf3a74b82b683f1f8fe724f6433a9c72e0"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_apply_font_policy.schema.json",
+        "sha256": "153e50e2f6577b5ea70fd1d3522f8ccf3a74b82b683f1f8fe724f6433a9c72e0"
+      }
+    },
+    {
+      "name": "docx_apply_toc_style_policy",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_apply_toc_style_policy.schema.json",
+        "sha256": "2d4887ab4dc57e2c655f130e67c08886ff1630a889e7258b13519fb6e1529d25"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_apply_toc_style_policy.schema.json",
+        "sha256": "2d4887ab4dc57e2c655f130e67c08886ff1630a889e7258b13519fb6e1529d25"
+      }
+    },
     {
       "name": "docx_compare",
       "providerContract": {
@@ -20,11 +42,11 @@
       "name": "docx_copy_content",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_copy_content.schema.json",
-        "sha256": "27110c4590087bb38bd08f77ab2dc19a62407a836f58a603d222ebdb184c97b6"
+        "sha256": "a988f7c4284c5f99bd3cc28f31813c0a12b999c2486f697776bf6f873c9c49e7"
       },
       "inputContract": {
         "path": "office/contracts/docx_copy_content.schema.json",
-        "sha256": "27110c4590087bb38bd08f77ab2dc19a62407a836f58a603d222ebdb184c97b6"
+        "sha256": "a988f7c4284c5f99bd3cc28f31813c0a12b999c2486f697776bf6f873c9c49e7"
       }
     },
     {
@@ -127,6 +149,17 @@
       }
     },
     {
+      "name": "docx_refresh_fields",
+      "providerContract": {
+        "source": "packages/convert-cli/schemas/mcp-input/docx_refresh_fields.schema.json",
+        "sha256": "5f2a4f928796752adf7a44098919bca94c6faba8dbc9e5ad36b43e7f33035c7c"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_refresh_fields.schema.json",
+        "sha256": "5f2a4f928796752adf7a44098919bca94c6faba8dbc9e5ad36b43e7f33035c7c"
+      }
+    },
+    {
       "name": "docx_replace_style_ids",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_style_ids.schema.json",
@@ -135,6 +168,17 @@
       "inputContract": {
         "path": "office/contracts/docx_replace_style_ids.schema.json",
         "sha256": "aa8fc12a350a391fadf32546847f29a816319efcab01866a1f406dc8313ea1ed"
+      }
+    },
+    {
+      "name": "docx_set_text",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_set_text.schema.json",
+        "sha256": "945a5af0d9390c21f380cc9d255429353d6f743264b19a9e85111e75b3c0344b"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_set_text.schema.json",
+        "sha256": "945a5af0d9390c21f380cc9d255429353d6f743264b19a9e85111e75b3c0344b"
       }
     },
     {
