@@ -191,6 +191,9 @@ public static class NativeContentCopy
     {
         var clone = (Paragraph)paragraph.CloneNode(true);
         clone.ParagraphProperties?.Remove();
+        foreach (var bookmark in clone.Descendants<BookmarkStart>().Cast<OpenXmlElement>()
+                     .Concat(clone.Descendants<BookmarkEnd>()).ToArray())
+            bookmark.Remove();
         return clone;
     }
 
@@ -246,12 +249,43 @@ public static class NativeContentCopy
             foreach (var semantic in source.ChildElements.Where(element => element is Bold or Italic or Underline
                 or Strike or DoubleStrike or Caps or SmallCaps or VerticalTextAlignment).ToArray())
             {
-                foreach (var existing in result.ChildElements.Where(child => child.GetType() == semantic.GetType()).ToArray())
-                    existing.Remove();
-                result.Append(semantic.CloneNode(true));
+                SetRunProperty(result, semantic);
             }
         }
         return result.ChildElements.Count == 0 ? null : result;
+    }
+
+    private static void SetRunProperty(RunProperties properties, OpenXmlElement property)
+    {
+        switch (property)
+        {
+            case Bold value:
+                properties.Bold = (Bold)value.CloneNode(true);
+                break;
+            case Italic value:
+                properties.Italic = (Italic)value.CloneNode(true);
+                break;
+            case Underline value:
+                properties.Underline = (Underline)value.CloneNode(true);
+                break;
+            case Strike value:
+                properties.Strike = (Strike)value.CloneNode(true);
+                break;
+            case DoubleStrike value:
+                properties.DoubleStrike = (DoubleStrike)value.CloneNode(true);
+                break;
+            case Caps value:
+                properties.Caps = (Caps)value.CloneNode(true);
+                break;
+            case SmallCaps value:
+                properties.SmallCaps = (SmallCaps)value.CloneNode(true);
+                break;
+            case VerticalTextAlignment value:
+                properties.VerticalTextAlignment = (VerticalTextAlignment)value.CloneNode(true);
+                break;
+            default:
+                throw new InvalidOperationException("run-property-not-supported-for-content-copy");
+        }
     }
 
     private static IReadOnlyList<CopyContentReadback> ReadBack(
