@@ -198,6 +198,7 @@ const docxObjectIdentity = z.object({
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   revision: docxRevision,
   object: docxObjectIdentity,
+  objects: z.array(docxObjectIdentity).min(1),
 }).strict();
 
 const tools = [
@@ -225,7 +226,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object as an ordered native hierarchy written to the requested output artifact. The tool response only identifies that artifact and the selected root object; read the artifact for descendant refs and content. For a table, request row and cell once. Add paragraph for whole-paragraph choices; add run and text for exact content selections.',
+    description: 'Read one selected native DOCX object. The response returns the selected root and requested descendants as ordered object identities for the next operation; the complete hierarchy remains in the evidence artifact. For a table, request row, cell, and paragraph once when row bounds, header columns, and paragraph choices are all needed.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -482,6 +483,17 @@ function compactDocxObjectIdentity(object) {
   };
 }
 
+function compactDocxObservationObjects(observation) {
+  const objects = [];
+  function visit(node) {
+    if (!node?.object) return;
+    objects.push(compactDocxObjectIdentity(node.object));
+    for (const child of node.children ?? []) visit(child);
+  }
+  visit(observation);
+  return objects;
+}
+
 async function docxInspect(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(docxCandidates, ['inspect', input, '--json']);
@@ -514,6 +526,7 @@ async function docxReadObject(args) {
       artifact: await writeJsonArtifact(output, result.json),
       revision: result.json.receipt.revision,
       object: compactDocxObjectIdentity(result.json.observation.object),
+      objects: compactDocxObservationObjects(result.json.observation),
     };
   });
 }
