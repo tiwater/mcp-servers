@@ -41,7 +41,7 @@ public static class ObservationCommand
                 OptionalString(request, "continuation")),
             "docx_read_object" => Observation.Read(
                 input,
-                RequireString(request, "ref"),
+                RequireStringList(request, "refs"),
                 OptionalString(request, "revision"),
                 RequireStringArray(request, "kinds")),
             _ => throw new InvalidOperationException($"Unknown DOCX observation command: {command}"),
@@ -73,6 +73,18 @@ public static class ObservationCommand
             throw new InvalidOperationException($"{property}-is-invalid");
         var values = rawValues.ToHashSet(StringComparer.Ordinal);
         if (rawValues.Count != values.Count)
+            throw new InvalidOperationException($"{property}-contains-duplicates");
+        return values;
+    }
+
+    private static IReadOnlyList<string> RequireStringList(JsonObject request, string property)
+    {
+        if (request[property] is not JsonArray array || array.Count == 0)
+            throw new InvalidOperationException($"{property}-is-required");
+        var values = array.Select(item => item?.GetValue<string>() ?? string.Empty).ToList();
+        if (values.Any(string.IsNullOrWhiteSpace))
+            throw new InvalidOperationException($"{property}-is-invalid");
+        if (values.Count != values.Distinct(StringComparer.Ordinal).Count())
             throw new InvalidOperationException($"{property}-contains-duplicates");
         return values;
     }

@@ -3,11 +3,11 @@
   "$id": "tiwater.docx-observation-read/v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "receipt", "observation"],
+  "required": ["schema", "receipt", "observations"],
   "properties": {
     "schema": { "const": "tiwater.docx-observation-read/v1" },
     "receipt": { "$ref": "#/$defs/receipt" },
-    "observation": { "$ref": "#/$defs/detail" }
+    "observations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/detail" } }
   },
   "$defs": {
     "revision": {
@@ -27,8 +27,8 @@
         "schema": { "const": "tiwater.docx-observation-receipt/v1" },
         "operation": { "const": "read" },
         "revision": { "$ref": "#/$defs/revision" },
-        "totalCount": { "const": 1 },
-        "returnedCount": { "const": 1 },
+        "totalCount": { "type": "integer", "minimum": 1 },
+        "returnedCount": { "type": "integer", "minimum": 1 },
         "remaining": { "const": 0 },
         "continuation": { "type": "null" }
       }
