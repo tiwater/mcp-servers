@@ -47,7 +47,7 @@
             "required": ["firstRef", "lastRef"],
             "additionalProperties": false
           },
-      "columns": {
+          "columns": {
         "type": "array",
         "minItems": 1,
         "description": "One mapping per logical header cell. A header cell owns its full OpenXML gridSpan; do not add separate mappings for physical grid columns inside that span.",
@@ -58,6 +58,48 @@
                 "targetHeaderRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
               },
               "required": ["sourceHeaderRef", "targetHeaderRef"],
+              "additionalProperties": false
+            }
+          },
+          "sourceCellContents": {
+            "type": "array",
+            "description": "Optional exact native content selections for source cells in the selected row range. Unlisted cells copy all paragraphs. An empty selection writes one empty paragraph while preserving the copied row and target presentation.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sourceCellRef": {
+                  "type": "string",
+                  "pattern": "^dox1_[0-9a-f]{64}$",
+                  "description": "Observed source cell ref belonging to the selected source rows. Each source cell may appear once."
+                },
+                "sourceSelections": {
+                  "type": "array",
+                  "description": "Ordered content copied into this source cell's mapped target cell. Select a whole observed object by ref alone, or an exact substring by adding range to a run or text ref.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "ref": {
+                        "type": "string",
+                        "pattern": "^dox1_[0-9a-f]{64}$",
+                        "description": "Observed object ref belonging to sourceCellRef. When range is present this must be a run or text ref."
+                      },
+                      "range": {
+                        "type": "object",
+                        "description": "Zero-based substring within the selected run or text object.",
+                        "properties": {
+                          "start": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+                          "length": { "type": "integer", "exclusiveMinimum": 0, "maximum": 2147483647 }
+                        },
+                        "required": ["start", "length"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["ref"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["sourceCellRef", "sourceSelections"],
               "additionalProperties": false
             }
           }
