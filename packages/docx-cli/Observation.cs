@@ -8,7 +8,6 @@ namespace Dockit.Docx;
 public static class Observation
 {
     private const int DefaultLimit = 100;
-    private const int MaximumLimit = 1000;
 
     private static readonly IReadOnlySet<string> Kinds = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -258,7 +257,6 @@ public static class Observation
         };
 
     public static int DefaultPageLimit => DefaultLimit;
-    public static int MaximumPageLimit => MaximumLimit;
 
     private static DocxObservationReceipt Receipt(
         string operation,
@@ -279,8 +277,8 @@ public static class Observation
         int limit,
         int offset)
     {
-        if (limit is < 1 or > MaximumLimit)
-            throw new InvalidOperationException($"limit-must-be-between-1-and-{MaximumLimit}");
+        if (limit < 1)
+            throw new InvalidOperationException("limit-must-be-positive");
         if (offset < 0 || offset > items.Count)
             throw new InvalidOperationException("offset-invalid");
 
