@@ -3,33 +3,15 @@
   "$id": "tiwater.office-mcp-input/docx_copy_table_rows",
   "type": "object",
   "properties": {
-    "targetDocument": {
-      "type": "object",
-      "properties": {
-        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
-      },
-      "required": ["input"],
-      "additionalProperties": false
-    },
     "changes": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
         "properties": {
-          "targetTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-      "targetRows": {
-        "type": "object",
-        "description": "Complete target data-row range to replace. Exclude every header row, including continuation rows in a multi-row header; the range cannot start or end inside a vertical merge.",
-            "properties": {
-              "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-              "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
-            },
-            "required": ["firstRef", "lastRef"],
-            "additionalProperties": false
-          },
           "sourceDocument": {
             "type": "object",
+            "description": "Exact source document for this table edit.",
             "properties": {
               "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
             },
@@ -37,9 +19,29 @@
             "additionalProperties": false
           },
           "sourceTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-      "sourceRows": {
-        "type": "object",
-      "description": "Exact contiguous source rows to copy. Select only wanted rows; the range cannot begin or end inside a vertical merge.",
+          "sourceRows": {
+            "type": "object",
+            "description": "Exact contiguous source rows to copy. Select only wanted rows; the range cannot begin or end inside a vertical merge.",
+            "properties": {
+              "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+              "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
+            },
+            "required": ["firstRef", "lastRef"],
+            "additionalProperties": false
+          },
+          "targetDocument": {
+            "type": "object",
+            "description": "Exact target document for this table edit. Every item in one call must name the same target document.",
+            "properties": {
+              "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
+            },
+            "required": ["input"],
+            "additionalProperties": false
+          },
+          "targetTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+          "targetRows": {
+            "type": "object",
+            "description": "Complete target data-row range to replace. Exclude every header row, including continuation rows in a multi-row header; the range cannot start or end inside a vertical merge.",
             "properties": {
               "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
               "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
@@ -104,7 +106,7 @@
             }
           }
         },
-        "required": ["targetTableRef", "targetRows", "sourceDocument", "sourceTableRef", "sourceRows", "columns"],
+        "required": ["sourceDocument", "sourceTableRef", "sourceRows", "targetDocument", "targetTableRef", "targetRows", "columns"],
         "additionalProperties": false
       }
     },
@@ -116,6 +118,6 @@
       "x-tiwater-file-effect": false
     }
   },
-  "required": ["targetDocument", "changes", "output", "receiptOutput"],
+  "required": ["changes", "output", "receiptOutput"],
   "additionalProperties": false
 }
