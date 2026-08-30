@@ -5,6 +5,7 @@
   "properties": {
     "changes": {
       "type": "array",
+      "description": "Complete resolved table-edit set for one target document. A successful call invalidates every prior target ref, so do not split this set across calls.",
       "minItems": 1,
       "items": {
         "type": "object",
