@@ -173,17 +173,6 @@ function docxInspectionOutput(tool) {
     revision: docxRevision,
     summary: z.object({
       tableCount: z.number().int().nonnegative(),
-      tables: z.array(z.object({
-        ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
-        parentRef: z.string().regex(/^dox1_[0-9a-f]{64}$/).nullable(),
-        rowCount: z.number().int().nonnegative(),
-        columnCount: z.number().int().nonnegative(),
-        textPreview: z.string().max(240),
-        contextBefore: z.array(z.object({
-          ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
-          textPreview: z.string().min(1).max(240),
-        }).strict()).max(3),
-      }).strict()),
       openingParagraphs: z.array(z.object({
         ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
         textPreview: z.string().min(1).max(240),
@@ -252,7 +241,7 @@ const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX. The response returns its revision, every table identity with shape, short text preview, and up to three immediately preceding non-empty body paragraphs, plus up to six opening non-empty body paragraphs. Reuse those native refs directly; use docx_find_literal only for text not exposed here and docx_list_objects only for container children. The complete inspection remains in the evidence artifact.',
+    description: 'Inspect one current DOCX and retain its complete machine observation at output. The response returns the current revision, observation artifact, table count, and up to six opening non-empty body paragraphs for document identity. Use bounded list, find, and read operations for selected document objects.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -528,34 +517,10 @@ function compactDocxInspection(report) {
       ref: item.objectRef,
       textPreview: item.text.trim().replace(/\s+/gu, ' ').slice(0, 240),
     }));
-  const tableContexts = new Map();
-  let precedingParagraphs = [];
-  for (const item of report.flow) {
-    if (item?.type === 'paragraph' && /^dox1_[0-9a-f]{64}$/u.test(item.objectRef)
-      && typeof item.text === 'string' && item.text.trim()) {
-      precedingParagraphs.push({
-        ref: item.objectRef,
-        textPreview: item.text.trim().replace(/\s+/gu, ' ').slice(0, 240),
-      });
-      precedingParagraphs = precedingParagraphs.slice(-3);
-    }
-    if (item?.type === 'table' && Number.isInteger(item.tableIndex)) {
-      tableContexts.set(item.tableIndex, precedingParagraphs);
-      precedingParagraphs = [];
-    }
-  }
   return {
     revision: report.tables.revision,
     summary: {
       tableCount: report.tables.tables.length,
-      tables: report.tables.tables.map((table, tableIndex) => ({
-        ref: table.ref,
-        parentRef: table.parentRef,
-        rowCount: table.rowCount,
-        columnCount: table.columnCount,
-        textPreview: String(table.textPreview ?? '').trim().replace(/\s+/gu, ' ').slice(0, 240),
-        contextBefore: tableContexts.get(tableIndex) ?? [],
-      })),
       openingParagraphs,
     },
   };
