@@ -6,10 +6,9 @@
     "targetDocument": {
       "type": "object",
       "properties": {
-        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
-        "revision": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" }
+        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
       },
-      "required": ["input", "revision"],
+      "required": ["input"],
       "additionalProperties": false
     },
     "changes": {
@@ -32,10 +31,9 @@
           "sourceDocument": {
             "type": "object",
             "properties": {
-              "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
-              "revision": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" }
+              "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
             },
-            "required": ["input", "revision"],
+            "required": ["input"],
             "additionalProperties": false
           },
           "sourceTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
