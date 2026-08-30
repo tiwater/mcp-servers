@@ -236,7 +236,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of revision-bound nearest-child identities in native document order and retain the exact page at output for later reuse. Start at the selected story part, follow continuation in order, and descend only through returned refs with parentRef. Request paragraph and table together when their adjacency carries meaning. Text previews describe already located objects; never use matching text to identify a document or select a source.',
+    description: 'List one small page of revision-bound nearest-child identities in native document order and retain the exact page at output for later reuse. Request only the object kinds needed by the current local traversal, follow continuation in order, and descend only through returned refs with parentRef. Text previews describe already located objects; never use matching text to identify a document or select a source.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
