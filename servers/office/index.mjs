@@ -239,7 +239,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read selected rows, cells, or paragraphs from one native DOCX in one call and return them in address order. Pass the document path once and only the OpenXML addresses needed for the current target. For exact inline content, use an observed cell or paragraph address and request run or text.',
+    description: 'Read selected tables, rows, cells, or paragraphs from one native DOCX in one call and return them in address order. Pass the document path once and only the OpenXML addresses needed for the current target. For exact inline content, use an observed cell or paragraph address and request run or text.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -569,9 +569,6 @@ async function docxReadObject(args) {
   const { output: _output, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
-    if (result.json?.observations?.some(observation => observation?.object?.kind === 'table')) {
-      throw new Error('docx-table-read-requires-paged-row-selection');
-    }
     return {
       tool: 'docx_read_object',
       runtime: commandRuntime(result),
