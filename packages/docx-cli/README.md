@@ -13,11 +13,14 @@ workflow protocol.
 ```bash
 tiwater-docx inspect input.docx --json
 tiwater-docx docx_list_objects request.json
-tiwater-docx docx_find_literal request.json
 tiwater-docx docx_read_object request.json
 tiwater-docx export-json input.docx output.json
 tiwater-docx compare old.docx new.docx --json
 ```
+
+`docx_find_literal` remains a CLI diagnostic for a human who already knows the
+exact document and scope. It is not published to Agents because text occurrence
+does not establish document identity or source selection.
 
 Inspection reports current package, story, paragraph, run, table, row, cell,
 field, drawing, font, flow, and formatting facts. Complete JSON can be written
