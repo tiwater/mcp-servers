@@ -705,6 +705,34 @@ function checkSourceBoundObservationOutputs(tools) {
   note(`${names.length} inspect/export outputs bind their exact source artifacts`);
 }
 
+function unboundedResponseArrays(schema, location = '$', found = []) {
+  if (Array.isArray(schema)) {
+    schema.forEach((entry, index) => unboundedResponseArrays(entry, `${location}[${index}]`, found));
+    return found;
+  }
+  if (!schema || typeof schema !== 'object') return found;
+  if (schema.type === 'array' && !Number.isInteger(schema.maxItems)) found.push(location);
+  for (const [key, value] of Object.entries(schema)) {
+    unboundedResponseArrays(value, `${location}.${key}`, found);
+  }
+  return found;
+}
+
+function checkBoundedInspectionOutputs(tools) {
+  const check = 'bounded-inspection-output';
+  const inspections = tools.filter(tool => tool?.name?.endsWith('_inspect'));
+  for (const tool of inspections) {
+    if (!tool.outputSchema || typeof tool.outputSchema !== 'object') {
+      fail(check, `${tool.name} has no machine-readable output schema`);
+      continue;
+    }
+    for (const location of unboundedResponseArrays(tool.outputSchema)) {
+      fail(check, `${tool.name} exposes an unbounded response collection at ${location}`);
+    }
+  }
+  note(`${inspections.length} inspect outputs keep complete evidence in artifacts and bound every response collection`);
+}
+
 async function main() {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'tiwater-office-boundary-'));
   try {
@@ -718,6 +746,7 @@ async function main() {
     await checkPublicSchemas(packageRoot);
     const toolNames = await smokeInstalledPackage(archive, tempRoot);
     checkSourceBoundObservationOutputs(toolNames);
+    checkBoundedInspectionOutputs(toolNames);
     const packedPackage = await readJson(path.join(packageRoot, 'package.json'));
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);
   } catch (error) {
