@@ -44,10 +44,15 @@ public static class NativeTableRowCopy
     public static TableRowCopyReceipt Apply(TableRowCopyRequest request)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        RequireAbsolutePath(request.TargetDocument.Input, "targetDocument.input");
+        var targetPaths = request.Changes.Select((change, index) =>
+        {
+            RequireAbsolutePath(change.TargetDocument.Input, $"changes[{index}].targetDocument.input");
+            return Path.GetFullPath(change.TargetDocument.Input);
+        }).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (targetPaths.Length != 1) throw new InvalidOperationException("changes-must-share-one-target-document");
         RequireAbsolutePath(request.Output, "output");
         RequireAbsolutePath(request.ReceiptOutput, "receiptOutput");
-        var targetPath = request.TargetDocument.Input;
+        var targetPath = targetPaths[0];
         var outputPath = request.Output;
         var receiptPath = request.ReceiptOutput;
         RequireNewPath(outputPath, "output");
@@ -841,12 +846,13 @@ public sealed record TableRowCopyColumn(string SourceHeaderRef, string TargetHea
 public sealed record TableRowCopyCellContent(
     string SourceCellRef,
     IReadOnlyList<CopyContentSelection> SourceSelections);
-public sealed record TableRowCopyChange(string TargetTableRef, TableRowCopyRange TargetRows,
-    TableRowCopyDocument SourceDocument, string SourceTableRef, TableRowCopyRange SourceRows,
+public sealed record TableRowCopyChange(TableRowCopyDocument SourceDocument,
+    string SourceTableRef, TableRowCopyRange SourceRows,
+    TableRowCopyDocument TargetDocument, string TargetTableRef, TableRowCopyRange TargetRows,
     IReadOnlyList<TableRowCopyColumn> Columns,
     IReadOnlyList<TableRowCopyCellContent>? SourceCellContents = null);
-public sealed record TableRowCopyRequest(TableRowCopyDocument TargetDocument,
-    IReadOnlyList<TableRowCopyChange> Changes, string Output, string ReceiptOutput);
+public sealed record TableRowCopyRequest(IReadOnlyList<TableRowCopyChange> Changes,
+    string Output, string ReceiptOutput);
 public sealed record TableRowCopyReadback(int ChangeIndex, int SourceRowCount, int OutputRowCount,
     IReadOnlyList<string> RowTexts);
 public sealed record TableRowCopyReceipt(string Schema, string Provider, string ToolVersion,
