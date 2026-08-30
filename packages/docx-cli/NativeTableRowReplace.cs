@@ -9,9 +9,9 @@ using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace Dockit.Docx;
 
-public static class NativeTableRowCopy
+public static class NativeTableRowReplace
 {
-    public const string Command = "docx_copy_table_rows";
+    public const string Command = "docx_replace_table_rows";
     private const string MainStory = "/word/document.xml";
 
     public static int Run(string[] args)
@@ -23,8 +23,8 @@ public static class NativeTableRowCopy
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         };
-        var request = JsonSerializer.Deserialize<TableRowCopyRequest>(File.ReadAllText(args[0]), options)
-            ?? throw new InvalidOperationException("table-row-copy-request-invalid");
+        var request = JsonSerializer.Deserialize<TableRowReplaceRequest>(File.ReadAllText(args[0]), options)
+            ?? throw new InvalidOperationException("table-row-replace-request-invalid");
         var receipt = Apply(request);
         Console.WriteLine(JsonSerializer.Serialize(new
         {
@@ -34,25 +34,20 @@ public static class NativeTableRowCopy
             summary = new
             {
                 pass = true,
-                operationCount = request.Changes.Count,
-                appliedCount = receipt.Changes.Count,
+                operationCount = request.Tables.Count,
+                appliedCount = receipt.Tables.Count,
             },
         }, Json.CamelCaseOptions));
         return 0;
     }
 
-    public static TableRowCopyReceipt Apply(TableRowCopyRequest request)
+    public static TableRowReplaceReceipt Apply(TableRowReplaceRequest request)
     {
-        if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var targetPaths = request.Changes.Select((change, index) =>
-        {
-            RequireAbsolutePath(change.TargetDocument.Input, $"changes[{index}].targetDocument.input");
-            return Path.GetFullPath(change.TargetDocument.Input);
-        }).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (targetPaths.Length != 1) throw new InvalidOperationException("changes-must-share-one-target-document");
+        if (request.Tables.Count == 0) throw new InvalidOperationException("tables-must-not-be-empty");
+        RequireAbsolutePath(request.TargetDocument.Input, "targetDocument.input");
         RequireAbsolutePath(request.Output, "output");
         RequireAbsolutePath(request.ReceiptOutput, "receiptOutput");
-        var targetPath = targetPaths[0];
+        var targetPath = Path.GetFullPath(request.TargetDocument.Input);
         var outputPath = request.Output;
         var receiptPath = request.ReceiptOutput;
         RequireNewPath(outputPath, "output");
@@ -84,7 +79,7 @@ public static class NativeTableRowCopy
             File.Copy(targetPath, temporaryPath, overwrite: false);
             using (var outputDocument = WordprocessingDocument.Open(temporaryPath, true))
             {
-                ApplyChanges(outputDocument, prepared);
+                ApplyTables(outputDocument, prepared);
                 outputDocument.MainDocumentPart?.Document?.Save();
                 var issues = ValidationIssueCounts(outputDocument);
                 var added = issues.FirstOrDefault(item => item.Value > baselineIssues.GetValueOrDefault(item.Key));
@@ -94,8 +89,8 @@ public static class NativeTableRowCopy
             File.Move(temporaryPath, outputPath);
             var outputRevision = Observation.CurrentRevision(outputPath);
             var readback = ReadBack(outputPath, prepared);
-            var receipt = new TableRowCopyReceipt(
-                "tiwater.docx-copy-table-rows-receipt/v1",
+            var receipt = new TableRowReplaceReceipt(
+                "tiwater.docx-replace-table-rows-receipt/v1",
                 "tiwater.docx.cli",
                 RuntimeIdentity.Version,
                 targetRevision,
@@ -114,16 +109,16 @@ public static class NativeTableRowCopy
         }
     }
 
-    private static IReadOnlyList<PreparedChange> Prepare(
-        TableRowCopyRequest request,
+    private static IReadOnlyList<PreparedTable> Prepare(
+        TableRowReplaceRequest request,
         string targetPath,
         string targetRevision)
     {
-        var result = new List<PreparedChange>(request.Changes.Count);
+        var result = new List<PreparedTable>(request.Tables.Count);
         using var targetDocument = WordprocessingDocument.Open(targetPath, false);
-        for (var changeIndex = 0; changeIndex < request.Changes.Count; changeIndex++)
+        for (var tableIndex = 0; tableIndex < request.Tables.Count; tableIndex++)
         {
-            var change = request.Changes[changeIndex];
+            var change = request.Tables[tableIndex];
             var targetReferences = new[]
             {
                 change.TargetTableRef,
@@ -183,7 +178,7 @@ public static class NativeTableRowCopy
                 sourceRows.Select(row => PrepareRow(row, mappings, targetGridWidths.Count, sourceCellContents)).ToArray(),
                 mappings, targetGridWidths.Count, sourceCellContents);
             RequireClosedMergeChains(preparedRows, targetGridWidths.Count, "source");
-            result.Add(new PreparedChange(changeIndex, targetResolved[0],
+            result.Add(new PreparedTable(tableIndex, targetResolved[0],
                 targetRows.Select(Observation.NativePathFor).ToArray(), sourcePath, sourceRevision,
                 targetGridWidths, mappings.Select(mapping => new TargetColumnReshape(
                     mapping.OldTargetStart, mapping.OldTargetSpan, mapping.TargetStart, mapping.TargetSpan)).ToArray(),
@@ -274,7 +269,7 @@ public static class NativeTableRowCopy
                             cell.SourceColumn >= item.SourceColumn
                             && cell.SourceColumn < item.SourceColumn + item.SourceSpan);
                         if (originCell.TargetColumn != cell.TargetColumn || originCell.TargetSpan != cell.TargetSpan)
-                            throw new InvalidOperationException("source-vertical-merge-span-changes-at-selection-boundary");
+                            throw new InvalidOperationException("source-vertical-merge-span-tables-at-selection-boundary");
                         cell = cell with
                         {
                             Paragraphs = originCell.Paragraphs,
@@ -295,7 +290,7 @@ public static class NativeTableRowCopy
         string sourceRevision,
         WordprocessingDocument sourceDocument,
         IReadOnlyList<TableRow> sourceRows,
-        IReadOnlyList<TableRowCopyCellContent> requested)
+        IReadOnlyList<TableRowReplaceCellContent> requested)
     {
         if (requested.Count == 0)
             return new Dictionary<string, IReadOnlyList<Paragraph>>(StringComparer.Ordinal);
@@ -361,10 +356,10 @@ public static class NativeTableRowCopy
         return cell.Elements<Paragraph>().Select(NativeContentCopy.CloneParagraph).ToArray();
     }
 
-    private static void PreflightImports(WordprocessingDocument targetDocument, IReadOnlyList<PreparedChange> changes)
+    private static void PreflightImports(WordprocessingDocument targetDocument, IReadOnlyList<PreparedTable> tables)
     {
         var targetMain = targetDocument.MainDocumentPart ?? throw new InvalidOperationException("target-main-part-not-found");
-        foreach (var group in changes.GroupBy(change => change.SourcePath, StringComparer.OrdinalIgnoreCase))
+        foreach (var group in tables.GroupBy(change => change.SourcePath, StringComparer.OrdinalIgnoreCase))
         {
             using var sourceDocument = WordprocessingDocument.Open(group.Key, false);
             var sourceMain = sourceDocument.MainDocumentPart ?? throw new InvalidOperationException("source-main-part-not-found");
@@ -380,11 +375,11 @@ public static class NativeTableRowCopy
         }
     }
 
-    private static void ApplyChanges(WordprocessingDocument outputDocument, IReadOnlyList<PreparedChange> changes)
+    private static void ApplyTables(WordprocessingDocument outputDocument, IReadOnlyList<PreparedTable> tables)
     {
         var outputMain = outputDocument.MainDocumentPart ?? throw new InvalidOperationException("target-main-part-not-found");
         var outputBody = outputMain.Document?.Body ?? throw new InvalidOperationException("target-body-not-found");
-        foreach (var group in changes.GroupBy(change => change.SourcePath, StringComparer.OrdinalIgnoreCase))
+        foreach (var group in tables.GroupBy(change => change.SourcePath, StringComparer.OrdinalIgnoreCase))
         {
             using var sourceDocument = WordprocessingDocument.Open(group.Key, false);
             var sourceMain = sourceDocument.MainDocumentPart ?? throw new InvalidOperationException("source-main-part-not-found");
@@ -447,10 +442,10 @@ public static class NativeTableRowCopy
         throw new InvalidOperationException("target-row-range-has-no-repeatable-interior-style");
     }
 
-    private static IReadOnlyList<TableRowCopyReadback> ReadBack(string output, IReadOnlyList<PreparedChange> changes)
+    private static IReadOnlyList<TableRowReplaceReadback> ReadBack(string output, IReadOnlyList<PreparedTable> tables)
     {
         using var document = WordprocessingDocument.Open(output, false);
-        return changes.Select(change =>
+        return tables.Select(change =>
         {
             var table = Resolve<Table>(document, change.TargetTable, "output-target-table");
             var allRows = table.Elements<TableRow>().ToArray();
@@ -476,7 +471,7 @@ public static class NativeTableRowCopy
                         throw new InvalidOperationException("output-readback-vertical-merge-mismatch");
                 }
             }
-            return new TableRowCopyReadback(change.Index, change.Rows.Count, rows.Length,
+            return new TableRowReplaceReadback(change.Index, change.Rows.Count, rows.Length,
                 rows.Select(row => row.InnerText).ToArray());
         }).ToArray();
     }
@@ -547,7 +542,7 @@ public static class NativeTableRowCopy
     private static IReadOnlyList<ColumnMapping> BuildMappings(
         IReadOnlyList<CellSlot> sourceHeaders,
         IReadOnlyList<CellSlot> targetHeaders,
-        IReadOnlyList<TableRowCopyColumn> columns)
+        IReadOnlyList<TableRowReplaceColumn> columns)
     {
         var indexed = columns.Select((column, index) => new
         {
@@ -825,13 +820,13 @@ public static class NativeTableRowCopy
     private sealed record PreparedCell(int SourceColumn, int SourceSpan, int TargetColumn,
         IReadOnlyList<Paragraph> Paragraphs, VerticalMerge? VerticalMerge, int TargetSpan);
     private sealed record PreparedRow(IReadOnlyList<PreparedCell> Cells, int GridBefore, int GridAfter);
-    private sealed record PreparedChange(int Index, ResolvedDocxReference TargetTable,
+    private sealed record PreparedTable(int Index, ResolvedDocxReference TargetTable,
         IReadOnlyList<string> TargetRowPaths, string SourcePath, string SourceRevision,
         IReadOnlyList<long> TargetGridWidths, IReadOnlyList<TargetColumnReshape> TargetColumns,
         IReadOnlyList<PreparedRow> Rows);
 }
 
-internal static class TableRowCopyReferenceExtensions
+internal static class TableRowReplaceReferenceExtensions
 {
     internal static int IndexOfReference<T>(this IReadOnlyList<T> values, T expected) where T : class
     {
@@ -840,20 +835,21 @@ internal static class TableRowCopyReferenceExtensions
     }
 }
 
-public sealed record TableRowCopyDocument(string Input);
-public sealed record TableRowCopyRange(string FirstRef, string LastRef);
-public sealed record TableRowCopyColumn(string SourceHeaderRef, string TargetHeaderRef);
-public sealed record TableRowCopyCellContent(
+public sealed record TableRowReplaceDocument(string Input);
+public sealed record TableRowReplaceRange(string FirstRef, string LastRef);
+public sealed record TableRowReplaceColumn(string SourceHeaderRef, string TargetHeaderRef);
+public sealed record TableRowReplaceCellContent(
     string SourceCellRef,
     IReadOnlyList<CopyContentSelection> SourceSelections);
-public sealed record TableRowCopyChange(TableRowCopyDocument SourceDocument,
-    string SourceTableRef, TableRowCopyRange SourceRows,
-    TableRowCopyDocument TargetDocument, string TargetTableRef, TableRowCopyRange TargetRows,
-    IReadOnlyList<TableRowCopyColumn> Columns,
-    IReadOnlyList<TableRowCopyCellContent>? SourceCellContents = null);
-public sealed record TableRowCopyRequest(IReadOnlyList<TableRowCopyChange> Changes,
+public sealed record TableRowReplaceTable(TableRowReplaceDocument SourceDocument,
+    string SourceTableRef, TableRowReplaceRange SourceRows,
+    string TargetTableRef, TableRowReplaceRange TargetRows,
+    IReadOnlyList<TableRowReplaceColumn> Columns,
+    IReadOnlyList<TableRowReplaceCellContent>? SourceCellContents = null);
+public sealed record TableRowReplaceRequest(TableRowReplaceDocument TargetDocument,
+    IReadOnlyList<TableRowReplaceTable> Tables,
     string Output, string ReceiptOutput);
-public sealed record TableRowCopyReadback(int ChangeIndex, int SourceRowCount, int OutputRowCount,
+public sealed record TableRowReplaceReadback(int TableIndex, int SourceRowCount, int OutputRowCount,
     IReadOnlyList<string> RowTexts);
-public sealed record TableRowCopyReceipt(string Schema, string Provider, string ToolVersion,
-    DocxRevision TargetRevision, DocxRevision OutputRevision, IReadOnlyList<TableRowCopyReadback> Changes, string Output);
+public sealed record TableRowReplaceReceipt(string Schema, string Provider, string ToolVersion,
+    DocxRevision TargetRevision, DocxRevision OutputRevision, IReadOnlyList<TableRowReplaceReadback> Tables, string Output);
