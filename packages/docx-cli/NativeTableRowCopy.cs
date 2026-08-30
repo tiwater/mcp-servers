@@ -57,7 +57,8 @@ public static class NativeTableRowCopy
         if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, targetPath))
             throw new InvalidOperationException("output-must-not-overwrite-input");
 
-        var prepared = Prepare(request, targetPath);
+        var targetRevision = Observation.CurrentRevision(targetPath);
+        var prepared = Prepare(request, targetPath, targetRevision.Id);
         if (prepared.Select(change => change.TargetTable.Reference).Distinct(StringComparer.Ordinal).Count() != prepared.Count)
             throw new InvalidOperationException("target-table-must-have-one-change");
         IReadOnlyDictionary<string, int> baselineIssues;
@@ -70,7 +71,7 @@ public static class NativeTableRowCopy
         var temporaryPath = outputPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            if (!StringComparer.Ordinal.Equals(Observation.CurrentRevision(targetPath).Id, request.TargetDocument.Revision))
+            if (!StringComparer.Ordinal.Equals(Observation.CurrentRevision(targetPath).Id, targetRevision.Id))
                 throw new InvalidOperationException("stale-revision");
             foreach (var source in prepared.Select(change => (change.SourcePath, change.SourceRevision)).Distinct())
                 if (!StringComparer.Ordinal.Equals(Observation.CurrentRevision(source.SourcePath).Id, source.SourceRevision))
@@ -92,7 +93,7 @@ public static class NativeTableRowCopy
                 "tiwater.docx-copy-table-rows-receipt/v1",
                 "tiwater.docx.cli",
                 RuntimeIdentity.Version,
-                Observation.CurrentRevision(targetPath),
+                targetRevision,
                 outputRevision,
                 readback,
                 outputPath);
@@ -108,7 +109,10 @@ public static class NativeTableRowCopy
         }
     }
 
-    private static IReadOnlyList<PreparedChange> Prepare(TableRowCopyRequest request, string targetPath)
+    private static IReadOnlyList<PreparedChange> Prepare(
+        TableRowCopyRequest request,
+        string targetPath,
+        string targetRevision)
     {
         var result = new List<PreparedChange>(request.Changes.Count);
         using var targetDocument = WordprocessingDocument.Open(targetPath, false);
@@ -121,7 +125,7 @@ public static class NativeTableRowCopy
                 change.TargetRows.FirstRef,
                 change.TargetRows.LastRef,
             }.Concat(change.Columns.Select(column => column.TargetHeaderRef)).ToArray();
-            var targetResolved = Observation.ResolveReferences(targetPath, request.TargetDocument.Revision, targetReferences);
+            var targetResolved = Observation.ResolveReferences(targetPath, targetRevision, targetReferences);
             RequireKinds(targetResolved, "table", "row", "row", change.Columns.Count, "cell", "target");
             var targetTable = Resolve<Table>(targetDocument, targetResolved[0], "target-table");
             var allTargetRows = targetTable.Elements<TableRow>().ToArray();
@@ -141,6 +145,7 @@ public static class NativeTableRowCopy
 
             RequireAbsolutePath(change.SourceDocument.Input, "sourceDocument.input");
             var sourcePath = change.SourceDocument.Input;
+            var sourceRevision = Observation.CurrentRevision(sourcePath).Id;
             using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
             var sourceReferences = new[]
             {
@@ -148,7 +153,7 @@ public static class NativeTableRowCopy
                 change.SourceRows.FirstRef,
                 change.SourceRows.LastRef,
             }.Concat(change.Columns.Select(column => column.SourceHeaderRef)).ToArray();
-            var sourceResolved = Observation.ResolveReferences(sourcePath, change.SourceDocument.Revision, sourceReferences);
+            var sourceResolved = Observation.ResolveReferences(sourcePath, sourceRevision, sourceReferences);
             RequireKinds(sourceResolved, "table", "row", "row", change.Columns.Count, "cell", "source");
             var sourceTable = Resolve<Table>(sourceDocument, sourceResolved[0], "source-table");
             var allSourceRows = sourceTable.Elements<TableRow>().ToArray();
@@ -172,7 +177,7 @@ public static class NativeTableRowCopy
                 mappings, targetGridWidths.Count);
             RequireClosedMergeChains(preparedRows, targetGridWidths.Count, "source");
             result.Add(new PreparedChange(changeIndex, targetResolved[0],
-                targetRows.Select(Observation.NativePathFor).ToArray(), sourcePath, change.SourceDocument.Revision,
+                targetRows.Select(Observation.NativePathFor).ToArray(), sourcePath, sourceRevision,
                 targetGridWidths, mappings.Select(mapping => new TargetColumnReshape(
                     mapping.OldTargetStart, mapping.OldTargetSpan, mapping.TargetStart, mapping.TargetSpan)).ToArray(),
                 preparedRows));
@@ -773,7 +778,7 @@ internal static class TableRowCopyReferenceExtensions
     }
 }
 
-public sealed record TableRowCopyDocument(string Input, string Revision);
+public sealed record TableRowCopyDocument(string Input);
 public sealed record TableRowCopyRange(string FirstRef, string LastRef);
 public sealed record TableRowCopyColumn(string SourceHeaderRef, string TargetHeaderRef);
 public sealed record TableRowCopyChange(string TargetTableRef, TableRowCopyRange TargetRows,
