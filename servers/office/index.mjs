@@ -236,7 +236,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of revision-bound nearest-child identities in native document order and retain the exact page at output for later reuse. Request only the object kinds needed by the current local traversal, follow continuation in order, and descend only through returned refs with parentRef. Text previews describe already located objects; never use matching text to identify a document or select a source.',
+    description: 'List one small page of nearest-child identities from the current DOCX in native document order and retain the exact page at output. This call creates and returns the current revision; it does not accept a revision argument. Request only the object kinds needed by the current local traversal, follow continuation in order, and descend only through returned refs with parentRef. Text previews describe already located objects; they do not prove descendant content.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -244,7 +244,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read selected rows, cells, or paragraphs from one native DOCX in one call and return them in refs order. Pass the document path once and all refs needed for the current target. For exact inline content, use observed cell or paragraph refs and request run or text.',
+    description: 'Read selected rows, cells, or paragraphs from one native DOCX in one call and return them in refs order. Unlike docx_list_objects, this call accepts the list result revision to reject stale refs. Pass the document path once and only the refs needed for the current target. For exact inline content, use observed cell or paragraph refs and request run or text.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
