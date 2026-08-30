@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -329,8 +330,16 @@ public static class Observation
 
     private static string EncodeCursor(Cursor cursor)
     {
-        var json = JsonSerializer.SerializeToUtf8Bytes(cursor, Json.Options);
-        return Convert.ToBase64String(json).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        const string revisionPrefix = "docx-rev-v1-";
+        if (!cursor.Revision.StartsWith(revisionPrefix, StringComparison.Ordinal)
+            || cursor.Revision.Length != revisionPrefix.Length + 64
+            || cursor.Selection.Length != 64)
+            throw new InvalidOperationException("continuation-invalid");
+        var bytes = new byte[68];
+        Convert.FromHexString(cursor.Revision[revisionPrefix.Length..]).CopyTo(bytes, 0);
+        Convert.FromHexString(cursor.Selection).CopyTo(bytes, 32);
+        BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(64), cursor.Offset);
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     private static Cursor DecodeCursor(string value)
@@ -339,8 +348,12 @@ public static class Observation
         {
             var padded = value.Replace('-', '+').Replace('_', '/');
             padded = padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '=');
-            var cursor = JsonSerializer.Deserialize<Cursor>(Convert.FromBase64String(padded), Json.Options);
-            return cursor ?? throw new InvalidOperationException("continuation-invalid");
+            var bytes = Convert.FromBase64String(padded);
+            if (bytes.Length != 68) throw new InvalidOperationException("continuation-invalid");
+            return new Cursor(
+                $"docx-rev-v1-{Convert.ToHexString(bytes.AsSpan(0, 32)).ToLowerInvariant()}",
+                Convert.ToHexString(bytes.AsSpan(32, 32)),
+                BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(64, 4)));
         }
         catch (FormatException)
         {
