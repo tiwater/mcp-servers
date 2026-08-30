@@ -168,15 +168,16 @@ public static class NativeTableRowReplace
             var sourceHeaderSlots = sourceHeaderCells.Select(cell => GridSlot(sourceTable, cell)).ToArray();
             var sourceGridCount = GridColumnCount(sourceTable);
             RequireCompleteHeader(sourceHeaderSlots, sourceGridCount, "source");
+            RequireClosedRangeBoundary(allSourceRows, sourceRows, sourceGridCount, "source");
             var sourceCellContents = PrepareSourceCellContents(
                 sourcePath, sourceRevision, sourceDocument, sourceRows, change.SourceCellContents ?? []);
 
             var mappings = BuildMappings(sourceHeaderSlots, targetHeaderSlots, change.Columns);
             var targetGridWidths = BuildTargetGridWidths(sourceTable, targetTable, mappings);
 
-            var preparedRows = NormalizeMergeStarts(allSourceRows, sourceRows,
-                sourceRows.Select(row => PrepareRow(row, mappings, targetGridWidths.Count, sourceCellContents)).ToArray(),
-                mappings, targetGridWidths.Count, sourceCellContents);
+            var preparedRows = sourceRows
+                .Select(row => PrepareRow(row, mappings, targetGridWidths.Count, sourceCellContents))
+                .ToArray();
             RequireClosedMergeChains(preparedRows, targetGridWidths.Count, "source");
             result.Add(new PreparedTable(tableIndex, targetResolved[0],
                 targetRows.Select(Observation.NativePathFor).ToArray(), sourcePath, sourceRevision,
@@ -228,63 +229,6 @@ public static class NativeTableRowReplace
         return new PreparedRow(ordered, occupied[0], targetGridCount - occupied[^1] - 1);
     }
 
-    private static IReadOnlyList<PreparedRow> NormalizeMergeStarts(
-        IReadOnlyList<TableRow> allRows,
-        IReadOnlyList<TableRow> selectedRows,
-        IReadOnlyList<PreparedRow> preparedRows,
-        IReadOnlyList<ColumnMapping> mappings,
-        int targetGridCount,
-        IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> sourceCellContents)
-    {
-        var active = new bool[targetGridCount];
-        var result = new List<PreparedRow>(preparedRows.Count);
-        var previousSourceIndex = -2;
-        for (var rowIndex = 0; rowIndex < preparedRows.Count; rowIndex++)
-        {
-            var sourceIndex = allRows.IndexOfReference(selectedRows[rowIndex]);
-            if (sourceIndex != previousSourceIndex + 1) Array.Fill(active, false);
-            previousSourceIndex = sourceIndex;
-            var cells = new List<PreparedCell>(preparedRows[rowIndex].Cells.Count);
-            foreach (var original in preparedRows[rowIndex].Cells)
-            {
-                var cell = original;
-                var positions = Enumerable.Range(cell.TargetColumn, cell.TargetSpan).ToArray();
-                if (cell.VerticalMerge is null)
-                {
-                    foreach (var position in positions) active[position] = false;
-                }
-                else if (cell.VerticalMerge.Val?.Value == MergedCellValues.Restart)
-                {
-                    foreach (var position in positions) active[position] = true;
-                }
-                else
-                {
-                    var activeStates = positions.Select(position => active[position]).Distinct().ToArray();
-                    if (activeStates.Length != 1)
-                        throw new InvalidOperationException("source-vertical-merge-maps-to-inconsistent-target-columns");
-                    if (!activeStates[0])
-                    {
-                        var origin = FindMergeOrigin(allRows, sourceIndex, cell.SourceColumn);
-                        var originCell = PrepareRow(origin, mappings, targetGridCount, sourceCellContents).Cells.Single(item =>
-                            cell.SourceColumn >= item.SourceColumn
-                            && cell.SourceColumn < item.SourceColumn + item.SourceSpan);
-                        if (originCell.TargetColumn != cell.TargetColumn || originCell.TargetSpan != cell.TargetSpan)
-                            throw new InvalidOperationException("source-vertical-merge-span-tables-at-selection-boundary");
-                        cell = cell with
-                        {
-                            Paragraphs = originCell.Paragraphs,
-                            VerticalMerge = new VerticalMerge { Val = MergedCellValues.Restart },
-                        };
-                    }
-                    foreach (var position in positions) active[position] = true;
-                }
-                cells.Add(cell);
-            }
-            result.Add(preparedRows[rowIndex] with { Cells = cells });
-        }
-        return result;
-    }
-
     private static IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> PrepareSourceCellContents(
         string sourcePath,
         string sourceRevision,
@@ -333,19 +277,6 @@ public static class NativeTableRowReplace
             result.Add(Observation.NativePathFor(cell), paragraphs);
         }
         return result;
-    }
-
-    private static TableRow FindMergeOrigin(IReadOnlyList<TableRow> rows, int beforeIndex, int sourceColumn)
-    {
-        for (var index = beforeIndex - 1; index >= 0; index--)
-        {
-            var slot = Cells(rows[index]).SingleOrDefault(cell =>
-                sourceColumn >= cell.Start && sourceColumn < cell.Start + cell.Span);
-            var merge = slot?.Cell.TableCellProperties?.VerticalMerge;
-            if (merge is null) break;
-            if (merge.Val?.Value == MergedCellValues.Restart) return rows[index];
-        }
-        throw new InvalidOperationException("source-vertical-merge-origin-not-found");
     }
 
     private static IReadOnlyList<Paragraph> CloneCellParagraphs(TableCell cell)
