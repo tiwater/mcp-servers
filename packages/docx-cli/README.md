@@ -28,7 +28,7 @@ to an artifact path by the Office MCP.
 ```bash
 tiwater-docx docx_copy_content request.json
 tiwater-docx docx_set_text request.json
-tiwater-docx docx_copy_table_rows request.json
+tiwater-docx docx_replace_table_rows request.json
 tiwater-docx docx_copy_object request.json
 tiwater-docx docx_delete_object request.json
 tiwater-docx docx_merge_cells request.json

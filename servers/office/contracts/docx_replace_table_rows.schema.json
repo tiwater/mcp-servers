@@ -1,11 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tiwater.office-mcp-input/docx_copy_table_rows",
+  "$id": "tiwater.office-mcp-input/docx_replace_table_rows",
   "type": "object",
   "properties": {
-    "changes": {
+    "targetDocument": {
+      "type": "object",
+      "description": "Exact current target document for every table replacement in this call.",
+      "properties": {
+        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
+      },
+      "required": ["input"],
+      "additionalProperties": false
+    },
+    "tables": {
       "type": "array",
-      "description": "Complete resolved table-edit set for one target document. Items may use different source documents. A successful call invalidates every prior target ref, so do not split this set across calls.",
+      "description": "Complete resolved table replacements for targetDocument. Each item may use a different source document.",
       "minItems": 1,
       "items": {
         "type": "object",
@@ -28,15 +37,6 @@
               "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
             },
             "required": ["firstRef", "lastRef"],
-            "additionalProperties": false
-          },
-          "targetDocument": {
-            "type": "object",
-            "description": "Exact target document for this table edit. Every item in one call must name the same target document.",
-            "properties": {
-              "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
-            },
-            "required": ["input"],
             "additionalProperties": false
           },
           "targetTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
@@ -107,7 +107,7 @@
             }
           }
         },
-        "required": ["sourceDocument", "sourceTableRef", "sourceRows", "targetDocument", "targetTableRef", "targetRows", "columns"],
+        "required": ["sourceDocument", "sourceTableRef", "sourceRows", "targetTableRef", "targetRows", "columns"],
         "additionalProperties": false
       }
     },
@@ -119,6 +119,6 @@
       "x-tiwater-file-effect": false
     }
   },
-  "required": ["changes", "output", "receiptOutput"],
+  "required": ["targetDocument", "tables", "output", "receiptOutput"],
   "additionalProperties": false
 }
