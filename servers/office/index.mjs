@@ -272,7 +272,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object and requested descendants. For a table, read row, cell, and paragraph descendants first. To select exact inline content, make a second read rooted at the observed cell or paragraph and request run or text; table-rooted inline reads are rejected so one call cannot return the document-wide character tree.',
+    description: 'Read one selected native DOCX row, cell, or paragraph and requested descendants. For a table, page its row identities with docx_list_objects, then read only the current row. To select exact inline content, make a second read rooted at the observed cell or paragraph and request run or text.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -619,9 +619,8 @@ async function docxReadObject(args) {
   const { output: _output, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
-    if (result.json?.observation?.object?.kind === 'table'
-      && args.kinds.some(kind => kind === 'run' || kind === 'text')) {
-      throw new Error('docx-table-inline-detail-requires-cell-or-paragraph-root');
+    if (result.json?.observation?.object?.kind === 'table') {
+      throw new Error('docx-table-read-requires-paged-row-selection');
     }
     return {
       tool: 'docx_read_object',
