@@ -115,15 +115,14 @@ public static class Inspector
     public static IReadOnlyList<object> InspectDocumentFlow(string input)
     {
         var path = Path.GetFullPath(input);
-        var revision = Observation.CurrentRevision(path);
         using var doc = WordprocessingDocument.Open(path, false);
         var mainPart = doc.MainDocumentPart ?? throw new InvalidOperationException("Main document part not found.");
         var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Document body not found.");
         static string PartUri(OpenXmlPart part)
             => part.Uri.OriginalString.StartsWith("/", StringComparison.Ordinal)
                 ? part.Uri.OriginalString : "/" + part.Uri.OriginalString;
-        string ParagraphReference(OpenXmlPart part, Paragraph paragraph)
-            => Observation.MakeReference(revision, "paragraph", PartUri(part), Observation.NativePathFor(paragraph));
+        DocxObjectAddress ParagraphAddress(OpenXmlPart part, Paragraph paragraph)
+            => Observation.Address(PartUri(part), Observation.NativePathFor(paragraph));
         var nodes = new List<object>();
         var headerIndex = 0;
         foreach (var headerPart in mainPart.HeaderParts)
@@ -143,7 +142,7 @@ public static class Inspector
                 if (!string.IsNullOrEmpty(text)) nodes.Add(new
                 {
                     type = "headerParagraph", headerIndex, paragraphIndex,
-                    objectRef = ParagraphReference(headerPart, paragraph), style, fontSizes, text,
+                    address = ParagraphAddress(headerPart, paragraph), style, fontSizes, text,
                 });
                 paragraphIndex += 1;
             }
@@ -168,14 +167,14 @@ public static class Inspector
                     nodes.Add(new
                     {
                         type = "paragraph", paragraphIndex = bodyParagraphIndex,
-                        objectRef = ParagraphReference(mainPart, paragraph), style, numberingId,
+                        address = ParagraphAddress(mainPart, paragraph), style, numberingId,
                         numberingLevel, keepNext, keepLines, drawingCount, text,
                     });
                 else
                     nodes.Add(new
                     {
                         type = "paragraph", paragraphIndex = bodyParagraphIndex,
-                        objectRef = ParagraphReference(mainPart, paragraph), style, numberingId,
+                        address = ParagraphAddress(mainPart, paragraph), style, numberingId,
                         numberingLevel, keepNext, keepLines, text,
                     });
                 bodyParagraphIndex += 1;

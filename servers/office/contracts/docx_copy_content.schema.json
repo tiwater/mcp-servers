@@ -1,70 +1,106 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tiwater.office-mcp-input/docx_copy_content",
   "type": "object",
   "properties": {
-    "targetDocument": {
-      "type": "object",
-      "properties": {
-        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
-        "revision": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" }
-      },
-      "required": ["input", "revision"],
-      "additionalProperties": false
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
     },
     "changes": {
-      "type": "array",
       "minItems": 1,
+      "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "targetRef": {
-            "type": "string",
-            "pattern": "^dox1_[0-9a-f]{64}$",
-            "description": "Target plain-text paragraph or cell ref whose content is replaced while its container formatting is retained. Paragraph bookmarks are preserved; targets containing fields, drawings, nested tables, controls, links, or other non-text content are rejected."
-          },
-          "sourceDocument": {
+          "target": {
             "type": "object",
             "properties": {
-              "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
-              "revision": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" }
+              "part": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^\\/"
+              }
             },
-            "required": ["input", "revision"],
+            "required": [
+              "part",
+              "path"
+            ],
             "additionalProperties": false
           },
+          "sourceInput": {
+            "type": "string",
+            "minLength": 1,
+            "x-tiwater-file-role": "read"
+          },
           "sourceSelections": {
-            "type": "array",
             "minItems": 1,
-            "description": "Ordered source content copied into the target paragraph or cell. Select a whole observed object by ref alone, or select an exact substring by adding range to an observed run or text ref. Multiple selections are copied in this array order.",
+            "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "ref": {
-                  "type": "string",
-                  "pattern": "^dox1_[0-9a-f]{64}$",
-                  "description": "Observed source object ref. When range is present this must be a run or text ref, not a paragraph, cell, row, or table ref."
+                "address": {
+                  "type": "object",
+                  "properties": {
+                    "part": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "path": {
+                      "type": "string",
+                      "pattern": "^\\/"
+                    }
+                  },
+                  "required": [
+                    "part",
+                    "path"
+                  ],
+                  "additionalProperties": false
                 },
                 "range": {
                   "type": "object",
-                  "description": "Zero-based substring within the selected run or text object. Omit range to copy the whole selected object.",
                   "properties": {
-                    "start": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
-                    "length": { "type": "integer", "exclusiveMinimum": 0, "maximum": 2147483647 }
+                    "start": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "length": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
                   },
-                  "required": ["start", "length"],
+                  "required": [
+                    "start",
+                    "length"
+                  ],
                   "additionalProperties": false
                 }
               },
-              "required": ["ref"],
+              "required": [
+                "address"
+              ],
               "additionalProperties": false
             }
           }
         },
-        "required": ["targetRef", "sourceDocument", "sourceSelections"],
+        "required": [
+          "target",
+          "sourceInput",
+          "sourceSelections"
+        ],
         "additionalProperties": false
       }
     },
-    "output": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write" },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "write"
+    },
     "receiptOutput": {
       "type": "string",
       "minLength": 1,
@@ -72,6 +108,12 @@
       "x-tiwater-file-effect": false
     }
   },
-  "required": ["targetDocument", "changes", "output", "receiptOutput"],
-  "additionalProperties": false
+  "required": [
+    "input",
+    "changes",
+    "output",
+    "receiptOutput"
+  ],
+  "additionalProperties": false,
+  "$id": "tiwater.office-mcp-input/docx_copy_content"
 }

@@ -7,19 +7,31 @@
       "minLength": 1,
       "x-tiwater-file-role": "read"
     },
-    "refs": {
-      "description": "Object refs from one current DOCX observation, returned in this order. Use row, cell, or paragraph refs; table-rooted reads are rejected.",
+    "addresses": {
+      "minItems": 1,
       "type": "array",
-      "items": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-      "minItems": 1
-    },
-    "revision": {
-      "description": "Optional expected revision id from the observation receipt; a changed document fails as stale.",
-      "type": "string",
-      "pattern": "^docx-rev-v1-[0-9a-f]{64}$"
+      "items": {
+        "type": "object",
+        "properties": {
+          "part": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^\\/"
+          }
+        },
+        "required": [
+          "part",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "description": "OpenXML addresses returned by observation."
     },
     "kinds": {
-      "description": "Object kinds required by the next operation. Include paragraph for table content boundaries. Request run or text only when ref identifies a cell or paragraph, never a whole table.",
+      "minItems": 1,
       "type": "array",
       "items": {
         "type": "string",
@@ -34,18 +46,17 @@
           "drawing"
         ]
       },
-      "minItems": 1
+      "description": "Descendant object kinds to return."
     },
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "Absolute path for a new JSON artifact containing the selected native object and only the requested descendant kinds.",
       "x-tiwater-file-role": "write"
     }
   },
   "required": [
     "input",
-    "refs",
+    "addresses",
     "kinds",
     "output"
   ],

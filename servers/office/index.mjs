@@ -161,20 +161,17 @@ function artifactOutput(tool) {
   return z.object({ tool: z.literal(tool), runtime: runtimeIdentity, source: artifact, artifact }).strict();
 }
 
-const docxRevision = z.object({
-  id: z.string().regex(/^docx-rev-v1-[0-9a-f]{64}$/),
-  inputSha256: z.string().regex(/^[A-F0-9]{64}$/),
-  provider: z.literal('tiwater.docx.cli'),
-  toolVersion: z.string(),
+const docxAddress = z.object({
+  part: z.string().min(1),
+  path: z.string().startsWith('/'),
 }).strict();
 
 function docxInspectionOutput(tool) {
   return artifactOutput(tool).extend({
-    revision: docxRevision,
     summary: z.object({
       tableCount: z.number().int().nonnegative(),
       openingParagraphs: z.array(z.object({
-        ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
+        address: docxAddress,
         textPreview: z.string().min(1).max(240),
       }).strict()).max(6),
     }).strict(),
@@ -182,8 +179,8 @@ function docxInspectionOutput(tool) {
 }
 
 const docxObjectIdentity = z.object({
-  ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
-  parentRef: z.string().regex(/^dox1_[0-9a-f]{64}$/).nullable(),
+  address: docxAddress,
+  parentAddress: docxAddress.nullable(),
   kind: z.string(),
   textPreview: z.string().nullable(),
   gridSpan: z.number().int().positive().nullable(),
@@ -191,7 +188,7 @@ const docxObjectIdentity = z.object({
 }).strict();
 
 const docxNestedObjectIdentity = docxObjectIdentity.pick({
-  ref: true,
+  address: true,
   kind: true,
   textPreview: true,
 }).extend({
@@ -206,11 +203,10 @@ const docxObservationNode = z.lazy(() => z.object({
 const docxObservationReceipt = z.object({
   schema: z.literal('tiwater.docx-observation-receipt/v1'),
   operation: z.literal('list'),
-  revision: docxRevision,
   totalCount: z.number().int().nonnegative(),
   returnedCount: z.number().int().nonnegative(),
   remaining: z.number().int().nonnegative(),
-  continuation: z.string().nullable(),
+  nextOffset: z.number().int().nonnegative().nullable(),
 }).strict();
 
 const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
@@ -221,14 +217,13 @@ const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
 }).strict();
 
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
-  revision: docxRevision,
   observations: z.array(docxObservationNode).min(1),
 }).strict();
 
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX and retain its complete machine observation at output. The response returns the current revision, observation artifact, table count, and up to six opening non-empty body paragraphs for document identity. Use list and read operations to traverse selected document objects in native structure order.',
+    description: 'Inspect one current DOCX and retain its complete machine observation at output. The response returns the observation artifact, table count, and up to six opening non-empty body paragraphs with their OpenXML addresses. Use list and read operations to traverse selected document objects in native structure order.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -236,7 +231,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of nearest-child identities from the current DOCX in native document order and retain the exact page at output. This call creates and returns the current revision; it does not accept a revision argument. Request only the object kinds needed by the current local traversal, follow continuation in order, and descend only through returned refs with parentRef. Text previews describe already located objects; they do not prove descendant content.',
+    description: 'List one small page of nearest-child OpenXML addresses from the current DOCX in native document order and retain the exact page at output. Continue with nextOffset and descend through a returned address as parent. Text previews describe already located objects; they do not prove descendant content.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -244,7 +239,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read selected rows, cells, or paragraphs from one native DOCX in one call and return them in refs order. Unlike docx_list_objects, this call accepts the list result revision to reject stale refs. Pass the document path once and only the refs needed for the current target. For exact inline content, use observed cell or paragraph refs and request run or text.',
+    description: 'Read selected rows, cells, or paragraphs from one native DOCX in one call and return them in address order. Pass the document path once and only the OpenXML addresses needed for the current target. For exact inline content, use an observed cell or paragraph address and request run or text.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -252,7 +247,7 @@ const tools = [
   },
   {
     name: 'docx_copy_content',
-    description: 'Replace content in existing plain-text target paragraphs or cells while retaining target container formatting and source inline meaning. Targets containing non-text objects are rejected. Batch cells that need exact observed subsets after docx_replace_table_rows. A selection copies a whole object by ref, or an exact substring when range is attached to a run or text ref.',
+    description: 'Replace content in existing plain-text target paragraphs or cells while retaining target container formatting and source inline meaning. A selection copies a whole object by OpenXML address, or an exact substring when range is attached to a run or text address.',
     inputSchema: inputContract('docx_copy_content'),
     outputSchema: fixedEditOutput('docx_copy_content'),
     handler: args => fixedEdit('docx_copy_content', args),
@@ -266,7 +261,7 @@ const tools = [
   },
   {
     name: 'docx_replace_table_rows',
-    description: 'Replace one or more data-row ranges in one current target document. targetDocument appears once; each tables item binds one source document and its source and target rows. All source-cell paragraphs copy by default; sourceCellContents selects exact observed content that the target keeps.',
+    description: 'Replace one or more data-row ranges in one current target document. input appears once; each tables item binds sourceInput and exact source and target OpenXML addresses. All source-cell paragraphs copy by default; sourceCellContents selects exact observed content that the target keeps.',
     inputSchema: inputContract('docx_replace_table_rows'),
     outputSchema: fixedEditOutput('docx_replace_table_rows'),
     handler: args => fixedEdit('docx_replace_table_rows', args),
@@ -484,20 +479,20 @@ function buildServer() {
 }
 
 function compactDocxInspection(report) {
-  if (!report?.tables?.revision || !Array.isArray(report.tables.tables) || !Array.isArray(report.flow)) {
+  if (!Array.isArray(report?.tables?.tables) || !Array.isArray(report.flow)) {
     throw new Error('docx-table-inspection-result-invalid');
   }
   const openingParagraphs = report.flow
     .filter(item => item?.type === 'paragraph'
-      && /^dox1_[0-9a-f]{64}$/u.test(item.objectRef)
+      && typeof item.address?.part === 'string'
+      && typeof item.address?.path === 'string'
       && typeof item.text === 'string' && item.text.trim())
     .slice(0, 6)
     .map(item => ({
-      ref: item.objectRef,
+      address: item.address,
       textPreview: item.text.trim().replace(/\s+/gu, ' ').slice(0, 240),
     }));
   return {
-    revision: report.tables.revision,
     summary: {
       tableCount: report.tables.tables.length,
       openingParagraphs,
@@ -507,8 +502,8 @@ function compactDocxInspection(report) {
 
 function compactDocxObjectIdentity(object) {
   return {
-    ref: object.ref,
-    parentRef: object.parentRef,
+    address: object.address,
+    parentAddress: object.parentAddress,
     kind: object.kind,
     textPreview: object.textPreview,
     gridSpan: object.gridSpan,
@@ -522,7 +517,7 @@ function compactDocxObservation(observation) {
     const identity = compactDocxObjectIdentity(node.object);
     const children = (node.children ?? []).map(compactNode);
     const object = {
-      ref: identity.ref,
+      address: identity.address,
       kind: identity.kind,
       textPreview: children.length === 0 ? identity.textPreview : null,
       ...(identity.gridSpan === null ? {} : { gridSpan: identity.gridSpan }),
@@ -582,7 +577,6 @@ async function docxReadObject(args) {
       runtime: commandRuntime(result),
       source: await fileArtifact(input),
       artifact: await writeJsonArtifact(output, result.json),
-      revision: result.json.receipt.revision,
       observations: result.json.observations.map(compactDocxObservation),
     };
   });

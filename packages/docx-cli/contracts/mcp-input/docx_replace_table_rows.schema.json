@@ -1,120 +1,297 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tiwater.office-mcp-input/docx_replace_table_rows",
   "type": "object",
   "properties": {
-    "targetDocument": {
-      "type": "object",
-      "description": "Exact current target document for every table replacement in this call.",
-      "properties": {
-        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
-      },
-      "required": ["input"],
-      "additionalProperties": false
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
     },
     "tables": {
-      "type": "array",
-      "description": "One or more table replacements for targetDocument. Each item may use a different source document.",
       "minItems": 1,
+      "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "sourceDocument": {
+          "sourceInput": {
+            "type": "string",
+            "minLength": 1,
+            "x-tiwater-file-role": "read"
+          },
+          "sourceTable": {
             "type": "object",
-            "description": "Exact source document for this table edit.",
             "properties": {
-              "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" }
+              "part": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^\\/"
+              }
             },
-            "required": ["input"],
+            "required": [
+              "part",
+              "path"
+            ],
             "additionalProperties": false
           },
-          "sourceTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
           "sourceRows": {
             "type": "object",
-            "description": "Exact contiguous source rows to copy. Select only wanted rows; the range cannot begin or end inside a vertical merge.",
             "properties": {
-              "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-              "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
+              "first": {
+                "type": "object",
+                "properties": {
+                  "part": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^\\/"
+                  }
+                },
+                "required": [
+                  "part",
+                  "path"
+                ],
+                "additionalProperties": false
+              },
+              "last": {
+                "type": "object",
+                "properties": {
+                  "part": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^\\/"
+                  }
+                },
+                "required": [
+                  "part",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
             },
-            "required": ["firstRef", "lastRef"],
+            "required": [
+              "first",
+              "last"
+            ],
             "additionalProperties": false
           },
-          "targetTableRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+          "targetTable": {
+            "type": "object",
+            "properties": {
+              "part": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^\\/"
+              }
+            },
+            "required": [
+              "part",
+              "path"
+            ],
+            "additionalProperties": false
+          },
           "targetRows": {
             "type": "object",
-            "description": "Complete target data-row range to replace. Exclude every header row, including continuation rows in a multi-row header; the range cannot start or end inside a vertical merge.",
             "properties": {
-              "firstRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-              "lastRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
+              "first": {
+                "type": "object",
+                "properties": {
+                  "part": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^\\/"
+                  }
+                },
+                "required": [
+                  "part",
+                  "path"
+                ],
+                "additionalProperties": false
+              },
+              "last": {
+                "type": "object",
+                "properties": {
+                  "part": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^\\/"
+                  }
+                },
+                "required": [
+                  "part",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
             },
-            "required": ["firstRef", "lastRef"],
+            "required": [
+              "first",
+              "last"
+            ],
             "additionalProperties": false
           },
           "columns": {
-        "type": "array",
-        "minItems": 1,
-        "description": "One mapping per logical header cell. A header cell owns its full OpenXML gridSpan; do not add separate mappings for physical grid columns inside that span.",
+            "minItems": 1,
+            "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "sourceHeaderRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-                "targetHeaderRef": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" }
+                "sourceHeader": {
+                  "type": "object",
+                  "properties": {
+                    "part": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "path": {
+                      "type": "string",
+                      "pattern": "^\\/"
+                    }
+                  },
+                  "required": [
+                    "part",
+                    "path"
+                  ],
+                  "additionalProperties": false
+                },
+                "targetHeader": {
+                  "type": "object",
+                  "properties": {
+                    "part": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "path": {
+                      "type": "string",
+                      "pattern": "^\\/"
+                    }
+                  },
+                  "required": [
+                    "part",
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
               },
-              "required": ["sourceHeaderRef", "targetHeaderRef"],
+              "required": [
+                "sourceHeader",
+                "targetHeader"
+              ],
               "additionalProperties": false
             }
           },
           "sourceCellContents": {
             "type": "array",
-            "description": "Optional exact native content selections for source cells in the selected row range. Unlisted cells copy all paragraphs. An empty selection writes one empty paragraph while preserving the copied row and target presentation.",
             "items": {
               "type": "object",
               "properties": {
-                "sourceCellRef": {
-                  "type": "string",
-                  "pattern": "^dox1_[0-9a-f]{64}$",
-                  "description": "Observed source cell ref belonging to the selected source rows. Each source cell may appear once."
+                "sourceCell": {
+                  "type": "object",
+                  "properties": {
+                    "part": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "path": {
+                      "type": "string",
+                      "pattern": "^\\/"
+                    }
+                  },
+                  "required": [
+                    "part",
+                    "path"
+                  ],
+                  "additionalProperties": false
                 },
                 "sourceSelections": {
                   "type": "array",
-                  "description": "Ordered content copied into this source cell's mapped target cell. Select a whole observed object by ref alone, or an exact substring by adding range to a run or text ref.",
                   "items": {
                     "type": "object",
                     "properties": {
-                      "ref": {
-                        "type": "string",
-                        "pattern": "^dox1_[0-9a-f]{64}$",
-                        "description": "Observed object ref belonging to sourceCellRef. When range is present this must be a run or text ref."
+                      "address": {
+                        "type": "object",
+                        "properties": {
+                          "part": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "path": {
+                            "type": "string",
+                            "pattern": "^\\/"
+                          }
+                        },
+                        "required": [
+                          "part",
+                          "path"
+                        ],
+                        "additionalProperties": false
                       },
                       "range": {
                         "type": "object",
-                        "description": "Zero-based substring within the selected run or text object.",
                         "properties": {
-                          "start": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
-                          "length": { "type": "integer", "exclusiveMinimum": 0, "maximum": 2147483647 }
+                          "start": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "length": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
                         },
-                        "required": ["start", "length"],
+                        "required": [
+                          "start",
+                          "length"
+                        ],
                         "additionalProperties": false
                       }
                     },
-                    "required": ["ref"],
+                    "required": [
+                      "address"
+                    ],
                     "additionalProperties": false
                   }
                 }
               },
-              "required": ["sourceCellRef", "sourceSelections"],
+              "required": [
+                "sourceCell",
+                "sourceSelections"
+              ],
               "additionalProperties": false
             }
           }
         },
-        "required": ["sourceDocument", "sourceTableRef", "sourceRows", "targetTableRef", "targetRows", "columns"],
+        "required": [
+          "sourceInput",
+          "sourceTable",
+          "sourceRows",
+          "targetTable",
+          "targetRows",
+          "columns"
+        ],
         "additionalProperties": false
       }
     },
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "New DOCX revision. Every targetDocument object ref becomes stale after success; observe this output before any later structural call.",
       "x-tiwater-file-role": "write"
     },
     "receiptOutput": {
@@ -124,6 +301,12 @@
       "x-tiwater-file-effect": false
     }
   },
-  "required": ["targetDocument", "tables", "output", "receiptOutput"],
-  "additionalProperties": false
+  "required": [
+    "input",
+    "tables",
+    "output",
+    "receiptOutput"
+  ],
+  "additionalProperties": false,
+  "$id": "tiwater.office-mcp-input/docx_replace_table_rows"
 }

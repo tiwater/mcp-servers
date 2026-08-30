@@ -11,11 +11,11 @@ namespace Dockit.Docx;
 internal static class NativeMutationSupport
 {
     public static (string Input, string Output, string Receipt) Paths(
-        ObjectDocument targetDocument,
+        string input,
         string output,
         string receiptOutput)
     {
-        var inputPath = Path.GetFullPath(targetDocument.Input);
+        var inputPath = Path.GetFullPath(input);
         var outputPath = Path.GetFullPath(output);
         var receiptPath = Path.GetFullPath(receiptOutput);
         RequireNewPath(outputPath, "output");
@@ -24,9 +24,6 @@ internal static class NativeMutationSupport
             throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
         if (StringComparer.OrdinalIgnoreCase.Equals(inputPath, outputPath))
             throw new InvalidOperationException("output-must-not-overwrite-input");
-        var revision = Observation.CurrentRevision(inputPath);
-        if (!StringComparer.Ordinal.Equals(revision.Id, targetDocument.Revision))
-            throw new InvalidOperationException("stale-revision");
         return (inputPath, outputPath, receiptPath);
     }
 

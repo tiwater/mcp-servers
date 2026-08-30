@@ -33,7 +33,7 @@ public static class NativePolicyMutation
 
     public static PolicyMutationReceipt ApplyFontPolicy(ApplyFontPolicyRequest request)
     {
-        var paths = NativeMutationSupport.Paths(request.TargetDocument, request.Output, request.ReceiptOutput);
+        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var policyBytes = File.ReadAllBytes(Path.GetFullPath(request.Policy));
         var policy = FontPolicy.ReadPolicy(policyBytes);
         if (!FontPolicy.TryNormalize(policy, out var normalized, out var error))
@@ -84,7 +84,7 @@ public static class NativePolicyMutation
     {
         if (request.IndentCharactersPerLevel < 0)
             throw new InvalidOperationException("indent-characters-per-level-must-be-nonnegative");
-        var paths = NativeMutationSupport.Paths(request.TargetDocument, request.Output, request.ReceiptOutput);
+        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var policy = new { request.Italic, request.IndentCharactersPerLevel };
         var policySha256 = NativeMutationSupport.JsonSha256(policy);
         IReadOnlyDictionary<string, int> baseline;
@@ -132,8 +132,6 @@ public static class NativePolicyMutation
             schema,
             "tiwater.docx.cli",
             RuntimeIdentity.Version,
-            Observation.CurrentRevision(paths.Input),
-            Observation.CurrentRevision(paths.Output),
             policySha256,
             bodyRunCount,
             tableRunCount,
@@ -153,14 +151,12 @@ public static class NativePolicyMutation
         }, Json.CamelCaseOptions));
 }
 
-public sealed record ApplyFontPolicyRequest(ObjectDocument TargetDocument, string Policy, string Output, string ReceiptOutput);
-public sealed record ApplyTocStylePolicyRequest(ObjectDocument TargetDocument, bool Italic, int IndentCharactersPerLevel, string Output, string ReceiptOutput);
+public sealed record ApplyFontPolicyRequest(string Input, string Policy, string Output, string ReceiptOutput);
+public sealed record ApplyTocStylePolicyRequest(string Input, bool Italic, int IndentCharactersPerLevel, string Output, string ReceiptOutput);
 public sealed record PolicyMutationReceipt(
     string Schema,
     string Provider,
     string ToolVersion,
-    DocxRevision TargetRevision,
-    DocxRevision OutputRevision,
     string PolicySha256,
     int BodyRunCount,
     int TableRunCount,

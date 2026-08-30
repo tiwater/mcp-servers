@@ -44,10 +44,10 @@ tiwater-docx replace-style-ids input.docx output.docx style-map.json
 ```
 
 Each `docx_*` mutation command consumes the matching provider-owned request
-contract from `contracts/mcp-input/`. The provider validates revision-bound
-native object references and Open XML constraints; callers own the selected
-objects and values. Structural mutation requires fresh observation before later
-calls.
+contract from `contracts/mcp-input/`. The provider resolves the supplied OpenXML
+part and native path and enforces only executable OpenXML constraints; callers
+own the selected objects and values. After structural mutation, re-list the
+changed parent when its child paths are needed again.
 
 ## Validation
 

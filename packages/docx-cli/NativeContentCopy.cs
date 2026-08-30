@@ -33,7 +33,7 @@ public static class NativeContentCopy
     public static CopyContentReceipt Apply(CopyContentRequest request)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var targetPath = Path.GetFullPath(request.TargetDocument.Input);
+        var targetPath = Path.GetFullPath(request.Input);
         var outputPath = Path.GetFullPath(request.Output);
         var receiptPath = Path.GetFullPath(request.ReceiptOutput);
         RequireNewPath(outputPath, "output");
@@ -43,14 +43,14 @@ public static class NativeContentCopy
         if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, targetPath))
             throw new InvalidOperationException("output-must-not-overwrite-input");
 
-        var targetRefs = Observation.ResolveReferences(
+        var targetRefs = Observation.ResolveAddresses(
             targetPath,
-            request.TargetDocument.Revision,
-            request.Changes.Select(change => change.TargetRef).ToArray());
+            request.Changes.Select(change => change.Target).ToArray(),
+            "changes.target");
         if (targetRefs.Any(item => item.Kind is not "paragraph" and not "cell" || item.StoryPart != MainStory))
-            throw new InvalidOperationException("target-ref-must-be-main-document-paragraph-or-cell");
-        if (targetRefs.Select(item => item.Reference).Distinct(StringComparer.Ordinal).Count() != targetRefs.Count)
-            throw new InvalidOperationException("target-ref-duplicate");
+            throw new InvalidOperationException("target-address-must-be-main-document-paragraph-or-cell");
+        if (targetRefs.Select(item => item.Address).Distinct().Count() != targetRefs.Count)
+            throw new InvalidOperationException("target-address-duplicate");
 
         var prepared = PrepareSources(request, targetRefs);
         IReadOnlyDictionary<string, int> baselineIssues;
@@ -78,14 +78,11 @@ public static class NativeContentCopy
                     throw new InvalidOperationException($"output-added-openxml-validation-issues: {added.Key}");
             }
             File.Move(temporaryPath, outputPath);
-            var outputRevision = Observation.CurrentRevision(outputPath);
-            var readback = ReadBack(outputPath, outputRevision, prepared);
+            var readback = ReadBack(outputPath, prepared);
             var receipt = new CopyContentReceipt(
                 "tiwater.docx-copy-content-receipt",
                 "tiwater.docx.cli",
                 RuntimeIdentity.Version,
-                Observation.CurrentRevision(targetPath),
-                outputRevision,
                 readback,
                 outputPath);
             File.WriteAllText(receiptPath, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
@@ -102,19 +99,19 @@ public static class NativeContentCopy
 
     private static IReadOnlyList<PreparedChange> PrepareSources(
         CopyContentRequest request,
-        IReadOnlyList<ResolvedDocxReference> targetRefs)
+        IReadOnlyList<ResolvedDocxAddress> targetRefs)
     {
         var result = new List<PreparedChange>(request.Changes.Count);
         for (var index = 0; index < request.Changes.Count; index++)
         {
             var change = request.Changes[index];
-            var sourcePath = Path.GetFullPath(change.SourceDocument.Input);
-            var sourceRefs = Observation.ResolveReferences(
+            var sourcePath = Path.GetFullPath(change.SourceInput);
+            var sourceRefs = Observation.ResolveAddresses(
                 sourcePath,
-                change.SourceDocument.Revision,
-                change.SourceSelections.Select(selection => selection.Reference).ToArray());
+                change.SourceSelections.Select(selection => selection.Address).ToArray(),
+                $"changes[{index}].sourceSelections.address");
             if (sourceRefs.Any(item => item.StoryPart != MainStory))
-                throw new InvalidOperationException("source-ref-must-be-main-document-object");
+                throw new InvalidOperationException("source-address-must-be-main-document-object");
             using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
             var paragraphs = new List<Paragraph>();
             for (var sourceIndex = 0; sourceIndex < sourceRefs.Count; sourceIndex++)
@@ -124,7 +121,7 @@ public static class NativeContentCopy
                 paragraphs.AddRange(CopySelection(element, change.SourceSelections[sourceIndex]));
             }
             if (paragraphs.Count == 0) paragraphs.Add(new Paragraph());
-            result.Add(new PreparedChange(targetRefs[index], sourcePath, change.SourceDocument.Revision, paragraphs));
+            result.Add(new PreparedChange(targetRefs[index], sourcePath, paragraphs));
         }
         return result;
     }
@@ -327,7 +324,6 @@ public static class NativeContentCopy
 
     private static IReadOnlyList<CopyContentReadback> ReadBack(
         string output,
-        DocxRevision revision,
         IReadOnlyList<PreparedChange> changes)
     {
         using var document = WordprocessingDocument.Open(output, false);
@@ -338,10 +334,8 @@ public static class NativeContentCopy
             if (!StringComparer.Ordinal.Equals(target.InnerText, expected))
                 throw new InvalidOperationException("output-readback-content-mismatch");
             return new CopyContentReadback(
-                Observation.MakeReference(revision, change.Target.Kind, change.Target.StoryPart, change.Target.NativePath),
-                change.Target.NativePath,
-                target.InnerText,
-                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(target.InnerXml))).ToLowerInvariant());
+                change.Target.Address,
+                target.InnerText);
         }).ToArray();
     }
 
@@ -368,33 +362,29 @@ public static class NativeContentCopy
     }
 
     private sealed record PreparedChange(
-        ResolvedDocxReference Target,
+        ResolvedDocxAddress Target,
         string SourcePath,
-        string SourceRevision,
         IReadOnlyList<Paragraph> Paragraphs);
 }
 
-public sealed record CopyContentDocument(string Input, string Revision);
 public sealed record CopyContentSelection(
-    [property: JsonPropertyName("ref")] string Reference,
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
     CopyContentRange? Range = null);
 public sealed record CopyContentRange(int Start, int Length);
 public sealed record CopyContentChange(
-    string TargetRef,
-    CopyContentDocument SourceDocument,
+    DocxObjectAddress Target,
+    string SourceInput,
     IReadOnlyList<CopyContentSelection> SourceSelections);
 public sealed record CopyContentRequest(
-    CopyContentDocument TargetDocument,
+    string Input,
     IReadOnlyList<CopyContentChange> Changes,
     string Output,
     string ReceiptOutput);
 public sealed record CopyContentArtifact(string Path, string Sha256, long Bytes);
-public sealed record CopyContentReadback(string Ref, string NativePath, string Text, string ContentSha256);
+public sealed record CopyContentReadback(DocxObjectAddress Address, string Text);
 public sealed record CopyContentReceipt(
     string Schema,
     string Provider,
     string ToolVersion,
-    DocxRevision TargetRevision,
-    DocxRevision OutputRevision,
     IReadOnlyList<CopyContentReadback> Changes,
     string Output);
