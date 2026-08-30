@@ -76,60 +76,69 @@ public static class Observation
 
     public static DocxObservationReadResult Read(
         string input,
-        string reference,
+        IReadOnlyList<string> references,
         string? expectedRevision,
         IReadOnlySet<string> kinds)
     {
         var snapshot = Snapshot.Open(input);
+        if (references.Count == 0) throw new InvalidOperationException("refs-is-required");
         if (kinds.Count == 0) throw new InvalidOperationException("kinds-is-required");
         foreach (var kind in kinds)
             if (!ReadKinds.Contains(kind)) throw new InvalidOperationException($"unsupported-read-kind: {kind}");
-        if (!IsObjectReference(reference))
-            throw new InvalidOperationException("object-ref-invalid");
         if (expectedRevision is not null && !StringComparer.Ordinal.Equals(expectedRevision, snapshot.Revision.Id))
             throw new InvalidOperationException("stale-revision");
 
-        var selected = snapshot.Objects.FirstOrDefault(item =>
-            StringComparer.Ordinal.Equals(item.Reference, reference));
-        if (selected is null)
-            throw new InvalidOperationException("stale-object-ref");
-
-        var included = new Dictionary<OpenXmlElement, NativeObject>(ReferenceEqualityComparer.Instance);
-        foreach (var item in snapshot.Objects.Where(item =>
-            !ReferenceEquals(item.Element, selected.Element)
-            && kinds.Contains(item.Kind)
-            && item.Element.Ancestors().Any(ancestor => ReferenceEquals(ancestor, selected.Element))))
-            included.Add(item.Element, item);
-        DocxObservationNode Node(NativeObject item)
+        var objectsByReference = snapshot.Objects.ToDictionary(item => item.Reference, StringComparer.Ordinal);
+        var selectedObjects = references.Select((reference, index) =>
         {
-            var children = included.Values.Where(candidate =>
+            if (!IsObjectReference(reference))
+                throw new InvalidOperationException($"object-ref-invalid: refs[{index}]={reference}");
+            return objectsByReference.TryGetValue(reference, out var selected)
+                ? selected
+                : throw new InvalidOperationException($"stale-object-ref: refs[{index}]={reference}");
+        }).ToList();
+
+        DocxObservationDetail Detail(NativeObject selected)
+        {
+            var included = new Dictionary<OpenXmlElement, NativeObject>(ReferenceEqualityComparer.Instance);
+            foreach (var item in snapshot.Objects.Where(item =>
+                !ReferenceEquals(item.Element, selected.Element)
+                && kinds.Contains(item.Kind)
+                && item.Element.Ancestors().Any(ancestor => ReferenceEquals(ancestor, selected.Element))))
+                included.Add(item.Element, item);
+            DocxObservationNode Node(NativeObject item)
             {
-                var parent = candidate.Element.Parent;
-                while (parent is not null && !ReferenceEquals(parent, item.Element))
+                var children = included.Values.Where(candidate =>
                 {
-                    if (included.ContainsKey(parent)) return false;
-                    parent = parent.Parent;
-                }
-                return ReferenceEquals(parent, item.Element);
-            }).Select(Node).ToList();
-            return new DocxObservationNode(ToObject(snapshot, item), children);
+                    var parent = candidate.Element.Parent;
+                    while (parent is not null && !ReferenceEquals(parent, item.Element))
+                    {
+                        if (included.ContainsKey(parent)) return false;
+                        parent = parent.Parent;
+                    }
+                    return ReferenceEquals(parent, item.Element);
+                }).Select(Node).ToList();
+                return new DocxObservationNode(ToObject(snapshot, item), children);
+            }
+            return new DocxObservationDetail(
+                ToObject(snapshot, selected),
+                included.Values.Where(item =>
+                {
+                    var parent = item.Element.Parent;
+                    while (parent is not null && !ReferenceEquals(parent, selected.Element))
+                    {
+                        if (included.ContainsKey(parent)) return false;
+                        parent = parent.Parent;
+                    }
+                    return ReferenceEquals(parent, selected.Element);
+                }).Select(Node).ToList());
         }
-        var detail = new DocxObservationDetail(
-            ToObject(snapshot, selected),
-            included.Values.Where(item =>
-            {
-                var parent = item.Element.Parent;
-                while (parent is not null && !ReferenceEquals(parent, selected.Element))
-                {
-                    if (included.ContainsKey(parent)) return false;
-                    parent = parent.Parent;
-                }
-                return ReferenceEquals(parent, selected.Element);
-            }).Select(Node).ToList());
+
+        var details = selectedObjects.Select(Detail).ToList();
         return new DocxObservationReadResult(
             "tiwater.docx-observation-read/v1",
-            Receipt("read", snapshot.Revision, 1, 1, 0, null),
-            detail);
+            Receipt("read", snapshot.Revision, details.Count, details.Count, 0, null),
+            details);
     }
 
     public static DocxTableIndexResult TableIndex(string input)
@@ -681,7 +690,7 @@ public sealed record DocxObservationFindResult(
 public sealed record DocxObservationReadResult(
     [property: JsonPropertyName("schema")] string Schema,
     [property: JsonPropertyName("receipt")] DocxObservationReceipt Receipt,
-    [property: JsonPropertyName("observation")] DocxObservationDetail Observation);
+    [property: JsonPropertyName("observations")] IReadOnlyList<DocxObservationDetail> Observations);
 
 public sealed record DocxTableIndexEntry(
     [property: JsonPropertyName("ref")] string Reference,

@@ -7,10 +7,11 @@
       "minLength": 1,
       "x-tiwater-file-role": "read"
     },
-    "ref": {
-      "description": "One object ref returned by a current DOCX observation. Read table structure through paragraph descendants first. For exact inline content, use an observed cell or paragraph ref; table-rooted run/text reads are rejected.",
-      "type": "string",
-      "pattern": "^dox1_[0-9a-f]{64}$"
+    "refs": {
+      "description": "Object refs from one current DOCX observation, returned in this order. Use row, cell, or paragraph refs; table-rooted reads are rejected.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
+      "minItems": 1
     },
     "revision": {
       "description": "Optional expected revision id from the observation receipt; a changed document fails as stale.",
@@ -44,7 +45,7 @@
   },
   "required": [
     "input",
-    "ref",
+    "refs",
     "kinds",
     "output"
   ],

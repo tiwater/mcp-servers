@@ -222,7 +222,7 @@ const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
 
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   revision: docxRevision,
-  observation: docxObservationNode,
+  observations: z.array(docxObservationNode).min(1),
 }).strict();
 
 const tools = [
@@ -244,7 +244,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX row, cell, or paragraph and requested descendants. For a table, page its row identities with docx_list_objects, then read only the current row. To select exact inline content, make a second read rooted at the observed cell or paragraph and request run or text.',
+    description: 'Read selected rows, cells, or paragraphs from one native DOCX in one call and return them in refs order. Pass the document path once and all refs needed for the current target. For exact inline content, use observed cell or paragraph refs and request run or text.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -574,7 +574,7 @@ async function docxReadObject(args) {
   const { output: _output, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
-    if (result.json?.observation?.object?.kind === 'table') {
+    if (result.json?.observations?.some(observation => observation?.object?.kind === 'table')) {
       throw new Error('docx-table-read-requires-paged-row-selection');
     }
     return {
@@ -583,7 +583,7 @@ async function docxReadObject(args) {
       source: await fileArtifact(input),
       artifact: await writeJsonArtifact(output, result.json),
       revision: result.json.receipt.revision,
-      observation: compactDocxObservation(result.json.observation),
+      observations: result.json.observations.map(compactDocxObservation),
     };
   });
 }
