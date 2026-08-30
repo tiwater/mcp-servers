@@ -64,11 +64,11 @@
       "name": "docx_copy_table_rows",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_copy_table_rows.schema.json",
-        "sha256": "f0c72dc539bbacbc00320c4735ba1de5dd6ebe11be82e97f3951ba442a5bd6ad"
+        "sha256": "76cb4ee7a8a4ce3871fbf2773619b337a2aa95622699f08aa92e0448bb76721c"
       },
       "inputContract": {
         "path": "office/contracts/docx_copy_table_rows.schema.json",
-        "sha256": "f0c72dc539bbacbc00320c4735ba1de5dd6ebe11be82e97f3951ba442a5bd6ad"
+        "sha256": "76cb4ee7a8a4ce3871fbf2773619b337a2aa95622699f08aa92e0448bb76721c"
       }
     },
     {
