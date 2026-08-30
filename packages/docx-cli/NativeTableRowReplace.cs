@@ -415,6 +415,9 @@ public static class NativeTableRowReplace
                         if (targetSlot is null) throw new InvalidOperationException("target-row-does-not-cover-selected-column");
                         var targetCell = (TableCell)targetSlot.Cell.CloneNode(true);
                         SetGridSpan(targetCell, cellChange.TargetSpan);
+                        SetCellWidth(targetCell, change.TargetGridWidths,
+                            targetSlot.Start, targetSlot.Span,
+                            cellChange.TargetColumn, cellChange.TargetSpan);
                         var paragraphs = cellChange.Paragraphs.Select(paragraph => (Paragraph)paragraph.CloneNode(true)).ToArray();
                         foreach (var paragraph in paragraphs) DocxObjectActions.RewriteRelationships(paragraph, relationshipMap);
                         DocxObjectActions.RemapDrawingIds(outputBody, paragraphs.Cast<OpenXmlElement>().ToArray());
@@ -497,6 +500,30 @@ public static class NativeTableRowReplace
         properties.RemoveAllChildren<GridSpan>();
         if (span > 1 && !properties.AddChild(new GridSpan { Val = span }, true))
             throw new InvalidOperationException("target-grid-span-not-supported");
+    }
+
+    private static void SetCellWidth(
+        TableCell target,
+        IReadOnlyList<long> gridWidths,
+        int templateStart,
+        int templateSpan,
+        int outputStart,
+        int outputSpan)
+    {
+        if (templateStart == outputStart && templateSpan == outputSpan) return;
+        var width = target.TableCellProperties?.TableCellWidth;
+        if (width?.Width?.Value is not string value || !long.TryParse(value, out var templateWidth)) return;
+        var widthType = width.Type?.Value;
+        if (widthType != TableWidthUnitValues.Pct && widthType != TableWidthUnitValues.Dxa) return;
+
+        var templateGridWidth = gridWidths.Skip(templateStart).Take(templateSpan).Sum();
+        if (templateGridWidth <= 0) throw new InvalidOperationException("target-cell-grid-width-invalid");
+        var beforeGridWidth = gridWidths.Skip(templateStart).Take(outputStart - templateStart).Sum();
+        var outputGridWidth = gridWidths.Skip(outputStart).Take(outputSpan).Sum();
+        var before = (long)Math.Round((decimal)templateWidth * beforeGridWidth / templateGridWidth);
+        var after = (long)Math.Round((decimal)templateWidth
+            * (beforeGridWidth + outputGridWidth) / templateGridWidth);
+        width.Width = (after - before).ToString();
     }
 
     private static IReadOnlyList<CellSlot> Cells(TableRow row)
