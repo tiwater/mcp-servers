@@ -111,7 +111,12 @@
         "additionalProperties": false
       }
     },
-    "output": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write" },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New DOCX revision. Every targetDocument object ref becomes stale after success; observe this output before any later structural call.",
+      "x-tiwater-file-role": "write"
+    },
     "receiptOutput": {
       "type": "string",
       "minLength": 1,
