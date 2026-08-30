@@ -63,6 +63,16 @@ internal static class NativeMutationSupport
     public static string ContentSha256(string value)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
+    public static string PlainText(OpenXmlElement target)
+        => string.Concat(target.Descendants<OpenXmlElement>().Select(element => element switch
+        {
+            Text text => text.Text,
+            Break => "\n",
+            CarriageReturn => "\n",
+            TabChar => "\t",
+            _ => string.Empty,
+        }));
+
     public static void RejectOverlappingTargets(IReadOnlyList<OpenXmlElement> targets)
     {
         for (var left = 0; left < targets.Count; left++)
@@ -78,7 +88,7 @@ internal static class NativeMutationSupport
         {
             if (cell.ChildElements.Any(child => child is not TableCellProperties and not Paragraph))
                 throw new InvalidOperationException("target-cell-must-contain-only-plain-text-paragraphs");
-            foreach (var cellParagraph in cell.Elements<Paragraph>()) RequirePlainTextParagraph(cellParagraph, false);
+            foreach (var cellParagraph in cell.Elements<Paragraph>()) RequirePlainTextParagraph(cellParagraph, true);
             return;
         }
         if (target is Paragraph paragraph)
@@ -94,7 +104,8 @@ internal static class NativeMutationSupport
         if (paragraph.ChildElements.Any(child => child is not ParagraphProperties and not Run and not ProofError
                 && (!allowBookmarks || child is not BookmarkStart and not BookmarkEnd))
             || paragraph.Elements<Run>().Any(run =>
-                run.ChildElements.Any(child => child is not RunProperties and not Text and not LastRenderedPageBreak)))
+                run.ChildElements.Any(child => child is not RunProperties and not Text and not LastRenderedPageBreak
+                    and not Break and not CarriageReturn and not TabChar)))
             throw new InvalidOperationException("target-paragraph-must-contain-only-plain-text-runs");
     }
 

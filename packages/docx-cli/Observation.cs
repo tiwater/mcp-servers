@@ -180,11 +180,12 @@ public static class Observation
         var snapshot = Snapshot.Open(input);
         if (!StringComparer.Ordinal.Equals(expectedRevision, snapshot.Revision.Id))
             throw new InvalidOperationException("stale-revision");
-        return references.Select(reference =>
+        return references.Select((reference, index) =>
         {
-            if (!IsObjectReference(reference)) throw new InvalidOperationException("object-ref-invalid");
+            if (!IsObjectReference(reference))
+                throw new InvalidOperationException($"object-ref-invalid: references[{index}]={reference}");
             var selected = snapshot.Objects.FirstOrDefault(item => StringComparer.Ordinal.Equals(item.Reference, reference))
-                ?? throw new InvalidOperationException("stale-object-ref");
+                ?? throw new InvalidOperationException($"stale-object-ref: references[{index}]={reference}");
             return new ResolvedDocxReference(selected.Reference, selected.Kind, selected.StoryPart, selected.NativePath);
         }).ToList();
     }

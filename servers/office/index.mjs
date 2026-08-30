@@ -280,7 +280,7 @@ const tools = [
   },
   {
     name: 'docx_set_text',
-    description: 'Replace the whole text content of observed plain-text paragraph or cell objects while retaining their target formatting. Targets containing non-text objects are rejected. This sets already-derived text; it does not insert objects, copy source formatting, or decide business wording.',
+    description: 'Replace the whole text content of observed paragraph or cell objects while retaining target formatting and bookmarks. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. This sets already-derived text; it does not insert objects, copy source formatting, or decide business wording.',
     inputSchema: inputContract('docx_set_text'),
     outputSchema: fixedEditOutput('docx_set_text'),
     handler: args => fixedEdit('docx_set_text', args),
