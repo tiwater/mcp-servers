@@ -35,6 +35,13 @@ try
     });
 
     var targetState = ObserveTarget(target, "target");
+    var invalidBoundary = RunExpectFailure("docx_replace_table_rows", Replacement(
+        target, targetState, source, sourceTable, sourceRows, sourceRead,
+        sourceFirst: 2, sourceLast: 4, targetFirst: 1, targetLast: targetState.Rows.Count - 1,
+        Path.Combine(root, "invalid-boundary.docx"), Path.Combine(root, "invalid-boundary-receipt.json")));
+    Require(invalidBoundary.Contains("source-row-range-starts-inside-vertical-merge", StringComparison.Ordinal),
+        "source range beginning inside a vertical merge was not rejected");
+
     var first = Path.Combine(root, "first.docx");
     Run("docx_replace_table_rows", Replacement(
         target, targetState, source, sourceTable, sourceRows, sourceRead,
