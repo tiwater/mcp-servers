@@ -173,6 +173,13 @@ function docxInspectionOutput(tool) {
     revision: docxRevision,
     summary: z.object({
       tableCount: z.number().int().nonnegative(),
+      tables: z.array(z.object({
+        ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
+        parentRef: z.string().regex(/^dox1_[0-9a-f]{64}$/).nullable(),
+        rowCount: z.number().int().nonnegative(),
+        columnCount: z.number().int().nonnegative(),
+        textPreview: z.string().max(240),
+      }).strict()),
       openingParagraphs: z.array(z.object({
         ref: z.string().regex(/^dox1_[0-9a-f]{64}$/),
         textPreview: z.string().min(1).max(240),
@@ -241,7 +248,7 @@ const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX. The response returns its revision, table count, and up to six opening non-empty body paragraphs with native refs for document identification and immediate reuse; use docx_find_literal for other text and docx_list_objects for container children. The complete inspection remains in the evidence artifact.',
+    description: 'Inspect one current DOCX. The response returns its revision, every table identity with shape and short text preview, and up to six opening non-empty body paragraphs. Reuse those native refs directly; use docx_find_literal only for text not exposed here and docx_list_objects only for container children. The complete inspection remains in the evidence artifact.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -519,7 +526,17 @@ function compactDocxInspection(report) {
     }));
   return {
     revision: report.tables.revision,
-    summary: { tableCount: report.tables.tables.length, openingParagraphs },
+    summary: {
+      tableCount: report.tables.tables.length,
+      tables: report.tables.tables.map(table => ({
+        ref: table.ref,
+        parentRef: table.parentRef,
+        rowCount: table.rowCount,
+        columnCount: table.columnCount,
+        textPreview: String(table.textPreview ?? '').trim().replace(/\s+/gu, ' ').slice(0, 240),
+      })),
+      openingParagraphs,
+    },
   };
 }
 
