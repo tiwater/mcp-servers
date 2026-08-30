@@ -14,7 +14,7 @@
     },
     "tables": {
       "type": "array",
-      "description": "Complete resolved table replacements for targetDocument. Each item may use a different source document.",
+      "description": "One or more table replacements for targetDocument. Each item may use a different source document.",
       "minItems": 1,
       "items": {
         "type": "object",
