@@ -19,22 +19,25 @@ public static class Observation
     {
         "part", "paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"
     };
+    private static readonly IReadOnlySet<string> ListKinds = new HashSet<string>(Kinds.Where(kind => kind != "part"), StringComparer.Ordinal);
     private static readonly IReadOnlySet<string> ReadKinds = new HashSet<string>(Kinds.Where(kind => kind != "part"), StringComparer.Ordinal);
 
     public static DocxObservationListResult List(
         string input,
-        string kind,
+        IReadOnlySet<string> kinds,
         string? scope,
         string? parentReference,
         int limit,
         string? continuation)
     {
         var snapshot = Snapshot.Open(input);
-        ValidateKind(kind);
+        if (kinds.Count == 0) throw new InvalidOperationException("kinds-is-required");
+        foreach (var kind in kinds)
+            if (!ListKinds.Contains(kind)) throw new InvalidOperationException($"unsupported-list-kind: {kind}");
         var objects = SelectObjects(snapshot, scope, parentReference)
-            .Where(item => item.Kind == kind)
+            .Where(item => kinds.Contains(item.Kind))
             .ToList();
-        var selection = SelectionKey("list", kind, scope, parentReference, null);
+        var selection = SelectionKey("list", string.Join(",", kinds.Order(StringComparer.Ordinal)), scope, parentReference, null);
         var page = Page(objects, snapshot.Revision, selection, limit, continuation);
         return new DocxObservationListResult(
             "tiwater.docx-observation-list/v1",
@@ -364,7 +367,15 @@ public static class Observation
         string? parentReference)
     {
         if (parentReference is null)
-            return snapshot.Objects.Where(item => InScope(item, scope));
+        {
+            var roots = snapshot.Objects
+                .Where(item => item.Kind == "part" && InScope(item, scope))
+                .ToList();
+            return snapshot.Objects.Where(item =>
+                item.Kind != "part"
+                && InScope(item, scope)
+                && roots.Any(root => IsDirectPublishedChild(snapshot, item, root)));
+        }
         if (!IsObjectReference(parentReference))
             throw new InvalidOperationException("parent-ref-invalid");
 

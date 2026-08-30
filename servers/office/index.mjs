@@ -249,7 +249,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of revision-bound nearest-child identities and retain the exact page at output for later reuse. Use parentRef to restrict any container, such as body paragraphs, table rows, or row cells; use docx_find_literal when selecting by text.',
+    description: 'List one small page of revision-bound nearest-child identities in native document order and retain the exact page at output for later reuse. Without parentRef, returns nearest children of each selected story part; request paragraph and table together when a heading, caption, or summary identifies the following table. Use parentRef to restrict another container, such as a table or row; use docx_find_literal when selecting by text.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },

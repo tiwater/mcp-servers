@@ -26,7 +26,7 @@ public static class ObservationCommand
         {
             "docx_list_objects" => Observation.List(
                 input,
-                RequireString(request, "kind"),
+                RequireStringArray(request, "kinds"),
                 OptionalString(request, "scope"),
                 OptionalString(request, "parentRef"),
                 OptionalInt(request, "limit") ?? Observation.DefaultPageLimit,
@@ -68,9 +68,12 @@ public static class ObservationCommand
     {
         if (request[property] is not JsonArray array || array.Count == 0)
             throw new InvalidOperationException($"{property}-is-required");
-        var values = array.Select(item => item?.GetValue<string>() ?? string.Empty).ToHashSet(StringComparer.Ordinal);
-        if (values.Any(string.IsNullOrWhiteSpace))
+        var rawValues = array.Select(item => item?.GetValue<string>() ?? string.Empty).ToList();
+        if (rawValues.Any(string.IsNullOrWhiteSpace))
             throw new InvalidOperationException($"{property}-is-invalid");
+        var values = rawValues.ToHashSet(StringComparer.Ordinal);
+        if (rawValues.Count != values.Count)
+            throw new InvalidOperationException($"{property}-contains-duplicates");
         return values;
     }
 }

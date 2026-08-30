@@ -7,20 +7,23 @@
       "minLength": 1,
       "x-tiwater-file-role": "read"
     },
-    "kind": {
-      "description": "Open XML object kind to list. Returned parentRef is the valid targetParentRef for inserting beside that object.",
-      "type": "string",
-      "enum": [
-        "part",
-        "paragraph",
-        "table",
-        "gridColumn",
-        "row",
-        "cell",
-        "run",
-        "text",
-        "drawing"
-      ]
+    "kinds": {
+      "description": "Open XML object kinds to list in native document order. Request paragraph and table together when their adjacency carries meaning. Returned parentRef is the valid targetParentRef for inserting beside that object.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "paragraph",
+          "table",
+          "gridColumn",
+          "row",
+          "cell",
+          "run",
+          "text",
+          "drawing"
+        ]
+      },
+      "minItems": 1
     },
     "scope": {
       "description": "Exact story-part URI such as /word/document.xml. This is not a table nativePath or ancestor filter.",
@@ -28,7 +31,7 @@
       "minLength": 1
     },
     "parentRef": {
-      "description": "Optional revision-bound parent object ref. Returns only its nearest published child objects; this is not recursive descendant search.",
+      "description": "Optional revision-bound parent object ref. Returns only its nearest published child objects; when omitted, returns nearest children of each selected story part. This is never recursive descendant search.",
       "type": "string",
       "pattern": "^dox1_[0-9a-f]{64}$"
     },
@@ -52,7 +55,7 @@
   },
   "required": [
     "input",
-    "kind",
+    "kinds",
     "output"
   ],
   "additionalProperties": false,
