@@ -5,6 +5,6 @@
     "input": { "type": "string", "minLength": 1 }, "literal": { "type": "string", "minLength": 1 },
     "kind": { "type": "string", "enum": ["part", "paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"] },
     "scope": { "type": "string", "minLength": 1 }, "parent": { "$ref": "#/$defs/address" },
-    "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 }, "offset": { "type": "integer", "minimum": 0, "default": 0 }
+    "limit": { "type": "integer", "minimum": 1, "default": 50 }, "offset": { "type": "integer", "minimum": 0, "default": 0 }
   }, "required": ["input", "literal"], "additionalProperties": false
 }

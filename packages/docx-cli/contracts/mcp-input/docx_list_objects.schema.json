@@ -53,7 +53,7 @@
       "default": 50,
       "type": "integer",
       "minimum": 1,
-      "maximum": 100
+      "maximum": 2147483647
     },
     "offset": {
       "default": 0,
