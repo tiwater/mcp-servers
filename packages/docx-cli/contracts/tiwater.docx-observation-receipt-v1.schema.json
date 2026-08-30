@@ -1,39 +1,10 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tiwater.docx-observation-receipt/v1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema", "operation", "revision", "totalCount", "returnedCount", "remaining", "continuation"],
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "tiwater.docx-observation-receipt/v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema", "operation", "totalCount", "returnedCount", "remaining", "nextOffset"],
   "properties": {
-    "schema": { "const": "tiwater.docx-observation-receipt/v1" },
-    "operation": { "enum": ["list", "find", "read"] },
-    "revision": { "$ref": "#/$defs/revision" },
-    "totalCount": { "type": "integer", "minimum": 0 },
-    "returnedCount": { "type": "integer", "minimum": 0 },
-    "remaining": { "type": "integer", "minimum": 0 },
-    "continuation": { "type": ["string", "null"], "minLength": 1 }
-  },
-  "allOf": [
-    {
-      "if": { "properties": { "remaining": { "const": 0 } } },
-      "then": { "properties": { "continuation": { "type": "null" } } }
-    },
-    {
-      "if": { "properties": { "remaining": { "exclusiveMinimum": 0 } } },
-      "then": { "required": ["continuation"], "properties": { "continuation": { "type": "string" } } }
-    }
-  ],
-  "$defs": {
-    "revision": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "inputSha256", "provider", "toolVersion"],
-      "properties": {
-        "id": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" },
-        "inputSha256": { "type": "string", "pattern": "^[0-9A-F]{64}$" },
-        "provider": { "const": "tiwater.docx.cli" },
-        "toolVersion": { "type": "string", "minLength": 1 }
-      }
-    }
+    "schema": { "const": "tiwater.docx-observation-receipt/v1" }, "operation": { "enum": ["list", "find", "read"] },
+    "totalCount": { "type": "integer", "minimum": 0 }, "returnedCount": { "type": "integer", "minimum": 0 },
+    "remaining": { "type": "integer", "minimum": 0 }, "nextOffset": { "type": ["integer", "null"], "minimum": 0 }
   }
 }

@@ -28,21 +28,20 @@ public static class ObservationCommand
                 input,
                 RequireStringArray(request, "kinds"),
                 OptionalString(request, "scope"),
-                OptionalString(request, "parentRef"),
+                OptionalAddress(request, "parent"),
                 OptionalInt(request, "limit") ?? Observation.DefaultPageLimit,
-                OptionalString(request, "continuation")),
+                OptionalInt(request, "offset") ?? 0),
             "docx_find_literal" => Observation.Find(
                 input,
                 RequireString(request, "literal"),
                 OptionalString(request, "kind"),
                 OptionalString(request, "scope"),
-                OptionalString(request, "parentRef"),
+                OptionalAddress(request, "parent"),
                 OptionalInt(request, "limit") ?? Observation.DefaultPageLimit,
-                OptionalString(request, "continuation")),
+                OptionalInt(request, "offset") ?? 0),
             "docx_read_object" => Observation.Read(
                 input,
-                RequireStringList(request, "refs"),
-                OptionalString(request, "revision"),
+                RequireAddressList(request, "addresses"),
                 RequireStringArray(request, "kinds")),
             _ => throw new InvalidOperationException($"Unknown DOCX observation command: {command}"),
         };
@@ -77,14 +76,26 @@ public static class ObservationCommand
         return values;
     }
 
-    private static IReadOnlyList<string> RequireStringList(JsonObject request, string property)
+    private static DocxObjectAddress? OptionalAddress(JsonObject request, string property)
+        => request[property] is null ? null : ReadAddress(request[property]!, property);
+
+    private static DocxObjectAddress ReadAddress(JsonNode node, string name)
+    {
+        var address = node.Deserialize<DocxObjectAddress>(Json.Options)
+            ?? throw new InvalidOperationException($"{name}-is-invalid");
+        if (string.IsNullOrWhiteSpace(address.Part) || string.IsNullOrWhiteSpace(address.Path))
+            throw new InvalidOperationException($"{name}-is-invalid");
+        return address;
+    }
+
+    private static IReadOnlyList<DocxObjectAddress> RequireAddressList(JsonObject request, string property)
     {
         if (request[property] is not JsonArray array || array.Count == 0)
             throw new InvalidOperationException($"{property}-is-required");
-        var values = array.Select(item => item?.GetValue<string>() ?? string.Empty).ToList();
-        if (values.Any(string.IsNullOrWhiteSpace))
-            throw new InvalidOperationException($"{property}-is-invalid");
-        if (values.Count != values.Distinct(StringComparer.Ordinal).Count())
+        var values = array.Select((item, index) => item is null
+            ? throw new InvalidOperationException($"{property}[{index}]-is-invalid")
+            : ReadAddress(item, $"{property}[{index}]")).ToList();
+        if (values.Count != values.Distinct().Count())
             throw new InvalidOperationException($"{property}-contains-duplicates");
         return values;
     }

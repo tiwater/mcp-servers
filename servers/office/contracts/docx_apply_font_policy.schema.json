@@ -3,15 +3,7 @@
   "$id": "tiwater.office-mcp-input/docx_apply_font_policy",
   "type": "object",
   "properties": {
-    "targetDocument": {
-      "type": "object",
-      "properties": {
-        "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
-        "revision": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" }
-      },
-      "required": ["input", "revision"],
-      "additionalProperties": false
-    },
+    "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
     "policy": {
       "type": "string",
       "minLength": 1,
@@ -26,6 +18,6 @@
       "x-tiwater-file-effect": false
     }
   },
-  "required": ["targetDocument", "policy", "output", "receiptOutput"],
+  "required": ["input", "policy", "output", "receiptOutput"],
   "additionalProperties": false
 }

@@ -44,10 +44,10 @@ public static class NativeTableRowReplace
     public static TableRowReplaceReceipt Apply(TableRowReplaceRequest request)
     {
         if (request.Tables.Count == 0) throw new InvalidOperationException("tables-must-not-be-empty");
-        RequireAbsolutePath(request.TargetDocument.Input, "targetDocument.input");
+        RequireAbsolutePath(request.Input, "input");
         RequireAbsolutePath(request.Output, "output");
         RequireAbsolutePath(request.ReceiptOutput, "receiptOutput");
-        var targetPath = Path.GetFullPath(request.TargetDocument.Input);
+        var targetPath = Path.GetFullPath(request.Input);
         var outputPath = request.Output;
         var receiptPath = request.ReceiptOutput;
         RequireNewPath(outputPath, "output");
@@ -57,9 +57,8 @@ public static class NativeTableRowReplace
         if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, targetPath))
             throw new InvalidOperationException("output-must-not-overwrite-input");
 
-        var targetRevision = Observation.CurrentRevision(targetPath);
-        var prepared = Prepare(request, targetPath, targetRevision.Id);
-        if (prepared.Select(change => change.TargetTable.Reference).Distinct(StringComparer.Ordinal).Count() != prepared.Count)
+        var prepared = Prepare(request, targetPath);
+        if (prepared.Select(change => change.TargetTable.Address).Distinct().Count() != prepared.Count)
             throw new InvalidOperationException("target-table-must-have-one-change");
         IReadOnlyDictionary<string, int> baselineIssues;
         using (var targetDocument = WordprocessingDocument.Open(targetPath, false))
@@ -71,11 +70,6 @@ public static class NativeTableRowReplace
         var temporaryPath = outputPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            if (!StringComparer.Ordinal.Equals(Observation.CurrentRevision(targetPath).Id, targetRevision.Id))
-                throw new InvalidOperationException("stale-revision");
-            foreach (var source in prepared.Select(change => (change.SourcePath, change.SourceRevision)).Distinct())
-                if (!StringComparer.Ordinal.Equals(Observation.CurrentRevision(source.SourcePath).Id, source.SourceRevision))
-                    throw new InvalidOperationException("stale-revision");
             File.Copy(targetPath, temporaryPath, overwrite: false);
             using (var outputDocument = WordprocessingDocument.Open(temporaryPath, true))
             {
@@ -87,14 +81,11 @@ public static class NativeTableRowReplace
                     throw new InvalidOperationException($"output-added-openxml-validation-issues: {added.Key}");
             }
             File.Move(temporaryPath, outputPath);
-            var outputRevision = Observation.CurrentRevision(outputPath);
             var readback = ReadBack(outputPath, prepared);
             var receipt = new TableRowReplaceReceipt(
                 "tiwater.docx-replace-table-rows-receipt/v1",
                 "tiwater.docx.cli",
                 RuntimeIdentity.Version,
-                targetRevision,
-                outputRevision,
                 readback,
                 outputPath);
             File.WriteAllText(receiptPath, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
@@ -111,21 +102,20 @@ public static class NativeTableRowReplace
 
     private static IReadOnlyList<PreparedTable> Prepare(
         TableRowReplaceRequest request,
-        string targetPath,
-        string targetRevision)
+        string targetPath)
     {
         var result = new List<PreparedTable>(request.Tables.Count);
         using var targetDocument = WordprocessingDocument.Open(targetPath, false);
         for (var tableIndex = 0; tableIndex < request.Tables.Count; tableIndex++)
         {
             var change = request.Tables[tableIndex];
-            var targetReferences = new[]
+            var targetAddresses = new[]
             {
-                change.TargetTableRef,
-                change.TargetRows.FirstRef,
-                change.TargetRows.LastRef,
-            }.Concat(change.Columns.Select(column => column.TargetHeaderRef)).ToArray();
-            var targetResolved = Observation.ResolveReferences(targetPath, targetRevision, targetReferences);
+                change.TargetTable,
+                change.TargetRows.First,
+                change.TargetRows.Last,
+            }.Concat(change.Columns.Select(column => column.TargetHeader)).ToArray();
+            var targetResolved = Observation.ResolveAddresses(targetPath, targetAddresses, $"tables[{tableIndex}].target");
             RequireKinds(targetResolved, "table", "row", "row", change.Columns.Count, "cell", "target");
             var targetTable = Resolve<Table>(targetDocument, targetResolved[0], "target-table");
             var allTargetRows = targetTable.Elements<TableRow>().ToArray();
@@ -143,17 +133,16 @@ public static class NativeTableRowReplace
                     cell.ChildElements.Any(element => element is not TableCellProperties and not Paragraph)))
                 throw new InvalidOperationException("target-row-contains-non-paragraph-cell-content");
 
-            RequireAbsolutePath(change.SourceDocument.Input, "sourceDocument.input");
-            var sourcePath = change.SourceDocument.Input;
-            var sourceRevision = Observation.CurrentRevision(sourcePath).Id;
+            RequireAbsolutePath(change.SourceInput, "sourceInput");
+            var sourcePath = change.SourceInput;
             using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
-            var sourceReferences = new[]
+            var sourceAddresses = new[]
             {
-                change.SourceTableRef,
-                change.SourceRows.FirstRef,
-                change.SourceRows.LastRef,
-            }.Concat(change.Columns.Select(column => column.SourceHeaderRef)).ToArray();
-            var sourceResolved = Observation.ResolveReferences(sourcePath, sourceRevision, sourceReferences);
+                change.SourceTable,
+                change.SourceRows.First,
+                change.SourceRows.Last,
+            }.Concat(change.Columns.Select(column => column.SourceHeader)).ToArray();
+            var sourceResolved = Observation.ResolveAddresses(sourcePath, sourceAddresses, $"tables[{tableIndex}].source");
             RequireKinds(sourceResolved, "table", "row", "row", change.Columns.Count, "cell", "source");
             var sourceTable = Resolve<Table>(sourceDocument, sourceResolved[0], "source-table");
             var allSourceRows = sourceTable.Elements<TableRow>().ToArray();
@@ -170,7 +159,7 @@ public static class NativeTableRowReplace
             RequireCompleteHeader(sourceHeaderSlots, sourceGridCount, "source");
             RequireClosedRangeBoundary(allSourceRows, sourceRows, sourceGridCount, "source");
             var sourceCellContents = PrepareSourceCellContents(
-                sourcePath, sourceRevision, sourceDocument, sourceRows, change.SourceCellContents ?? []);
+                sourcePath, sourceDocument, sourceRows, change.SourceCellContents ?? []);
 
             var mappings = BuildMappings(sourceHeaderSlots, targetHeaderSlots, change.Columns);
             var targetGridWidths = BuildTargetGridWidths(sourceTable, targetTable, mappings);
@@ -180,7 +169,7 @@ public static class NativeTableRowReplace
                 .ToArray();
             RequireClosedMergeChains(preparedRows, targetGridWidths.Count, "source");
             result.Add(new PreparedTable(tableIndex, targetResolved[0],
-                targetRows.Select(Observation.NativePathFor).ToArray(), sourcePath, sourceRevision,
+                targetRows.Select(Observation.NativePathFor).ToArray(), sourcePath,
                 targetGridWidths, mappings.Select(mapping => new TargetColumnReshape(
                     mapping.OldTargetStart, mapping.OldTargetSpan, mapping.TargetStart, mapping.TargetSpan)).ToArray(),
                 preparedRows));
@@ -231,24 +220,23 @@ public static class NativeTableRowReplace
 
     private static IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> PrepareSourceCellContents(
         string sourcePath,
-        string sourceRevision,
         WordprocessingDocument sourceDocument,
         IReadOnlyList<TableRow> sourceRows,
         IReadOnlyList<TableRowReplaceCellContent> requested)
     {
         if (requested.Count == 0)
             return new Dictionary<string, IReadOnlyList<Paragraph>>(StringComparer.Ordinal);
-        if (requested.Select(item => item.SourceCellRef).Distinct(StringComparer.Ordinal).Count() != requested.Count)
+        if (requested.Select(item => item.SourceCell).Distinct().Count() != requested.Count)
             throw new InvalidOperationException("source-cell-content-must-be-unique");
 
-        var cellReferences = Observation.ResolveReferences(
-            sourcePath, sourceRevision, requested.Select(item => item.SourceCellRef).ToArray());
+        var cellReferences = Observation.ResolveAddresses(
+            sourcePath, requested.Select(item => item.SourceCell).ToArray(), "sourceCellContents.sourceCell");
         var result = new Dictionary<string, IReadOnlyList<Paragraph>>(StringComparer.Ordinal);
         for (var index = 0; index < requested.Count; index++)
         {
             var cellReference = cellReferences[index];
             if (cellReference.Kind != "cell" || cellReference.StoryPart != MainStory)
-                throw new InvalidOperationException("source-cell-content-ref-must-be-main-document-cell");
+                throw new InvalidOperationException("source-cell-content-address-must-be-main-document-cell");
             var cell = Resolve<TableCell>(sourceDocument, cellReference, "source-cell-content");
             var row = cell.Ancestors<TableRow>().SingleOrDefault();
             if (row is null || !sourceRows.Any(selected => ReferenceEquals(selected, row)))
@@ -258,8 +246,8 @@ public static class NativeTableRowReplace
             var paragraphs = new List<Paragraph>();
             if (selections.Count > 0)
             {
-                var selectionReferences = Observation.ResolveReferences(
-                    sourcePath, sourceRevision, selections.Select(item => item.Reference).ToArray());
+                var selectionReferences = Observation.ResolveAddresses(
+                    sourcePath, selections.Select(item => item.Address).ToArray(), "sourceCellContents.sourceSelections.address");
                 for (var selectionIndex = 0; selectionIndex < selections.Count; selectionIndex++)
                 {
                     var selectionReference = selectionReferences[selectionIndex];
@@ -729,7 +717,7 @@ public static class NativeTableRowReplace
         return rows.Skip(firstIndex).Take(lastIndex - firstIndex + 1).ToArray();
     }
 
-    private static T Resolve<T>(WordprocessingDocument document, ResolvedDocxReference reference, string name)
+    private static T Resolve<T>(WordprocessingDocument document, ResolvedDocxAddress reference, string name)
         where T : OpenXmlElement
     {
         if (reference.StoryPart != MainStory) throw new InvalidOperationException($"{name}-must-be-main-document-object");
@@ -737,7 +725,7 @@ public static class NativeTableRowReplace
             ?? throw new InvalidOperationException($"{name}-kind-invalid");
     }
 
-    private static void RequireKinds(IReadOnlyList<ResolvedDocxReference> refs, string first, string second,
+    private static void RequireKinds(IReadOnlyList<ResolvedDocxAddress> refs, string first, string second,
         string third, int remainingCount, string? remainingKind, string name)
     {
         if (refs.Count != 3 + remainingCount || refs[0].Kind != first || refs[1].Kind != second || refs[2].Kind != third)
@@ -778,8 +766,8 @@ public static class NativeTableRowReplace
     private sealed record PreparedCell(int SourceColumn, int SourceSpan, int TargetColumn,
         IReadOnlyList<Paragraph> Paragraphs, VerticalMerge? VerticalMerge, int TargetSpan);
     private sealed record PreparedRow(IReadOnlyList<PreparedCell> Cells, int GridBefore, int GridAfter);
-    private sealed record PreparedTable(int Index, ResolvedDocxReference TargetTable,
-        IReadOnlyList<string> TargetRowPaths, string SourcePath, string SourceRevision,
+    private sealed record PreparedTable(int Index, ResolvedDocxAddress TargetTable,
+        IReadOnlyList<string> TargetRowPaths, string SourcePath,
         IReadOnlyList<long> TargetGridWidths, IReadOnlyList<TargetColumnReshape> TargetColumns,
         IReadOnlyList<PreparedRow> Rows);
 }
@@ -793,21 +781,20 @@ internal static class TableRowReplaceReferenceExtensions
     }
 }
 
-public sealed record TableRowReplaceDocument(string Input);
-public sealed record TableRowReplaceRange(string FirstRef, string LastRef);
-public sealed record TableRowReplaceColumn(string SourceHeaderRef, string TargetHeaderRef);
+public sealed record TableRowReplaceRange(DocxObjectAddress First, DocxObjectAddress Last);
+public sealed record TableRowReplaceColumn(DocxObjectAddress SourceHeader, DocxObjectAddress TargetHeader);
 public sealed record TableRowReplaceCellContent(
-    string SourceCellRef,
+    DocxObjectAddress SourceCell,
     IReadOnlyList<CopyContentSelection> SourceSelections);
-public sealed record TableRowReplaceTable(TableRowReplaceDocument SourceDocument,
-    string SourceTableRef, TableRowReplaceRange SourceRows,
-    string TargetTableRef, TableRowReplaceRange TargetRows,
+public sealed record TableRowReplaceTable(string SourceInput,
+    DocxObjectAddress SourceTable, TableRowReplaceRange SourceRows,
+    DocxObjectAddress TargetTable, TableRowReplaceRange TargetRows,
     IReadOnlyList<TableRowReplaceColumn> Columns,
     IReadOnlyList<TableRowReplaceCellContent>? SourceCellContents = null);
-public sealed record TableRowReplaceRequest(TableRowReplaceDocument TargetDocument,
+public sealed record TableRowReplaceRequest(string Input,
     IReadOnlyList<TableRowReplaceTable> Tables,
     string Output, string ReceiptOutput);
 public sealed record TableRowReplaceReadback(int TableIndex, int SourceRowCount, int OutputRowCount,
     IReadOnlyList<string> RowTexts);
 public sealed record TableRowReplaceReceipt(string Schema, string Provider, string ToolVersion,
-    DocxRevision TargetRevision, DocxRevision OutputRevision, IReadOnlyList<TableRowReplaceReadback> Tables, string Output);
+    IReadOnlyList<TableRowReplaceReadback> Tables, string Output);

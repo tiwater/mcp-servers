@@ -43,7 +43,7 @@ public static class NativeObjectMutation
             : ((DeleteObjectRequest)request).Changes.Count;
         var appliedCount = command == CopyCommand
             ? ((CopyObjectReceipt)receipt).Changes.Count
-            : ((DeleteObjectReceipt)receipt).DeletedRefs.Count;
+            : ((DeleteObjectReceipt)receipt).DeletedAddresses.Count;
         Console.WriteLine(JsonSerializer.Serialize(new
         {
             tool = command,
@@ -56,8 +56,8 @@ public static class NativeObjectMutation
 
     public static CopyObjectReceipt Copy(CopyObjectRequest request)
     {
-        ValidatePaths(request.TargetDocument.Input, request.Output, request.ReceiptOutput);
-        var targetPath = Path.GetFullPath(request.TargetDocument.Input);
+        ValidatePaths(request.Input, request.Output, request.ReceiptOutput);
+        var targetPath = Path.GetFullPath(request.Input);
         var outputPath = Path.GetFullPath(request.Output);
         var receiptPath = Path.GetFullPath(request.ReceiptOutput);
         var prepared = PrepareCopies(request, targetPath);
@@ -80,15 +80,14 @@ public static class NativeObjectMutation
                 RejectAddedValidationIssues(output, baseline);
             }
             File.Move(temporaryPath, outputPath);
-            var revision = Observation.CurrentRevision(outputPath);
             IReadOnlyList<ObjectReadback> readback;
             using (var output = WordprocessingDocument.Open(outputPath, false))
             {
-                readback = inserted.Select(element => Readback(element, revision)).ToArray();
+                readback = inserted.Select(Readback).ToArray();
             }
             var receipt = new CopyObjectReceipt(
                 "tiwater.docx-copy-object-receipt", "tiwater.docx.cli", RuntimeIdentity.Version,
-                Observation.CurrentRevision(targetPath), revision, readback, outputPath, receiptPath);
+                readback, outputPath, receiptPath);
             File.WriteAllText(receiptPath, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
             return receipt;
         }
@@ -101,16 +100,16 @@ public static class NativeObjectMutation
 
     public static DeleteObjectReceipt Delete(DeleteObjectRequest request)
     {
-        ValidatePaths(request.TargetDocument.Input, request.Output, request.ReceiptOutput);
-        var targetPath = Path.GetFullPath(request.TargetDocument.Input);
+        ValidatePaths(request.Input, request.Output, request.ReceiptOutput);
+        var targetPath = Path.GetFullPath(request.Input);
         var outputPath = Path.GetFullPath(request.Output);
         var receiptPath = Path.GetFullPath(request.ReceiptOutput);
-        var refs = request.Changes.SelectMany(change => change.Refs).ToArray();
-        if (refs.Length == 0 || refs.Distinct(StringComparer.Ordinal).Count() != refs.Length)
-            throw new InvalidOperationException("delete-refs-empty-or-duplicate");
-        var resolved = Observation.ResolveReferences(targetPath, request.TargetDocument.Revision, refs);
+        var addresses = request.Changes.SelectMany(change => change.Addresses).ToArray();
+        if (addresses.Length == 0 || addresses.Distinct().Count() != addresses.Length)
+            throw new InvalidOperationException("delete-addresses-empty-or-duplicate");
+        var resolved = Observation.ResolveAddresses(targetPath, addresses, "changes.addresses");
         if (resolved.Any(item => item.StoryPart != MainStory || !DeletableKinds.Contains(item.Kind)))
-            throw new InvalidOperationException("delete-ref-kind-not-supported");
+            throw new InvalidOperationException("delete-address-kind-not-supported");
 
         IReadOnlyDictionary<string, int> baseline;
         using (var target = WordprocessingDocument.Open(targetPath, false))
@@ -118,7 +117,7 @@ public static class NativeObjectMutation
             baseline = ValidationIssueCounts(target);
             var elements = resolved.Select(item => Observation.ResolveNativePath(target, item.StoryPart, item.NativePath)).ToArray();
             if (elements.Any(element => elements.Any(other => !ReferenceEquals(element, other) && element.Ancestors().Contains(other))))
-                throw new InvalidOperationException("delete-refs-must-not-overlap");
+                throw new InvalidOperationException("delete-addresses-must-not-overlap");
             foreach (var group in elements.OfType<TableRow>().GroupBy(row => row.Parent))
                 if (group.Key is Table table && group.Count() >= table.Elements<TableRow>().Count())
                     throw new InvalidOperationException("delete-must-not-remove-all-table-rows");
@@ -136,10 +135,9 @@ public static class NativeObjectMutation
                 RejectAddedValidationIssues(output, baseline);
             }
             File.Move(temporaryPath, outputPath);
-            var revision = Observation.CurrentRevision(outputPath);
             var receipt = new DeleteObjectReceipt(
                 "tiwater.docx-delete-object-receipt", "tiwater.docx.cli", RuntimeIdentity.Version,
-                Observation.CurrentRevision(targetPath), revision, resolved.Select(item => item.Reference).ToArray(), outputPath, receiptPath);
+                resolved.Select(item => item.Address).ToArray(), outputPath, receiptPath);
             File.WriteAllText(receiptPath, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
             return receipt;
         }
@@ -160,15 +158,15 @@ public static class NativeObjectMutation
         foreach (var change in request.Changes)
         {
             var repeat = change.Repeat ?? 1;
-            var targetRefs = new[] { change.TargetParentRef }.Concat(change.BeforeRef is null ? [] : [change.BeforeRef]).ToArray();
-            var target = Observation.ResolveReferences(targetPath, request.TargetDocument.Revision, targetRefs);
+            var targetAddresses = new[] { change.TargetParent }.Concat(change.Before is null ? [] : [change.Before]).ToArray();
+            var target = Observation.ResolveAddresses(targetPath, targetAddresses!, "changes.target");
             var parent = target[0];
             var before = target.Count == 2 ? target[1] : null;
             if (parent.StoryPart != MainStory || before is not null && before.StoryPart != MainStory)
                 throw new InvalidOperationException("copy-target-must-be-main-document-object");
 
-            var sourcePath = Path.GetFullPath(change.SourceDocument.Input);
-            var source = Observation.ResolveReferences(sourcePath, change.SourceDocument.Revision, change.SourceRefs);
+            var sourcePath = Path.GetFullPath(change.SourceInput);
+            var source = Observation.ResolveAddresses(sourcePath, change.Sources, "changes.sources");
             if (source.Any(item => item.StoryPart != MainStory || !CopyableKinds.Contains(item.Kind)))
                 throw new InvalidOperationException("copy-source-kind-not-supported");
             using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
@@ -214,7 +212,7 @@ public static class NativeObjectMutation
             foreach (var change in group)
             {
                 var (parent, before) = targets[change];
-                if (before is not null && !ReferenceEquals(before.Parent, parent)) throw new InvalidOperationException("before-ref-must-be-direct-child-of-target-parent");
+                if (before is not null && !ReferenceEquals(before.Parent, parent)) throw new InvalidOperationException("before-must-be-direct-child-of-target-parent");
                 foreach (var template in change.Clones)
                 {
                     EnsureAllowedParent(parent, template);
@@ -246,7 +244,7 @@ public static class NativeObjectMutation
         if (!allowed) throw new InvalidOperationException($"object-kind-cannot-be-child-of-target-parent: {child.LocalName} -> {parent.LocalName}");
     }
 
-    private static ObjectReadback Readback(OpenXmlElement element, DocxRevision revision)
+    private static ObjectReadback Readback(OpenXmlElement element)
     {
         var kind = element switch
         {
@@ -255,8 +253,7 @@ public static class NativeObjectMutation
         };
         var nativePath = Observation.NativePathFor(element);
         return new ObjectReadback(
-            Observation.MakeReference(revision, kind, MainStory, nativePath), nativePath, kind, element.InnerText,
-            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(element.OuterXml))).ToLowerInvariant());
+            Observation.Address(MainStory, nativePath), kind, element.InnerText);
     }
 
     private static void ValidatePaths(string input, string output, string receiptOutput)
@@ -298,15 +295,14 @@ public static class NativeObjectMutation
         return new ObjectArtifact(Path.GetFullPath(path), Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant(), stream.Length);
     }
 
-    private sealed record PreparedCopy(string SourcePath, ResolvedDocxReference Parent, ResolvedDocxReference? Before, int Repeat, IReadOnlyList<OpenXmlElement> Clones);
+    private sealed record PreparedCopy(string SourcePath, ResolvedDocxAddress Parent, ResolvedDocxAddress? Before, int Repeat, IReadOnlyList<OpenXmlElement> Clones);
 }
 
-public sealed record ObjectDocument(string Input, string Revision);
-public sealed record CopyObjectChange(ObjectDocument SourceDocument, IReadOnlyList<string> SourceRefs, string TargetParentRef, string? BeforeRef = null, int? Repeat = null);
-public sealed record CopyObjectRequest(ObjectDocument TargetDocument, IReadOnlyList<CopyObjectChange> Changes, string Output, string ReceiptOutput);
-public sealed record DeleteObjectChange(IReadOnlyList<string> Refs);
-public sealed record DeleteObjectRequest(ObjectDocument TargetDocument, IReadOnlyList<DeleteObjectChange> Changes, string Output, string ReceiptOutput);
+public sealed record CopyObjectChange(string SourceInput, IReadOnlyList<DocxObjectAddress> Sources, DocxObjectAddress TargetParent, DocxObjectAddress? Before = null, int? Repeat = null);
+public sealed record CopyObjectRequest(string Input, IReadOnlyList<CopyObjectChange> Changes, string Output, string ReceiptOutput);
+public sealed record DeleteObjectChange(IReadOnlyList<DocxObjectAddress> Addresses);
+public sealed record DeleteObjectRequest(string Input, IReadOnlyList<DeleteObjectChange> Changes, string Output, string ReceiptOutput);
 public sealed record ObjectArtifact(string Path, string Sha256, long Bytes);
-public sealed record ObjectReadback(string Ref, string NativePath, string Kind, string Text, string ContentSha256);
-public sealed record CopyObjectReceipt(string Schema, string Provider, string ToolVersion, DocxRevision TargetRevision, DocxRevision OutputRevision, IReadOnlyList<ObjectReadback> Changes, string Output, string ReceiptOutput);
-public sealed record DeleteObjectReceipt(string Schema, string Provider, string ToolVersion, DocxRevision TargetRevision, DocxRevision OutputRevision, IReadOnlyList<string> DeletedRefs, string Output, string ReceiptOutput);
+public sealed record ObjectReadback(DocxObjectAddress Address, string Kind, string Text);
+public sealed record CopyObjectReceipt(string Schema, string Provider, string ToolVersion, IReadOnlyList<ObjectReadback> Changes, string Output, string ReceiptOutput);
+public sealed record DeleteObjectReceipt(string Schema, string Provider, string ToolVersion, IReadOnlyList<DocxObjectAddress> DeletedAddresses, string Output, string ReceiptOutput);

@@ -1,52 +1,10 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "input": {
-      "type": "string",
-      "minLength": 1
-    },
-    "literal": {
-      "type": "string",
-      "minLength": 1
-    },
-    "kind": {
-      "type": "string",
-      "enum": [
-        "part",
-        "paragraph",
-        "table",
-        "gridColumn",
-        "row",
-        "cell",
-        "run",
-        "text",
-        "drawing"
-      ]
-    },
-    "scope": {
-      "type": "string",
-      "minLength": 1
-    },
-    "parentRef": {
-      "type": "string",
-      "pattern": "^dox1_[0-9a-f]{64}$"
-    },
-    "limit": {
-      "default": 50,
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 100
-    },
-    "continuation": {
-      "type": "string",
-      "minLength": 1
-    }
-  },
-  "required": [
-    "input",
-    "literal"
-  ],
-  "additionalProperties": false,
-  "$id": "tiwater.docx-diagnostic-input/docx_find_literal/v1"
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "tiwater.docx-diagnostic-input/docx_find_literal/v1",
+  "$defs": { "address": { "type": "object", "properties": { "part": { "type": "string", "minLength": 1 }, "path": { "type": "string", "pattern": "^/" } }, "required": ["part", "path"], "additionalProperties": false } },
+  "type": "object", "properties": {
+    "input": { "type": "string", "minLength": 1 }, "literal": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "enum": ["part", "paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"] },
+    "scope": { "type": "string", "minLength": 1 }, "parent": { "$ref": "#/$defs/address" },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 }, "offset": { "type": "integer", "minimum": 0, "default": 0 }
+  }, "required": ["input", "literal"], "additionalProperties": false
 }

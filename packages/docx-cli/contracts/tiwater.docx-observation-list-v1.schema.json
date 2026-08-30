@@ -1,52 +1,10 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tiwater.docx-observation-list/v1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema", "receipt", "objects"],
-  "properties": {
-    "schema": { "const": "tiwater.docx-observation-list/v1" },
-    "receipt": { "$ref": "#/$defs/receipt" },
-    "objects": { "type": "array", "items": { "$ref": "#/$defs/object" } }
-  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "tiwater.docx-observation-list/v1",
+  "type": "object", "additionalProperties": false, "required": ["schema", "receipt", "objects"],
+  "properties": { "schema": { "const": "tiwater.docx-observation-list/v1" }, "receipt": { "$ref": "#/$defs/receipt" }, "objects": { "type": "array", "items": { "$ref": "#/$defs/object" } } },
   "$defs": {
-    "revision": {
-      "type": "object", "additionalProperties": false,
-      "required": ["id", "inputSha256", "provider", "toolVersion"],
-      "properties": {
-        "id": { "type": "string", "pattern": "^docx-rev-v1-[0-9a-f]{64}$" },
-        "inputSha256": { "type": "string", "pattern": "^[0-9A-F]{64}$" },
-        "provider": { "const": "tiwater.docx.cli" },
-        "toolVersion": { "type": "string", "minLength": 1 }
-      }
-    },
-    "receipt": {
-      "type": "object", "additionalProperties": false,
-      "required": ["schema", "operation", "revision", "totalCount", "returnedCount", "remaining", "continuation"],
-      "properties": {
-        "schema": { "const": "tiwater.docx-observation-receipt/v1" },
-        "operation": { "const": "list" },
-        "revision": { "$ref": "#/$defs/revision" },
-        "totalCount": { "type": "integer", "minimum": 0 },
-        "returnedCount": { "type": "integer", "minimum": 0 },
-        "remaining": { "type": "integer", "minimum": 0 },
-        "continuation": { "type": ["string", "null"], "minLength": 1 }
-      }
-    },
-    "object": {
-      "type": "object", "additionalProperties": false,
-      "required": ["ref", "parentRef", "kind", "storyPart", "nativePath", "localName", "childCount"],
-      "properties": {
-        "ref": { "type": "string", "pattern": "^dox1_[0-9a-f]{64}$" },
-        "parentRef": { "type": ["string", "null"], "pattern": "^dox1_[0-9a-f]{64}$" },
-        "kind": { "enum": ["part", "paragraph", "table", "row", "cell", "run", "drawing"] },
-        "storyPart": { "type": "string", "pattern": "^/[^\\s]+$" },
-        "nativePath": { "type": "string", "pattern": "^/[^\\s]+$" },
-        "localName": { "type": "string", "minLength": 1 },
-        "textPreview": { "type": ["string", "null"] },
-        "textLength": { "type": ["integer", "null"], "minimum": 0 },
-        "childCount": { "type": "integer", "minimum": 0 }
-      }
-    }
+    "address": { "type": "object", "properties": { "part": { "type": "string", "minLength": 1 }, "path": { "type": "string", "pattern": "^/" } }, "required": ["part", "path"], "additionalProperties": false },
+    "receipt": { "type": "object", "additionalProperties": false, "required": ["schema", "operation", "totalCount", "returnedCount", "remaining", "nextOffset"], "properties": { "schema": { "const": "tiwater.docx-observation-receipt/v1" }, "operation": { "const": "list" }, "totalCount": { "type": "integer", "minimum": 0 }, "returnedCount": { "type": "integer", "minimum": 0 }, "remaining": { "type": "integer", "minimum": 0 }, "nextOffset": { "type": ["integer", "null"], "minimum": 0 } } },
+    "object": { "type": "object", "additionalProperties": false, "required": ["address", "parentAddress", "kind", "localName", "textPreview", "textLength", "childCount", "gridSpan", "verticalMerge"], "properties": { "address": { "$ref": "#/$defs/address" }, "parentAddress": { "anyOf": [{ "$ref": "#/$defs/address" }, { "type": "null" }] }, "kind": { "enum": ["part", "paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"] }, "localName": { "type": "string", "minLength": 1 }, "textPreview": { "type": ["string", "null"] }, "textLength": { "type": ["integer", "null"], "minimum": 0 }, "childCount": { "type": "integer", "minimum": 0 }, "gridSpan": { "type": ["integer", "null"], "minimum": 1 }, "verticalMerge": { "type": ["string", "null"] } } }
   }
 }

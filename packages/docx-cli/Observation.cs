@@ -1,7 +1,3 @@
-using System.Buffers.Binary;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -11,8 +7,6 @@ namespace Dockit.Docx;
 
 public static class Observation
 {
-    private const string RevisionSchema = "tiwater.docx-revision/v1";
-    private const string ObjectReferencePrefix = "dox1_";
     private const int DefaultLimit = 100;
     private const int MaximumLimit = 1000;
 
@@ -27,22 +21,21 @@ public static class Observation
         string input,
         IReadOnlySet<string> kinds,
         string? scope,
-        string? parentReference,
+        DocxObjectAddress? parent,
         int limit,
-        string? continuation)
+        int offset)
     {
         var snapshot = Snapshot.Open(input);
         if (kinds.Count == 0) throw new InvalidOperationException("kinds-is-required");
         foreach (var kind in kinds)
             if (!ListKinds.Contains(kind)) throw new InvalidOperationException($"unsupported-list-kind: {kind}");
-        var objects = SelectObjects(snapshot, scope, parentReference)
+        var objects = SelectObjects(snapshot, scope, parent)
             .Where(item => kinds.Contains(item.Kind))
             .ToList();
-        var selection = SelectionKey("list", string.Join(",", kinds.Order(StringComparer.Ordinal)), scope, parentReference, null);
-        var page = Page(objects, snapshot.Revision, selection, limit, continuation);
+        var page = Page(objects, limit, offset);
         return new DocxObservationListResult(
             "tiwater.docx-observation-list/v1",
-            Receipt("list", snapshot.Revision, page.TotalCount, page.Items.Count, page.Remaining, page.Continuation),
+            Receipt("list", page.TotalCount, page.Items.Count, page.Remaining, page.NextOffset),
             page.Items.Select(item => ToObject(snapshot, item)).ToList());
     }
 
@@ -51,52 +44,41 @@ public static class Observation
         string literal,
         string? kind,
         string? scope,
-        string? parentReference,
+        DocxObjectAddress? parent,
         int limit,
-        string? continuation)
+        int offset)
     {
         if (string.IsNullOrEmpty(literal))
             throw new InvalidOperationException("find-literal-must-not-be-empty");
 
         var snapshot = Snapshot.Open(input);
         if (kind is not null) ValidateKind(kind);
-        var matches = SelectObjects(snapshot, scope, parentReference)
+        var matches = SelectObjects(snapshot, scope, parent)
             .Where(item => kind is null || item.Kind == kind)
             .Select(item => new { Item = item, Ranges = FindRanges(TechnicalText(item.Element), literal) })
             .Where(item => item.Ranges.Count > 0)
             .Select(item => new DocxObservationMatch(ToObject(snapshot, item.Item), item.Ranges))
             .ToList();
-        var selection = SelectionKey("find", kind, scope, parentReference, literal);
-        var page = Page(matches, snapshot.Revision, selection, limit, continuation);
+        var page = Page(matches, limit, offset);
         return new DocxObservationFindResult(
             "tiwater.docx-observation-find/v1",
-            Receipt("find", snapshot.Revision, page.TotalCount, page.Items.Count, page.Remaining, page.Continuation),
+            Receipt("find", page.TotalCount, page.Items.Count, page.Remaining, page.NextOffset),
             page.Items);
     }
 
     public static DocxObservationReadResult Read(
         string input,
-        IReadOnlyList<string> references,
-        string? expectedRevision,
+        IReadOnlyList<DocxObjectAddress> addresses,
         IReadOnlySet<string> kinds)
     {
         var snapshot = Snapshot.Open(input);
-        if (references.Count == 0) throw new InvalidOperationException("refs-is-required");
+        if (addresses.Count == 0) throw new InvalidOperationException("addresses-is-required");
         if (kinds.Count == 0) throw new InvalidOperationException("kinds-is-required");
         foreach (var kind in kinds)
             if (!ReadKinds.Contains(kind)) throw new InvalidOperationException($"unsupported-read-kind: {kind}");
-        if (expectedRevision is not null && !StringComparer.Ordinal.Equals(expectedRevision, snapshot.Revision.Id))
-            throw new InvalidOperationException("stale-revision");
-
-        var objectsByReference = snapshot.Objects.ToDictionary(item => item.Reference, StringComparer.Ordinal);
-        var selectedObjects = references.Select((reference, index) =>
-        {
-            if (!IsObjectReference(reference))
-                throw new InvalidOperationException($"object-ref-invalid: refs[{index}]={reference}");
-            return objectsByReference.TryGetValue(reference, out var selected)
-                ? selected
-                : throw new InvalidOperationException($"stale-object-ref: refs[{index}]={reference}");
-        }).ToList();
+        var selectedObjects = ResolveAddresses(snapshot, addresses, "addresses")
+            .Select(item => new NativeObject(item.Address, item.Kind, item.Element))
+            .ToList();
 
         DocxObservationDetail Detail(NativeObject selected)
         {
@@ -137,7 +119,7 @@ public static class Observation
         var details = selectedObjects.Select(Detail).ToList();
         return new DocxObservationReadResult(
             "tiwater.docx-observation-read/v1",
-            Receipt("read", snapshot.Revision, details.Count, details.Count, 0, null),
+            Receipt("read", details.Count, details.Count, 0, null),
             details);
     }
 
@@ -153,16 +135,14 @@ public static class Observation
                 table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count() ?? 0,
                 rows.Select(TableRowWidth).DefaultIfEmpty(0).Max());
             return new DocxTableIndexEntry(
-                identity.Reference,
-                identity.ParentReference,
-                identity.StoryPart,
-                identity.NativePath,
+                identity.Address,
+                identity.ParentAddress,
                 rows.Count,
                 columnCount,
                 identity.TextPreview ?? string.Empty,
                 identity.TextLength ?? 0);
         }).ToList();
-        return new DocxTableIndexResult("tiwater.docx-table-index/v1", snapshot.Revision, tables);
+        return new DocxTableIndexResult("tiwater.docx-table-index/v1", tables);
     }
 
     private static int TableRowWidth(TableRow row)
@@ -177,30 +157,37 @@ public static class Observation
         return int.TryParse(value, out var result) ? result : 0;
     }
 
-    internal static DocxRevision CurrentRevision(string input)
-        => Snapshot.Open(input).Revision;
-
-    internal static string MakeReference(DocxRevision revision, string kind, string storyPart, string nativePath)
-        => MakeObjectReference(revision, kind, storyPart, nativePath);
+    internal static DocxObjectAddress Address(string storyPart, string nativePath)
+        => new(storyPart, nativePath);
 
     internal static string NativePathFor(OpenXmlElement element) => Snapshot.NativePath(element);
 
-    internal static IReadOnlyList<ResolvedDocxReference> ResolveReferences(
+    internal static IReadOnlyList<ResolvedDocxAddress> ResolveAddresses(
         string input,
-        string expectedRevision,
-        IReadOnlyList<string> references)
+        IReadOnlyList<DocxObjectAddress> addresses,
+        string name = "addresses")
     {
         var snapshot = Snapshot.Open(input);
-        if (!StringComparer.Ordinal.Equals(expectedRevision, snapshot.Revision.Id))
-            throw new InvalidOperationException("stale-revision");
-        return references.Select((reference, index) =>
+        return ResolveAddresses(snapshot, addresses, name);
+    }
+
+    private static IReadOnlyList<ResolvedDocxAddress> ResolveAddresses(
+        Snapshot snapshot,
+        IReadOnlyList<DocxObjectAddress> addresses,
+        string name)
+        => addresses.Select((address, index) =>
         {
-            if (!IsObjectReference(reference))
-                throw new InvalidOperationException($"object-ref-invalid: references[{index}]={reference}");
-            var selected = snapshot.Objects.FirstOrDefault(item => StringComparer.Ordinal.Equals(item.Reference, reference))
-                ?? throw new InvalidOperationException($"stale-object-ref: references[{index}]={reference}");
-            return new ResolvedDocxReference(selected.Reference, selected.Kind, selected.StoryPart, selected.NativePath);
+            ValidateAddress(address, $"{name}[{index}]");
+            var selected = snapshot.Objects.FirstOrDefault(item => item.Address == address)
+                ?? throw new InvalidOperationException($"object-address-not-found: {name}[{index}]");
+            return new ResolvedDocxAddress(selected.Address, selected.Kind, selected.Element);
         }).ToList();
+
+    private static void ValidateAddress(DocxObjectAddress address, string name)
+    {
+        if (string.IsNullOrWhiteSpace(address.Part)) throw new InvalidOperationException($"{name}.part-is-required");
+        if (string.IsNullOrWhiteSpace(address.Path) || !address.Path.StartsWith("/", StringComparison.Ordinal))
+            throw new InvalidOperationException($"{name}.path-is-invalid");
     }
 
     internal static OpenXmlElement ResolveNativePath(
@@ -275,103 +262,32 @@ public static class Observation
 
     private static DocxObservationReceipt Receipt(
         string operation,
-        DocxRevision revision,
         int totalCount,
         int returnedCount,
         int remaining,
-        string? continuation)
+        int? nextOffset)
         => new(
             "tiwater.docx-observation-receipt/v1",
             operation,
-            revision,
             totalCount,
             returnedCount,
             remaining,
-            continuation);
+            nextOffset);
 
     private static PageResult<T> Page<T>(
         IReadOnlyList<T> items,
-        DocxRevision revision,
-        string selection,
         int limit,
-        string? continuation)
+        int offset)
     {
         if (limit is < 1 or > MaximumLimit)
             throw new InvalidOperationException($"limit-must-be-between-1-and-{MaximumLimit}");
-
-        var offset = 0;
-        if (continuation is not null)
-        {
-            var cursor = DecodeCursor(continuation);
-            if (!StringComparer.Ordinal.Equals(cursor.Revision, revision.Id)
-                || !StringComparer.Ordinal.Equals(cursor.Selection, selection))
-                throw new InvalidOperationException("continuation-does-not-match-current-query");
-            offset = cursor.Offset;
-        }
-
         if (offset < 0 || offset > items.Count)
-            throw new InvalidOperationException("continuation-offset-invalid");
+            throw new InvalidOperationException("offset-invalid");
 
         var pageItems = items.Skip(offset).Take(limit).ToList();
         var remaining = items.Count - offset - pageItems.Count;
-        var next = remaining == 0
-            ? null
-            : EncodeCursor(new Cursor(revision.Id, selection, offset + pageItems.Count));
+        int? next = remaining == 0 ? null : offset + pageItems.Count;
         return new PageResult<T>(items.Count, pageItems, remaining, next);
-    }
-
-    private static string SelectionKey(
-        string operation,
-        string? kind,
-        string? scope,
-        string? parentReference,
-        string? literal)
-    {
-        var value = string.Join(
-            "\0",
-            operation,
-            kind ?? string.Empty,
-            scope ?? string.Empty,
-            parentReference ?? string.Empty,
-            literal ?? string.Empty);
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
-    }
-
-    private static string EncodeCursor(Cursor cursor)
-    {
-        const string revisionPrefix = "docx-rev-v1-";
-        if (!cursor.Revision.StartsWith(revisionPrefix, StringComparison.Ordinal)
-            || cursor.Revision.Length != revisionPrefix.Length + 64
-            || cursor.Selection.Length != 64)
-            throw new InvalidOperationException("continuation-invalid");
-        var bytes = new byte[68];
-        Convert.FromHexString(cursor.Revision[revisionPrefix.Length..]).CopyTo(bytes, 0);
-        Convert.FromHexString(cursor.Selection).CopyTo(bytes, 32);
-        BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(64), cursor.Offset);
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    }
-
-    private static Cursor DecodeCursor(string value)
-    {
-        try
-        {
-            var padded = value.Replace('-', '+').Replace('_', '/');
-            padded = padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '=');
-            var bytes = Convert.FromBase64String(padded);
-            if (bytes.Length != 68) throw new InvalidOperationException("continuation-invalid");
-            return new Cursor(
-                $"docx-rev-v1-{Convert.ToHexString(bytes.AsSpan(0, 32)).ToLowerInvariant()}",
-                Convert.ToHexString(bytes.AsSpan(32, 32)),
-                BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(64, 4)));
-        }
-        catch (FormatException)
-        {
-            throw new InvalidOperationException("continuation-invalid");
-        }
-        catch (JsonException)
-        {
-            throw new InvalidOperationException("continuation-invalid");
-        }
     }
 
     private static void ValidateKind(string kind)
@@ -386,9 +302,9 @@ public static class Observation
     private static IEnumerable<NativeObject> SelectObjects(
         Snapshot snapshot,
         string? scope,
-        string? parentReference)
+        DocxObjectAddress? parentAddress)
     {
-        if (parentReference is null)
+        if (parentAddress is null)
         {
             var roots = snapshot.Objects
                 .Where(item => item.Kind == "part" && InScope(item, scope))
@@ -398,14 +314,11 @@ public static class Observation
                 && InScope(item, scope)
                 && roots.Any(root => IsDirectPublishedChild(snapshot, item, root)));
         }
-        if (!IsObjectReference(parentReference))
-            throw new InvalidOperationException("parent-ref-invalid");
-
-        var parent = snapshot.Objects.FirstOrDefault(item =>
-            StringComparer.Ordinal.Equals(item.Reference, parentReference))
-            ?? throw new InvalidOperationException("stale-parent-ref");
+        ValidateAddress(parentAddress, "parent");
+        var parent = snapshot.Objects.FirstOrDefault(item => item.Address == parentAddress)
+            ?? throw new InvalidOperationException("parent-address-not-found");
         if (scope is not null && !StringComparer.Ordinal.Equals(parent.StoryPart, scope))
-            throw new InvalidOperationException("parent-ref-outside-scope");
+            throw new InvalidOperationException("parent-address-outside-scope");
 
         return snapshot.Objects.Where(item =>
             InScope(item, scope) && IsDirectPublishedChild(snapshot, item, parent));
@@ -450,11 +363,9 @@ public static class Observation
             : cellProperties.VerticalMerge.GetAttributes()
                 .FirstOrDefault(attribute => attribute.LocalName == "val").Value ?? "continue";
         return new DocxObservationObject(
-            item.Reference,
-            PublishedParentReference(snapshot, item),
+            item.Address,
+            PublishedParentAddress(snapshot, item),
             item.Kind,
-            item.StoryPart,
-            item.NativePath,
             item.Element.LocalName,
             text is null ? null : Clip(text, 160),
             text?.Length,
@@ -463,29 +374,15 @@ public static class Observation
             verticalMerge);
     }
 
-    private static string? PublishedParentReference(Snapshot snapshot, NativeObject item)
+    private static DocxObjectAddress? PublishedParentAddress(Snapshot snapshot, NativeObject item)
     {
         var current = item.Element.Parent;
         while (current is not null)
         {
-            if (snapshot.ObjectsByElement.TryGetValue(current, out var parent)) return parent.Reference;
+            if (snapshot.ObjectsByElement.TryGetValue(current, out var parent)) return parent.Address;
             current = current.Parent;
         }
         return null;
-    }
-
-    private static bool IsObjectReference(string value)
-    {
-        if (!value.StartsWith(ObjectReferencePrefix, StringComparison.Ordinal)
-            || value.Length != ObjectReferencePrefix.Length + 64)
-            return false;
-        return value[ObjectReferencePrefix.Length..].All(character => Uri.IsHexDigit(character));
-    }
-
-    private static string MakeObjectReference(DocxRevision revision, string kind, string part, string path)
-    {
-        var value = string.Join("\0", "tiwater.docx-object/v1", revision.Id, kind, part, path);
-        return ObjectReferencePrefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     }
 
     private static string Clip(string value, int maximum)
@@ -494,23 +391,23 @@ public static class Observation
     private static string TechnicalText(OpenXmlElement element)
         => element is Paragraph paragraph ? Inspector.GetParagraphText(paragraph) : element.InnerText;
 
-    private sealed record Cursor(string Revision, string Selection, int Offset);
-    private sealed record PageResult<T>(int TotalCount, IReadOnlyList<T> Items, int Remaining, string? Continuation);
+    private sealed record PageResult<T>(int TotalCount, IReadOnlyList<T> Items, int Remaining, int? NextOffset);
 
     private sealed record NativeObject(
-        string Reference,
+        DocxObjectAddress Address,
         string Kind,
-        string StoryPart,
-        string NativePath,
-        OpenXmlElement Element);
+        OpenXmlElement Element)
+    {
+        public string StoryPart => Address.Part;
+        public string NativePath => Address.Path;
+    }
 
     private sealed record Story(string Part, OpenXmlElement Root);
 
     private sealed class Snapshot
     {
-        private Snapshot(DocxRevision revision, IReadOnlyList<NativeObject> objects)
+        private Snapshot(IReadOnlyList<NativeObject> objects)
         {
-            Revision = revision;
             Objects = objects;
             ObjectsByElement = objects.ToDictionary<NativeObject, OpenXmlElement, NativeObject>(
                 item => item.Element,
@@ -519,7 +416,6 @@ public static class Observation
             PublishedElements = ObjectsByElement.Keys.ToHashSet<OpenXmlElement>(ReferenceEqualityComparer.Instance);
         }
 
-        public DocxRevision Revision { get; }
         public IReadOnlyList<NativeObject> Objects { get; }
         public IReadOnlyDictionary<OpenXmlElement, NativeObject> ObjectsByElement { get; }
         public IReadOnlySet<OpenXmlElement> PublishedElements { get; }
@@ -528,15 +424,6 @@ public static class Observation
         {
             var path = Path.GetFullPath(input);
             if (!File.Exists(path)) throw new FileNotFoundException("input-docx-not-found", path);
-            var inputSha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
-            var toolVersion = RuntimeIdentity.Version;
-            var revisionDigest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                string.Join("\0", inputSha256, "tiwater.docx.cli", toolVersion))));
-            var revision = new DocxRevision(
-                "docx-rev-v1-" + revisionDigest.ToLowerInvariant(),
-                inputSha256,
-                "tiwater.docx.cli",
-                toolVersion);
 
             using var document = WordprocessingDocument.Open(path, false);
             var objects = new List<NativeObject>();
@@ -549,14 +436,12 @@ public static class Observation
                     kind ??= "part";
                     var nativePath = NativePath(element);
                     objects.Add(new NativeObject(
-                        MakeObjectReference(revision, kind, story.Part, nativePath),
+                        new DocxObjectAddress(story.Part, nativePath),
                         kind,
-                        story.Part,
-                        nativePath,
                         element));
                 }
             }
-            return new Snapshot(revision, objects);
+            return new Snapshot(objects);
         }
 
         private static IEnumerable<Story> Stories(WordprocessingDocument document)
@@ -633,27 +518,22 @@ public static class Observation
     }
 }
 
-public sealed record DocxRevision(
-    [property: JsonPropertyName("id")] string Id,
-    [property: JsonPropertyName("inputSha256")] string InputSha256,
-    [property: JsonPropertyName("provider")] string Provider,
-    [property: JsonPropertyName("toolVersion")] string ToolVersion);
+public sealed record DocxObjectAddress(
+    [property: JsonPropertyName("part")] string Part,
+    [property: JsonPropertyName("path")] string Path);
 
 public sealed record DocxObservationReceipt(
     [property: JsonPropertyName("schema")] string Schema,
     [property: JsonPropertyName("operation")] string Operation,
-    [property: JsonPropertyName("revision")] DocxRevision Revision,
     [property: JsonPropertyName("totalCount")] int TotalCount,
     [property: JsonPropertyName("returnedCount")] int ReturnedCount,
     [property: JsonPropertyName("remaining")] int Remaining,
-    [property: JsonPropertyName("continuation")] string? Continuation);
+    [property: JsonPropertyName("nextOffset")] int? NextOffset);
 
 public sealed record DocxObservationObject(
-    [property: JsonPropertyName("ref")] string Reference,
-    [property: JsonPropertyName("parentRef")] string? ParentReference,
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("parentAddress")] DocxObjectAddress? ParentAddress,
     [property: JsonPropertyName("kind")] string Kind,
-    [property: JsonPropertyName("storyPart")] string StoryPart,
-    [property: JsonPropertyName("nativePath")] string NativePath,
     [property: JsonPropertyName("localName")] string LocalName,
     [property: JsonPropertyName("textPreview")] string? TextPreview,
     [property: JsonPropertyName("textLength")] int? TextLength,
@@ -693,10 +573,8 @@ public sealed record DocxObservationReadResult(
     [property: JsonPropertyName("observations")] IReadOnlyList<DocxObservationDetail> Observations);
 
 public sealed record DocxTableIndexEntry(
-    [property: JsonPropertyName("ref")] string Reference,
-    [property: JsonPropertyName("parentRef")] string? ParentReference,
-    [property: JsonPropertyName("storyPart")] string StoryPart,
-    [property: JsonPropertyName("nativePath")] string NativePath,
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("parentAddress")] DocxObjectAddress? ParentAddress,
     [property: JsonPropertyName("rowCount")] int RowCount,
     [property: JsonPropertyName("columnCount")] int ColumnCount,
     [property: JsonPropertyName("textPreview")] string TextPreview,
@@ -704,11 +582,13 @@ public sealed record DocxTableIndexEntry(
 
 public sealed record DocxTableIndexResult(
     [property: JsonPropertyName("schema")] string Schema,
-    [property: JsonPropertyName("revision")] DocxRevision Revision,
     [property: JsonPropertyName("tables")] IReadOnlyList<DocxTableIndexEntry> Tables);
 
-internal sealed record ResolvedDocxReference(
-    string Reference,
+internal sealed record ResolvedDocxAddress(
+    DocxObjectAddress Address,
     string Kind,
-    string StoryPart,
-    string NativePath);
+    OpenXmlElement Element)
+{
+    public string StoryPart => Address.Part;
+    public string NativePath => Address.Path;
+}

@@ -26,11 +26,11 @@ try
     var sourceRows = Objects(Run("docx_list_objects", new
     {
         input = source, kinds = new[] { "row" }, scope = "/word/document.xml",
-        parentRef = Ref(sourceTable), limit = 10, output = Path.Combine(root, "source-rows.json")
+        parent = Address(sourceTable), limit = 10, output = Path.Combine(root, "source-rows.json")
     }));
     var sourceRead = Run("docx_read_object", new
     {
-        input = source, refs = sourceRows.Select(Ref).ToArray(), kinds = new[] { "cell", "paragraph" },
+        input = source, addresses = sourceRows.Select(Address).ToArray(), kinds = new[] { "cell", "paragraph" },
         output = Path.Combine(root, "source-read.json")
     });
 
@@ -48,15 +48,15 @@ try
         sourceFirst: 1, sourceLast: 2, targetFirst: 1, targetLast: 2,
         first, Path.Combine(root, "first-receipt.json")));
 
-    var stale = RunExpectFailure("docx_list_objects", new
+    var rowsFromStableTableAddress = Objects(Run("docx_list_objects", new
     {
         input = first, kinds = new[] { "row" }, scope = "/word/document.xml",
-        parentRef = Ref(targetState.Table), limit = 10, output = Path.Combine(root, "stale.json")
-    });
-    Require(stale.Contains("stale-parent-ref", StringComparison.Ordinal), "old parent ref was not rejected");
+        parent = Address(targetState.Table), limit = 10, output = Path.Combine(root, "stable-table-address.json")
+    }));
+    Require(rowsFromStableTableAddress.Count > 0, "unchanged table address did not remain usable after row content replacement");
 
     var freshState = ObserveTarget(first, "first");
-    Require(Ref(freshState.Table) != Ref(targetState.Table), "mutation did not produce fresh refs");
+    Require(Address(freshState.Table).GetRawText() == Address(targetState.Table).GetRawText(), "unchanged table address changed after row content replacement");
 
     var final = Path.Combine(root, "final.docx");
     Run("docx_replace_table_rows", Replacement(
@@ -87,25 +87,25 @@ object Replacement(
         .SelectMany(index => ChildObservations(Observation(sourceRead, index)))
         .Select(cell => new
         {
-            sourceCellRef = Ref(cell.GetProperty("object")),
-            sourceSelections = new[] { new { @ref = Ref(ChildObservations(cell)[0].GetProperty("object")) } }
+            sourceCell = Address(cell.GetProperty("object")),
+            sourceSelections = new[] { new { address = Address(ChildObservations(cell)[0].GetProperty("object")) } }
         }).ToArray();
 
     return new
     {
-        targetDocument = new { input = targetPath },
+        input = targetPath,
         tables = new[]
         {
             new
             {
-                sourceDocument = new { input = sourcePath },
-                sourceTableRef = Ref(sourceTable),
-                sourceRows = new { firstRef = Ref(sourceRows[sourceFirst]), lastRef = Ref(sourceRows[sourceLast]) },
-                targetTableRef = Ref(targetState.Table),
-                targetRows = new { firstRef = Ref(targetState.Rows[targetFirst]), lastRef = Ref(targetState.Rows[targetLast]) },
+                sourceInput = sourcePath,
+                sourceTable = Address(sourceTable),
+                sourceRows = new { first = Address(sourceRows[sourceFirst]), last = Address(sourceRows[sourceLast]) },
+                targetTable = Address(targetState.Table),
+                targetRows = new { first = Address(targetState.Rows[targetFirst]), last = Address(targetState.Rows[targetLast]) },
                 columns = sourceHeader.Zip(targetState.HeaderCells, (sourceCell, targetCell) => new
                 {
-                    sourceHeaderRef = Ref(sourceCell), targetHeaderRef = Ref(targetCell)
+                    sourceHeader = Address(sourceCell), targetHeader = Address(targetCell)
                 }).ToArray(),
                 sourceCellContents = selectedCells
             }
@@ -124,12 +124,12 @@ TargetState ObserveTarget(string input, string stem)
     }));
     var rows = Objects(Run("docx_list_objects", new
     {
-        input, kinds = new[] { "row" }, scope = "/word/document.xml", parentRef = Ref(table),
+        input, kinds = new[] { "row" }, scope = "/word/document.xml", parent = Address(table),
         limit = 20, output = Path.Combine(root, stem + "-rows.json")
     }));
     var headerRead = Run("docx_read_object", new
     {
-        input, refs = new[] { Ref(rows[0]) }, kinds = new[] { "cell", "paragraph" },
+        input, addresses = new[] { Address(rows[0]) }, kinds = new[] { "cell", "paragraph" },
         output = Path.Combine(root, stem + "-header.json")
     });
     return new TargetState(table, rows, ChildObjects(Observation(headerRead, 0)));
@@ -245,7 +245,7 @@ static IReadOnlyList<JsonElement> ChildObservations(JsonElement observation) =>
     observation.GetProperty("children").EnumerateArray().Select(item => item.Clone()).ToArray();
 static IReadOnlyList<JsonElement> ChildObjects(JsonElement observation) =>
     ChildObservations(observation).Select(item => item.GetProperty("object").Clone()).ToArray();
-static string Ref(JsonElement value) => value.GetProperty("ref").GetString()!;
+static JsonElement Address(JsonElement value) => value.GetProperty("address").Clone();
 static void Require(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);

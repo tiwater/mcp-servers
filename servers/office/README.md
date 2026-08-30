@@ -40,9 +40,9 @@ Structural worksheet row deletion is exposed as `xlsx_delete_rows`. Each change
 contains only `sheet`, `startRow`, and `count`; unsupported dependent workbook
 structures fail atomically and are reported by the provider receipt.
 
-DOCX mutations accept revision-bound native object references. Physical table,
-row, column, paragraph, run, drawing, and body indexes are not public mutation
-addresses.
+DOCX observation and mutation use the OpenXML part URI and native object path
+directly. Content edits keep unaffected addresses usable. After a structural
+edit, callers re-list only the changed parent when they need its new children.
 
 Table-row copying is a distinct bulk table responsibility: the caller selects
 current source and target tables, bounded row regions, excluded source rows,

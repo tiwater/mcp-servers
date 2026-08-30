@@ -33,7 +33,7 @@ public static class NativeCellMutation
     {
         if (command is not MergeCommand and not SplitCommand) throw new InvalidOperationException("cell-mutation-command-invalid");
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var targetPath = Path.GetFullPath(request.TargetDocument.Input);
+        var targetPath = Path.GetFullPath(request.Input);
         var outputPath = Path.GetFullPath(request.Output);
         var receiptPath = Path.GetFullPath(request.ReceiptOutput);
         RequireNewPath(outputPath, "output");
@@ -41,12 +41,12 @@ public static class NativeCellMutation
         if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath)) throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
         if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, targetPath)) throw new InvalidOperationException("output-must-not-overwrite-input");
 
-        var allRefs = request.Changes.SelectMany(change => change.CellRefs).ToArray();
-        if (allRefs.Length == 0 || allRefs.Distinct(StringComparer.Ordinal).Count() != allRefs.Length)
-            throw new InvalidOperationException("cell-refs-empty-or-duplicate");
-        var resolved = Observation.ResolveReferences(targetPath, request.TargetDocument.Revision, allRefs);
+        var addresses = request.Changes.SelectMany(change => change.Cells).ToArray();
+        if (addresses.Length == 0 || addresses.Distinct().Count() != addresses.Length)
+            throw new InvalidOperationException("cell-addresses-empty-or-duplicate");
+        var resolved = Observation.ResolveAddresses(targetPath, addresses, "changes.cells");
         if (resolved.Any(item => item.Kind != "cell" || item.StoryPart != MainStory))
-            throw new InvalidOperationException("cell-ref-must-be-main-document-cell");
+            throw new InvalidOperationException("cell-address-must-be-main-document-cell");
 
         IReadOnlyDictionary<string, int> baseline;
         using (var input = WordprocessingDocument.Open(targetPath, false)) baseline = ValidationIssueCounts(input);
@@ -60,11 +60,11 @@ public static class NativeCellMutation
                 var offset = 0;
                 foreach (var change in request.Changes)
                 {
-                    var cells = resolved.Skip(offset).Take(change.CellRefs.Count)
+                    var cells = resolved.Skip(offset).Take(change.Cells.Count)
                         .Select(item => Observation.ResolveNativePath(output, item.StoryPart, item.NativePath) as TableCell
-                            ?? throw new InvalidOperationException("cell-ref-not-found-in-output"))
+                            ?? throw new InvalidOperationException("cell-address-not-found-in-output"))
                         .ToArray();
-                    offset += change.CellRefs.Count;
+                    offset += change.Cells.Count;
                     var changed = command == MergeCommand ? Merge(cells) : Split(cells);
                     changedPaths.AddRange(changed.Select(Observation.NativePathFor));
                 }
@@ -72,15 +72,14 @@ public static class NativeCellMutation
                 RejectAddedValidationIssues(output, baseline);
             }
             File.Move(temporaryPath, outputPath);
-            var revision = Observation.CurrentRevision(outputPath);
             IReadOnlyList<CellMutationReadback> changes;
             using (var output = WordprocessingDocument.Open(outputPath, false))
                 changes = changedPaths.Select(path => Readback(
                     Observation.ResolveNativePath(output, MainStory, path) as TableCell
-                        ?? throw new InvalidOperationException("changed-cell-readback-failed"), revision)).ToArray();
+                        ?? throw new InvalidOperationException("changed-cell-readback-failed"))).ToArray();
             var receipt = new CellMutationReceipt(
                 command == MergeCommand ? "tiwater.docx-merge-cells-receipt" : "tiwater.docx-split-cells-receipt",
-                "tiwater.docx.cli", RuntimeIdentity.Version, Observation.CurrentRevision(targetPath), revision, changes, outputPath);
+                "tiwater.docx.cli", RuntimeIdentity.Version, changes, outputPath);
             File.WriteAllText(receiptPath, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
             return receipt;
         }
@@ -241,7 +240,7 @@ public static class NativeCellMutation
         return result;
     }
 
-    private static CellMutationReadback Readback(TableCell cell, DocxRevision revision)
+    private static CellMutationReadback Readback(TableCell cell)
     {
         var path = Observation.NativePathFor(cell);
         var properties = cell.TableCellProperties;
@@ -249,10 +248,10 @@ public static class NativeCellMutation
             ? null
             : merge.Val?.Value == MergedCellValues.Restart ? "restart" : "continue";
         return new CellMutationReadback(
-            Observation.MakeReference(revision, "cell", MainStory, path), path,
+            Observation.Address(MainStory, path),
             Math.Max(1, properties?.GridSpan?.Val?.Value ?? 1),
             verticalMerge,
-            cell.InnerText, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cell.OuterXml))).ToLowerInvariant());
+            cell.InnerText);
     }
 
     private static IReadOnlyDictionary<string, int> ValidationIssueCounts(WordprocessingDocument document)
@@ -282,7 +281,7 @@ public static class NativeCellMutation
     private sealed record RowCellPosition(TableCell Cell, int Start, int End);
 }
 
-public sealed record CellMutationChange(IReadOnlyList<string> CellRefs);
-public sealed record CellMutationRequest(ObjectDocument TargetDocument, IReadOnlyList<CellMutationChange> Changes, string Output, string ReceiptOutput);
-public sealed record CellMutationReadback(string Ref, string NativePath, int GridSpan, string? VerticalMerge, string Text, string ContentSha256);
-public sealed record CellMutationReceipt(string Schema, string Provider, string ToolVersion, DocxRevision TargetRevision, DocxRevision OutputRevision, IReadOnlyList<CellMutationReadback> Changes, string Output);
+public sealed record CellMutationChange(IReadOnlyList<DocxObjectAddress> Cells);
+public sealed record CellMutationRequest(string Input, IReadOnlyList<CellMutationChange> Changes, string Output, string ReceiptOutput);
+public sealed record CellMutationReadback(DocxObjectAddress Address, int GridSpan, string? VerticalMerge, string Text);
+public sealed record CellMutationReceipt(string Schema, string Provider, string ToolVersion, IReadOnlyList<CellMutationReadback> Changes, string Output);

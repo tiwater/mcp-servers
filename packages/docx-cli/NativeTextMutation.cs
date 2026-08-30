@@ -28,20 +28,20 @@ public static class NativeTextMutation
     public static SetTextReceipt Apply(SetTextRequest request)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var refs = request.Changes.Select(change => change.TargetRef).ToArray();
+        var addresses = request.Changes.Select(change => change.Target).ToArray();
         var duplicate = request.Changes
-            .Select((change, index) => new { change.TargetRef, Index = index })
-            .GroupBy(item => item.TargetRef, StringComparer.Ordinal)
+            .Select((change, index) => new { change.Target, Index = index })
+            .GroupBy(item => item.Target)
             .FirstOrDefault(group => group.Count() > 1);
         if (duplicate is not null)
             throw new InvalidOperationException(
-                $"target-ref-duplicate: targetRef={duplicate.Key}; changes=[{string.Join(',', duplicate.Select(item => item.Index))}]");
-        var paths = NativeMutationSupport.Paths(request.TargetDocument, request.Output, request.ReceiptOutput);
-        var resolved = Observation.ResolveReferences(paths.Input, request.TargetDocument.Revision, refs);
+                $"target-address-duplicate: changes=[{string.Join(',', duplicate.Select(item => item.Index))}]");
+        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        var resolved = Observation.ResolveAddresses(paths.Input, addresses, "changes.target");
         for (var index = 0; index < resolved.Count; index++)
             if (resolved[index].Kind is not "paragraph" and not "cell")
                 throw new InvalidOperationException(
-                    $"target-ref-must-be-paragraph-or-cell: changes[{index}].targetRef={refs[index]}; kind={resolved[index].Kind}");
+                    $"target-must-be-paragraph-or-cell: changes[{index}].target; kind={resolved[index].Kind}");
 
         IReadOnlyDictionary<string, int> baseline;
         using (var input = WordprocessingDocument.Open(paths.Input, false))
@@ -58,7 +58,7 @@ public static class NativeTextMutation
                 catch (InvalidOperationException error)
                 {
                     throw new InvalidOperationException(
-                        $"{error.Message}: changes[{index}].targetRef={refs[index]}", error);
+                        $"{error.Message}: changes[{index}].target", error);
                 }
             }
             baseline = NativeMutationSupport.ValidationIssueCounts(input);
@@ -79,7 +79,6 @@ public static class NativeTextMutation
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
             }
             File.Move(temporaryPath, paths.Output);
-            var outputRevision = Observation.CurrentRevision(paths.Output);
             IReadOnlyList<SetTextReadback> readback;
             using (var output = WordprocessingDocument.Open(paths.Output, false))
             {
@@ -88,12 +87,9 @@ public static class NativeTextMutation
                     var target = Observation.ResolveNativePath(output, item.StoryPart, item.NativePath);
                     var text = NativeMutationSupport.PlainText(target);
                     return new SetTextReadback(
-                        Observation.MakeReference(outputRevision, item.Kind, item.StoryPart, item.NativePath),
+                        item.Address,
                         item.Kind,
-                        item.StoryPart,
-                        item.NativePath,
-                        text,
-                        NativeMutationSupport.ContentSha256(target.OuterXml));
+                        text);
                 }).ToArray();
             }
             for (var index = 0; index < readback.Count; index++)
@@ -103,8 +99,6 @@ public static class NativeTextMutation
                 "tiwater.docx-set-text-receipt/v1",
                 "tiwater.docx.cli",
                 RuntimeIdentity.Version,
-                Observation.CurrentRevision(paths.Input),
-                outputRevision,
                 readback,
                 paths.Output);
             File.WriteAllText(paths.Receipt, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
@@ -206,14 +200,12 @@ public static class NativeTextMutation
         => uri.OriginalString.StartsWith("/", StringComparison.Ordinal) ? uri.OriginalString : "/" + uri.OriginalString;
 }
 
-public sealed record SetTextChange(string TargetRef, string Text);
-public sealed record SetTextRequest(ObjectDocument TargetDocument, IReadOnlyList<SetTextChange> Changes, string Output, string ReceiptOutput);
-public sealed record SetTextReadback(string Ref, string Kind, string StoryPart, string NativePath, string Text, string ContentSha256);
+public sealed record SetTextChange(DocxObjectAddress Target, string Text);
+public sealed record SetTextRequest(string Input, IReadOnlyList<SetTextChange> Changes, string Output, string ReceiptOutput);
+public sealed record SetTextReadback(DocxObjectAddress Address, string Kind, string Text);
 public sealed record SetTextReceipt(
     string Schema,
     string Provider,
     string ToolVersion,
-    DocxRevision TargetRevision,
-    DocxRevision OutputRevision,
     IReadOnlyList<SetTextReadback> Changes,
     string Output);
