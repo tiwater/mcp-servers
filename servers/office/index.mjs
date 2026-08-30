@@ -205,7 +205,7 @@ const docxObservationNode = z.lazy(() => z.object({
 
 const docxObservationReceipt = z.object({
   schema: z.literal('tiwater.docx-observation-receipt/v1'),
-  operation: z.enum(['list', 'find', 'read']),
+  operation: z.literal('list'),
   revision: docxRevision,
   totalCount: z.number().int().nonnegative(),
   returnedCount: z.number().int().nonnegative(),
@@ -220,19 +220,6 @@ const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
   runtime: runtimeIdentity,
 }).strict();
 
-const docxFindLiteralOutput = artifactOutput('docx_find_literal').extend({
-  schema: z.literal('tiwater.docx-observation-find/v1'),
-  receipt: docxObservationReceipt,
-  matches: z.array(z.object({
-    object: docxObjectIdentity,
-    matches: z.array(z.object({
-      offset: z.number().int().nonnegative(),
-      length: z.number().int().positive(),
-    }).strict()),
-  }).strict()),
-  runtime: runtimeIdentity,
-}).strict();
-
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   revision: docxRevision,
   observation: docxObservationNode,
@@ -241,7 +228,7 @@ const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX and retain its complete machine observation at output. The response returns the current revision, observation artifact, table count, and up to six opening non-empty body paragraphs for document identity. Use bounded list, find, and read operations for selected document objects.',
+    description: 'Inspect one current DOCX and retain its complete machine observation at output. The response returns the current revision, observation artifact, table count, and up to six opening non-empty body paragraphs for document identity. Use list and read operations to traverse selected document objects in native structure order.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -249,19 +236,11 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of revision-bound nearest-child identities in native document order and retain the exact page at output for later reuse. Without parentRef, returns nearest children of each selected story part; request paragraph and table together when a heading, caption, or summary identifies the following table. Use parentRef to restrict another container, such as a table or row; use docx_find_literal when selecting by text.',
+    description: 'List one small page of revision-bound nearest-child identities in native document order and retain the exact page at output for later reuse. Start at the selected story part, follow continuation in order, and descend only through returned refs with parentRef. Request paragraph and table together when their adjacency carries meaning. Text previews describe already located objects; never use matching text to identify a document or select a source.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_list_objects', args),
-  },
-  {
-    name: 'docx_find_literal',
-    description: 'Find exact current text in one small page of revision-bound native DOCX objects and retain the exact page at output for later reuse. With kind table or row, matching includes descendant cell text.',
-    inputSchema: inputContract('docx_find_literal'),
-    outputSchema: docxFindLiteralOutput,
-    annotations: { readOnlyHint: true, idempotentHint: true },
-    handler: args => docxObservation('docx_find_literal', args),
   },
   {
     name: 'docx_read_object',
@@ -584,16 +563,6 @@ async function docxObservation(tool, args) {
     };
     if (tool === 'docx_list_objects') {
       return { ...retained, ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
-    }
-    if (tool === 'docx_find_literal') {
-      return {
-        ...retained,
-        ...payload,
-        matches: payload.matches.map(match => ({
-          object: compactDocxObjectIdentity(match.object),
-          matches: match.matches,
-        })),
-      };
     }
     throw new Error(`unsupported-docx-observation-tool:${tool}`);
   });

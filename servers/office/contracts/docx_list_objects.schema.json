@@ -8,7 +8,7 @@
       "x-tiwater-file-role": "read"
     },
     "kinds": {
-      "description": "Open XML object kinds to list in native document order. Request paragraph and table together when their adjacency carries meaning. Returned parentRef is the valid targetParentRef for inserting beside that object.",
+      "description": "Open XML object kinds to list in native document order. Start at the selected story part, then follow returned refs through parentRef-scoped child pages. Request paragraph and table together when their adjacency carries meaning. Text previews describe already located objects; they do not identify a document or select a source. Returned parentRef is the valid targetParentRef for inserting beside that object.",
       "type": "array",
       "items": {
         "type": "string",
@@ -36,7 +36,7 @@
       "pattern": "^dox1_[0-9a-f]{64}$"
     },
     "limit": {
-      "description": "Maximum identities in this small page. Follow continuation only when the same structural inventory is required; use docx_find_literal instead of paging through paragraphs for content.",
+      "description": "Maximum identities in this small page. Follow continuation in native order when the same structural inventory is required, then use returned refs to descend into the selected object.",
       "default": 50,
       "type": "integer",
       "minimum": 1,
