@@ -2,7 +2,7 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.17.23"
+    "version": "0.17.24"
   },
   "tools": [
     {
@@ -163,11 +163,11 @@
       "name": "docx_replace_table_rows",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_table_rows.schema.json",
-        "sha256": "9f945477f3619f4f2fc777d2154cb3c45ceeaaad7dd079daeb7033e2a33ecf78"
+        "sha256": "dc0afe9a4be1974744df80d7d6b920034f0fa78f79ea18b2844eb67d69ecac5f"
       },
       "inputContract": {
         "path": "office/contracts/docx_replace_table_rows.schema.json",
-        "sha256": "9f945477f3619f4f2fc777d2154cb3c45ceeaaad7dd079daeb7033e2a33ecf78"
+        "sha256": "dc0afe9a4be1974744df80d7d6b920034f0fa78f79ea18b2844eb67d69ecac5f"
       }
     },
     {

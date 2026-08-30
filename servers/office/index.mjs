@@ -294,7 +294,7 @@ const tools = [
   },
   {
     name: 'docx_replace_table_rows',
-    description: 'Replace all resolved data-row ranges in one current target document. targetDocument appears once; each tables item binds one source document and its source and target rows. All source-cell paragraphs copy by default; sourceCellContents selects exact observed content that the target keeps.',
+    description: 'Replace one or more data-row ranges in one current target document. targetDocument appears once; each tables item binds one source document and its source and target rows. All source-cell paragraphs copy by default; sourceCellContents selects exact observed content that the target keeps.',
     inputSchema: inputContract('docx_replace_table_rows'),
     outputSchema: fixedEditOutput('docx_replace_table_rows'),
     handler: args => fixedEdit('docx_replace_table_rows', args),
