@@ -8,7 +8,7 @@
       "x-tiwater-file-role": "read"
     },
     "ref": {
-      "description": "One object ref returned by docx_list_objects or docx_find_literal. Read a complete small or medium table once; page rows only when the complete table is too large for one response.",
+      "description": "One object ref returned by a current DOCX observation. Read table structure through paragraph descendants first. For exact inline content, use an observed cell or paragraph ref; table-rooted run/text reads are rejected.",
       "type": "string",
       "pattern": "^dox1_[0-9a-f]{64}$"
     },
@@ -18,7 +18,7 @@
       "pattern": "^docx-rev-v1-[0-9a-f]{64}$"
     },
     "kinds": {
-      "description": "Object kinds required by the next operation. Include paragraph when paragraph boundaries affect a later content selection.",
+      "description": "Object kinds required by the next operation. Include paragraph for table content boundaries. Request run or text only when ref identifies a cell or paragraph, never a whole table.",
       "type": "array",
       "items": {
         "type": "string",

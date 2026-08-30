@@ -265,7 +265,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read one selected native DOCX object and requested descendants. Read a complete small or medium table once with row, cell, and paragraph descendants; add run or text only for an exact inline selection. Page rows only when the complete table is too large for one response.',
+    description: 'Read one selected native DOCX object and requested descendants. For a table, read row, cell, and paragraph descendants first. To select exact inline content, make a second read rooted at the observed cell or paragraph and request run or text; table-rooted inline reads are rejected so one call cannot return the document-wide character tree.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -538,14 +538,14 @@ function compactDocxObservation(observation) {
   if (!observation?.object) throw new Error('docx-read-object-missing-observation');
   function compactNode(node) {
     const identity = compactDocxObjectIdentity(node.object);
+    const children = (node.children ?? []).map(compactNode);
     const object = {
       ref: identity.ref,
       kind: identity.kind,
-      textPreview: identity.textPreview,
+      textPreview: children.length === 0 ? identity.textPreview : null,
       ...(identity.gridSpan === null ? {} : { gridSpan: identity.gridSpan }),
       ...(identity.verticalMerge === null ? {} : { verticalMerge: identity.verticalMerge }),
     };
-    const children = (node.children ?? []).map(compactNode);
     return {
       object,
       ...(children.length === 0 ? {} : { children }),
@@ -602,6 +602,10 @@ async function docxReadObject(args) {
   const { output: _output, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
+    if (result.json?.observation?.object?.kind === 'table'
+      && args.kinds.some(kind => kind === 'run' || kind === 'text')) {
+      throw new Error('docx-table-inline-detail-requires-cell-or-paragraph-root');
+    }
     return {
       tool: 'docx_read_object',
       runtime: commandRuntime(result),
