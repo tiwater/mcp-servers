@@ -176,7 +176,7 @@ public static class NativeContentCopy
         }
     }
 
-    private static IReadOnlyList<Paragraph> CopySelection(OpenXmlElement element, CopyContentSelection selection)
+    internal static IReadOnlyList<Paragraph> CopySelection(OpenXmlElement element, CopyContentSelection selection)
     {
         if (selection.Range is not null)
             return [ParagraphForTextRange(element, selection.Range.Start, selection.Range.Length)];

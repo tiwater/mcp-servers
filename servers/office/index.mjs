@@ -287,7 +287,7 @@ const tools = [
   },
   {
     name: 'docx_copy_table_rows',
-    description: 'Populate existing target tables by replacing selected data-row ranges with selected source rows. Explicit header-cell mappings preserve target presentation, source grouping, and every source-cell paragraph. When a target cell needs an exact subset, copy the row structure first and batch those cells with docx_copy_content.',
+    description: 'Populate existing target tables by replacing selected data-row ranges with selected source rows. Explicit header-cell mappings preserve target presentation and source grouping. All source-cell paragraphs copy by default; sourceCellContents can select exact observed content for individual source cells in the same operation.',
     inputSchema: inputContract('docx_copy_table_rows'),
     outputSchema: fixedEditOutput('docx_copy_table_rows'),
     handler: args => fixedEdit('docx_copy_table_rows', args),

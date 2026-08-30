@@ -168,13 +168,15 @@ public static class NativeTableRowCopy
             var sourceHeaderSlots = sourceHeaderCells.Select(cell => GridSlot(sourceTable, cell)).ToArray();
             var sourceGridCount = GridColumnCount(sourceTable);
             RequireCompleteHeader(sourceHeaderSlots, sourceGridCount, "source");
+            var sourceCellContents = PrepareSourceCellContents(
+                sourcePath, sourceRevision, sourceDocument, sourceRows, change.SourceCellContents ?? []);
 
             var mappings = BuildMappings(sourceHeaderSlots, targetHeaderSlots, change.Columns);
             var targetGridWidths = BuildTargetGridWidths(sourceTable, targetTable, mappings);
 
             var preparedRows = NormalizeMergeStarts(allSourceRows, sourceRows,
-                sourceRows.Select(row => PrepareRow(row, mappings, targetGridWidths.Count)).ToArray(),
-                mappings, targetGridWidths.Count);
+                sourceRows.Select(row => PrepareRow(row, mappings, targetGridWidths.Count, sourceCellContents)).ToArray(),
+                mappings, targetGridWidths.Count, sourceCellContents);
             RequireClosedMergeChains(preparedRows, targetGridWidths.Count, "source");
             result.Add(new PreparedChange(changeIndex, targetResolved[0],
                 targetRows.Select(Observation.NativePathFor).ToArray(), sourcePath, sourceRevision,
@@ -188,7 +190,8 @@ public static class NativeTableRowCopy
     private static PreparedRow PrepareRow(
         TableRow sourceRow,
         IReadOnlyList<ColumnMapping> mappings,
-        int targetGridCount)
+        int targetGridCount,
+        IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> sourceCellContents)
     {
         var prepared = new List<PreparedCell>();
         foreach (var cell in Cells(sourceRow))
@@ -206,7 +209,10 @@ public static class NativeTableRowCopy
                 mapping.SourceStart, mapping.SourceSpan, mapping.TargetStart, mapping.TargetSpan)).Order().ToArray();
             if (!targetPositions.SequenceEqual(Enumerable.Range(targetPositions[0], targetPositions.Length)))
                 throw new InvalidOperationException("source-cell-maps-to-noncontiguous-target-columns");
-            var paragraphs = CloneCellParagraphs(cell.Cell);
+            var sourceCellPath = Observation.NativePathFor(cell.Cell);
+            var paragraphs = sourceCellContents.TryGetValue(sourceCellPath, out var selectedContent)
+                ? selectedContent
+                : CloneCellParagraphs(cell.Cell);
             prepared.Add(new PreparedCell(
                 cell.Start,
                 cell.Span,
@@ -227,7 +233,8 @@ public static class NativeTableRowCopy
         IReadOnlyList<TableRow> selectedRows,
         IReadOnlyList<PreparedRow> preparedRows,
         IReadOnlyList<ColumnMapping> mappings,
-        int targetGridCount)
+        int targetGridCount,
+        IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> sourceCellContents)
     {
         var active = new bool[targetGridCount];
         var result = new List<PreparedRow>(preparedRows.Count);
@@ -258,7 +265,7 @@ public static class NativeTableRowCopy
                     if (!activeStates[0])
                     {
                         var origin = FindMergeOrigin(allRows, sourceIndex, cell.SourceColumn);
-                        var originCell = PrepareRow(origin, mappings, targetGridCount).Cells.Single(item =>
+                        var originCell = PrepareRow(origin, mappings, targetGridCount, sourceCellContents).Cells.Single(item =>
                             cell.SourceColumn >= item.SourceColumn
                             && cell.SourceColumn < item.SourceColumn + item.SourceSpan);
                         if (originCell.TargetColumn != cell.TargetColumn || originCell.TargetSpan != cell.TargetSpan)
@@ -274,6 +281,56 @@ public static class NativeTableRowCopy
                 cells.Add(cell);
             }
             result.Add(preparedRows[rowIndex] with { Cells = cells });
+        }
+        return result;
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> PrepareSourceCellContents(
+        string sourcePath,
+        string sourceRevision,
+        WordprocessingDocument sourceDocument,
+        IReadOnlyList<TableRow> sourceRows,
+        IReadOnlyList<TableRowCopyCellContent> requested)
+    {
+        if (requested.Count == 0)
+            return new Dictionary<string, IReadOnlyList<Paragraph>>(StringComparer.Ordinal);
+        if (requested.Select(item => item.SourceCellRef).Distinct(StringComparer.Ordinal).Count() != requested.Count)
+            throw new InvalidOperationException("source-cell-content-must-be-unique");
+
+        var cellReferences = Observation.ResolveReferences(
+            sourcePath, sourceRevision, requested.Select(item => item.SourceCellRef).ToArray());
+        var result = new Dictionary<string, IReadOnlyList<Paragraph>>(StringComparer.Ordinal);
+        for (var index = 0; index < requested.Count; index++)
+        {
+            var cellReference = cellReferences[index];
+            if (cellReference.Kind != "cell" || cellReference.StoryPart != MainStory)
+                throw new InvalidOperationException("source-cell-content-ref-must-be-main-document-cell");
+            var cell = Resolve<TableCell>(sourceDocument, cellReference, "source-cell-content");
+            var row = cell.Ancestors<TableRow>().SingleOrDefault();
+            if (row is null || !sourceRows.Any(selected => ReferenceEquals(selected, row)))
+                throw new InvalidOperationException("source-cell-content-must-belong-to-selected-rows");
+
+            var selections = requested[index].SourceSelections;
+            var paragraphs = new List<Paragraph>();
+            if (selections.Count > 0)
+            {
+                var selectionReferences = Observation.ResolveReferences(
+                    sourcePath, sourceRevision, selections.Select(item => item.Reference).ToArray());
+                for (var selectionIndex = 0; selectionIndex < selections.Count; selectionIndex++)
+                {
+                    var selectionReference = selectionReferences[selectionIndex];
+                    if (selectionReference.StoryPart != MainStory)
+                        throw new InvalidOperationException("source-cell-selection-must-be-main-document-object");
+                    var element = Observation.ResolveNativePath(
+                        sourceDocument, selectionReference.StoryPart, selectionReference.NativePath);
+                    var owner = element as TableCell ?? element.Ancestors<TableCell>().FirstOrDefault();
+                    if (!ReferenceEquals(owner, cell))
+                        throw new InvalidOperationException("source-cell-selection-must-belong-to-source-cell");
+                    paragraphs.AddRange(NativeContentCopy.CopySelection(element, selections[selectionIndex]));
+                }
+            }
+            if (paragraphs.Count == 0) paragraphs.Add(new Paragraph());
+            result.Add(Observation.NativePathFor(cell), paragraphs);
         }
         return result;
     }
@@ -781,9 +838,13 @@ internal static class TableRowCopyReferenceExtensions
 public sealed record TableRowCopyDocument(string Input);
 public sealed record TableRowCopyRange(string FirstRef, string LastRef);
 public sealed record TableRowCopyColumn(string SourceHeaderRef, string TargetHeaderRef);
+public sealed record TableRowCopyCellContent(
+    string SourceCellRef,
+    IReadOnlyList<CopyContentSelection> SourceSelections);
 public sealed record TableRowCopyChange(string TargetTableRef, TableRowCopyRange TargetRows,
     TableRowCopyDocument SourceDocument, string SourceTableRef, TableRowCopyRange SourceRows,
-    IReadOnlyList<TableRowCopyColumn> Columns);
+    IReadOnlyList<TableRowCopyColumn> Columns,
+    IReadOnlyList<TableRowCopyCellContent>? SourceCellContents = null);
 public sealed record TableRowCopyRequest(TableRowCopyDocument TargetDocument,
     IReadOnlyList<TableRowCopyChange> Changes, string Output, string ReceiptOutput);
 public sealed record TableRowCopyReadback(int ChangeIndex, int SourceRowCount, int OutputRowCount,
