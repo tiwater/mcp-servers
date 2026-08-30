@@ -21,7 +21,7 @@
           "targetRef": {
             "type": "string",
             "pattern": "^dox1_[0-9a-f]{64}$",
-            "description": "Observed plain-text paragraph or cell ref whose whole text content is replaced. Paragraph bookmarks are preserved; targets containing fields, drawings, nested tables, controls, links, or other non-text content are rejected."
+            "description": "Observed paragraph or cell ref whose whole text content is replaced. Bookmarks and target formatting are preserved; tabs and line breaks are written as native OpenXML text controls. Targets containing fields, drawings, nested tables, controls, links, or other non-text content are rejected."
           },
           "text": { "type": "string" }
         },

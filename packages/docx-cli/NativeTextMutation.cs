@@ -29,12 +29,19 @@ public static class NativeTextMutation
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
         var refs = request.Changes.Select(change => change.TargetRef).ToArray();
-        if (refs.Distinct(StringComparer.Ordinal).Count() != refs.Length)
-            throw new InvalidOperationException("target-ref-duplicate");
+        var duplicate = request.Changes
+            .Select((change, index) => new { change.TargetRef, Index = index })
+            .GroupBy(item => item.TargetRef, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            throw new InvalidOperationException(
+                $"target-ref-duplicate: targetRef={duplicate.Key}; changes=[{string.Join(',', duplicate.Select(item => item.Index))}]");
         var paths = NativeMutationSupport.Paths(request.TargetDocument, request.Output, request.ReceiptOutput);
         var resolved = Observation.ResolveReferences(paths.Input, request.TargetDocument.Revision, refs);
-        if (resolved.Any(item => item.Kind is not "paragraph" and not "cell"))
-            throw new InvalidOperationException("target-ref-must-be-paragraph-or-cell");
+        for (var index = 0; index < resolved.Count; index++)
+            if (resolved[index].Kind is not "paragraph" and not "cell")
+                throw new InvalidOperationException(
+                    $"target-ref-must-be-paragraph-or-cell: changes[{index}].targetRef={refs[index]}; kind={resolved[index].Kind}");
 
         IReadOnlyDictionary<string, int> baseline;
         using (var input = WordprocessingDocument.Open(paths.Input, false))
@@ -42,7 +49,18 @@ public static class NativeTextMutation
             var targets = resolved.Select(item =>
                 Observation.ResolveNativePath(input, item.StoryPart, item.NativePath)).ToArray();
             NativeMutationSupport.RejectOverlappingTargets(targets);
-            foreach (var target in targets) NativeMutationSupport.RequirePlainTextContainer(target);
+            for (var index = 0; index < targets.Length; index++)
+            {
+                try
+                {
+                    NativeMutationSupport.RequirePlainTextContainer(targets[index]);
+                }
+                catch (InvalidOperationException error)
+                {
+                    throw new InvalidOperationException(
+                        $"{error.Message}: changes[{index}].targetRef={refs[index]}", error);
+                }
+            }
             baseline = NativeMutationSupport.ValidationIssueCounts(input);
         }
 
@@ -68,7 +86,7 @@ public static class NativeTextMutation
                 readback = resolved.Select(item =>
                 {
                     var target = Observation.ResolveNativePath(output, item.StoryPart, item.NativePath);
-                    var text = target.InnerText;
+                    var text = NativeMutationSupport.PlainText(target);
                     return new SetTextReadback(
                         Observation.MakeReference(outputRevision, item.Kind, item.StoryPart, item.NativePath),
                         item.Kind,
@@ -118,11 +136,21 @@ public static class NativeTextMutation
                 var template = cell.Elements<Paragraph>().FirstOrDefault();
                 var paragraphProperties = template?.ParagraphProperties?.CloneNode(true) as ParagraphProperties;
                 var cellRunProperties = template?.Descendants<Run>().FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
+                var bookmarkStarts = cell.Elements<Paragraph>()
+                    .SelectMany(paragraph => paragraph.Elements<BookmarkStart>())
+                    .Select(bookmark => (BookmarkStart)bookmark.CloneNode(true))
+                    .ToArray();
+                var bookmarkEnds = cell.Elements<Paragraph>()
+                    .SelectMany(paragraph => paragraph.Elements<BookmarkEnd>())
+                    .Select(bookmark => (BookmarkEnd)bookmark.CloneNode(true))
+                    .ToArray();
                 foreach (var child in cell.ChildElements.Where(child => child is not TableCellProperties).ToArray())
                     child.Remove();
                 var replacement = new Paragraph();
                 if (paragraphProperties is not null) replacement.Append((ParagraphProperties)paragraphProperties.CloneNode(true));
+                foreach (var bookmark in bookmarkStarts) replacement.Append(bookmark);
                 AppendText(replacement, cellRunProperties, text);
+                foreach (var bookmark in bookmarkEnds) replacement.Append(bookmark);
                 cell.Append(replacement);
                 break;
             default:
@@ -141,7 +169,24 @@ public static class NativeTextMutation
         if (text.Length == 0) return null;
         var run = new Run();
         if (properties is not null) run.Append((RunProperties)properties.CloneNode(true));
-        run.Append(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+        var start = 0;
+        for (var index = 0; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (character is not '\r' and not '\n' and not '\t') continue;
+            if (index > start)
+                run.Append(new Text(text[start..index]) { Space = SpaceProcessingModeValues.Preserve });
+            if (character == '\t')
+                run.Append(new TabChar());
+            else
+            {
+                run.Append(new Break());
+                if (character == '\r' && index + 1 < text.Length && text[index + 1] == '\n') index++;
+            }
+            start = index + 1;
+        }
+        if (start < text.Length)
+            run.Append(new Text(text[start..]) { Space = SpaceProcessingModeValues.Preserve });
         return run;
     }
 
