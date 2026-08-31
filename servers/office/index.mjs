@@ -268,7 +268,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'List one small page of nearest-child OpenXML addresses from the current DOCX in native document order and retain the exact page at output. Continue with nextOffset and descend through a returned address as parent. Text previews describe already located objects; they do not prove descendant content.',
+    description: 'Page through mixed nearest-child OpenXML objects when document order or paragraph relationships are required. Continue with nextOffset and descend through a returned parent address. Do not use this tool to locate tables or read a whole document: use docx_table_index to locate tables, then docx_read_table for one selected table.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -276,7 +276,7 @@ const tools = [
   },
   {
     name: 'docx_table_index',
-    description: 'List every table in one current DOCX as a compact native index with its OpenXML address, row count, column count, and short text preview. Use it to choose a table and confirm its shape before listing rows or reading selected content. It does not return full cell content or decide table semantics.',
+    description: 'Locate tables in one current DOCX. Returns one compact index containing every table address, shape, and short text preview. Choose the needed address from this index, then call docx_read_table. It does not return full cell content or decide table semantics.',
     inputSchema: inputContract('docx_table_index'),
     outputSchema: docxTableIndexOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -292,7 +292,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read one complete table selected by its native OpenXML address. Returns compact rows, cells, spans, vertical merges, paragraphs, text nodes, and their reusable addresses in document order. It does not search for a table or decide business meaning.',
+    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Returns its rows, cells, spans, vertical merges, paragraphs, text nodes, and reusable addresses in document order. It does not locate a table or decide business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
