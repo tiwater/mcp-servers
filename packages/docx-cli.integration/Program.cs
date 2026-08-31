@@ -18,11 +18,29 @@ try
     CreateSource(source);
     CreateTarget(target);
 
+    var sourceTableIndex = Run("docx_table_index", new
+    {
+        input = source, output = Path.Combine(root, "source-table-index.json")
+    });
+    var targetTableIndex = Run("docx_table_index", new
+    {
+        input = target, output = Path.Combine(root, "target-table-index.json")
+    });
+    Require(sourceTableIndex.GetProperty("tables").GetArrayLength() == 1,
+        "source table index did not return its single table");
+    Require(targetTableIndex.GetProperty("tables")[0].GetProperty("rowCount").GetInt32() == 7,
+        "target table index row count is wrong");
+    Require(targetTableIndex.GetProperty("tables")[0].GetProperty("columnCount").GetInt32() == 2,
+        "target table index column count is wrong");
+
     var sourceTable = FirstObject(Run("docx_list_objects", new
     {
         input = source, kinds = new[] { "table" }, scope = "/word/document.xml",
         limit = 10, output = Path.Combine(root, "source-tables.json")
     }));
+    Require(Address(sourceTable).GetRawText()
+            == sourceTableIndex.GetProperty("tables")[0].GetProperty("address").GetRawText(),
+        "table index address differs from native object listing");
     var sourceRows = Objects(Run("docx_list_objects", new
     {
         input = source, kinds = new[] { "row" }, scope = "/word/document.xml",
