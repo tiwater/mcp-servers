@@ -25,7 +25,7 @@ public static class Cli
         NativeContentCopy.Command,
         NativeTextMutation.Command,
         NativeTableRowReplace.Command,
-        NativeObjectMutation.CopyCommand,
+        NativeObjectMutation.InsertCommand,
         NativeObjectMutation.DeleteCommand,
         NativeCellMutation.MergeCommand,
         NativeCellMutation.SplitCommand,
@@ -81,7 +81,7 @@ public static class Cli
                 _ when args[0] == NativeContentCopy.Command => Task.FromResult(NativeContentCopy.Run(args[1..])),
                 _ when args[0] == NativeTextMutation.Command => Task.FromResult(NativeTextMutation.Run(args[1..])),
                 _ when args[0] == NativeTableRowReplace.Command => Task.FromResult(NativeTableRowReplace.Run(args[1..])),
-                _ when args[0] is NativeObjectMutation.CopyCommand or NativeObjectMutation.DeleteCommand
+                _ when args[0] is NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                     => Task.FromResult(NativeObjectMutation.Run(args[0], args[1..])),
                 _ when args[0] is NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
                     => Task.FromResult(NativeCellMutation.Run(args[0], args[1..])),
@@ -183,7 +183,7 @@ public static class Cli
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
             _ when ObservationCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
             _ when command is NativeContentCopy.Command or NativeTextMutation.Command or NativeTableRowReplace.Command
-                or NativeObjectMutation.CopyCommand or NativeObjectMutation.DeleteCommand
+                or NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                 or NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
                 or NativePolicyMutation.FontCommand or NativePolicyMutation.TocCommand
                 => $"tiwater-docx {command} <request.json>",

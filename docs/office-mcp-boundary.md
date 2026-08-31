@@ -86,8 +86,7 @@ The public operation list is closed over these verbs:
 | --- | --- |
 | set content | Replace content in selected Word text containers, workbook cells, or presentation text and table cells without replacing their containers. |
 | copy content | Copy current content from selected source containers to selected target containers; target structure and formatting remain authoritative unless a fixed formatting mode is explicitly selected. |
-| insert object | Insert a caller-supplied native object of an allowed kind into a selected native container. |
-| copy object | Copy selected paragraphs, contiguous story ranges, tables, rows, columns, worksheets, slides, or shapes with required parts and relationships. |
+| insert object | Insert selected existing paragraphs, tables, rows, cells, runs, or text into a selected native container with their required parts and relationships. |
 | move object | Move selected objects within one current document without changing their content. |
 | delete object | Delete selected objects and remove relationships that become unreferenced. |
 | set properties | Set published typed Open XML properties for selected text, paragraph, table, row, cell, section, worksheet, slide, or shape objects. |

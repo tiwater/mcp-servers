@@ -11,7 +11,7 @@ namespace Dockit.Docx;
 
 public static class NativeObjectMutation
 {
-    public const string CopyCommand = "docx_copy_object";
+    public const string InsertCommand = "docx_insert_objects";
     public const string DeleteCommand = "docx_delete_object";
     private const string MainStory = "/word/document.xml";
 
@@ -21,11 +21,11 @@ public static class NativeObjectMutation
         var requestJson = File.ReadAllText(args[0]);
         object request;
         object receipt;
-        if (command == CopyCommand)
+        if (command == InsertCommand)
         {
-            request = JsonSerializer.Deserialize<CopyObjectRequest>(requestJson, Json.Options)
-                ?? throw new InvalidOperationException("copy-object-request-invalid");
-            receipt = Copy((CopyObjectRequest)request);
+            request = JsonSerializer.Deserialize<InsertObjectsRequest>(requestJson, Json.Options)
+                ?? throw new InvalidOperationException("insert-objects-request-invalid");
+            receipt = Insert((InsertObjectsRequest)request);
         }
         else if (command == DeleteCommand)
         {
@@ -34,15 +34,15 @@ public static class NativeObjectMutation
             receipt = Delete((DeleteObjectRequest)request);
         }
         else throw new InvalidOperationException("native-object-command-invalid");
-        var output = command == CopyCommand ? ((CopyObjectReceipt)receipt).Output : ((DeleteObjectReceipt)receipt).Output;
-        var receiptOutput = command == CopyCommand
-            ? ((CopyObjectReceipt)receipt).ReceiptOutput
+        var output = command == InsertCommand ? ((InsertObjectsReceipt)receipt).Output : ((DeleteObjectReceipt)receipt).Output;
+        var receiptOutput = command == InsertCommand
+            ? ((InsertObjectsReceipt)receipt).ReceiptOutput
             : ((DeleteObjectReceipt)receipt).ReceiptOutput;
-        var operationCount = command == CopyCommand
-            ? ((CopyObjectRequest)request).Changes.Count
+        var operationCount = command == InsertCommand
+            ? ((InsertObjectsRequest)request).Changes.Count
             : ((DeleteObjectRequest)request).Changes.Count;
-        var appliedCount = command == CopyCommand
-            ? ((CopyObjectReceipt)receipt).Changes.Count
+        var appliedCount = command == InsertCommand
+            ? ((InsertObjectsReceipt)receipt).Changes.Count
             : ((DeleteObjectReceipt)receipt).DeletedAddresses.Count;
         Console.WriteLine(JsonSerializer.Serialize(new
         {
@@ -54,7 +54,7 @@ public static class NativeObjectMutation
         return 0;
     }
 
-    public static CopyObjectReceipt Copy(CopyObjectRequest request)
+    public static InsertObjectsReceipt Insert(InsertObjectsRequest request)
     {
         var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var targetPath = paths.Input;
@@ -85,8 +85,8 @@ public static class NativeObjectMutation
             {
                 readback = inserted.Select(Readback).ToArray();
             }
-            var receipt = new CopyObjectReceipt(
-                "tiwater.docx-copy-object-receipt", "tiwater.docx.cli", RuntimeIdentity.Version,
+            var receipt = new InsertObjectsReceipt(
+                "tiwater.docx-insert-objects-receipt", "tiwater.docx.cli", RuntimeIdentity.Version,
                 readback, outputPath, receiptPath);
             File.WriteAllText(receiptPath, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
             return receipt;
@@ -151,7 +151,7 @@ public static class NativeObjectMutation
     private static readonly HashSet<string> CopyableKinds = ["paragraph", "table", "row", "cell", "run", "text"];
     private static readonly HashSet<string> DeletableKinds = ["paragraph", "table", "row", "cell", "run", "text", "drawing"];
 
-    private static IReadOnlyList<PreparedCopy> PrepareCopies(CopyObjectRequest request, string targetPath)
+    private static IReadOnlyList<PreparedCopy> PrepareCopies(InsertObjectsRequest request, string targetPath)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
         var result = new List<PreparedCopy>();
@@ -163,12 +163,12 @@ public static class NativeObjectMutation
             var parent = target[0];
             var before = target.Count == 2 ? target[1] : null;
             if (parent.StoryPart != MainStory || before is not null && before.StoryPart != MainStory)
-                throw new InvalidOperationException("copy-target-must-be-main-document-object");
+                throw new InvalidOperationException("insert-target-must-be-main-document-object");
 
             var sourcePath = Path.GetFullPath(change.SourceInput);
             var source = Observation.ResolveAddresses(sourcePath, change.Sources, "changes.sources");
             if (source.Any(item => item.StoryPart != MainStory || !CopyableKinds.Contains(item.Kind)))
-                throw new InvalidOperationException("copy-source-kind-not-supported");
+                throw new InvalidOperationException("insert-source-kind-not-supported");
             using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
             var clones = source.Select(item => Observation.ResolveNativePath(sourceDocument, item.StoryPart, item.NativePath).CloneNode(true)).ToArray();
             result.Add(new PreparedCopy(sourcePath, parent, before, repeat, clones));
@@ -280,11 +280,11 @@ public static class NativeObjectMutation
     private sealed record PreparedCopy(string SourcePath, ResolvedDocxAddress Parent, ResolvedDocxAddress? Before, int Repeat, IReadOnlyList<OpenXmlElement> Clones);
 }
 
-public sealed record CopyObjectChange(string SourceInput, IReadOnlyList<DocxObjectAddress> Sources, DocxObjectAddress TargetParent, DocxObjectAddress? Before = null, int? Repeat = null);
-public sealed record CopyObjectRequest(string Input, IReadOnlyList<CopyObjectChange> Changes, string Output, string ReceiptOutput);
+public sealed record InsertObjectsChange(string SourceInput, IReadOnlyList<DocxObjectAddress> Sources, DocxObjectAddress TargetParent, DocxObjectAddress? Before = null, int? Repeat = null);
+public sealed record InsertObjectsRequest(string Input, IReadOnlyList<InsertObjectsChange> Changes, string Output, string ReceiptOutput);
 public sealed record DeleteObjectChange(IReadOnlyList<DocxObjectAddress> Addresses);
 public sealed record DeleteObjectRequest(string Input, IReadOnlyList<DeleteObjectChange> Changes, string Output, string ReceiptOutput);
 public sealed record ObjectArtifact(string Path, string Sha256, long Bytes);
 public sealed record ObjectReadback(DocxObjectAddress Address, string Kind, string Text);
-public sealed record CopyObjectReceipt(string Schema, string Provider, string ToolVersion, IReadOnlyList<ObjectReadback> Changes, string Output, string ReceiptOutput);
+public sealed record InsertObjectsReceipt(string Schema, string Provider, string ToolVersion, IReadOnlyList<ObjectReadback> Changes, string Output, string ReceiptOutput);
 public sealed record DeleteObjectReceipt(string Schema, string Provider, string ToolVersion, IReadOnlyList<DocxObjectAddress> DeletedAddresses, string Output, string ReceiptOutput);

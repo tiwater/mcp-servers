@@ -110,5 +110,5 @@
     "receiptOutput"
   ],
   "additionalProperties": false,
-  "$id": "tiwater.office-mcp-input/docx_copy_object"
+  "$id": "tiwater.office-mcp-input/docx_insert_objects"
 }
