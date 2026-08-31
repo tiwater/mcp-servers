@@ -33,6 +33,38 @@ try
     Require(targetTableIndex.GetProperty("tables")[0].GetProperty("columnCount").GetInt32() == 2,
         "target table index column count is wrong");
 
+    var compactTable = Run("docx_read_table", new
+    {
+        input = source,
+        table = sourceTableIndex.GetProperty("tables")[0].GetProperty("address"),
+        output = Path.Combine(root, "source-table.json")
+    });
+    Require(compactTable.GetProperty("rowCount").GetInt32() == 5,
+        "compact table row count is wrong");
+    Require(compactTable.GetProperty("columnCount").GetInt32() == 2,
+        "compact table column count is wrong");
+    var compactRows = compactTable.GetProperty("rows");
+    Require(compactRows[1].GetProperty("cells")[0].GetProperty("verticalMerge").GetString() == "restart",
+        "compact table did not expose vertical merge restart");
+    Require(compactRows[2].GetProperty("cells")[0].GetProperty("verticalMerge").GetString() == "continue",
+        "compact table did not expose vertical merge continuation");
+    var compactParagraphs = compactRows[1].GetProperty("cells")[0].GetProperty("paragraphs");
+    Require(compactParagraphs.GetArrayLength() == 2 && compactParagraphs[0].GetProperty("text").GetString() == "甲",
+        "compact table paragraph projection is wrong");
+    Require(compactParagraphs[0].GetProperty("textNodes")[0].GetProperty("text").GetString() == "甲",
+        "compact table text-node projection is wrong");
+    Require(compactParagraphs[0].GetProperty("address").GetProperty("path").GetString()!.StartsWith('/'),
+        "compact table paragraph address is not native");
+
+    var nonTableRead = RunExpectFailure("docx_read_table", new
+    {
+        input = source,
+        table = compactRows[0].GetProperty("address"),
+        output = Path.Combine(root, "non-table.json")
+    });
+    Require(nonTableRead.Contains("table-reference-kind-invalid", StringComparison.Ordinal),
+        "compact table accepted a non-table address");
+
     var sourceTable = FirstObject(Run("docx_list_objects", new
     {
         input = source, kinds = new[] { "table" }, scope = "/word/document.xml",
