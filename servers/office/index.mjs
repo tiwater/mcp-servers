@@ -218,6 +218,13 @@ const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
 
 const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
   schema: z.literal('tiwater.docx-table-index/v1'),
+  receipt: z.object({
+    schema: z.literal('tiwater.docx-table-index-receipt/v1'),
+    totalCount: z.number().int().nonnegative(),
+    returnedCount: z.number().int().nonnegative(),
+    remaining: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+  }).strict(),
   tables: z.array(z.object({
     address: docxAddress,
     parentAddress: docxAddress.nullable(),
@@ -296,7 +303,7 @@ const tools = [
   },
   {
     name: 'docx_table_index',
-    description: 'Locate tables in one current DOCX. Returns one compact index containing every table address, shape, short text preview, and the nearest non-empty paragraph before and after each table. Choose the needed address from this index, then call docx_read_table. It does not return full cell content or decide table semantics.',
+    description: 'Locate tables in one current DOCX. Writes the complete index to output and returns a bounded page containing table address, shape, short text preview, and nearest non-empty paragraphs. Continue with receipt.nextOffset, then call docx_read_table for one selected address. It does not return full cell content or decide table semantics.',
     inputSchema: inputContract('docx_table_index'),
     outputSchema: docxTableIndexOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -632,7 +639,31 @@ async function docxObservation(tool, args) {
     if (tool === 'docx_list_objects') {
       return { ...retained, ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
     }
-    if (tool === 'docx_table_index' || tool === 'docx_read_table') return { ...retained, ...payload };
+    if (tool === 'docx_table_index') {
+      const totalCount = payload.tables.length;
+      const offset = Math.min(args.offset ?? 0, totalCount);
+      const requestedLimit = args.limit ?? totalCount;
+      const tables = [];
+      for (const table of payload.tables.slice(offset, offset + requestedLimit)) {
+        const candidate = [...tables, table];
+        if (tables.length > 0 && Buffer.byteLength(JSON.stringify(candidate)) > 7_000) break;
+        tables.push(table);
+      }
+      const nextOffset = offset + tables.length < totalCount ? offset + tables.length : null;
+      return {
+        ...retained,
+        schema: payload.schema,
+        receipt: {
+          schema: 'tiwater.docx-table-index-receipt/v1',
+          totalCount,
+          returnedCount: tables.length,
+          remaining: totalCount - offset - tables.length,
+          nextOffset,
+        },
+        tables,
+      };
+    }
+    if (tool === 'docx_read_table') return { ...retained, ...payload };
     throw new Error(`unsupported-docx-observation-tool:${tool}`);
   });
 }
