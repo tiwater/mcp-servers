@@ -375,7 +375,7 @@ const tools = [
   },
   {
     name: 'docx_merge_cells',
-    description: 'Merge selected current DOCX cells when they form one closed rectangle.',
+    description: 'Merge selected current DOCX cells when they form one closed rectangle. A one-column, multi-row rectangle creates a vertical merge whose first cell is the restart owner and whose later cells are continuations. All selected cell content moves into the top-left owner, so the selected content must already be correct for that one logical cell.',
     inputSchema: inputContract('docx_merge_cells'),
     outputSchema: fixedEditOutput('docx_merge_cells'),
     handler: args => fixedEdit('docx_merge_cells', args),
