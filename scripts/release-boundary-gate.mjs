@@ -739,7 +739,8 @@ function checkDocxTableStreamingContract(tools) {
   const receipt = tool?.outputSchema?.properties?.receipt;
   if (!description.includes('exactly the returned row page')
       || !description.includes('never builds another whole-table data object')
-      || !description.includes('never revisit an earlier offset')) {
+      || !description.includes('complete only when receipt.remaining is 0')
+      || !description.includes('each page once in ascending receipt.nextOffset order')) {
     fail(check, 'docx_read_table does not describe one-pass page consumption');
   }
   if (cell?.properties?.text?.type !== 'string'
