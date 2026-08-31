@@ -311,7 +311,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'Page through mixed nearest-child OpenXML objects when document order or paragraph relationships are required. Continue with nextOffset and descend through a returned parent address. Do not use this tool to locate tables or read a whole document: use docx_table_index to locate tables, then docx_read_table for one selected table.',
+    description: 'Page through mixed nearest-child OpenXML objects when document order or paragraph relationships are required. The complete requested provider page is retained at output; the response returns a byte-bounded prefix. Continue with receipt.nextOffset and descend through a returned parent address. Do not use this tool to locate tables or read a whole document: use docx_table_index to locate tables, then docx_read_table for one selected table.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -653,7 +653,28 @@ async function docxObservation(tool, args) {
       artifact: await writeJsonArtifact(output, result.json),
     };
     if (tool === 'docx_list_objects') {
-      return { ...retained, ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
+      const totalCount = payload.receipt.totalCount;
+      const offset = Math.min(args.offset ?? 0, totalCount);
+      const objects = [];
+      for (const sourceObject of payload.objects.map(compactDocxObjectIdentity)) {
+        const candidate = [...objects, sourceObject];
+        if (objects.length > 0 && Buffer.byteLength(JSON.stringify(candidate)) > 6_500) break;
+        objects.push(sourceObject);
+      }
+      const nextOffset = offset + objects.length < totalCount ? offset + objects.length : null;
+      return {
+        ...retained,
+        schema: payload.schema,
+        receipt: {
+          schema: 'tiwater.docx-observation-receipt/v1',
+          operation: 'list',
+          totalCount,
+          returnedCount: objects.length,
+          remaining: totalCount - offset - objects.length,
+          nextOffset,
+        },
+        objects,
+      };
     }
     if (tool === 'docx_table_index') {
       const totalCount = payload.tables.length;
