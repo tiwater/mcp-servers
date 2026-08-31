@@ -194,6 +194,8 @@ const docxNestedObjectIdentity = docxObjectIdentity.pick({
 }).extend({
   gridSpan: z.number().int().positive().optional(),
   verticalMerge: z.string().optional(),
+  verticalMergeOwner: docxAddress.optional(),
+  logicalText: z.string().optional(),
 }).strict();
 const docxObservationNode = z.lazy(() => z.object({
   object: docxNestedObjectIdentity,
@@ -329,7 +331,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read selected rows, cells, or paragraphs from one native DOCX and retain the complete result at output. The response returns compact requested descendants when bounded; if receipt.narrowingRequired is true, request fewer observed addresses or descendants. Use docx_read_table for a table.',
+    description: 'Read selected rows, cells, or paragraphs from one native DOCX and retain the complete result at output. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. The response returns compact requested descendants when bounded; if receipt.narrowingRequired is true, request fewer observed addresses or descendants. Use docx_read_table for a table.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -627,6 +629,8 @@ function compactDocxObservation(observation) {
       textPreview: children.length === 0 ? identity.textPreview : null,
       ...(identity.gridSpan === null ? {} : { gridSpan: identity.gridSpan }),
       ...(identity.verticalMerge === null ? {} : { verticalMerge: identity.verticalMerge }),
+      ...(node.object.verticalMergeOwner === null ? {} : { verticalMergeOwner: node.object.verticalMergeOwner }),
+      ...(node.object.logicalText === null ? {} : { logicalText: node.object.logicalText }),
     };
     return {
       object,
