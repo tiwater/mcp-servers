@@ -85,6 +85,32 @@ try
     });
 
     var targetState = ObserveTarget(target, "target");
+
+    var modeOutput = Path.Combine(root, "paragraph-mode.docx");
+    Run("docx_replace_table_rows", ParagraphModeReplacement(
+        target, targetState, source, sourceTable, sourceRows, sourceRead,
+        sourceFirst: 1, sourceLast: 2, targetFirst: 1,
+        modeOutput, Path.Combine(root, "paragraph-mode-receipt.json")));
+    using (var modeDocument = WordprocessingDocument.Open(modeOutput, false))
+    {
+        var modeRows = modeDocument.MainDocumentPart!.Document.Body!.Elements<Table>()
+            .Single().Elements<TableRow>().ToArray();
+        Require(modeRows.Length == 3, "omitted target last did not replace through table end");
+        Require(modeRows[1].InnerText == "甲甲内容R2=1.000采用 HPLC 检测",
+            "paired Latin prose was not removed or technical content was lost");
+        Require(modeRows[2].InnerText == "English continuation甲续行",
+            "all-Latin content without a Han pair was not preserved");
+    }
+
+    var incompatible = RunExpectFailure("docx_replace_table_rows", ParagraphModeReplacement(
+        target, targetState, source, sourceTable, sourceRows, sourceRead,
+        sourceFirst: 1, sourceLast: 2, targetFirst: 1,
+        Path.Combine(root, "incompatible.docx"), Path.Combine(root, "incompatible-receipt.json"),
+        includeExplicitSelections: true));
+    Require(incompatible.Contains("source-cell-contents-and-source-paragraph-mode-are-mutually-exclusive",
+            StringComparison.Ordinal),
+        "paragraph mode and explicit source selections were not rejected together");
+
     var invalidBoundary = RunExpectFailure("docx_replace_table_rows", Replacement(
         target, targetState, source, sourceTable, sourceRows, sourceRead,
         sourceFirst: 2, sourceLast: 4, targetFirst: 1, targetLast: targetState.Rows.Count - 1,
@@ -168,6 +194,45 @@ object Replacement(
                     sourceHeader = Address(sourceCell), targetHeader = Address(targetCell)
                 }).ToArray(),
                 sourceCellContents = selectedCells
+            }
+        },
+        output,
+        receiptOutput
+    };
+}
+
+object ParagraphModeReplacement(
+    string targetPath, TargetState targetState, string sourcePath, JsonElement sourceTable,
+    IReadOnlyList<JsonElement> sourceRows, JsonElement sourceRead,
+    int sourceFirst, int sourceLast, int targetFirst,
+    string output, string receiptOutput, bool includeExplicitSelections = false)
+{
+    var sourceHeader = ChildObjects(Observation(sourceRead, 0));
+    var selectedCells = Enumerable.Range(sourceFirst, sourceLast - sourceFirst + 1)
+        .SelectMany(index => ChildObservations(Observation(sourceRead, index)))
+        .Select(cell => new
+        {
+            sourceCell = Address(cell.GetProperty("object")),
+            sourceSelections = new[] { new { address = Address(ChildObservations(cell)[0].GetProperty("object")) } }
+        }).ToArray();
+    return new
+    {
+        input = targetPath,
+        tables = new[]
+        {
+            new
+            {
+                sourceInput = sourcePath,
+                sourceTable = Address(sourceTable),
+                sourceRows = new { first = Address(sourceRows[sourceFirst]), last = Address(sourceRows[sourceLast]) },
+                targetTable = Address(targetState.Table),
+                targetRows = new { first = Address(targetState.Rows[targetFirst]) },
+                columns = sourceHeader.Zip(targetState.HeaderCells, (sourceCell, targetCell) => new
+                {
+                    sourceHeader = Address(sourceCell), targetHeader = Address(targetCell)
+                }).ToArray(),
+                sourceCellContents = includeExplicitSelections ? selectedCells : null,
+                sourceParagraphMode = "omit-paired-latin-prose"
             }
         },
         output,
@@ -279,7 +344,15 @@ TableCell Cell(string text, MergedCellValues? merge, bool bilingual)
     var properties = new TableCellProperties();
     if (merge is not null) properties.Append(new VerticalMerge { Val = merge.Value });
     var cell = new TableCell(properties, new Paragraph(new Run(new Text(text))));
-    if (bilingual) cell.Append(new Paragraph(new Run(new Text("EN-" + (text.Length == 0 ? "continuation" : text)))));
+    if (bilingual)
+    {
+        cell.Append(new Paragraph(new Run(new Text(text.Length == 0 ? "English continuation" : "English translation"))));
+        if (text == "甲内容")
+        {
+            cell.Append(new Paragraph(new Run(new Text("R2=1.000"))));
+            cell.Append(new Paragraph(new Run(new Text("采用 HPLC 检测"))));
+        }
+    }
     return cell;
 }
 

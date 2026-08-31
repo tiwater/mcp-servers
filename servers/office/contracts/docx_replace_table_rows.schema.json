@@ -103,7 +103,7 @@
           },
           "targetRows": {
             "type": "object",
-            "description": "Contiguous target data rows to replace. The header row stays outside this range. The first and last row must enclose complete vertical-merge groups as reported by docx_read_table.",
+            "description": "Contiguous target data rows to replace. The header row stays outside this range. Omit last to replace from first through the table's final row. An explicit first and last must enclose complete vertical-merge groups as reported by docx_read_table.",
             "properties": {
               "first": {
                 "type": "object",
@@ -143,8 +143,7 @@
               }
             },
             "required": [
-              "first",
-              "last"
+              "first"
             ],
             "additionalProperties": false
           },
@@ -282,6 +281,11 @@
               ],
               "additionalProperties": false
             }
+          },
+          "sourceParagraphMode": {
+            "type": "string",
+            "const": "omit-paired-latin-prose",
+            "description": "Optional deterministic paragraph selection for every mapped source cell. omit-paired-latin-prose preserves Han or mixed-language paragraphs and standalone technical expressions, while omitting adjacent Latin prose paired after Han text. It cannot be combined with sourceCellContents."
           }
         },
         "required": [
