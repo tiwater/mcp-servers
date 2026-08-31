@@ -247,6 +247,15 @@ const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
 
 const docxTableReadOutput = artifactOutput('docx_read_table').extend({
   schema: z.literal('tiwater.docx-table-read/v1'),
+  receipt: z.object({
+    schema: z.literal('tiwater.docx-table-read-receipt/v1'),
+    totalRowCount: z.number().int().nonnegative(),
+    returnedRowCount: z.number().int().nonnegative(),
+    remaining: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+    inlineTextNodesOmitted: z.literal(true),
+    narrowingRequired: z.boolean(),
+  }).strict(),
   address: docxAddress,
   rowCount: z.number().int().nonnegative(),
   columnCount: z.number().int().nonnegative(),
@@ -281,7 +290,14 @@ const docxTableReadOutput = artifactOutput('docx_read_table').extend({
 }).strict();
 
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
-  observations: z.array(docxObservationNode).min(1),
+  receipt: z.object({
+    schema: z.literal('tiwater.docx-read-object-receipt/v1'),
+    observationCount: z.number().int().positive(),
+    returnedCount: z.number().int().nonnegative(),
+    responseComplete: z.boolean(),
+    narrowingRequired: z.boolean(),
+  }).strict(),
+  observations: z.array(docxObservationNode),
 }).strict();
 
 const tools = [
@@ -311,7 +327,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read selected rows, cells, or paragraphs from one native DOCX in one call and return their requested descendants in address order. Use docx_read_table when the current task needs one complete table. For exact inline content, use an observed cell or paragraph address and request run or text.',
+    description: 'Read selected rows, cells, or paragraphs from one native DOCX and retain the complete result at output. The response returns compact requested descendants when bounded; if receipt.narrowingRequired is true, request fewer observed addresses or descendants. Use docx_read_table for a table.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -319,7 +335,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Returns its nearest non-empty paragraph before and after the table, rows, cells, spans, vertical merges, paragraphs, text nodes, and reusable addresses in document order. It does not locate a table or decide business meaning.',
+    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Writes the complete table, including text nodes, to output and returns a bounded row page with cells, spans, vertical merges, paragraph text, and reusable addresses. Continue with receipt.nextOffset. If receipt.narrowingRequired is true, list rows under the same table and read smaller objects. It does not locate a table or decide business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -663,7 +679,50 @@ async function docxObservation(tool, args) {
         tables,
       };
     }
-    if (tool === 'docx_read_table') return { ...retained, ...payload };
+    if (tool === 'docx_read_table') {
+      const totalRowCount = payload.rows.length;
+      const offset = Math.min(args.offset ?? 0, totalRowCount);
+      const requestedLimit = args.limit ?? totalRowCount;
+      const rows = [];
+      let narrowingRequired = false;
+      for (const sourceRow of payload.rows.slice(offset, offset + requestedLimit)) {
+        const row = {
+          ...sourceRow,
+          cells: sourceRow.cells.map(cell => ({
+            ...cell,
+            paragraphs: cell.paragraphs.map(paragraph => ({ ...paragraph, textNodes: [] })),
+          })),
+        };
+        const candidate = [...rows, row];
+        if (Buffer.byteLength(JSON.stringify(candidate)) > 6_500) {
+          narrowingRequired = rows.length === 0;
+          break;
+        }
+        rows.push(row);
+      }
+      const nextOffset = !narrowingRequired && offset + rows.length < totalRowCount
+        ? offset + rows.length
+        : null;
+      return {
+        ...retained,
+        schema: payload.schema,
+        address: payload.address,
+        rowCount: payload.rowCount,
+        columnCount: payload.columnCount,
+        precedingParagraph: payload.precedingParagraph,
+        followingParagraph: payload.followingParagraph,
+        receipt: {
+          schema: 'tiwater.docx-table-read-receipt/v1',
+          totalRowCount,
+          returnedRowCount: rows.length,
+          remaining: totalRowCount - offset - rows.length,
+          nextOffset,
+          inlineTextNodesOmitted: true,
+          narrowingRequired,
+        },
+        rows,
+      };
+    }
     throw new Error(`unsupported-docx-observation-tool:${tool}`);
   });
 }
@@ -674,12 +733,21 @@ async function docxReadObject(args) {
   const { output: _output, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
+    const observations = result.json.observations.map(compactDocxObservation);
+    const responseComplete = Buffer.byteLength(JSON.stringify(observations)) <= 6_500;
     return {
       tool: 'docx_read_object',
       runtime: commandRuntime(result),
       source: await fileArtifact(input),
       artifact: await writeJsonArtifact(output, result.json),
-      observations: result.json.observations.map(compactDocxObservation),
+      receipt: {
+        schema: 'tiwater.docx-read-object-receipt/v1',
+        observationCount: observations.length,
+        returnedCount: responseComplete ? observations.length : 0,
+        responseComplete,
+        narrowingRequired: !responseComplete,
+      },
+      observations: responseComplete ? observations : [],
     };
   });
 }
