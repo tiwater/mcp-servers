@@ -139,11 +139,7 @@ internal static class LimaWpsPdfConverter
             ?? throw new InvalidOperationException($"Failed to start Lima {backend} PDF conversion.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
-        {
-            try { process.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException($"Lima {backend} PDF conversion timed out after 180 seconds.");
-        }
+        process.WaitForExit();
 
         var outputText = WpsRpcSession.CollectProcessOutput(
             stdoutTask, stderrTask, TimeSpan.FromSeconds(1));

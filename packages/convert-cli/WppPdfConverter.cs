@@ -68,8 +68,8 @@ public static class WppPdfConverter
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
         var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
-            process, completionMarker, () => IsPdf(output), TimeSpan.FromMinutes(3),
-            "WPP RPC PDF conversion timed out after 180 seconds.");
+            process, completionMarker, () => IsPdf(output), WpsRpcSession.OfficeOperationTimeout,
+            "WPP RPC PDF conversion timed out after 600 seconds.");
 
         var details = WpsRpcSession.CollectDiagnosticOutput(
             stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));

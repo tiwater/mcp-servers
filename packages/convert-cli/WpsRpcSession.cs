@@ -5,6 +5,7 @@ namespace Dockit.Convert;
 internal static class WpsRpcSession
 {
     private static readonly string OfficeLeasePath = Path.Combine(Path.GetTempPath(), "tiwater-office.lock");
+    internal static readonly TimeSpan OfficeOperationTimeout = TimeSpan.FromMinutes(10);
 
     internal static bool IsAvailable()
         => FindOnPath("dbus-run-session") is not null
