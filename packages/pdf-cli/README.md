@@ -19,7 +19,7 @@ pip install tiwater-pdf
 
 ## Commands Reference
 
-The CLI provides four major functionalities:
+The CLI provides six major functionalities:
 
 ### 1. Find a Specific Table
 Searches the document for a table matching a specific heading or name and attempts to extract it.
@@ -53,7 +53,20 @@ tiwater-pdf inspect <report.pdf> [--json]
 
 `--json` includes the metadata inspection and detailed table inspection in one result.
 
-### 5. OCR Scanned PDFs With a Vision LLM
+### 5. Render Every Page for Visual Review
+
+Renders a complete PDF to an ordered PNG set. The new output directory also
+contains `manifest.json`, which binds the source PDF hash and every page's
+number, path, hash, byte count, width, and height.
+
+```bash
+tiwater-pdf render-pages <document.pdf> --output-dir <new-directory> [--zoom 2.0] [--json]
+```
+
+The output directory must not already exist; a failed render leaves no partial
+page set.
+
+### 6. OCR Scanned PDFs With a Vision LLM
 Extracts text from scanned or image-only PDFs using an OpenAI-compatible vision model.
 
 ```bash
