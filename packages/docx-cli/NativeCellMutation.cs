@@ -118,11 +118,7 @@ public static class NativeCellMutation
             var owner = rowSelection[0].Cell;
             foreach (var removed in rowSelection.Skip(1))
             {
-                foreach (var paragraph in removed.Cell.Elements<Paragraph>().ToArray())
-                {
-                    paragraph.Remove();
-                    owner.Append(paragraph);
-                }
+                MoveCellContent(removed.Cell, owner);
                 removed.Cell.Remove();
             }
             var properties = owner.TableCellProperties ?? owner.PrependChild(new TableCellProperties());
@@ -135,15 +131,15 @@ public static class NativeCellMutation
 
         if (owners.Count > 1)
         {
+            var owner = owners[0];
+            foreach (var continuation in owners.Skip(1))
+                MoveCellContent(continuation, owner);
             for (var index = 0; index < owners.Count; index++)
             {
                 var properties = owners[index].TableCellProperties ?? owners[index].PrependChild(new TableCellProperties());
                 properties.VerticalMerge = new VerticalMerge { Val = index == 0 ? MergedCellValues.Restart : MergedCellValues.Continue };
                 if (index > 0)
-                {
-                    owners[index].RemoveAllChildren<Paragraph>();
-                    owners[index].Append(new Paragraph());
-                }
+                    ReplaceWithEmptyParagraph(owners[index]);
             }
         }
         return [owners[0]];
@@ -193,8 +189,7 @@ public static class NativeCellMutation
         for (var index = 1; index < span; index++)
         {
             var clone = (TableCell)cell.CloneNode(true);
-            clone.RemoveAllChildren<Paragraph>();
-            clone.Append(new Paragraph());
+            ReplaceWithEmptyParagraph(clone);
             var cloneProperties = clone.TableCellProperties ?? clone.PrependChild(new TableCellProperties());
             cloneProperties.GridSpan = null;
             cloneProperties.VerticalMerge = null;
@@ -204,6 +199,21 @@ public static class NativeCellMutation
             result.Add(clone);
         }
         return result;
+    }
+
+    private static void MoveCellContent(TableCell source, TableCell target)
+    {
+        foreach (var child in source.ChildElements.Where(child => child is not TableCellProperties).ToArray())
+        {
+            child.Remove();
+            target.Append(child);
+        }
+    }
+
+    private static void ReplaceWithEmptyParagraph(TableCell cell)
+    {
+        foreach (var child in cell.ChildElements.Where(child => child is not TableCellProperties).ToArray()) child.Remove();
+        cell.Append(new Paragraph());
     }
 
     private static void SetCellWidth(TableCell cell, Table table, int startColumn, int count)
