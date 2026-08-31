@@ -938,6 +938,7 @@ void RequireTableInvariants(JsonElement table, string name)
     var columnCount = table.GetProperty("columnCount").GetInt32();
     Require(columnCount == table.GetProperty("gridColumns").GetArrayLength(), $"{name}: grid column count mismatch");
     var seenAddresses = new HashSet<string>(StringComparer.Ordinal);
+    var logicalTextByAddress = new Dictionary<string, string>(StringComparer.Ordinal);
     foreach (var row in table.GetProperty("rows").EnumerateArray())
     {
         var cursor = row.GetProperty("gridBefore").GetInt32();
@@ -951,14 +952,28 @@ void RequireTableInvariants(JsonElement table, string name)
             Require(seenAddresses.Add(address), $"{name}: duplicate cell address");
             var merge = cell.GetProperty("verticalMerge");
             var owner = cell.GetProperty("verticalMergeOwner");
+            var logicalText = cell.GetProperty("logicalText").GetString() ?? "";
             if (merge.ValueKind == JsonValueKind.Null)
+            {
                 Require(owner.ValueKind == JsonValueKind.Null, $"{name}: unmerged cell has an owner");
+                Require(logicalText == CellText(cell), $"{name}: unmerged logical text differs from physical text");
+            }
             else if (merge.GetString() == "restart")
+            {
                 Require(owner.GetProperty("path").GetString() == address, $"{name}: restart cell does not own itself");
+                Require(logicalText == CellText(cell), $"{name}: restart logical text differs from physical text");
+            }
             else
+            {
+                var ownerPath = owner.GetProperty("path").GetString() ?? "";
                 Require(owner.ValueKind == JsonValueKind.Object
-                        && seenAddresses.Contains(owner.GetProperty("path").GetString() ?? ""),
+                        && seenAddresses.Contains(ownerPath),
                     $"{name}: continuation cell owner was not observed earlier");
+                Require(logicalTextByAddress.TryGetValue(ownerPath, out var ownerText)
+                        && logicalText == ownerText,
+                    $"{name}: continuation logical text does not resolve its owner");
+            }
+            logicalTextByAddress[address] = logicalText;
         }
         cursor += row.GetProperty("gridAfter").GetInt32();
         Require(cursor == columnCount, $"{name}: row does not cover the declared table grid");

@@ -710,7 +710,8 @@ function checkDocxMergedCellDescriptions(tools) {
   const readDescription = tools.find(tool => tool?.name === 'docx_read_table')?.description || '';
   const setDescription = tools.find(tool => tool?.name === 'docx_set_text')?.description || '';
   if (!readDescription.includes('restart')
-      || !readDescription.includes('continue cell is not an independent row value')) {
+      || !readDescription.includes('continue cell is not an independent row value')
+      || !readDescription.includes('logicalText resolves the restart cell value')) {
     fail(check, 'docx_read_table does not explain vertical-merge logical-cell identity');
   }
   if (!setDescription.includes('restart cell rather than a continue cell')
@@ -733,6 +734,7 @@ function checkDocxTableStreamingContract(tools) {
     fail(check, 'docx_read_table does not describe one-pass page consumption');
   }
   if (cell?.properties?.text?.type !== 'string'
+      || cell?.properties?.logicalText?.type !== 'string'
       || Object.hasOwn(cell?.properties ?? {}, 'paragraphs')
       || receipt?.properties?.detailPageRetained?.const !== true) {
     fail(check, 'docx_read_table response is not a compact page backed by one detailed page');

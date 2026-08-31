@@ -171,18 +171,15 @@ public static class Observation
             }).ToArray();
             return cells;
         }).ToArray();
-        DocxObjectAddress? MergeOwner(int rowIndex, ProjectedTableCell cell)
+        ProjectedTableCell LogicalOwner(int rowIndex, ProjectedTableCell cell)
         {
-            if (cell.VerticalMerge is null) return null;
-            if (cell.VerticalMerge == "restart")
-                return Address(selected.StoryPart, NativePathFor(cell.Cell));
+            if (cell.VerticalMerge is null || cell.VerticalMerge == "restart") return cell;
             for (var previous = rowIndex - 1; previous >= 0; previous--)
             {
                 var candidate = projectedRows[previous].SingleOrDefault(item =>
                     item.GridColumnStart == cell.GridColumnStart && item.GridSpan == cell.GridSpan);
                 if (candidate is null || candidate.VerticalMerge is null) break;
-                if (candidate.VerticalMerge == "restart")
-                    return Address(selected.StoryPart, NativePathFor(candidate.Cell));
+                if (candidate.VerticalMerge == "restart") return candidate;
             }
             throw new InvalidOperationException("vertical-merge-owner-not-found");
         }
@@ -192,19 +189,26 @@ public static class Observation
             row.TableRowProperties?.GetFirstChild<CantSplit>() is not null,
             RowOffset(row.TableRowProperties, "gridBefore"),
             RowOffset(row.TableRowProperties, "gridAfter"),
-            projectedRows[rowIndex].Select(cell => new DocxTableReadCell(
-                Address(selected.StoryPart, NativePathFor(cell.Cell)),
-                cell.GridColumnStart,
-                cell.GridSpan,
-                cell.VerticalMerge,
-                MergeOwner(rowIndex, cell),
-                cell.Cell.Elements<Paragraph>().Select(paragraph => new DocxTableReadParagraph(
+            projectedRows[rowIndex].Select(cell =>
+            {
+                var logicalOwner = LogicalOwner(rowIndex, cell);
+                return new DocxTableReadCell(
+                    Address(selected.StoryPart, NativePathFor(cell.Cell)),
+                    cell.GridColumnStart,
+                    cell.GridSpan,
+                    cell.VerticalMerge,
+                    cell.VerticalMerge is null
+                        ? null
+                        : Address(selected.StoryPart, NativePathFor(logicalOwner.Cell)),
+                    string.Join("\n", logicalOwner.Cell.Elements<Paragraph>()
+                        .Select(paragraph => paragraph.InnerText)),
+                    cell.Cell.Elements<Paragraph>().Select(paragraph => new DocxTableReadParagraph(
                     Address(selected.StoryPart, NativePathFor(paragraph)),
                     paragraph.InnerText,
                     paragraph.Descendants<Text>().Select(value => new DocxTableReadText(
                         Address(selected.StoryPart, NativePathFor(value)), value.Text)).ToArray()
-                )).ToArray()
-            )).ToArray()
+                    )).ToArray());
+            }).ToArray()
         )).ToArray();
         var columnCount = Math.Max(
             table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count() ?? 0,
@@ -711,6 +715,7 @@ public sealed record DocxTableReadCell(
     [property: JsonPropertyName("gridSpan")] int GridSpan,
     [property: JsonPropertyName("verticalMerge")] string? VerticalMerge,
     [property: JsonPropertyName("verticalMergeOwner")] DocxObjectAddress? VerticalMergeOwner,
+    [property: JsonPropertyName("logicalText")] string LogicalText,
     [property: JsonPropertyName("paragraphs")] IReadOnlyList<DocxTableReadParagraph> Paragraphs);
 
 public sealed record DocxTableReadRow(
