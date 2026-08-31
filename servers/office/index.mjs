@@ -216,6 +216,18 @@ const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
   runtime: runtimeIdentity,
 }).strict();
 
+const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
+  schema: z.literal('tiwater.docx-table-index/v1'),
+  tables: z.array(z.object({
+    address: docxAddress,
+    parentAddress: docxAddress.nullable(),
+    rowCount: z.number().int().nonnegative(),
+    columnCount: z.number().int().nonnegative(),
+    textPreview: z.string(),
+    textLength: z.number().int().nonnegative(),
+  }).strict()),
+}).strict();
+
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   observations: z.array(docxObservationNode).min(1),
 }).strict();
@@ -236,6 +248,14 @@ const tools = [
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_list_objects', args),
+  },
+  {
+    name: 'docx_table_index',
+    description: 'List every table in one current DOCX as a compact native index with its OpenXML address, row count, column count, and short text preview. Use it to choose a table and confirm its shape before listing rows or reading selected content. It does not return full cell content or decide table semantics.',
+    inputSchema: inputContract('docx_table_index'),
+    outputSchema: docxTableIndexOutput,
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: args => docxObservation('docx_table_index', args),
   },
   {
     name: 'docx_read_object',
@@ -559,6 +579,7 @@ async function docxObservation(tool, args) {
     if (tool === 'docx_list_objects') {
       return { ...retained, ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
     }
+    if (tool === 'docx_table_index') return { ...retained, ...payload };
     throw new Error(`unsupported-docx-observation-tool:${tool}`);
   });
 }
