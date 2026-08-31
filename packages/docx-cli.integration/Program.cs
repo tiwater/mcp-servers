@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -236,24 +237,627 @@ try
     RunInput("validate-openxml", batchColumns);
     RunInput("validate-openxml", insertedInsideOtherSpan);
     RunInput("validate-openxml", merged);
-    Console.WriteLine("PASS table observation, row insertion, column edits, batch merges, and readback");
+
+    foreach (var shape in new[] { "flat", "horizontal", "vertical", "mixed", "rectangle", "irregular", "multi-paragraph" })
+        RunTableOperationMatrix(shape, path => CreateMatrixDocument(path, shape));
+    RunTableOperationMatrix("nested", CreateNestedMatrixDocument, tableIndex: 1);
+    RunNestedCellContentMatrix();
+    RunTableFailureMatrix();
+
+    Console.WriteLine("PASS table operation matrix across 8 table shapes");
 }
 finally
 {
     Directory.Delete(root, recursive: true);
 }
 
+void RunTableOperationMatrix(string name, Action<string> create, int tableIndex = 0)
+{
+    var original = Path.Combine(root, $"matrix-{name}-original.docx");
+    create(original);
+    var baseline = ReadTableAt(original, $"matrix-{name}-baseline", tableIndex);
+    RequireTableInvariants(baseline, $"{name}:baseline");
+    var baselineSignature = TableSignature(baseline);
+    RunExistingMergeRoundTrips(name, original, baseline, tableIndex);
+
+    var written = Path.Combine(root, $"matrix-{name}-written.docx");
+    var lastRow = baseline.GetProperty("rows").GetArrayLength() - 1;
+    var writeTarget = CellAt(baseline, lastRow, 0).GetProperty("address").Clone();
+    Run("docx_set_text", new
+    {
+        input = original,
+        changes = new[] { new { target = writeTarget, text = $"write-{name}" } },
+        output = written,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-written-receipt.json")
+    });
+    var writtenState = ReadTableAt(written, $"matrix-{name}-written", tableIndex);
+    Require(CellText(CellAt(writtenState, lastRow, 0)) == $"write-{name}", $"{name}: cell write was not readable");
+    RequireTableInvariants(writtenState, $"{name}:written");
+
+    var rowStartSequence = Path.Combine(root, $"matrix-{name}-row-start.docx");
+    Run("docx_insert_objects", new
+    {
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = original,
+                sources = new[] { baseline.GetProperty("rows")[0].GetProperty("address").Clone() },
+                targetParent = baseline.GetProperty("address").Clone(),
+                before = baseline.GetProperty("rows")[0].GetProperty("address").Clone(),
+                repeat = 1
+            }
+        },
+        output = rowStartSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-row-start-insert-receipt.json")
+    });
+    var rowStarted = ReadTableAt(rowStartSequence, $"matrix-{name}-row-start-inserted", tableIndex);
+    Require(rowStarted.GetProperty("rowCount").GetInt32() == baseline.GetProperty("rowCount").GetInt32() + 1,
+        $"{name}: row insertion at table start count mismatch");
+    RequireUniqueWordIdentities(rowStartSequence);
+    Run("docx_delete_object", new
+    {
+        input = rowStartSequence,
+        changes = new[] { new { addresses = new[] { rowStarted.GetProperty("rows")[0].GetProperty("address").Clone() } } },
+        output = rowStartSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-row-start-delete-receipt.json")
+    });
+    var rowStartRoundTrip = ReadTableAt(rowStartSequence, $"matrix-{name}-row-start-roundtrip", tableIndex);
+    Require(TableSignature(rowStartRoundTrip) == baselineSignature,
+        $"{name}: insert/delete at table start changed the base table");
+    RequireTableInvariants(rowStartRoundTrip, $"{name}:row-start-roundtrip");
+
+    var rowSequence = Path.Combine(root, $"matrix-{name}-row-sequence.docx");
+    Run("docx_insert_objects", new
+    {
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = original,
+                sources = new[] { baseline.GetProperty("rows")[lastRow].GetProperty("address").Clone() },
+                targetParent = baseline.GetProperty("address").Clone(),
+                repeat = 1
+            }
+        },
+        output = rowSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-row-insert-receipt.json")
+    });
+    var rowInserted = ReadTableAt(rowSequence, $"matrix-{name}-row-inserted", tableIndex);
+    Require(rowInserted.GetProperty("rowCount").GetInt32() == baseline.GetProperty("rowCount").GetInt32() + 1,
+        $"{name}: row insertion count mismatch");
+    RequireUniqueWordIdentities(rowSequence);
+    var insertedRowIndex = rowInserted.GetProperty("rows").GetArrayLength() - 1;
+    Run("docx_set_text", new
+    {
+        input = rowSequence,
+        changes = new[] { new { target = CellAt(rowInserted, insertedRowIndex, 0).GetProperty("address").Clone(), text = "row-chain" } },
+        output = rowSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-row-write-receipt.json")
+    });
+    var rowWritten = ReadTableAt(rowSequence, $"matrix-{name}-row-written", tableIndex);
+    var rowMergeCells = new[]
+    {
+        CellAt(rowWritten, insertedRowIndex, 1).GetProperty("address").Clone(),
+        CellAt(rowWritten, insertedRowIndex, 2).GetProperty("address").Clone()
+    };
+    Run("docx_merge_cells", new
+    {
+        input = rowSequence,
+        changes = new[] { new { cells = rowMergeCells } },
+        output = rowSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-row-merge-receipt.json")
+    });
+    var rowMerged = ReadTableAt(rowSequence, $"matrix-{name}-row-merged", tableIndex);
+    var rowMergeOwner = CellAt(rowMerged, insertedRowIndex, 1);
+    Require(rowMergeOwner.GetProperty("gridSpan").GetInt32() == 2, $"{name}: inserted-row merge did not span two columns");
+    Run("docx_split_cells", new
+    {
+        input = rowSequence,
+        changes = new[] { new { cells = new[] { rowMergeOwner.GetProperty("address").Clone() } } },
+        output = rowSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-row-split-receipt.json")
+    });
+    var rowSplit = ReadTableAt(rowSequence, $"matrix-{name}-row-split", tableIndex);
+    Run("docx_delete_object", new
+    {
+        input = rowSequence,
+        changes = new[] { new { addresses = new[] { rowSplit.GetProperty("rows")[insertedRowIndex].GetProperty("address").Clone() } } },
+        output = rowSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-row-delete-receipt.json")
+    });
+    var rowRoundTrip = ReadTableAt(rowSequence, $"matrix-{name}-row-roundtrip", tableIndex);
+    Require(TableSignature(rowRoundTrip) == baselineSignature, $"{name}: insert/write/merge/split/delete row sequence changed the base table");
+    RequireTableInvariants(rowRoundTrip, $"{name}:row-roundtrip");
+
+    var firstWorkspaceRow = baseline.GetProperty("rows").GetArrayLength() - 2;
+    var secondWorkspaceRow = firstWorkspaceRow + 1;
+    var verticalSequence = Path.Combine(root, $"matrix-{name}-vertical-sequence.docx");
+    Run("docx_merge_cells", new
+    {
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                cells = new[]
+                {
+                    CellAt(baseline, firstWorkspaceRow, 3).GetProperty("address").Clone(),
+                    CellAt(baseline, secondWorkspaceRow, 3).GetProperty("address").Clone()
+                }
+            }
+        },
+        output = verticalSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-vertical-merge-receipt.json")
+    });
+    var verticalMerged = ReadTableAt(verticalSequence, $"matrix-{name}-vertical-merged", tableIndex);
+    var verticalOwner = CellAt(verticalMerged, firstWorkspaceRow, 3);
+    var verticalContinuation = CellAt(verticalMerged, secondWorkspaceRow, 3);
+    Require(verticalOwner.GetProperty("verticalMerge").GetString() == "restart"
+            && verticalContinuation.GetProperty("verticalMerge").GetString() == "continue"
+            && verticalContinuation.GetProperty("verticalMergeOwner").GetRawText()
+               == verticalOwner.GetProperty("address").GetRawText(),
+        $"{name}: vertical merge owner relationship is wrong");
+    Require(CellText(verticalOwner) == "尾一\n尾二", $"{name}: vertical merge lost selected cell content");
+    Run("docx_set_text", new
+    {
+        input = verticalSequence,
+        changes = new[] { new { target = verticalOwner.GetProperty("address").Clone(), text = "vertical-chain" } },
+        output = verticalSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-vertical-write-receipt.json")
+    });
+    var verticalWritten = ReadTableAt(verticalSequence, $"matrix-{name}-vertical-written", tableIndex);
+    Run("docx_split_cells", new
+    {
+        input = verticalSequence,
+        changes = new[] { new { cells = new[] { CellAt(verticalWritten, firstWorkspaceRow, 3).GetProperty("address").Clone() } } },
+        output = verticalSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-vertical-split-receipt.json")
+    });
+    var verticalSplit = ReadTableAt(verticalSequence, $"matrix-{name}-vertical-split", tableIndex);
+    Require(TableStructureSignature(verticalSplit) == TableStructureSignature(baseline),
+        $"{name}: vertical merge/write/split sequence changed the base table structure");
+    Require(CellText(CellAt(verticalSplit, firstWorkspaceRow, 3)) == "vertical-chain"
+            && CellText(CellAt(verticalSplit, secondWorkspaceRow, 3)) == "",
+        $"{name}: vertical split did not retain merged owner content");
+    RequireTableInvariants(verticalSplit, $"{name}:vertical-split");
+
+    var rectangleSequence = Path.Combine(root, $"matrix-{name}-rectangle-sequence.docx");
+    var rectangleCells = new[]
+    {
+        CellAt(baseline, firstWorkspaceRow, 1).GetProperty("address").Clone(),
+        CellAt(baseline, firstWorkspaceRow, 2).GetProperty("address").Clone(),
+        CellAt(baseline, secondWorkspaceRow, 1).GetProperty("address").Clone(),
+        CellAt(baseline, secondWorkspaceRow, 2).GetProperty("address").Clone()
+    };
+    Run("docx_merge_cells", new
+    {
+        input = original,
+        changes = new[] { new { cells = rectangleCells } },
+        output = rectangleSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-rectangle-merge-receipt.json")
+    });
+    var rectangleMerged = ReadTableAt(rectangleSequence, $"matrix-{name}-rectangle-merged", tableIndex);
+    var rectangleOwner = CellAt(rectangleMerged, firstWorkspaceRow, 1);
+    var rectangleContinuation = CellAt(rectangleMerged, secondWorkspaceRow, 1);
+    Require(rectangleOwner.GetProperty("gridSpan").GetInt32() == 2
+            && rectangleOwner.GetProperty("verticalMerge").GetString() == "restart"
+            && rectangleContinuation.GetProperty("verticalMerge").GetString() == "continue",
+        $"{name}: 2x2 merge did not create one rectangular owner");
+    Run("docx_set_text", new
+    {
+        input = rectangleSequence,
+        changes = new[] { new { target = rectangleOwner.GetProperty("address").Clone(), text = "rectangle-chain" } },
+        output = rectangleSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-rectangle-write-receipt.json")
+    });
+    var rectangleWritten = ReadTableAt(rectangleSequence, $"matrix-{name}-rectangle-written", tableIndex);
+    var currentContinuationRow = rectangleWritten.GetProperty("rows")[secondWorkspaceRow];
+    Run("docx_insert_objects", new
+    {
+        input = rectangleSequence,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = rectangleSequence,
+                sources = new[] { currentContinuationRow.GetProperty("address").Clone() },
+                targetParent = rectangleWritten.GetProperty("address").Clone(),
+                before = currentContinuationRow.GetProperty("address").Clone(),
+                repeat = 1
+            }
+        },
+        output = rectangleSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-rectangle-insert-receipt.json")
+    });
+    var rectangleExtended = ReadTableAt(rectangleSequence, $"matrix-{name}-rectangle-extended", tableIndex);
+    var ownerPath = CellAt(rectangleExtended, firstWorkspaceRow, 1).GetProperty("address").GetProperty("path").GetString();
+    foreach (var rowIndex in new[] { firstWorkspaceRow + 1, firstWorkspaceRow + 2 })
+    {
+        var cell = CellAt(rectangleExtended, rowIndex, 1);
+        Require(cell.GetProperty("verticalMerge").GetString() == "continue"
+                && cell.GetProperty("verticalMergeOwner").GetProperty("path").GetString() == ownerPath,
+            $"{name}: inserted row did not remain in the 2x2 merge group");
+    }
+    RequireUniqueWordIdentities(rectangleSequence);
+    Run("docx_split_cells", new
+    {
+        input = rectangleSequence,
+        changes = new[] { new { cells = new[] { CellAt(rectangleExtended, firstWorkspaceRow, 1).GetProperty("address").Clone() } } },
+        output = rectangleSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-rectangle-split-receipt.json")
+    });
+    var rectangleSplit = ReadTableAt(rectangleSequence, $"matrix-{name}-rectangle-split", tableIndex);
+    Run("docx_set_text", new
+    {
+        input = rectangleSequence,
+        changes = new[] { new { target = CellAt(rectangleSplit, firstWorkspaceRow, 1).GetProperty("address").Clone(), text = "" } },
+        output = rectangleSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-rectangle-clear-receipt.json")
+    });
+    var rectangleCleared = ReadTableAt(rectangleSequence, $"matrix-{name}-rectangle-cleared", tableIndex);
+    Run("docx_delete_object", new
+    {
+        input = rectangleSequence,
+        changes = new[] { new { addresses = new[] { rectangleCleared.GetProperty("rows")[firstWorkspaceRow + 1].GetProperty("address").Clone() } } },
+        output = rectangleSequence,
+        receiptOutput = Path.Combine(root, $"matrix-{name}-rectangle-delete-receipt.json")
+    });
+    var rectangleRoundTrip = ReadTableAt(rectangleSequence, $"matrix-{name}-rectangle-roundtrip", tableIndex);
+    Require(TableSignature(rectangleRoundTrip) == baselineSignature,
+        $"{name}: merge/write/insert/split/delete sequence changed the base table");
+    RequireTableInvariants(rectangleRoundTrip, $"{name}:rectangle-roundtrip");
+
+    var columnCount = baseline.GetProperty("columnCount").GetInt32();
+    foreach (var (label, sourceColumn, insertionColumn) in new[]
+             {
+                 ("start", 0, 0),
+                 ("middle", 0, 1),
+                 ("end", columnCount - 1, columnCount)
+             })
+        RunColumnOperationSequence(name, label, original, baseline, baselineSignature, tableIndex,
+            lastRow, sourceColumn, insertionColumn);
+
+    foreach (var output in new[] { written, rowStartSequence, rowSequence, verticalSequence, rectangleSequence })
+        RunInput("validate-openxml", output);
+    Console.WriteLine($"PASS table matrix: {name}");
+}
+
+void RunExistingMergeRoundTrips(string shape, string original, JsonElement baseline, int tableIndex)
+{
+    var rows = baseline.GetProperty("rows");
+    var regions = new List<(int Row, int Start, int Width, int Height)>();
+    for (var rowIndex = 0; rowIndex < rows.GetArrayLength(); rowIndex++)
+    foreach (var cell in rows[rowIndex].GetProperty("cells").EnumerateArray())
+    {
+        var merge = cell.GetProperty("verticalMerge");
+        if (merge.ValueKind != JsonValueKind.Null && merge.GetString() == "continue") continue;
+        var start = cell.GetProperty("gridColumnStart").GetInt32();
+        var width = cell.GetProperty("gridSpan").GetInt32();
+        var height = 1;
+        if (merge.ValueKind != JsonValueKind.Null && merge.GetString() == "restart")
+        {
+            var ownerPath = cell.GetProperty("address").GetProperty("path").GetString();
+            for (var next = rowIndex + 1; next < rows.GetArrayLength(); next++)
+            {
+                var continuation = rows[next].GetProperty("cells").EnumerateArray().FirstOrDefault(candidate =>
+                    candidate.GetProperty("gridColumnStart").GetInt32() == start
+                    && candidate.GetProperty("gridSpan").GetInt32() == width);
+                if (continuation.ValueKind == JsonValueKind.Undefined
+                    || continuation.GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
+                    || continuation.GetProperty("verticalMerge").GetString() != "continue"
+                    || continuation.GetProperty("verticalMergeOwner").GetProperty("path").GetString() != ownerPath)
+                    break;
+                height++;
+            }
+        }
+        if (width > 1 || height > 1) regions.Add((rowIndex, start, width, height));
+    }
+
+    for (var regionIndex = 0; regionIndex < regions.Count; regionIndex++)
+    {
+        var region = regions[regionIndex];
+        var ownerWrite = Path.Combine(root, $"matrix-{shape}-existing-merge-{regionIndex}-write.docx");
+        Run("docx_set_text", new
+        {
+            input = original,
+            changes = new[]
+            {
+                new
+                {
+                    target = CellAt(baseline, region.Row, region.Start).GetProperty("address").Clone(),
+                    text = $"owner-{shape}-{regionIndex}"
+                }
+            },
+            output = ownerWrite,
+            receiptOutput = Path.Combine(root, $"matrix-{shape}-existing-merge-{regionIndex}-write-receipt.json")
+        });
+        var ownerWritten = ReadTableAt(ownerWrite, $"matrix-{shape}-existing-merge-{regionIndex}-written", tableIndex);
+        Require(TableStructureSignature(ownerWritten) == TableStructureSignature(baseline)
+                && CellText(CellAt(ownerWritten, region.Row, region.Start)) == $"owner-{shape}-{regionIndex}",
+            $"{shape}: writing an existing merge owner changed its structure");
+        RunInput("validate-openxml", ownerWrite);
+
+        var output = Path.Combine(root, $"matrix-{shape}-existing-merge-{regionIndex}.docx");
+        var originalOwnerText = CellText(CellAt(baseline, region.Row, region.Start));
+        Run("docx_split_cells", new
+        {
+            input = original,
+            changes = new[]
+            {
+                new { cells = new[] { CellAt(baseline, region.Row, region.Start).GetProperty("address").Clone() } }
+            },
+            output,
+            receiptOutput = Path.Combine(root, $"matrix-{shape}-existing-merge-{regionIndex}-split-receipt.json")
+        });
+        var split = ReadTableAt(output, $"matrix-{shape}-existing-merge-{regionIndex}-split", tableIndex);
+        var cells = new List<JsonElement>();
+        for (var row = region.Row; row < region.Row + region.Height; row++)
+        for (var column = region.Start; column < region.Start + region.Width; column++)
+        {
+            var cell = CellAt(split, row, column);
+            Require(cell.GetProperty("gridSpan").GetInt32() == 1
+                    && cell.GetProperty("verticalMerge").ValueKind == JsonValueKind.Null,
+                $"{shape}: split did not expose every cell in an existing merge");
+            cells.Add(cell.GetProperty("address").Clone());
+        }
+        Run("docx_merge_cells", new
+        {
+            input = output,
+            changes = new[] { new { cells = cells.ToArray() } },
+            output,
+            receiptOutput = Path.Combine(root, $"matrix-{shape}-existing-merge-{regionIndex}-merge-receipt.json")
+        });
+        var restored = ReadTableAt(output, $"matrix-{shape}-existing-merge-{regionIndex}-restored", tableIndex);
+        Require(TableStructureSignature(restored) == TableStructureSignature(baseline),
+            $"{shape}: split/merge changed existing merge structure");
+        Require(CellText(CellAt(restored, region.Row, region.Start)).TrimEnd('\n') == originalOwnerText.TrimEnd('\n'),
+            $"{shape}: split/merge lost existing owner text");
+        RequireTableInvariants(restored, $"{shape}:existing-merge-{regionIndex}");
+        RunInput("validate-openxml", output);
+
+        var deleted = Path.Combine(root, $"matrix-{shape}-existing-merge-{regionIndex}-deleted.docx");
+        Run("docx_delete_object", new
+        {
+            input = original,
+            changes = new[]
+            {
+                new
+                {
+                    addresses = Enumerable.Range(region.Row, region.Height)
+                        .Select(row => baseline.GetProperty("rows")[row].GetProperty("address").Clone()).ToArray()
+                }
+            },
+            output = deleted,
+            receiptOutput = Path.Combine(root, $"matrix-{shape}-existing-merge-{regionIndex}-delete-receipt.json")
+        });
+        var deletedState = ReadTableAt(deleted, $"matrix-{shape}-existing-merge-{regionIndex}-deleted", tableIndex);
+        Require(deletedState.GetProperty("rowCount").GetInt32()
+                == baseline.GetProperty("rowCount").GetInt32() - region.Height,
+            $"{shape}: deleting a closed merged-row set changed the wrong row count");
+        RequireTableInvariants(deletedState, $"{shape}:existing-merge-{regionIndex}-deleted");
+        RunInput("validate-openxml", deleted);
+    }
+}
+
+void RunColumnOperationSequence(
+    string shape,
+    string label,
+    string original,
+    JsonElement baseline,
+    string baselineSignature,
+    int tableIndex,
+    int lastRow,
+    int sourceColumn,
+    int insertionColumn)
+{
+    var output = Path.Combine(root, $"matrix-{shape}-column-{label}.docx");
+    var grid = baseline.GetProperty("gridColumns");
+    var before = insertionColumn < grid.GetArrayLength()
+        ? grid[insertionColumn].GetProperty("address").Clone()
+        : (JsonElement?)null;
+    Run("docx_insert_table_columns", new
+    {
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                table = baseline.GetProperty("address").Clone(),
+                sourceColumn = grid[sourceColumn].GetProperty("address").Clone(),
+                before
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, $"matrix-{shape}-column-{label}-insert-receipt.json")
+    });
+    var inserted = ReadTableAt(output, $"matrix-{shape}-column-{label}-inserted", tableIndex);
+    Require(inserted.GetProperty("columnCount").GetInt32() == baseline.GetProperty("columnCount").GetInt32() + 1,
+        $"{shape}:{label}: column insertion count mismatch");
+    Run("docx_set_text", new
+    {
+        input = output,
+        changes = new[]
+        {
+            new
+            {
+                target = CellAt(inserted, lastRow, insertionColumn).GetProperty("address").Clone(),
+                text = $"column-{label}"
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, $"matrix-{shape}-column-{label}-write-receipt.json")
+    });
+    var written = ReadTableAt(output, $"matrix-{shape}-column-{label}-written", tableIndex);
+    Run("docx_set_text", new
+    {
+        input = output,
+        changes = new[]
+        {
+            new { target = CellAt(written, lastRow, insertionColumn).GetProperty("address").Clone(), text = "" }
+        },
+        output,
+        receiptOutput = Path.Combine(root, $"matrix-{shape}-column-{label}-clear-receipt.json")
+    });
+    var cleared = ReadTableAt(output, $"matrix-{shape}-column-{label}-cleared", tableIndex);
+    Run("docx_delete_table_columns", new
+    {
+        input = output,
+        changes = new[]
+        {
+            new
+            {
+                table = cleared.GetProperty("address").Clone(),
+                columns = new[] { cleared.GetProperty("gridColumns")[insertionColumn].GetProperty("address").Clone() }
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, $"matrix-{shape}-column-{label}-delete-receipt.json")
+    });
+    var roundTrip = ReadTableAt(output, $"matrix-{shape}-column-{label}-roundtrip", tableIndex);
+    Require(TableSignature(roundTrip) == baselineSignature,
+        $"{shape}:{label}: insert/write/delete column sequence changed the base table");
+    RequireTableInvariants(roundTrip, $"{shape}:column-{label}-roundtrip");
+    RunInput("validate-openxml", output);
+}
+
+void RunNestedCellContentMatrix()
+{
+    var input = Path.Combine(root, "matrix-nested-cell.docx");
+    CreateNestedMatrixDocument(input);
+    var outer = ReadTableAt(input, "matrix-nested-cell-outer", 0);
+    var inner = ReadTableAt(input, "matrix-nested-cell-inner", 1);
+    var innerSignature = TableSignature(inner);
+    var output = Path.Combine(root, "matrix-nested-cell-merged.docx");
+    Run("docx_merge_cells", new
+    {
+        input,
+        changes = new[]
+        {
+            new
+            {
+                cells = new[]
+                {
+                    CellAt(outer, 0, 0).GetProperty("address").Clone(),
+                    CellAt(outer, 0, 1).GetProperty("address").Clone()
+                }
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, "matrix-nested-cell-merge-receipt.json")
+    });
+    var mergedOuter = ReadTableAt(output, "matrix-nested-cell-merged-outer", 0);
+    var mergedInner = ReadTableAt(output, "matrix-nested-cell-merged-inner", 1);
+    Require(mergedOuter.GetProperty("rows")[0].GetProperty("cells").GetArrayLength() == 1
+            && CellAt(mergedOuter, 0, 0).GetProperty("gridSpan").GetInt32() == 2,
+        "nested-cell merge did not create one owner");
+    Require(TableSignature(mergedInner) == innerSignature, "nested table content was lost during outer-cell merge");
+    Run("docx_split_cells", new
+    {
+        input = output,
+        changes = new[]
+        {
+            new { cells = new[] { CellAt(mergedOuter, 0, 0).GetProperty("address").Clone() } }
+        },
+        output,
+        receiptOutput = Path.Combine(root, "matrix-nested-cell-split-receipt.json")
+    });
+    var splitOuter = ReadTableAt(output, "matrix-nested-cell-split-outer", 0);
+    var splitInner = ReadTableAt(output, "matrix-nested-cell-split-inner", 1);
+    var index = Run("docx_table_index", new
+    {
+        input = output,
+        output = Path.Combine(root, "matrix-nested-cell-final-index.json")
+    });
+    Require(splitOuter.GetProperty("rows")[0].GetProperty("cells").GetArrayLength() == 2,
+        "nested-cell split did not restore two cells");
+    Require(index.GetProperty("tables").GetArrayLength() == 2,
+        "nested-cell split duplicated or deleted the nested table");
+    Require(TableSignature(splitInner) == innerSignature,
+        "nested table content changed during outer-cell split");
+    RequireTableInvariants(splitOuter, "nested-cell:outer");
+    RequireTableInvariants(splitInner, "nested-cell:inner");
+    RunInput("validate-openxml", output);
+    Console.WriteLine("PASS nested table cell-content preservation");
+}
+
+void RunTableFailureMatrix()
+{
+    var input = Path.Combine(root, "matrix-failure.docx");
+    CreateMatrixDocument(input, "mixed");
+    var state = ReadTable(input, "matrix-failure");
+    var rows = state.GetProperty("rows");
+    var firstWorkspaceRow = rows.GetArrayLength() - 2;
+    var secondWorkspaceRow = firstWorkspaceRow + 1;
+
+    var duplicateReceipt = Path.Combine(root, "matrix-failure-duplicate-write.json");
+    var duplicateTarget = CellAt(state, firstWorkspaceRow, 0).GetProperty("address").Clone();
+    var duplicateError = RunExpectAtomicFailure("docx_set_text", input, duplicateReceipt, new
+    {
+        input,
+        changes = new[] { new { target = duplicateTarget, text = "一" }, new { target = duplicateTarget, text = "二" } },
+        output = input,
+        receiptOutput = duplicateReceipt
+    });
+    Require(duplicateError.Contains("target-address-duplicate", StringComparison.Ordinal),
+        "duplicate set-text target did not fail explicitly");
+
+    var nonRectangleReceipt = Path.Combine(root, "matrix-failure-non-rectangle.json");
+    var nonRectangleError = RunExpectAtomicFailure("docx_merge_cells", input, nonRectangleReceipt, new
+    {
+        input,
+        changes = new[]
+        {
+            new
+            {
+                cells = new[]
+                {
+                    CellAt(state, firstWorkspaceRow, 1).GetProperty("address").Clone(),
+                    CellAt(state, firstWorkspaceRow, 2).GetProperty("address").Clone(),
+                    CellAt(state, secondWorkspaceRow, 1).GetProperty("address").Clone()
+                }
+            }
+        },
+        output = input,
+        receiptOutput = nonRectangleReceipt
+    });
+    Require(nonRectangleError.Contains("merge-cell-selection-must-be-one-closed-rectangle", StringComparison.Ordinal),
+        "non-rectangular merge did not fail explicitly");
+
+    var splitReceipt = Path.Combine(root, "matrix-failure-split-owner.json");
+    var splitError = RunExpectAtomicFailure("docx_split_cells", input, splitReceipt, new
+    {
+        input,
+        changes = new[] { new { cells = new[] { CellAt(state, firstWorkspaceRow, 0).GetProperty("address").Clone() } } },
+        output = input,
+        receiptOutput = splitReceipt
+    });
+    Require(splitError.Contains("split-cell-must-be-a-merge-owner", StringComparison.Ordinal),
+        "split of an unmerged cell did not fail explicitly");
+
+    RunInput("validate-openxml", input);
+    Console.WriteLine("PASS table failure atomicity matrix");
+}
+
 JsonElement ReadTable(string input, string stem)
+{
+    return ReadTableAt(input, stem, 0);
+}
+
+JsonElement ReadTableAt(string input, string stem, int tableIndex)
 {
     var index = Run("docx_table_index", new
     {
         input,
         output = Path.Combine(root, stem + "-index.json")
     });
+    Require(index.GetProperty("tables").GetArrayLength() > tableIndex, $"{stem}: table index {tableIndex} missing");
     return Run("docx_read_table", new
     {
         input,
-        table = index.GetProperty("tables")[0].GetProperty("address").Clone(),
+        table = index.GetProperty("tables")[tableIndex].GetProperty("address").Clone(),
         output = Path.Combine(root, stem + "-table.json")
     });
 }
@@ -261,9 +865,10 @@ JsonElement ReadTable(string input, string stem)
 JsonElement Run(string command, object request)
 {
     var requestPath = Path.Combine(root, Guid.NewGuid().ToString("N") + ".json");
-    File.WriteAllText(requestPath, JsonSerializer.Serialize(request));
+    var requestJson = JsonSerializer.Serialize(request);
+    File.WriteAllText(requestPath, requestJson);
     var result = Execute(command, requestPath);
-    Require(result.ExitCode == 0, $"{command} failed: {result.Error}\n{result.Output}");
+    Require(result.ExitCode == 0, $"{command} failed: {result.Error}\n{result.Output}\nrequest={requestJson}");
     return JsonDocument.Parse(result.Output).RootElement.Clone();
 }
 
@@ -274,6 +879,15 @@ string RunExpectFailure(string command, object request)
     var result = Execute(command, requestPath);
     Require(result.ExitCode != 0, $"{command} unexpectedly succeeded");
     return result.Error + result.Output;
+}
+
+string RunExpectAtomicFailure(string command, string input, string receipt, object request)
+{
+    var before = FileHash(input);
+    var error = RunExpectFailure(command, request);
+    Require(FileHash(input) == before, $"{command} changed its input after failure");
+    Require(!File.Exists(receipt), $"{command} retained a success receipt after failure");
+    return error;
 }
 
 void RunInput(string command, string input)
@@ -298,6 +912,202 @@ void RunInput(string command, string input)
     var error = process.StandardError.ReadToEnd();
     process.WaitForExit();
     return (process.ExitCode, output, error);
+}
+
+string FileHash(string path)
+{
+    using var stream = File.OpenRead(path);
+    return Convert.ToHexString(SHA256.HashData(stream));
+}
+
+JsonElement CellAt(JsonElement table, int rowIndex, int gridColumnStart)
+{
+    var match = table.GetProperty("rows")[rowIndex].GetProperty("cells").EnumerateArray()
+        .FirstOrDefault(cell => cell.GetProperty("gridColumnStart").GetInt32() == gridColumnStart);
+    Require(match.ValueKind != JsonValueKind.Undefined,
+        $"cell missing: row={rowIndex}, gridColumnStart={gridColumnStart}");
+    return match;
+}
+
+string CellText(JsonElement cell)
+    => string.Join("\n", cell.GetProperty("paragraphs").EnumerateArray()
+        .Select(paragraph => paragraph.GetProperty("text").GetString() ?? ""));
+
+void RequireTableInvariants(JsonElement table, string name)
+{
+    var columnCount = table.GetProperty("columnCount").GetInt32();
+    Require(columnCount == table.GetProperty("gridColumns").GetArrayLength(), $"{name}: grid column count mismatch");
+    var seenAddresses = new HashSet<string>(StringComparer.Ordinal);
+    foreach (var row in table.GetProperty("rows").EnumerateArray())
+    {
+        var cursor = row.GetProperty("gridBefore").GetInt32();
+        foreach (var cell in row.GetProperty("cells").EnumerateArray())
+        {
+            Require(cell.GetProperty("gridColumnStart").GetInt32() == cursor, $"{name}: cell grid has a gap or overlap");
+            var span = cell.GetProperty("gridSpan").GetInt32();
+            Require(span > 0, $"{name}: cell span is not positive");
+            cursor += span;
+            var address = cell.GetProperty("address").GetProperty("path").GetString() ?? "";
+            Require(seenAddresses.Add(address), $"{name}: duplicate cell address");
+            var merge = cell.GetProperty("verticalMerge");
+            var owner = cell.GetProperty("verticalMergeOwner");
+            if (merge.ValueKind == JsonValueKind.Null)
+                Require(owner.ValueKind == JsonValueKind.Null, $"{name}: unmerged cell has an owner");
+            else if (merge.GetString() == "restart")
+                Require(owner.GetProperty("path").GetString() == address, $"{name}: restart cell does not own itself");
+            else
+                Require(owner.ValueKind == JsonValueKind.Object
+                        && seenAddresses.Contains(owner.GetProperty("path").GetString() ?? ""),
+                    $"{name}: continuation cell owner was not observed earlier");
+        }
+        cursor += row.GetProperty("gridAfter").GetInt32();
+        Require(cursor == columnCount, $"{name}: row does not cover the declared table grid");
+    }
+}
+
+string TableSignature(JsonElement table)
+{
+    var signature = new
+    {
+        columnCount = table.GetProperty("columnCount").GetInt32(),
+        widths = table.GetProperty("gridColumns").EnumerateArray()
+            .Select(column => column.GetProperty("widthTwips").GetInt32()).ToArray(),
+        rows = table.GetProperty("rows").EnumerateArray().Select(row => new
+        {
+            repeatHeader = row.GetProperty("repeatHeader").GetBoolean(),
+            cantSplit = row.GetProperty("cantSplit").GetBoolean(),
+            gridBefore = row.GetProperty("gridBefore").GetInt32(),
+            gridAfter = row.GetProperty("gridAfter").GetInt32(),
+            cells = row.GetProperty("cells").EnumerateArray().Select(cell => new
+            {
+                start = cell.GetProperty("gridColumnStart").GetInt32(),
+                span = cell.GetProperty("gridSpan").GetInt32(),
+                merge = cell.GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
+                    ? null : cell.GetProperty("verticalMerge").GetString(),
+                text = CellText(cell)
+            }).ToArray()
+        }).ToArray()
+    };
+    return JsonSerializer.Serialize(signature);
+}
+
+string TableStructureSignature(JsonElement table)
+{
+    var signature = new
+    {
+        columnCount = table.GetProperty("columnCount").GetInt32(),
+        widths = table.GetProperty("gridColumns").EnumerateArray()
+            .Select(column => column.GetProperty("widthTwips").GetInt32()).ToArray(),
+        rows = table.GetProperty("rows").EnumerateArray().Select(row => new
+        {
+            repeatHeader = row.GetProperty("repeatHeader").GetBoolean(),
+            cantSplit = row.GetProperty("cantSplit").GetBoolean(),
+            gridBefore = row.GetProperty("gridBefore").GetInt32(),
+            gridAfter = row.GetProperty("gridAfter").GetInt32(),
+            cells = row.GetProperty("cells").EnumerateArray().Select(cell => new
+            {
+                start = cell.GetProperty("gridColumnStart").GetInt32(),
+                span = cell.GetProperty("gridSpan").GetInt32(),
+                merge = cell.GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
+                    ? null : cell.GetProperty("verticalMerge").GetString()
+            }).ToArray()
+        }).ToArray()
+    };
+    return JsonSerializer.Serialize(signature);
+}
+
+void CreateMatrixDocument(string path, string shape)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    main.Document = new Document(new Body(MatrixTable(shape)));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateNestedMatrixDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var inner = MatrixTable("mixed");
+    var nestedCell = new TableCell(
+        new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "2400" }),
+        new Paragraph(new Run(new Text("嵌套表前"))), inner, new Paragraph());
+    var outer = new Table(
+        new TableProperties(),
+        new TableGrid(new GridColumn { Width = "2400" }, new GridColumn { Width = "2400" }),
+        new TableRow(Cell("外层"), nestedCell));
+    main.Document = new Document(new Body(outer));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+Table MatrixTable(string shape)
+{
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(
+            new GridColumn { Width = "1200" }, new GridColumn { Width = "1200" },
+            new GridColumn { Width = "1200" }, new GridColumn { Width = "1200" }));
+    switch (shape)
+    {
+        case "flat":
+            table.Append(new TableRow(new TableRowProperties(new TableHeader()), Cell("甲"), Cell("乙"), Cell("丙"), Cell("丁")));
+            table.Append(new TableRow(new TableRowProperties(new CantSplit()), Cell("一"), Cell("二"), Cell("三"), Cell("四")));
+            table.Append(DataRow("五", "六", "七", "八"));
+            break;
+        case "horizontal":
+            table.Append(new TableRow(new TableRowProperties(new TableHeader()), Cell("左组", span: 2), Cell("右组", span: 2)));
+            table.Append(new TableRow(new TableRowProperties(new CantSplit()), Cell("一"), Cell("二"), Cell("三"), Cell("四")));
+            table.Append(DataRow("五", "六", "七", "八"));
+            break;
+        case "vertical":
+            table.Append(new TableRow(new TableRowProperties(new TableHeader()), Cell("甲"), Cell("乙"), Cell("丙"), Cell("丁")));
+            table.Append(new TableRow(new TableRowProperties(new CantSplit()),
+                Cell("纵组", merge: MergedCellValues.Restart), Cell("二"), Cell("三"), Cell("四")));
+            table.Append(new TableRow(Cell("", merge: MergedCellValues.Continue), Cell("六"), Cell("七"), Cell("八")));
+            break;
+        case "mixed":
+            table.Append(new TableRow(new TableRowProperties(new TableHeader()), Cell("左组", span: 2), Cell("右组", span: 2)));
+            table.Append(new TableRow(new TableRowProperties(new CantSplit()),
+                Cell("纵组", merge: MergedCellValues.Restart), Cell("二"), Cell("三"), Cell("四")));
+            table.Append(new TableRow(Cell("", merge: MergedCellValues.Continue), Cell("六"), Cell("七"), Cell("八")));
+            break;
+        case "rectangle":
+            table.Append(new TableRow(new TableRowProperties(new TableHeader()), Cell("甲"), Cell("乙"), Cell("丙"), Cell("丁")));
+            table.Append(new TableRow(new TableRowProperties(new CantSplit()),
+                Cell("二维组", span: 2, merge: MergedCellValues.Restart), Cell("三"), Cell("四")));
+            table.Append(new TableRow(Cell("", span: 2, merge: MergedCellValues.Continue), Cell("七"), Cell("八")));
+            break;
+        case "irregular":
+            table.Append(new TableRow(new TableRowProperties(new TableHeader()), Cell("甲"), Cell("乙"), Cell("丙"), Cell("丁")));
+            table.Append(new TableRow(
+                new TableRowProperties(new CantSplit(), new GridBefore { Val = 1 }, new GridAfter { Val = 1 }),
+                Cell("中一"), Cell("中二")));
+            table.Append(DataRow("五", "六", "七", "八"));
+            break;
+        case "multi-paragraph":
+            table.Append(new TableRow(new TableRowProperties(new TableHeader()), Cell("甲"), Cell("乙"), Cell("丙"), Cell("丁")));
+            table.Append(new TableRow(new TableRowProperties(new CantSplit()),
+                CellWithParagraphs("第一段", "第二段"), Cell(""), Cell("三"), Cell("四")));
+            table.Append(DataRow("五", "六", "", "八"));
+            break;
+        default:
+            throw new InvalidOperationException($"unknown table shape: {shape}");
+    }
+    table.Append(DataRow("工作一", "", "", "尾一"));
+    table.Append(DataRow("工作二", "", "", "尾二"));
+    return table;
+}
+
+TableRow DataRow(string first, string second, string third, string fourth)
+    => new(Cell(first), Cell(second), Cell(third), Cell(fourth));
+
+TableCell CellWithParagraphs(params string[] values)
+{
+    var properties = new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "1200" });
+    return new TableCell(new OpenXmlElement[] { properties }
+        .Concat(values.Select(value => (OpenXmlElement)new Paragraph(new Run(new Text(value))))));
 }
 
 void CreateDocument(string path)
