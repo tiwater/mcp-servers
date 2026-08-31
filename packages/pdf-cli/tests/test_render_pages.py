@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-import fitz
+import pymupdf as fitz
 
 from tiwater_pdf.cli import render_pages
 
