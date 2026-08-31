@@ -205,6 +205,8 @@ try
     });
     var afterRows = ReadTable(insertedRows, "after-rows");
     Require(afterRows.GetProperty("rowCount").GetInt32() == 6, "row insertion did not add two rows");
+    RequireUniqueWordIdentities(insertedRows);
+    RequireUniqueWordIdentities(insertedInsideMerge);
 
     var mergeInput = Path.Combine(root, "merge-input.docx");
     CreateFlatDocument(mergeInput);
@@ -320,6 +322,7 @@ void CreateDocument(string path)
         Cell("", merge: MergedCellValues.Continue), Cell("乙一"), Cell("乙二"), Cell("乙三")));
     table.Append(new TableRow(Cell("独立"), Cell("丙一"), Cell("丙二"), Cell("丙三")));
     main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
     main.Document.Save();
 }
 
@@ -343,6 +346,30 @@ TableCell Cell(string text, int span = 1, MergedCellValues? merge = null)
     if (span > 1) properties.Append(new GridSpan { Val = span });
     if (merge is not null) properties.Append(new VerticalMerge { Val = merge.Value });
     return new TableCell(properties, new Paragraph(new Run(new Text(text))));
+}
+
+void AssignParagraphIdentities(OpenXmlElement root)
+{
+    const string word2010 = "http://schemas.microsoft.com/office/word/2010/wordml";
+    var next = 1;
+    foreach (var element in root.Descendants().Where(element => element is Paragraph or TableRow))
+    {
+        element.SetAttribute(new OpenXmlAttribute("w14", "paraId", word2010, next.ToString("X8")));
+        element.SetAttribute(new OpenXmlAttribute("w14", "textId", word2010, (next + 1000).ToString("X8")));
+        next++;
+    }
+}
+
+void RequireUniqueWordIdentities(string path)
+{
+    const string word2010 = "http://schemas.microsoft.com/office/word/2010/wordml";
+    using var document = WordprocessingDocument.Open(path, false);
+    var values = document.MainDocumentPart?.Document?.Descendants()
+        .Select(element => element.GetAttributes().FirstOrDefault(attribute =>
+            attribute.LocalName == "paraId" && attribute.NamespaceUri == word2010).Value)
+        .Where(value => !string.IsNullOrWhiteSpace(value)).ToArray() ?? [];
+    Require(values.Length == values.Distinct(StringComparer.Ordinal).Count(),
+        "inserted objects retained duplicate Word identities");
 }
 
 static JsonElement Address(JsonElement value) => value.GetProperty("address").Clone();
