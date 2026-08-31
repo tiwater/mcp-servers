@@ -59,7 +59,8 @@ public static class NativeTableColumnMutation
                 var tableRef = resolved[offset++];
                 var sourceRef = resolved[offset++];
                 var beforeRef = change.Before is null ? null : resolved[offset++];
-                if (tableRef.Kind != "table" || sourceRef.Kind != "gridColumn" || beforeRef?.Kind != "gridColumn"
+                if (tableRef.Kind != "table" || sourceRef.Kind != "gridColumn"
+                    || beforeRef is not null && beforeRef.Kind != "gridColumn"
                     || tableRef.StoryPart != MainStory || sourceRef.StoryPart != MainStory
                     || beforeRef is not null && beforeRef.StoryPart != MainStory)
                     throw new InvalidOperationException("table-column-address-kind-invalid");
@@ -71,10 +72,11 @@ public static class NativeTableColumnMutation
                     : Observation.ResolveNativePath(input, beforeRef.StoryPart, beforeRef.NativePath) as GridColumn
                       ?? throw new InvalidOperationException("before-column-address-not-found");
                 RequireSameGrid(table, source, before);
-                var sourceIndex = table.GetFirstChild<TableGrid>()!.Elements<GridColumn>().ToList().IndexOf(source);
+                var columns = table.GetFirstChild<TableGrid>()!.Elements<GridColumn>().ToList();
+                var sourceIndex = columns.IndexOf(source);
+                var insertionIndex = before is null ? columns.Count : columns.IndexOf(before);
                 var prototypes = table.Elements<TableRow>()
-                    .Select(row => CellAt(row, sourceIndex)?.Cell.CloneNode(true) as TableCell
-                        ?? throw new InvalidOperationException("source-column-not-represented-in-row"))
+                    .Select(row => PrototypeFor(row, sourceIndex, insertionIndex))
                     .ToArray();
                 prepared.Add(new PreparedInsert(tableRef, sourceRef, beforeRef, change.Repeat ?? 1, prototypes));
             }
@@ -210,30 +212,31 @@ public static class NativeTableColumnMutation
         for (var rowIndex = 0; rowIndex < rows.Length; rowIndex++)
         {
             var row = rows[rowIndex];
-            var sourcePosition = CellAt(row, sourceIndex)
-                ?? throw new InvalidOperationException("source-column-not-represented-in-row");
+            var sourcePosition = CellAt(row, sourceIndex);
             var beforeCount = RowOffset(row.TableRowProperties, "gridBefore");
             var afterCount = RowOffset(row.TableRowProperties, "gridAfter");
             var oldColumnCount = grid.Elements<GridColumn>().Count() - 1;
-            if (insertionIndex < beforeCount)
+            if (insertionIndex < beforeCount
+                || insertionIndex == beforeCount && sourcePosition is null && sourceIndex < beforeCount)
             {
                 SetRowOffset(row, "gridBefore", beforeCount + 1);
                 continue;
             }
-            if (insertionIndex >= oldColumnCount - afterCount)
+            if (afterCount > 0 && insertionIndex >= oldColumnCount - afterCount)
             {
                 SetRowOffset(row, "gridAfter", afterCount + 1);
                 continue;
             }
             var insertionCell = CellAt(row, insertionIndex);
-            var sourceEndsAtInsertion = sourcePosition.Start + sourcePosition.Span == insertionIndex;
-            var sourceStartsAfterInsertion = sourcePosition.Start == insertionIndex;
+            var sourceEndsAtInsertion = sourcePosition is not null
+                && sourcePosition.Start + sourcePosition.Span == insertionIndex;
+            var sourceStartsAfterInsertion = sourcePosition?.Start == insertionIndex;
             if (insertionCell is not null && insertionIndex > insertionCell.Start)
             {
                 SetSpan(insertionCell.Cell, insertionCell.Span + 1);
                 continue;
             }
-            if (sourcePosition.Span > 1 && (sourceEndsAtInsertion || sourceStartsAfterInsertion))
+            if (sourcePosition is not null && sourcePosition.Span > 1 && (sourceEndsAtInsertion || sourceStartsAfterInsertion))
             {
                 SetSpan(sourcePosition.Cell, sourcePosition.Span + 1);
                 continue;
@@ -296,6 +299,16 @@ public static class NativeTableColumnMutation
             paragraph.Append(new Run((RunProperties)sourceRunProperties.CloneNode(true)));
         result.Append(paragraph);
         return result;
+    }
+
+    private static TableCell PrototypeFor(TableRow row, int sourceIndex, int insertionIndex)
+    {
+        var positions = Positions(row);
+        var prototype = CellAt(row, sourceIndex)?.Cell
+            ?? positions.FirstOrDefault(position => position.Start >= insertionIndex)?.Cell
+            ?? positions.LastOrDefault()?.Cell
+            ?? throw new InvalidOperationException("table-row-has-no-cell-prototype");
+        return (TableCell)prototype.CloneNode(true);
     }
 
     private static CellPosition? CellAt(TableRow row, int column)

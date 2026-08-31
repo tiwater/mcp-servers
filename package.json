@@ -5,6 +5,7 @@
   "scripts": {
     "generate:office-contracts": "node scripts/generate-office-contracts.mjs",
     "test:docx-integration": "dotnet build packages/docx-cli/docx.csproj --nologo && dotnet run --project packages/docx-cli.integration/docx-cli.integration.csproj -- packages/docx-cli/bin/Debug/net9.0/docx.dll",
+    "test:docx-table-operations": "npm run test:docx-integration",
     "office": "node servers/office/index.mjs",
     "pdf": "node servers/pdf/index.mjs",
     "release:boundary": "node scripts/release-boundary-gate.mjs"
