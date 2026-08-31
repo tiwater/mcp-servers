@@ -357,7 +357,7 @@ const tools = [
   },
   {
     name: 'docx_replace_table_rows',
-    description: 'Replace data rows in existing target tables after reading both tables. Each range excludes its header and closes vertical merges; omit targetRows.last to replace through the table end. Source cells copy all paragraphs by default. sourceParagraphMode can omit paired Latin prose while retaining Han text and standalone technical expressions; explicit sourceCellContents remains available for exact selections.',
+    description: 'Replace data rows in existing target tables after reading both tables. Each range excludes its header and closes vertical merges; omit targetRows.last to replace through the table end. Source cells copy all paragraphs by default. sourceParagraphMode can omit paired Latin prose paragraphs and clauses while retaining Han text and standalone technical expressions; explicit sourceCellContents remains available for exact selections.',
     inputSchema: inputContract('docx_replace_table_rows'),
     outputSchema: fixedEditOutput('docx_replace_table_rows'),
     handler: args => fixedEdit('docx_replace_table_rows', args),

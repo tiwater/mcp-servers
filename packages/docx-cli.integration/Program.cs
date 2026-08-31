@@ -96,7 +96,7 @@ try
         var modeRows = modeDocument.MainDocumentPart!.Document.Body!.Elements<Table>()
             .Single().Elements<TableRow>().ToArray();
         Require(modeRows.Length == 3, "omitted target last did not replace through table end");
-        Require(modeRows[1].InnerText == "甲甲内容R2=1.000采用 HPLC 检测",
+        Require(modeRows[1].InnerText == "甲甲内容R2=1.000采用 HPLC 检测中文。后文中文。Protein concentration后文实验员1：",
             "paired Latin prose was not removed or technical content was lost");
         Require(modeRows[2].InnerText == "English continuation甲续行",
             "all-Latin content without a Han pair was not preserved");
@@ -351,6 +351,9 @@ TableCell Cell(string text, MergedCellValues? merge, bool bilingual)
         {
             cell.Append(new Paragraph(new Run(new Text("R2=1.000"))));
             cell.Append(new Paragraph(new Run(new Text("采用 HPLC 检测"))));
+            cell.Append(new Paragraph(new Run(new Text("中文。The English sentence should be omitted.后文"))));
+            cell.Append(new Paragraph(new Run(new Text("中文。Protein concentration后文"))));
+            cell.Append(new Paragraph(new Run(new Text("实验员1 Experimenter 1："))));
         }
     }
     return cell;
