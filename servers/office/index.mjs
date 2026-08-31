@@ -339,7 +339,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Each call retains full paragraph and text-node detail for exactly the returned row page at output; it never builds another whole-table data object. The machine response is the compact form of that page: each row and cell keeps its reusable native address, grid position and span, vertical-merge owner, physical text, and logical text. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Process the current page before continuing once with receipt.nextOffset; never revisit an earlier offset. Use docx_read_object only when one selected object needs a narrower descendant view. The provider reports physical structure only; the Agent decides the template and business meaning.',
+    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Each call retains full paragraph and text-node detail for exactly the returned row page at output; it never builds another whole-table data object. The machine response is the compact form of that page: each row and cell keeps its reusable native address, grid position and span, vertical-merge owner, physical text, and logical text. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. A table observation is complete only when receipt.remaining is 0; process each page once in ascending receipt.nextOffset order. Use docx_read_object only when one selected object needs a narrower descendant view. The provider reports physical structure only; the Agent decides the template and business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -347,7 +347,7 @@ const tools = [
   },
   {
     name: 'docx_copy_content',
-    description: 'Replace content in existing plain-text target paragraphs or cells while retaining target container formatting and source inline meaning. A selection copies a whole object by OpenXML address, or an exact substring when range is attached to a run or text address.',
+    description: 'Replace content in existing plain-text target paragraphs or cells while retaining target container formatting. A whole-object selection copies only that object\'s inline content; a range copies an exact substring from a run or text address. Source table, row, cell, span, and merge structure are not copied.',
     inputSchema: inputContract('docx_copy_content'),
     outputSchema: fixedEditOutput('docx_copy_content'),
     handler: args => fixedEdit('docx_copy_content', args),
