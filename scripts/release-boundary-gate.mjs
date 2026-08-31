@@ -708,11 +708,20 @@ function checkSourceBoundObservationOutputs(tools) {
 function checkDocxMergedCellDescriptions(tools) {
   const check = 'docx-merged-cell-descriptions';
   const readDescription = tools.find(tool => tool?.name === 'docx_read_table')?.description || '';
+  const narrowRead = tools.find(tool => tool?.name === 'docx_read_object');
+  const narrowDescription = narrowRead?.description || '';
+  const narrowObject = narrowRead?.outputSchema?.$defs?.__schema0?.properties?.object;
   const setDescription = tools.find(tool => tool?.name === 'docx_set_text')?.description || '';
   if (!readDescription.includes('restart')
       || !readDescription.includes('continue cell is not an independent row value')
       || !readDescription.includes('logicalText resolves the restart cell value')) {
     fail(check, 'docx_read_table does not explain vertical-merge logical-cell identity');
+  }
+  if (!narrowDescription.includes('vertical-merge owner')
+      || !narrowDescription.includes('resolving the restart cell value')
+      || narrowObject?.properties?.verticalMergeOwner?.type !== 'object'
+      || narrowObject?.properties?.logicalText?.type !== 'string') {
+    fail(check, 'docx_read_object does not expose narrow merged-cell logical identity');
   }
   if (!setDescription.includes('restart cell rather than a continue cell')
       || !setDescription.includes('does not insert objects, change table structure')) {

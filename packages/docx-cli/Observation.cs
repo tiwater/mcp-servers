@@ -159,30 +159,7 @@ public static class Observation
                 int.TryParse(column.Width?.Value, out var width) ? width : null))
             .ToArray() ?? [];
         var nativeRows = table.Elements<TableRow>().ToArray();
-        var projectedRows = nativeRows.Select(row =>
-        {
-            var cursor = RowOffset(row.TableRowProperties, "gridBefore");
-            var cells = row.Elements<TableCell>().Select(cell =>
-            {
-                var span = Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1);
-                var projection = new ProjectedTableCell(cell, cursor, span, VerticalMergeValue(cell.TableCellProperties));
-                cursor += span;
-                return projection;
-            }).ToArray();
-            return cells;
-        }).ToArray();
-        ProjectedTableCell LogicalOwner(int rowIndex, ProjectedTableCell cell)
-        {
-            if (cell.VerticalMerge is null || cell.VerticalMerge == "restart") return cell;
-            for (var previous = rowIndex - 1; previous >= 0; previous--)
-            {
-                var candidate = projectedRows[previous].SingleOrDefault(item =>
-                    item.GridColumnStart == cell.GridColumnStart && item.GridSpan == cell.GridSpan);
-                if (candidate is null || candidate.VerticalMerge is null) break;
-                if (candidate.VerticalMerge == "restart") return candidate;
-            }
-            throw new InvalidOperationException("vertical-merge-owner-not-found");
-        }
+        var projectedRows = ProjectTable(table);
         var rows = nativeRows.Select((row, rowIndex) => new DocxTableReadRow(
             Address(selected.StoryPart, NativePathFor(row)),
             row.TableRowProperties?.GetFirstChild<TableHeader>() is not null,
@@ -191,7 +168,7 @@ public static class Observation
             RowOffset(row.TableRowProperties, "gridAfter"),
             projectedRows[rowIndex].Select(cell =>
             {
-                var logicalOwner = LogicalOwner(rowIndex, cell);
+                var logicalOwner = LogicalOwner(projectedRows, rowIndex, cell);
                 return new DocxTableReadCell(
                     Address(selected.StoryPart, NativePathFor(cell.Cell)),
                     cell.GridColumnStart,
@@ -250,6 +227,36 @@ public static class Observation
             ? null
             : properties.VerticalMerge.GetAttributes()
                 .FirstOrDefault(attribute => attribute.LocalName == "val").Value ?? "continue";
+
+    private static ProjectedTableCell[][] ProjectTable(Table table)
+        => table.Elements<TableRow>().Select(row =>
+        {
+            var cursor = RowOffset(row.TableRowProperties, "gridBefore");
+            return row.Elements<TableCell>().Select(cell =>
+            {
+                var span = Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1);
+                var projection = new ProjectedTableCell(
+                    cell, cursor, span, VerticalMergeValue(cell.TableCellProperties));
+                cursor += span;
+                return projection;
+            }).ToArray();
+        }).ToArray();
+
+    private static ProjectedTableCell LogicalOwner(
+        IReadOnlyList<ProjectedTableCell[]> projectedRows,
+        int rowIndex,
+        ProjectedTableCell cell)
+    {
+        if (cell.VerticalMerge is null || cell.VerticalMerge == "restart") return cell;
+        for (var previous = rowIndex - 1; previous >= 0; previous--)
+        {
+            var candidate = projectedRows[previous].SingleOrDefault(item =>
+                item.GridColumnStart == cell.GridColumnStart && item.GridSpan == cell.GridSpan);
+            if (candidate is null || candidate.VerticalMerge is null) break;
+            if (candidate.VerticalMerge == "restart") return candidate;
+        }
+        throw new InvalidOperationException("vertical-merge-owner-not-found");
+    }
 
     private static int TableRowWidth(TableRow row)
         => RowOffset(row.TableRowProperties, "gridBefore")
@@ -467,6 +474,23 @@ public static class Observation
             ? null
             : cellProperties.VerticalMerge.GetAttributes()
                 .FirstOrDefault(attribute => attribute.LocalName == "val").Value ?? "continue";
+        DocxObjectAddress? verticalMergeOwner = null;
+        string? logicalText = null;
+        if (item.Element is TableCell cell
+            && cell.Parent is TableRow row
+            && row.Parent is Table table)
+        {
+            var nativeRows = table.Elements<TableRow>().ToArray();
+            var rowIndex = Array.IndexOf(nativeRows, row);
+            var projectedRows = ProjectTable(table);
+            var projectedCell = projectedRows[rowIndex].Single(candidate => ReferenceEquals(candidate.Cell, cell));
+            var logicalOwner = LogicalOwner(projectedRows, rowIndex, projectedCell);
+            verticalMergeOwner = verticalMerge is null
+                ? null
+                : Address(item.StoryPart, NativePathFor(logicalOwner.Cell));
+            logicalText = string.Join("\n", logicalOwner.Cell.Elements<Paragraph>()
+                .Select(paragraph => paragraph.InnerText));
+        }
         return new DocxObservationObject(
             item.Address,
             PublishedParentAddress(snapshot, item),
@@ -476,7 +500,9 @@ public static class Observation
             text?.Length,
             item.Element.ChildElements.Count,
             cellProperties is null ? null : Math.Max(1, cellProperties.GridSpan?.Val?.Value ?? 1),
-            verticalMerge);
+            verticalMerge,
+            verticalMergeOwner,
+            logicalText);
     }
 
     private static DocxObjectAddress? PublishedParentAddress(Snapshot snapshot, NativeObject item)
@@ -644,7 +670,9 @@ public sealed record DocxObservationObject(
     [property: JsonPropertyName("textLength")] int? TextLength,
     [property: JsonPropertyName("childCount")] int ChildCount,
     [property: JsonPropertyName("gridSpan")] int? GridSpan,
-    [property: JsonPropertyName("verticalMerge")] string? VerticalMerge);
+    [property: JsonPropertyName("verticalMerge")] string? VerticalMerge,
+    [property: JsonPropertyName("verticalMergeOwner")] DocxObjectAddress? VerticalMergeOwner,
+    [property: JsonPropertyName("logicalText")] string? LogicalText);
 
 public sealed record DocxTextMatch(
     [property: JsonPropertyName("offset")] int Offset,

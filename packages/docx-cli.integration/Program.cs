@@ -27,6 +27,22 @@ try
     Require(rows[2].GetProperty("cells")[0].GetProperty("verticalMergeOwner").GetRawText()
             == rows[1].GetProperty("cells")[0].GetProperty("address").GetRawText(),
         "vertical continuation did not point to its restart owner");
+    var continuation = rows[2].GetProperty("cells")[0];
+    var continuationObservation = Run("docx_read_object", new
+    {
+        input = original,
+        addresses = new[] { continuation.GetProperty("address").Clone() },
+        kinds = new[] { "paragraph" },
+        output = Path.Combine(root, "continuation-observation.json")
+    }).GetProperty("observations")[0].GetProperty("object");
+    var observedOwner = continuationObservation.GetProperty("verticalMergeOwner");
+    var expectedOwner = rows[1].GetProperty("cells")[0].GetProperty("address");
+    Require(observedOwner.GetProperty("part").GetString() == expectedOwner.GetProperty("part").GetString()
+            && observedOwner.GetProperty("path").GetString() == expectedOwner.GetProperty("path").GetString(),
+        "narrow cell read did not expose the vertical-merge owner");
+    Require(continuationObservation.GetProperty("logicalText").GetString()
+            == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
+        "narrow cell read did not resolve the restart cell text");
 
     var batchColumns = Path.Combine(root, "batch-columns.docx");
     Run("docx_insert_table_columns", new
