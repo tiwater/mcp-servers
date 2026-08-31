@@ -38,6 +38,7 @@
           },
           "sourceRows": {
             "type": "object",
+            "description": "Contiguous source data rows. The header row stays outside this range. The first and last row must enclose complete vertical-merge groups as reported by docx_read_table.",
             "properties": {
               "first": {
                 "type": "object",
@@ -102,6 +103,7 @@
           },
           "targetRows": {
             "type": "object",
+            "description": "Contiguous target data rows to replace. The header row stays outside this range. The first and last row must enclose complete vertical-merge groups as reported by docx_read_table.",
             "properties": {
               "first": {
                 "type": "object",
@@ -149,6 +151,7 @@
           "columns": {
             "minItems": 1,
             "type": "array",
+            "description": "Source-to-target header-cell mappings. Source headers share one row, target headers share one row, both header rows stay outside the selected data rows, and each side covers its complete table grid.",
             "items": {
               "type": "object",
               "properties": {
