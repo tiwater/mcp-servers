@@ -712,6 +712,7 @@ function checkDocxMergedCellDescriptions(tools) {
   const narrowDescription = narrowRead?.description || '';
   const narrowObject = narrowRead?.outputSchema?.$defs?.__schema0?.properties?.object;
   const setDescription = tools.find(tool => tool?.name === 'docx_set_text')?.description || '';
+  const mergeDescription = tools.find(tool => tool?.name === 'docx_merge_cells')?.description || '';
   if (!readDescription.includes('restart')
       || !readDescription.includes('continue cell is not an independent row value')
       || !readDescription.includes('logicalText resolves the restart cell value')) {
@@ -726,6 +727,10 @@ function checkDocxMergedCellDescriptions(tools) {
   if (!setDescription.includes('restart cell rather than a continue cell')
       || !setDescription.includes('does not insert objects, change table structure')) {
     fail(check, 'docx_set_text does not explain merged-cell and structural non-goals');
+  }
+  if (!mergeDescription.includes('one-column, multi-row rectangle creates a vertical merge')
+      || !mergeDescription.includes('All selected cell content moves into the top-left owner')) {
+    fail(check, 'docx_merge_cells does not explain vertical grouping and content ownership');
   }
   note('DOCX table read/write descriptions preserve vertical-merge logical-cell semantics');
 }
