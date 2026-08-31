@@ -1,8 +1,6 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
@@ -157,18 +155,11 @@ public static class NativeTableRowReplace
             var sourceGridCount = GridColumnCount(sourceTable);
             RequireCompleteHeader(sourceHeaderSlots, sourceGridCount, "source");
             RequireClosedRangeBoundary(allSourceRows, sourceRows, sourceGridCount, "source");
-            var sourceCellContents = PrepareSourceCellContents(
-                sourcePath, sourceDocument, sourceRows, change.SourceCellContents ?? []);
-            if (change.SourceCellContents is { Count: > 0 } && change.SourceParagraphMode is not null)
-                throw new InvalidOperationException("source-cell-contents-and-source-paragraph-mode-are-mutually-exclusive");
-            RequireSourceParagraphMode(change.SourceParagraphMode);
-
             var mappings = BuildMappings(sourceHeaderSlots, targetHeaderSlots, change.Columns);
             var targetGridWidths = BuildTargetGridWidths(sourceTable, targetTable, mappings);
 
             var preparedRows = sourceRows
-                .Select(row => PrepareRow(row, mappings, targetGridWidths.Count, sourceCellContents,
-                    change.SourceParagraphMode))
+                .Select(row => PrepareRow(row, mappings, targetGridWidths.Count))
                 .ToArray();
             RequireClosedMergeChains(preparedRows, targetGridWidths.Count, "source");
             result.Add(new PreparedTable(tableIndex, targetResolved[0],
@@ -183,9 +174,7 @@ public static class NativeTableRowReplace
     private static PreparedRow PrepareRow(
         TableRow sourceRow,
         IReadOnlyList<ColumnMapping> mappings,
-        int targetGridCount,
-        IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> sourceCellContents,
-        string? sourceParagraphMode)
+        int targetGridCount)
     {
         var prepared = new List<PreparedCell>();
         foreach (var cell in Cells(sourceRow))
@@ -203,10 +192,7 @@ public static class NativeTableRowReplace
                 mapping.SourceStart, mapping.SourceSpan, mapping.TargetStart, mapping.TargetSpan)).Order().ToArray();
             if (!targetPositions.SequenceEqual(Enumerable.Range(targetPositions[0], targetPositions.Length)))
                 throw new InvalidOperationException("source-cell-maps-to-noncontiguous-target-columns");
-            var sourceCellPath = Observation.NativePathFor(cell.Cell);
-            var paragraphs = sourceCellContents.TryGetValue(sourceCellPath, out var selectedContent)
-                ? selectedContent
-                : CloneCellParagraphs(cell.Cell, sourceParagraphMode);
+            var paragraphs = CloneCellParagraphs(cell.Cell);
             prepared.Add(new PreparedCell(
                 cell.Start,
                 cell.Span,
@@ -222,147 +208,12 @@ public static class NativeTableRowReplace
         return new PreparedRow(ordered, occupied[0], targetGridCount - occupied[^1] - 1);
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> PrepareSourceCellContents(
-        string sourcePath,
-        WordprocessingDocument sourceDocument,
-        IReadOnlyList<TableRow> sourceRows,
-        IReadOnlyList<TableRowReplaceCellContent> requested)
-    {
-        if (requested.Count == 0)
-            return new Dictionary<string, IReadOnlyList<Paragraph>>(StringComparer.Ordinal);
-        if (requested.Select(item => item.SourceCell).Distinct().Count() != requested.Count)
-            throw new InvalidOperationException("source-cell-content-must-be-unique");
-
-        var cellReferences = Observation.ResolveAddresses(
-            sourcePath, requested.Select(item => item.SourceCell).ToArray(), "sourceCellContents.sourceCell");
-        var result = new Dictionary<string, IReadOnlyList<Paragraph>>(StringComparer.Ordinal);
-        for (var index = 0; index < requested.Count; index++)
-        {
-            var cellReference = cellReferences[index];
-            if (cellReference.Kind != "cell" || cellReference.StoryPart != MainStory)
-                throw new InvalidOperationException("source-cell-content-address-must-be-main-document-cell");
-            var cell = Resolve<TableCell>(sourceDocument, cellReference, "source-cell-content");
-            var row = cell.Ancestors<TableRow>().SingleOrDefault();
-            if (row is null || !sourceRows.Any(selected => ReferenceEquals(selected, row)))
-                throw new InvalidOperationException("source-cell-content-must-belong-to-selected-rows");
-
-            var selections = requested[index].SourceSelections;
-            var paragraphs = new List<Paragraph>();
-            if (selections.Count > 0)
-            {
-                var selectionReferences = Observation.ResolveAddresses(
-                    sourcePath, selections.Select(item => item.Address).ToArray(), "sourceCellContents.sourceSelections.address");
-                for (var selectionIndex = 0; selectionIndex < selections.Count; selectionIndex++)
-                {
-                    var selectionReference = selectionReferences[selectionIndex];
-                    if (selectionReference.StoryPart != MainStory)
-                        throw new InvalidOperationException("source-cell-selection-must-be-main-document-object");
-                    var element = Observation.ResolveNativePath(
-                        sourceDocument, selectionReference.StoryPart, selectionReference.NativePath);
-                    var owner = element as TableCell ?? element.Ancestors<TableCell>().FirstOrDefault();
-                    if (!ReferenceEquals(owner, cell))
-                        throw new InvalidOperationException("source-cell-selection-must-belong-to-source-cell");
-                    paragraphs.AddRange(NativeContentCopy.CopySelection(element, selections[selectionIndex]));
-                }
-            }
-            if (paragraphs.Count == 0) paragraphs.Add(new Paragraph());
-            result.Add(Observation.NativePathFor(cell), paragraphs);
-        }
-        return result;
-    }
-
-    private static IReadOnlyList<Paragraph> CloneCellParagraphs(TableCell cell, string? sourceParagraphMode)
+    private static IReadOnlyList<Paragraph> CloneCellParagraphs(TableCell cell)
     {
         if (cell.ChildElements.Any(element => element is not TableCellProperties
             and not Paragraph and not BookmarkStart and not BookmarkEnd))
             throw new InvalidOperationException("source-cell-contains-non-paragraph-content");
-        var paragraphs = cell.Elements<Paragraph>().ToArray();
-        if (sourceParagraphMode is null)
-            return paragraphs.Select(NativeContentCopy.CloneParagraph).ToArray();
-
-        var selected = new List<Paragraph>();
-        var precedingRetainedTextHasHan = false;
-        foreach (var paragraph in paragraphs)
-        {
-            var text = paragraph.InnerText.Trim();
-            if (text.Length == 0)
-            {
-                selected.Add(NativeContentCopy.CloneParagraph(paragraph));
-                continue;
-            }
-            var hasHan = HanText.IsMatch(text);
-            var isLatinProse = !hasHan && LatinWord.IsMatch(text);
-            if (sourceParagraphMode == OmitPairedLatinProse && precedingRetainedTextHasHan && isLatinProse)
-                continue;
-            var cloned = NativeContentCopy.CloneParagraph(paragraph);
-            if (sourceParagraphMode == OmitPairedLatinProse && hasHan)
-                OmitInlinePairedLatinProse(cloned);
-            selected.Add(cloned);
-            precedingRetainedTextHasHan = hasHan;
-        }
-        if (selected.Count == 0) selected.Add(new Paragraph());
-        return selected;
-    }
-
-    private const string OmitPairedLatinProse = "omit-paired-latin-prose";
-    private static readonly Regex HanText = new("[\\u3400-\\u4DBF\\u4E00-\\u9FFF]", RegexOptions.CultureInvariant);
-    private static readonly Regex LatinWord = new("[a-z]{2,}", RegexOptions.CultureInvariant);
-    private static readonly Regex LatinProseWord = new("[A-Za-z]*[a-z]{2,}[A-Za-z]*", RegexOptions.CultureInvariant);
-    private static readonly Regex ClauseAfterPunctuation = new(
-        "(?<=[：；。！？:;.!?])[\\s\\u00A0]*[A-Z][^\\u3400-\\u4DBF\\u4E00-\\u9FFF]*",
-        RegexOptions.CultureInvariant);
-    private static readonly Regex LabelBeforeChineseColon = new(
-        "\\s+[A-Z][A-Za-z]*(?:\\s+[A-Za-z0-9]+)*\\s*(?=：)", RegexOptions.CultureInvariant);
-    private static readonly Regex FinalLatinSuffix = new(
-        "(?<=[\\u3400-\\u4DBF\\u4E00-\\u9FFF])[A-Z][A-Za-z]*(?:\\s+[A-Za-z]+)*$",
-        RegexOptions.CultureInvariant);
-
-    private static void OmitInlinePairedLatinProse(Paragraph paragraph)
-    {
-        var textNodes = paragraph.Descendants<Text>().ToArray();
-        var text = string.Concat(textNodes.Select(node => node.Text));
-        if (text.Length == 0 || text != paragraph.InnerText) return;
-
-        var ranges = new List<(int Start, int Length)>();
-        foreach (Match match in ClauseAfterPunctuation.Matches(text))
-        {
-            var wordCount = LatinProseWord.Matches(match.Value).Count;
-            var terminalClause = match.Index + match.Length == text.Length;
-            var endsAsClause = match.Value.TrimEnd().EndsWith(':')
-                || match.Value.TrimEnd().EndsWith(';');
-            if (wordCount >= 3 || (terminalClause && wordCount >= 2) || (endsAsClause && wordCount >= 1))
-                ranges.Add((match.Index, match.Length));
-        }
-        foreach (Match match in LabelBeforeChineseColon.Matches(text))
-            if (LatinProseWord.IsMatch(match.Value))
-                ranges.Add((match.Index, match.Length));
-        foreach (Match match in FinalLatinSuffix.Matches(text))
-            if (LatinProseWord.IsMatch(match.Value))
-                ranges.Add((match.Index, match.Length));
-        if (ranges.Count == 0) return;
-
-        var removed = new bool[text.Length];
-        foreach (var range in ranges)
-            for (var index = range.Start; index < range.Start + range.Length; index++) removed[index] = true;
-        var offset = 0;
-        foreach (var node in textNodes)
-        {
-            var original = node.Text;
-            var retained = new StringBuilder(original.Length);
-            for (var index = 0; index < original.Length; index++)
-                if (!removed[offset + index]) retained.Append(original[index]);
-            node.Text = retained.ToString();
-            node.Space = node.Text.Length > 0 && (char.IsWhiteSpace(node.Text[0]) || char.IsWhiteSpace(node.Text[^1]))
-                ? SpaceProcessingModeValues.Preserve
-                : null;
-            offset += original.Length;
-        }
-    }
-
-    private static void RequireSourceParagraphMode(string? mode)
-    {
-        if (mode is not null && mode != OmitPairedLatinProse)
-            throw new InvalidOperationException("source-paragraph-mode-invalid");
+        return cell.Elements<Paragraph>().Select(NativeContentCopy.CloneParagraph).ToArray();
     }
 
     private static void PreflightImports(WordprocessingDocument targetDocument, IReadOnlyList<PreparedTable> tables)
@@ -866,15 +717,10 @@ internal static class TableRowReplaceReferenceExtensions
 public sealed record TableRowReplaceRange(DocxObjectAddress First, DocxObjectAddress Last);
 public sealed record TableRowReplaceTargetRange(DocxObjectAddress First, DocxObjectAddress? Last = null);
 public sealed record TableRowReplaceColumn(DocxObjectAddress SourceHeader, DocxObjectAddress TargetHeader);
-public sealed record TableRowReplaceCellContent(
-    DocxObjectAddress SourceCell,
-    IReadOnlyList<CopyContentSelection> SourceSelections);
 public sealed record TableRowReplaceTable(string SourceInput,
     DocxObjectAddress SourceTable, TableRowReplaceRange SourceRows,
     DocxObjectAddress TargetTable, TableRowReplaceTargetRange TargetRows,
-    IReadOnlyList<TableRowReplaceColumn> Columns,
-    IReadOnlyList<TableRowReplaceCellContent>? SourceCellContents = null,
-    string? SourceParagraphMode = null);
+    IReadOnlyList<TableRowReplaceColumn> Columns);
 public sealed record TableRowReplaceRequest(string Input,
     IReadOnlyList<TableRowReplaceTable> Tables,
     string Output, string ReceiptOutput);

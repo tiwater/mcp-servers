@@ -85,34 +85,26 @@ try
     });
 
     var targetState = ObserveTarget(target, "target");
+    var preparedSource = PrepareSource(source, compactRows);
 
-    var modeOutput = Path.Combine(root, "paragraph-mode.docx");
-    Run("docx_replace_table_rows", ParagraphModeReplacement(
-        target, targetState, source, sourceTable, sourceRows, sourceRead,
-        sourceFirst: 1, sourceLast: 2, targetFirst: 1,
-        modeOutput, Path.Combine(root, "paragraph-mode-receipt.json")));
-    using (var modeDocument = WordprocessingDocument.Open(modeOutput, false))
+    var completeOutput = Path.Combine(root, "complete-source-rows.docx");
+    Run("docx_replace_table_rows", Replacement(
+        target, targetState, preparedSource, sourceTable, sourceRows, sourceRead,
+        sourceFirst: 1, sourceLast: 2, targetFirst: 1, targetLast: null,
+        completeOutput, Path.Combine(root, "complete-source-rows-receipt.json")));
+    using (var completeDocument = WordprocessingDocument.Open(completeOutput, false))
     {
-        var modeRows = modeDocument.MainDocumentPart!.Document.Body!.Elements<Table>()
+        var completeRows = completeDocument.MainDocumentPart!.Document.Body!.Elements<Table>()
             .Single().Elements<TableRow>().ToArray();
-        Require(modeRows.Length == 3, "omitted target last did not replace through table end");
-        Require(modeRows[1].InnerText == "甲甲内容R2=1.000采用 HPLC 检测中文。后文中文。Protein concentration后文实验员1：",
-            "paired Latin prose was not removed or technical content was lost");
-        Require(modeRows[2].InnerText == "English continuation甲续行",
-            "all-Latin content without a Han pair was not preserved");
+        Require(completeRows.Length == 3, "omitted target last did not replace through table end");
+        Require(completeRows[1].InnerText == "甲甲内容R2=1.000采用 HPLC 检测中文。后文中文。Protein concentration后文实验员1 ：",
+            "complete row replacement changed the prepared source: " + completeRows[1].InnerText);
+        Require(completeRows[2].InnerText == "English continuation甲续行",
+            "complete row replacement omitted prepared source content");
     }
 
-    var incompatible = RunExpectFailure("docx_replace_table_rows", ParagraphModeReplacement(
-        target, targetState, source, sourceTable, sourceRows, sourceRead,
-        sourceFirst: 1, sourceLast: 2, targetFirst: 1,
-        Path.Combine(root, "incompatible.docx"), Path.Combine(root, "incompatible-receipt.json"),
-        includeExplicitSelections: true));
-    Require(incompatible.Contains("source-cell-contents-and-source-paragraph-mode-are-mutually-exclusive",
-            StringComparison.Ordinal),
-        "paragraph mode and explicit source selections were not rejected together");
-
     var invalidBoundary = RunExpectFailure("docx_replace_table_rows", Replacement(
-        target, targetState, source, sourceTable, sourceRows, sourceRead,
+        target, targetState, preparedSource, sourceTable, sourceRows, sourceRead,
         sourceFirst: 2, sourceLast: 4, targetFirst: 1, targetLast: targetState.Rows.Count - 1,
         Path.Combine(root, "invalid-boundary.docx"), Path.Combine(root, "invalid-boundary-receipt.json")));
     Require(invalidBoundary.Contains("source-row-range-starts-inside-vertical-merge", StringComparison.Ordinal),
@@ -120,7 +112,7 @@ try
 
     var first = Path.Combine(root, "first.docx");
     Run("docx_replace_table_rows", Replacement(
-        target, targetState, source, sourceTable, sourceRows, sourceRead,
+        target, targetState, preparedSource, sourceTable, sourceRows, sourceRead,
         sourceFirst: 1, sourceLast: 2, targetFirst: 1, targetLast: 2,
         first, Path.Combine(root, "first-receipt.json")));
 
@@ -136,7 +128,7 @@ try
 
     var beforeRejectedInPlace = File.ReadAllBytes(first);
     var rejectedInPlace = RunExpectFailure("docx_replace_table_rows", Replacement(
-        first, freshState, source, sourceTable, sourceRows, sourceRead,
+        first, freshState, preparedSource, sourceTable, sourceRows, sourceRead,
         sourceFirst: 2, sourceLast: 4, targetFirst: 1, targetLast: freshState.Rows.Count - 1,
         first, Path.Combine(root, "rejected-in-place-receipt.json")));
     Require(rejectedInPlace.Contains("source-row-range-starts-inside-vertical-merge", StringComparison.Ordinal),
@@ -146,7 +138,7 @@ try
 
     var final = first;
     Run("docx_replace_table_rows", Replacement(
-        first, freshState, source, sourceTable, sourceRows, sourceRead,
+        first, freshState, preparedSource, sourceTable, sourceRows, sourceRead,
         sourceFirst: 3, sourceLast: 4, targetFirst: 3, targetLast: freshState.Rows.Count - 1,
         final, Path.Combine(root, "final-receipt.json")));
 
@@ -165,17 +157,10 @@ finally
 object Replacement(
     string targetPath, TargetState targetState, string sourcePath, JsonElement sourceTable,
     IReadOnlyList<JsonElement> sourceRows, JsonElement sourceRead,
-    int sourceFirst, int sourceLast, int targetFirst, int targetLast,
+    int sourceFirst, int sourceLast, int targetFirst, int? targetLast,
     string output, string receiptOutput)
 {
     var sourceHeader = ChildObjects(Observation(sourceRead, 0));
-    var selectedCells = Enumerable.Range(sourceFirst, sourceLast - sourceFirst + 1)
-        .SelectMany(index => ChildObservations(Observation(sourceRead, index)))
-        .Select(cell => new
-        {
-            sourceCell = Address(cell.GetProperty("object")),
-            sourceSelections = new[] { new { address = Address(ChildObservations(cell)[0].GetProperty("object")) } }
-        }).ToArray();
 
     return new
     {
@@ -188,12 +173,13 @@ object Replacement(
                 sourceTable = Address(sourceTable),
                 sourceRows = new { first = Address(sourceRows[sourceFirst]), last = Address(sourceRows[sourceLast]) },
                 targetTable = Address(targetState.Table),
-                targetRows = new { first = Address(targetState.Rows[targetFirst]), last = Address(targetState.Rows[targetLast]) },
+                targetRows = targetLast is null
+                    ? (object)new { first = Address(targetState.Rows[targetFirst]) }
+                    : new { first = Address(targetState.Rows[targetFirst]), last = Address(targetState.Rows[targetLast.Value]) },
                 columns = sourceHeader.Zip(targetState.HeaderCells, (sourceCell, targetCell) => new
                 {
                     sourceHeader = Address(sourceCell), targetHeader = Address(targetCell)
-                }).ToArray(),
-                sourceCellContents = selectedCells
+                }).ToArray()
             }
         },
         output,
@@ -201,43 +187,72 @@ object Replacement(
     };
 }
 
-object ParagraphModeReplacement(
-    string targetPath, TargetState targetState, string sourcePath, JsonElement sourceTable,
-    IReadOnlyList<JsonElement> sourceRows, JsonElement sourceRead,
-    int sourceFirst, int sourceLast, int targetFirst,
-    string output, string receiptOutput, bool includeExplicitSelections = false)
+string PrepareSource(string sourcePath, JsonElement compactRows)
 {
-    var sourceHeader = ChildObjects(Observation(sourceRead, 0));
-    var selectedCells = Enumerable.Range(sourceFirst, sourceLast - sourceFirst + 1)
-        .SelectMany(index => ChildObservations(Observation(sourceRead, index)))
-        .Select(cell => new
+    var rows = compactRows.EnumerateArray().Select(item => item.Clone()).ToArray();
+    var inlineChanges = rows.SelectMany(row => row.GetProperty("cells").EnumerateArray())
+        .SelectMany(cell => cell.GetProperty("paragraphs").EnumerateArray())
+        .Select(paragraph => (Paragraph: paragraph.Clone(), Change: RetainedRanges(paragraph)))
+        .Where(item => item.Change is not null)
+        .Select(item => new
         {
-            sourceCell = Address(cell.GetProperty("object")),
-            sourceSelections = new[] { new { address = Address(ChildObservations(cell)[0].GetProperty("object")) } }
+            target = item.Paragraph.GetProperty("address").Clone(),
+            sourceInput = sourcePath,
+            sourceSelections = item.Change
         }).ToArray();
-    return new
+    var textPrepared = Path.Combine(root, "source-text-prepared.docx");
+    Run("docx_copy_content", new
     {
-        input = targetPath,
-        tables = new[]
+        input = sourcePath,
+        changes = inlineChanges,
+        output = textPrepared,
+        receiptOutput = Path.Combine(root, "source-text-prepared-receipt.json")
+    });
+
+    var translatedParagraphs = rows.SelectMany(row => row.GetProperty("cells").EnumerateArray())
+        .SelectMany(cell => cell.GetProperty("paragraphs").EnumerateArray())
+        .Where(paragraph => paragraph.GetProperty("text").GetString() == "English translation")
+        .Select(paragraph => paragraph.GetProperty("address").Clone()).ToArray();
+    var prepared = Path.Combine(root, "source-prepared.docx");
+    Run("docx_delete_object", new
+    {
+        input = textPrepared,
+        changes = new[] { new { addresses = translatedParagraphs } },
+        output = prepared,
+        receiptOutput = Path.Combine(root, "source-prepared-receipt.json")
+    });
+    return prepared;
+}
+
+object[]? RetainedRanges(JsonElement paragraph)
+{
+    foreach (var textNode in paragraph.GetProperty("textNodes").EnumerateArray())
+    {
+        var value = textNode.GetProperty("text").GetString()!;
+        foreach (var excluded in new[] { "The English sentence should be omitted.", "Experimenter 1" })
         {
-            new
-            {
-                sourceInput = sourcePath,
-                sourceTable = Address(sourceTable),
-                sourceRows = new { first = Address(sourceRows[sourceFirst]), last = Address(sourceRows[sourceLast]) },
-                targetTable = Address(targetState.Table),
-                targetRows = new { first = Address(targetState.Rows[targetFirst]) },
-                columns = sourceHeader.Zip(targetState.HeaderCells, (sourceCell, targetCell) => new
+            var start = value.IndexOf(excluded, StringComparison.Ordinal);
+            if (start < 0) continue;
+            var selections = new List<object>();
+            if (start > 0)
+                selections.Add(new
                 {
-                    sourceHeader = Address(sourceCell), targetHeader = Address(targetCell)
-                }).ToArray(),
-                sourceCellContents = includeExplicitSelections ? selectedCells : null,
-                sourceParagraphMode = "omit-paired-latin-prose"
+                    address = textNode.GetProperty("address").Clone(),
+                    range = new { start = 0, length = start }
+                });
+            var suffixStart = start + excluded.Length;
+            if (suffixStart < value.Length)
+            {
+                selections.Add(new
+                {
+                    address = textNode.GetProperty("address").Clone(),
+                    range = new { start = suffixStart, length = value.Length - suffixStart }
+                });
             }
-        },
-        output,
-        receiptOutput
-    };
+            return selections.ToArray();
+        }
+    }
+    return null;
 }
 
 TargetState ObserveTarget(string input, string stem)
@@ -364,8 +379,14 @@ void ValidateFinal(string path)
     using var document = WordprocessingDocument.Open(path, false);
     var rows = document.MainDocumentPart!.Document.Body!.Elements<Table>().Single().Elements<TableRow>().ToArray();
     var texts = rows.Skip(1).Select(row => row.InnerText).ToArray();
-    Require(texts.SequenceEqual(new[] { "甲甲内容", "甲续行", "乙乙内容", "乙续行" }),
-        "final text or Chinese-only selection is wrong: " + string.Join(" | ", texts));
+    Require(texts.SequenceEqual(new[]
+        {
+            "甲甲内容R2=1.000采用 HPLC 检测中文。后文中文。Protein concentration后文实验员1 ：",
+            "English continuation甲续行",
+            "乙乙内容",
+            "English continuation乙续行"
+        }),
+        "final complete source rows are wrong: " + string.Join(" | ", texts));
     var merges = rows.Skip(1).Select(row => row.Elements<TableCell>().First()
         .TableCellProperties?.GetFirstChild<VerticalMerge>()?.Val?.Value).ToArray();
     Require(merges.SequenceEqual(new MergedCellValues?[]
