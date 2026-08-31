@@ -123,7 +123,8 @@ try
     Require(afterDelete.GetProperty("rows")[0].GetProperty("cells")[0].GetProperty("gridSpan").GetInt32() == 2,
         "column delete did not shrink the spanning header");
 
-    var invalidInsert = RunExpectFailure("docx_insert_objects", new
+    var insertedInsideMerge = Path.Combine(root, "inserted-inside-merge.docx");
+    Run("docx_insert_objects", new
     {
         input = deletedColumns,
         changes = new[]
@@ -132,14 +133,45 @@ try
             {
                 sourceInput = deletedColumns,
                 sources = new[] { afterDelete.GetProperty("rows")[2].GetProperty("address").Clone() },
-                targetParent = afterDelete.GetProperty("address").Clone()
+                targetParent = afterDelete.GetProperty("address").Clone(),
+                before = afterDelete.GetProperty("rows")[2].GetProperty("address").Clone(),
+                repeat = 2
             }
         },
-        output = Path.Combine(root, "invalid-insert.docx"),
-        receiptOutput = Path.Combine(root, "invalid-insert-receipt.json")
+        output = insertedInsideMerge,
+        receiptOutput = Path.Combine(root, "inserted-inside-merge-receipt.json")
     });
-    Require(invalidInsert.Contains("row-selection-splits-vertical-merge", StringComparison.Ordinal),
-        "row insertion accepted half of a vertical merge");
+    var insideMergeState = ReadTable(insertedInsideMerge, "inserted-inside-merge");
+    Require(insideMergeState.GetProperty("rowCount").GetInt32() == 6,
+        "row insertion inside a vertical merge did not add two rows");
+    var mergeOwner = insideMergeState.GetProperty("rows")[1].GetProperty("cells")[0]
+        .GetProperty("address").GetRawText();
+    foreach (var rowIndex in new[] { 2, 3, 4 })
+    {
+        var cell = insideMergeState.GetProperty("rows")[rowIndex].GetProperty("cells")[0];
+        Require(cell.GetProperty("verticalMerge").GetString() == "continue"
+                && cell.GetProperty("verticalMergeOwner").GetRawText() == mergeOwner,
+            "inserted row did not extend the existing vertical merge");
+    }
+
+    var incompatibleInsert = RunExpectFailure("docx_insert_objects", new
+    {
+        input = deletedColumns,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = deletedColumns,
+                sources = new[] { afterDelete.GetProperty("rows")[3].GetProperty("address").Clone() },
+                targetParent = afterDelete.GetProperty("address").Clone(),
+                before = afterDelete.GetProperty("rows")[2].GetProperty("address").Clone()
+            }
+        },
+        output = Path.Combine(root, "incompatible-insert.docx"),
+        receiptOutput = Path.Combine(root, "incompatible-insert-receipt.json")
+    });
+    Require(incompatibleInsert.Contains("row-insert-boundary-requires-compatible-vertical-merge", StringComparison.Ordinal),
+        "row insertion accepted an incompatible vertical-merge boundary");
 
     var invalidDelete = RunExpectFailure("docx_delete_object", new
     {
@@ -198,10 +230,11 @@ try
         "batch merge used stale cell paths");
 
     RunInput("validate-openxml", insertedRows);
+    RunInput("validate-openxml", insertedInsideMerge);
     RunInput("validate-openxml", batchColumns);
     RunInput("validate-openxml", insertedInsideOtherSpan);
     RunInput("validate-openxml", merged);
-    Console.WriteLine("PASS table observation, row boundaries, column edits, batch merges, and readback");
+    Console.WriteLine("PASS table observation, row insertion, column edits, batch merges, and readback");
 }
 finally
 {
