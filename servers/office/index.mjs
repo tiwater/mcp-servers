@@ -246,7 +246,7 @@ const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
 }).strict();
 
 const docxTableReadOutput = artifactOutput('docx_read_table').extend({
-  schema: z.literal('tiwater.docx-table-read/v1'),
+  schema: z.literal('tiwater.docx-table-read/v2'),
   receipt: z.object({
     schema: z.literal('tiwater.docx-table-read-receipt/v1'),
     totalRowCount: z.number().int().nonnegative(),
@@ -259,6 +259,10 @@ const docxTableReadOutput = artifactOutput('docx_read_table').extend({
   address: docxAddress,
   rowCount: z.number().int().nonnegative(),
   columnCount: z.number().int().nonnegative(),
+  gridColumns: z.array(z.object({
+    address: docxAddress,
+    widthTwips: z.number().int().positive().nullable(),
+  }).strict()),
   precedingParagraph: z.object({
     address: docxAddress,
     textPreview: z.string(),
@@ -271,12 +275,16 @@ const docxTableReadOutput = artifactOutput('docx_read_table').extend({
   }).strict().nullable(),
   rows: z.array(z.object({
     address: docxAddress,
+    repeatHeader: z.boolean(),
+    cantSplit: z.boolean(),
     gridBefore: z.number().int().nonnegative(),
     gridAfter: z.number().int().nonnegative(),
     cells: z.array(z.object({
       address: docxAddress,
+      gridColumnStart: z.number().int().nonnegative(),
       gridSpan: z.number().int().positive(),
       verticalMerge: z.string().nullable(),
+      verticalMergeOwner: docxAddress.nullable(),
       paragraphs: z.array(z.object({
         address: docxAddress,
         text: z.string(),
@@ -335,7 +343,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Writes the complete table, including text nodes, to output and returns a bounded row page with cells, spans, vertical merges, paragraph text, and reusable addresses. In a vertical merge, restart begins one logical cell and following continue cells belong to it; a continue cell is not an independent row value. Continue with receipt.nextOffset. If receipt.narrowingRequired is true, list rows under the same table and read smaller objects. It does not locate a table or decide business meaning.',
+    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Writes the complete table, including text nodes, to output and returns a bounded row page with grid-column addresses and widths, each cell\'s zero-based grid start and span, vertical-merge owner, repeated-header and no-split row properties, paragraph text, and reusable addresses. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value. The provider reports physical structure only; the Agent decides the template and business meaning. Continue with receipt.nextOffset. If receipt.narrowingRequired is true, list rows under the same table and read smaller objects.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -356,22 +364,15 @@ const tools = [
     handler: args => fixedEdit('docx_set_text', args),
   },
   {
-    name: 'docx_replace_table_rows',
-    description: 'Atomically replace a contiguous data-row range in existing target tables after reading both tables. Each range excludes its header and closes vertical merges; omit targetRows.last to replace through the table end. It maps complete source columns into the target grid and copies every source paragraph. Prepare any semantic content changes with separate published text or object operations before this structural replacement.',
-    inputSchema: inputContract('docx_replace_table_rows'),
-    outputSchema: fixedEditOutput('docx_replace_table_rows'),
-    handler: args => fixedEdit('docx_replace_table_rows', args),
-  },
-  {
     name: 'docx_insert_objects',
-    description: 'Insert selected current DOCX objects under an existing parent. Table rows are objects: expand a target table by copying observed row patterns into that table, using before for insertion position and repeat for count; sourceInput may equal input. This inserts new rows only; use docx_replace_table_rows to replace an existing data-row range from a source table.',
+    description: 'Insert selected current DOCX objects under an existing parent. Table rows are objects: expand a target table by copying one contiguous observed row range that closes every vertical merge, using before only at a target vertical-merge boundary and repeat for count; sourceInput may equal input. Individual table cells are not raw insertion targets because that would bypass the table grid.',
     inputSchema: inputContract('docx_insert_objects'),
     outputSchema: fixedEditOutput('docx_insert_objects'),
     handler: args => fixedEdit('docx_insert_objects', args),
   },
   {
     name: 'docx_delete_object',
-    description: 'Delete selected current DOCX objects directly from the current target document.',
+    description: 'Delete selected current DOCX objects directly from the current target document. Selected table rows must close every vertical merge and cannot remove the whole table. Individual table cells are not raw deletion targets; use column or merge operations for table structure.',
     inputSchema: inputContract('docx_delete_object'),
     outputSchema: fixedEditOutput('docx_delete_object'),
     handler: args => fixedEdit('docx_delete_object', args),
@@ -389,6 +390,20 @@ const tools = [
     inputSchema: inputContract('docx_split_cells'),
     outputSchema: fixedEditOutput('docx_split_cells'),
     handler: args => fixedEdit('docx_split_cells', args),
+  },
+  {
+    name: 'docx_insert_table_columns',
+    description: 'Insert empty template-shaped grid columns into one current main-document table. Select an observed source grid column for width and per-row cell formatting, and optionally a before grid-column address; cells spanning the insertion boundary expand instead of being split. It does not copy business values or decide column meaning.',
+    inputSchema: inputContract('docx_insert_table_columns'),
+    outputSchema: fixedEditOutput('docx_insert_table_columns'),
+    handler: args => fixedEdit('docx_insert_table_columns', args),
+  },
+  {
+    name: 'docx_delete_table_columns',
+    description: 'Delete selected observed grid columns from one current main-document table while shrinking spanning cells and preserving the remaining table grid. It cannot remove every column and does not decide whether a business column is unused.',
+    inputSchema: inputContract('docx_delete_table_columns'),
+    outputSchema: fixedEditOutput('docx_delete_table_columns'),
+    handler: args => fixedEdit('docx_delete_table_columns', args),
   },
   {
     name: 'docx_compare',
@@ -730,6 +745,7 @@ async function docxObservation(tool, args) {
         address: payload.address,
         rowCount: payload.rowCount,
         columnCount: payload.columnCount,
+        gridColumns: payload.gridColumns,
         precedingParagraph: payload.precedingParagraph,
         followingParagraph: payload.followingParagraph,
         receipt: {

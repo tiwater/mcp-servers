@@ -119,8 +119,12 @@ public static class NativeObjectMutation
             if (elements.Any(element => elements.Any(other => !ReferenceEquals(element, other) && element.Ancestors().Contains(other))))
                 throw new InvalidOperationException("delete-addresses-must-not-overlap");
             foreach (var group in elements.OfType<TableRow>().GroupBy(row => row.Parent))
-                if (group.Key is Table table && group.Count() >= table.Elements<TableRow>().Count())
-                    throw new InvalidOperationException("delete-must-not-remove-all-table-rows");
+                if (group.Key is Table table)
+                {
+                    if (group.Count() >= table.Elements<TableRow>().Count())
+                        throw new InvalidOperationException("delete-must-not-remove-all-table-rows");
+                    RequireClosedVerticalMergeGroups(table, group.ToHashSet());
+                }
         }
 
         var temporaryPath = outputPath + ".tmp-" + Guid.NewGuid().ToString("N");
@@ -148,8 +152,8 @@ public static class NativeObjectMutation
         }
     }
 
-    private static readonly HashSet<string> CopyableKinds = ["paragraph", "table", "row", "cell", "run", "text"];
-    private static readonly HashSet<string> DeletableKinds = ["paragraph", "table", "row", "cell", "run", "text", "drawing"];
+    private static readonly HashSet<string> CopyableKinds = ["paragraph", "table", "row", "run", "text"];
+    private static readonly HashSet<string> DeletableKinds = ["paragraph", "table", "row", "run", "text", "drawing"];
 
     private static IReadOnlyList<PreparedCopy> PrepareCopies(InsertObjectsRequest request, string targetPath)
     {
@@ -169,8 +173,19 @@ public static class NativeObjectMutation
             var source = Observation.ResolveAddresses(sourcePath, change.Sources, "changes.sources");
             if (source.Any(item => item.StoryPart != MainStory || !CopyableKinds.Contains(item.Kind)))
                 throw new InvalidOperationException("insert-source-kind-not-supported");
+            if (parent.Kind == "table")
+            {
+                if (source.Any(item => item.Kind != "row") || before is not null && before.Kind != "row")
+                    throw new InvalidOperationException("table-insert-requires-row-sources-and-row-boundary");
+                if (before is not null && !ReferenceEquals(before.Element.Parent, parent.Element))
+                    throw new InvalidOperationException("before-must-be-direct-child-of-target-parent");
+                ValidateInsertionBoundary((Table)parent.Element, before?.Element as TableRow);
+            }
             using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
-            var clones = source.Select(item => Observation.ResolveNativePath(sourceDocument, item.StoryPart, item.NativePath).CloneNode(true)).ToArray();
+            var sourceElements = source.Select(item =>
+                Observation.ResolveNativePath(sourceDocument, item.StoryPart, item.NativePath)).ToArray();
+            if (parent.Kind == "table") ValidateRowSourceSelection(sourceElements.Cast<TableRow>().ToArray());
+            var clones = sourceElements.Select(item => item.CloneNode(true)).ToArray();
             result.Add(new PreparedCopy(sourcePath, parent, before, repeat, clones));
         }
         return result;
@@ -235,7 +250,6 @@ public static class NativeObjectMutation
         {
             Body => child is Paragraph or Table,
             Table => child is TableRow,
-            TableRow => child is TableCell,
             TableCell => child is Paragraph or Table,
             Paragraph => child is DocumentFormat.OpenXml.Wordprocessing.Run,
             DocumentFormat.OpenXml.Wordprocessing.Run => child is Text,
@@ -254,6 +268,90 @@ public static class NativeObjectMutation
         var nativePath = Observation.NativePathFor(element);
         return new ObjectReadback(
             Observation.Address(MainStory, nativePath), kind, element.InnerText);
+    }
+
+    private static void ValidateRowSourceSelection(IReadOnlyList<TableRow> selectedRows)
+    {
+        if (selectedRows.Count == 0) throw new InvalidOperationException("row-source-selection-empty");
+        var table = selectedRows[0].Parent as Table ?? throw new InvalidOperationException("row-source-table-not-found");
+        if (selectedRows.Any(row => !ReferenceEquals(row.Parent, table)))
+            throw new InvalidOperationException("row-sources-must-share-one-table");
+        var rows = table.Elements<TableRow>().ToArray();
+        var indices = selectedRows.Select(row => Array.IndexOf(rows, row)).ToArray();
+        if (indices.Any(index => index < 0) || !indices.SequenceEqual(indices.OrderBy(index => index))
+            || indices.Zip(indices.Skip(1)).Any(pair => pair.Second != pair.First + 1))
+            throw new InvalidOperationException("row-sources-must-be-one-contiguous-native-range");
+        RequireClosedVerticalMergeGroups(table, selectedRows.ToHashSet());
+    }
+
+    private static void ValidateInsertionBoundary(Table table, TableRow? before)
+    {
+        var rows = table.Elements<TableRow>().ToArray();
+        var boundary = before is null ? rows.Length : Array.IndexOf(rows, before);
+        if (boundary < 0) throw new InvalidOperationException("before-row-not-found-in-target-table");
+        foreach (var group in VerticalMergeGroups(table))
+        {
+            var indices = group.Select(row => Array.IndexOf(rows, row)).ToArray();
+            if (indices.Min() < boundary && boundary <= indices.Max())
+                throw new InvalidOperationException("row-insert-boundary-is-inside-vertical-merge");
+        }
+    }
+
+    private static void RequireClosedVerticalMergeGroups(Table table, IReadOnlySet<TableRow> selected)
+    {
+        foreach (var group in VerticalMergeGroups(table))
+        {
+            var selectedCount = group.Count(selected.Contains);
+            if (selectedCount > 0 && selectedCount != group.Count)
+                throw new InvalidOperationException("row-selection-splits-vertical-merge");
+        }
+    }
+
+    private static IReadOnlyList<IReadOnlyList<TableRow>> VerticalMergeGroups(Table table)
+    {
+        var groups = new List<IReadOnlyList<TableRow>>();
+        var active = new Dictionary<(int Start, int Span), List<TableRow>>();
+        foreach (var row in table.Elements<TableRow>())
+        {
+            var continued = new HashSet<(int Start, int Span)>();
+            var cursor = RowOffset(row.TableRowProperties, "gridBefore");
+            foreach (var cell in row.Elements<TableCell>())
+            {
+                var span = Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1);
+                var key = (cursor, span);
+                var merge = cell.TableCellProperties?.VerticalMerge;
+                if (merge?.Val?.Value == MergedCellValues.Restart)
+                {
+                    Close(key);
+                    active[key] = [row];
+                    continued.Add(key);
+                }
+                else if (merge is not null)
+                {
+                    if (!active.TryGetValue(key, out var group))
+                        throw new InvalidOperationException("vertical-merge-continuation-without-restart");
+                    group.Add(row);
+                    continued.Add(key);
+                }
+                cursor += span;
+            }
+            foreach (var key in active.Keys.Where(key => !continued.Contains(key)).ToArray()) Close(key);
+        }
+        foreach (var key in active.Keys.ToArray()) Close(key);
+        return groups;
+
+        void Close((int Start, int Span) key)
+        {
+            if (!active.Remove(key, out var group)) return;
+            groups.Add(group);
+        }
+    }
+
+    private static int RowOffset(TableRowProperties? properties, string localName)
+    {
+        var value = properties?.ChildElements.FirstOrDefault(child => child.LocalName == localName)
+            ?.GetAttributes().FirstOrDefault(attribute => attribute.LocalName == "val").Value;
+        return int.TryParse(value, out var result) ? result : 0;
     }
 
     private static IReadOnlyDictionary<string, int> ValidationIssueCounts(WordprocessingDocument document)

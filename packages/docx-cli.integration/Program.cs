@@ -13,266 +13,214 @@ Directory.CreateDirectory(root);
 
 try
 {
-    var source = Path.Combine(root, "source.docx");
-    var target = Path.Combine(root, "target.docx");
-    CreateSource(source);
-    CreateTarget(target);
+    var original = Path.Combine(root, "original.docx");
+    CreateDocument(original);
+    var initial = ReadTable(original, "initial");
+    Require(initial.GetProperty("schema").GetString() == "tiwater.docx-table-read/v2", "table read schema is not v2");
+    Require(initial.GetProperty("gridColumns").GetArrayLength() == 4, "grid columns were not exposed");
+    var rows = initial.GetProperty("rows");
+    Require(rows[0].GetProperty("repeatHeader").GetBoolean(), "repeat-header row property was not exposed");
+    Require(rows[1].GetProperty("cantSplit").GetBoolean(), "no-split row property was not exposed");
+    Require(rows[1].GetProperty("cells")[2].GetProperty("gridColumnStart").GetInt32() == 2,
+        "cell grid start was not exposed");
+    Require(rows[2].GetProperty("cells")[0].GetProperty("verticalMergeOwner").GetRawText()
+            == rows[1].GetProperty("cells")[0].GetProperty("address").GetRawText(),
+        "vertical continuation did not point to its restart owner");
 
-    var sourceTableIndex = Run("docx_table_index", new
+    var batchColumns = Path.Combine(root, "batch-columns.docx");
+    Run("docx_insert_table_columns", new
     {
-        input = source, output = Path.Combine(root, "source-table-index.json")
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                table = initial.GetProperty("address").Clone(),
+                sourceColumn = initial.GetProperty("gridColumns")[0].GetProperty("address").Clone(),
+                before = initial.GetProperty("gridColumns")[1].GetProperty("address").Clone()
+            },
+            new
+            {
+                table = initial.GetProperty("address").Clone(),
+                sourceColumn = initial.GetProperty("gridColumns")[2].GetProperty("address").Clone(),
+                before = initial.GetProperty("gridColumns")[3].GetProperty("address").Clone()
+            }
+        },
+        output = batchColumns,
+        receiptOutput = Path.Combine(root, "batch-columns-receipt.json")
     });
-    var targetTableIndex = Run("docx_table_index", new
+    var batchState = ReadTable(batchColumns, "batch-columns");
+    var batchWidths = batchState.GetProperty("gridColumns").EnumerateArray()
+        .Select(column => column.GetProperty("widthTwips").GetInt32()).ToArray();
+    Require(batchWidths.SequenceEqual(new[] { 1200, 1200, 1200, 1800, 1800, 1800 }),
+        "batch column insertion reused stale grid paths");
+
+    var insertedInsideOtherSpan = Path.Combine(root, "inside-other-span.docx");
+    Run("docx_insert_table_columns", new
     {
-        input = target, output = Path.Combine(root, "target-table-index.json")
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                table = initial.GetProperty("address").Clone(),
+                sourceColumn = initial.GetProperty("gridColumns")[0].GetProperty("address").Clone(),
+                before = initial.GetProperty("gridColumns")[3].GetProperty("address").Clone()
+            }
+        },
+        output = insertedInsideOtherSpan,
+        receiptOutput = Path.Combine(root, "inside-other-span-receipt.json")
     });
-    Require(sourceTableIndex.GetProperty("tables").GetArrayLength() == 1,
-        "source table index did not return its single table");
-    Require(targetTableIndex.GetProperty("tables")[0].GetProperty("rowCount").GetInt32() == 7,
-        "target table index row count is wrong");
-    Require(targetTableIndex.GetProperty("tables")[0].GetProperty("columnCount").GetInt32() == 2,
-        "target table index column count is wrong");
+    var otherSpanState = ReadTable(insertedInsideOtherSpan, "inside-other-span");
+    var otherSpanHeader = otherSpanState.GetProperty("rows")[0].GetProperty("cells");
+    Require(otherSpanHeader[0].GetProperty("gridSpan").GetInt32() == 2
+            && otherSpanHeader[1].GetProperty("gridSpan").GetInt32() == 3,
+        "column insertion expanded the source header instead of the insertion-position header");
 
-    var compactTable = Run("docx_read_table", new
+    var insertedColumns = Path.Combine(root, "inserted-columns.docx");
+    Run("docx_insert_table_columns", new
     {
-        input = source,
-        table = sourceTableIndex.GetProperty("tables")[0].GetProperty("address"),
-        output = Path.Combine(root, "source-table.json")
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                table = initial.GetProperty("address").Clone(),
+                sourceColumn = initial.GetProperty("gridColumns")[1].GetProperty("address").Clone(),
+                before = initial.GetProperty("gridColumns")[2].GetProperty("address").Clone()
+            }
+        },
+        output = insertedColumns,
+        receiptOutput = Path.Combine(root, "inserted-columns-receipt.json")
     });
-    Require(compactTable.GetProperty("rowCount").GetInt32() == 5,
-        "compact table row count is wrong");
-    Require(compactTable.GetProperty("columnCount").GetInt32() == 2,
-        "compact table column count is wrong");
-    var compactRows = compactTable.GetProperty("rows");
-    Require(compactRows[1].GetProperty("cells")[0].GetProperty("verticalMerge").GetString() == "restart",
-        "compact table did not expose vertical merge restart");
-    Require(compactRows[2].GetProperty("cells")[0].GetProperty("verticalMerge").GetString() == "continue",
-        "compact table did not expose vertical merge continuation");
-    var compactParagraphs = compactRows[1].GetProperty("cells")[0].GetProperty("paragraphs");
-    Require(compactParagraphs.GetArrayLength() == 2 && compactParagraphs[0].GetProperty("text").GetString() == "甲",
-        "compact table paragraph projection is wrong");
-    Require(compactParagraphs[0].GetProperty("textNodes")[0].GetProperty("text").GetString() == "甲",
-        "compact table text-node projection is wrong");
-    Require(compactParagraphs[0].GetProperty("address").GetProperty("path").GetString()!.StartsWith('/'),
-        "compact table paragraph address is not native");
+    var afterInsert = ReadTable(insertedColumns, "after-insert");
+    Require(afterInsert.GetProperty("columnCount").GetInt32() == 5, "column insert did not expand the grid");
+    Require(afterInsert.GetProperty("rows")[0].GetProperty("cells")[0].GetProperty("gridSpan").GetInt32() == 3,
+        "column insert did not expand the spanning header");
+    Require(afterInsert.GetProperty("rows")[1].GetProperty("cells").GetArrayLength() == 5,
+        "column insert did not add a data cell");
+    Require(string.Concat(afterInsert.GetProperty("rows")[1].GetProperty("cells")[2].GetProperty("paragraphs")
+            .EnumerateArray().Select(item => item.GetProperty("text").GetString())).Length == 0,
+        "inserted data cell copied business text");
 
-    var nonTableRead = RunExpectFailure("docx_read_table", new
+    var deletedColumns = Path.Combine(root, "deleted-columns.docx");
+    Run("docx_delete_table_columns", new
     {
-        input = source,
-        table = compactRows[0].GetProperty("address"),
-        output = Path.Combine(root, "non-table.json")
+        input = insertedColumns,
+        changes = new[]
+        {
+            new
+            {
+                table = afterInsert.GetProperty("address").Clone(),
+                columns = new[] { afterInsert.GetProperty("gridColumns")[2].GetProperty("address").Clone() }
+            }
+        },
+        output = deletedColumns,
+        receiptOutput = Path.Combine(root, "deleted-columns-receipt.json")
     });
-    Require(nonTableRead.Contains("table-reference-kind-invalid", StringComparison.Ordinal),
-        "compact table accepted a non-table address");
+    var afterDelete = ReadTable(deletedColumns, "after-delete");
+    Require(afterDelete.GetProperty("columnCount").GetInt32() == 4, "column delete did not restore the grid");
+    Require(afterDelete.GetProperty("rows")[0].GetProperty("cells")[0].GetProperty("gridSpan").GetInt32() == 2,
+        "column delete did not shrink the spanning header");
 
-    var sourceTable = FirstObject(Run("docx_list_objects", new
+    var invalidInsert = RunExpectFailure("docx_insert_objects", new
     {
-        input = source, kinds = new[] { "table" }, scope = "/word/document.xml",
-        limit = 10, output = Path.Combine(root, "source-tables.json")
-    }));
-    Require(Address(sourceTable).GetRawText()
-            == sourceTableIndex.GetProperty("tables")[0].GetProperty("address").GetRawText(),
-        "table index address differs from native object listing");
-    var sourceRows = Objects(Run("docx_list_objects", new
-    {
-        input = source, kinds = new[] { "row" }, scope = "/word/document.xml",
-        parent = Address(sourceTable), limit = 10, output = Path.Combine(root, "source-rows.json")
-    }));
-    var sourceRead = Run("docx_read_object", new
-    {
-        input = source, addresses = sourceRows.Select(Address).ToArray(), kinds = new[] { "cell", "paragraph" },
-        output = Path.Combine(root, "source-read.json")
+        input = deletedColumns,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = deletedColumns,
+                sources = new[] { afterDelete.GetProperty("rows")[2].GetProperty("address").Clone() },
+                targetParent = afterDelete.GetProperty("address").Clone()
+            }
+        },
+        output = Path.Combine(root, "invalid-insert.docx"),
+        receiptOutput = Path.Combine(root, "invalid-insert-receipt.json")
     });
+    Require(invalidInsert.Contains("row-selection-splits-vertical-merge", StringComparison.Ordinal),
+        "row insertion accepted half of a vertical merge");
 
-    var targetState = ObserveTarget(target, "target");
-    var preparedSource = PrepareSource(source, compactRows);
-
-    var completeOutput = Path.Combine(root, "complete-source-rows.docx");
-    Run("docx_replace_table_rows", Replacement(
-        target, targetState, preparedSource, sourceTable, sourceRows, sourceRead,
-        sourceFirst: 1, sourceLast: 2, targetFirst: 1, targetLast: null,
-        completeOutput, Path.Combine(root, "complete-source-rows-receipt.json")));
-    using (var completeDocument = WordprocessingDocument.Open(completeOutput, false))
+    var invalidDelete = RunExpectFailure("docx_delete_object", new
     {
-        var completeRows = completeDocument.MainDocumentPart!.Document.Body!.Elements<Table>()
-            .Single().Elements<TableRow>().ToArray();
-        Require(completeRows.Length == 3, "omitted target last did not replace through table end");
-        Require(completeRows[1].InnerText == "甲甲内容R2=1.000采用 HPLC 检测中文。后文中文。Protein concentration后文实验员1 ：",
-            "complete row replacement changed the prepared source: " + completeRows[1].InnerText);
-        Require(completeRows[2].InnerText == "English continuation甲续行",
-            "complete row replacement omitted prepared source content");
-    }
+        input = deletedColumns,
+        changes = new[]
+        {
+            new { addresses = new[] { afterDelete.GetProperty("rows")[1].GetProperty("address").Clone() } }
+        },
+        output = Path.Combine(root, "invalid-delete.docx"),
+        receiptOutput = Path.Combine(root, "invalid-delete-receipt.json")
+    });
+    Require(invalidDelete.Contains("row-selection-splits-vertical-merge", StringComparison.Ordinal),
+        "row deletion accepted half of a vertical merge");
 
-    var invalidBoundary = RunExpectFailure("docx_replace_table_rows", Replacement(
-        target, targetState, preparedSource, sourceTable, sourceRows, sourceRead,
-        sourceFirst: 2, sourceLast: 4, targetFirst: 1, targetLast: targetState.Rows.Count - 1,
-        Path.Combine(root, "invalid-boundary.docx"), Path.Combine(root, "invalid-boundary-receipt.json")));
-    Require(invalidBoundary.Contains("source-row-range-starts-inside-vertical-merge", StringComparison.Ordinal),
-        "source range beginning inside a vertical merge was not rejected");
-
-    var first = Path.Combine(root, "first.docx");
-    Run("docx_replace_table_rows", Replacement(
-        target, targetState, preparedSource, sourceTable, sourceRows, sourceRead,
-        sourceFirst: 1, sourceLast: 2, targetFirst: 1, targetLast: 2,
-        first, Path.Combine(root, "first-receipt.json")));
-
-    var rowsFromStableTableAddress = Objects(Run("docx_list_objects", new
+    var insertedRows = Path.Combine(root, "inserted-rows.docx");
+    Run("docx_insert_objects", new
     {
-        input = first, kinds = new[] { "row" }, scope = "/word/document.xml",
-        parent = Address(targetState.Table), limit = 10, output = Path.Combine(root, "stable-table-address.json")
-    }));
-    Require(rowsFromStableTableAddress.Count > 0, "unchanged table address did not remain usable after row content replacement");
+        input = deletedColumns,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = deletedColumns,
+                sources = new[] { afterDelete.GetProperty("rows")[3].GetProperty("address").Clone() },
+                targetParent = afterDelete.GetProperty("address").Clone(),
+                repeat = 2
+            }
+        },
+        output = insertedRows,
+        receiptOutput = Path.Combine(root, "inserted-rows-receipt.json")
+    });
+    var afterRows = ReadTable(insertedRows, "after-rows");
+    Require(afterRows.GetProperty("rowCount").GetInt32() == 6, "row insertion did not add two rows");
 
-    var freshState = ObserveTarget(first, "first");
-    Require(Address(freshState.Table).GetRawText() == Address(targetState.Table).GetRawText(), "unchanged table address changed after row content replacement");
+    var mergeInput = Path.Combine(root, "merge-input.docx");
+    CreateFlatDocument(mergeInput);
+    var mergeState = ReadTable(mergeInput, "merge-state");
+    var mergeCells = mergeState.GetProperty("rows")[0].GetProperty("cells");
+    var merged = Path.Combine(root, "merged.docx");
+    Run("docx_merge_cells", new
+    {
+        input = mergeInput,
+        changes = new[]
+        {
+            new { cells = new[] { Address(mergeCells[0]), Address(mergeCells[1]) } },
+            new { cells = new[] { Address(mergeCells[2]), Address(mergeCells[3]) } }
+        },
+        output = merged,
+        receiptOutput = Path.Combine(root, "merged-receipt.json")
+    });
+    var mergedState = ReadTable(merged, "merged-state");
+    var finalCells = mergedState.GetProperty("rows")[0].GetProperty("cells");
+    Require(finalCells.GetArrayLength() == 2
+            && finalCells[0].GetProperty("gridSpan").GetInt32() == 2
+            && finalCells[1].GetProperty("gridSpan").GetInt32() == 2,
+        "batch merge used stale cell paths");
 
-    var beforeRejectedInPlace = File.ReadAllBytes(first);
-    var rejectedInPlace = RunExpectFailure("docx_replace_table_rows", Replacement(
-        first, freshState, preparedSource, sourceTable, sourceRows, sourceRead,
-        sourceFirst: 2, sourceLast: 4, targetFirst: 1, targetLast: freshState.Rows.Count - 1,
-        first, Path.Combine(root, "rejected-in-place-receipt.json")));
-    Require(rejectedInPlace.Contains("source-row-range-starts-inside-vertical-merge", StringComparison.Ordinal),
-        "invalid in-place mutation did not report its technical failure");
-    Require(File.ReadAllBytes(first).SequenceEqual(beforeRejectedInPlace),
-        "invalid in-place mutation changed the input document");
-
-    var final = first;
-    Run("docx_replace_table_rows", Replacement(
-        first, freshState, preparedSource, sourceTable, sourceRows, sourceRead,
-        sourceFirst: 3, sourceLast: 4, targetFirst: 3, targetLast: freshState.Rows.Count - 1,
-        final, Path.Combine(root, "final-receipt.json")));
-
-    var finalState = ObserveTarget(final, "final");
-    Require(finalState.Rows.Count == 5, $"expected 5 rows, found {finalState.Rows.Count}");
-    ValidateFinal(final);
-    RunInput("validate-openxml", final);
-
-    Console.WriteLine("PASS docx observation -> mutation -> fresh observation -> mutation -> readback");
+    RunInput("validate-openxml", insertedRows);
+    RunInput("validate-openxml", batchColumns);
+    RunInput("validate-openxml", insertedInsideOtherSpan);
+    RunInput("validate-openxml", merged);
+    Console.WriteLine("PASS table observation, row boundaries, column edits, batch merges, and readback");
 }
 finally
 {
     Directory.Delete(root, recursive: true);
 }
 
-object Replacement(
-    string targetPath, TargetState targetState, string sourcePath, JsonElement sourceTable,
-    IReadOnlyList<JsonElement> sourceRows, JsonElement sourceRead,
-    int sourceFirst, int sourceLast, int targetFirst, int? targetLast,
-    string output, string receiptOutput)
+JsonElement ReadTable(string input, string stem)
 {
-    var sourceHeader = ChildObjects(Observation(sourceRead, 0));
-
-    return new
+    var index = Run("docx_table_index", new
     {
-        input = targetPath,
-        tables = new[]
-        {
-            new
-            {
-                sourceInput = sourcePath,
-                sourceTable = Address(sourceTable),
-                sourceRows = new { first = Address(sourceRows[sourceFirst]), last = Address(sourceRows[sourceLast]) },
-                targetTable = Address(targetState.Table),
-                targetRows = targetLast is null
-                    ? (object)new { first = Address(targetState.Rows[targetFirst]) }
-                    : new { first = Address(targetState.Rows[targetFirst]), last = Address(targetState.Rows[targetLast.Value]) },
-                columns = sourceHeader.Zip(targetState.HeaderCells, (sourceCell, targetCell) => new
-                {
-                    sourceHeader = Address(sourceCell), targetHeader = Address(targetCell)
-                }).ToArray()
-            }
-        },
-        output,
-        receiptOutput
-    };
-}
-
-string PrepareSource(string sourcePath, JsonElement compactRows)
-{
-    var rows = compactRows.EnumerateArray().Select(item => item.Clone()).ToArray();
-    var inlineChanges = rows.SelectMany(row => row.GetProperty("cells").EnumerateArray())
-        .SelectMany(cell => cell.GetProperty("paragraphs").EnumerateArray())
-        .Select(paragraph => (Paragraph: paragraph.Clone(), Change: RetainedRanges(paragraph)))
-        .Where(item => item.Change is not null)
-        .Select(item => new
-        {
-            target = item.Paragraph.GetProperty("address").Clone(),
-            sourceInput = sourcePath,
-            sourceSelections = item.Change
-        }).ToArray();
-    var textPrepared = Path.Combine(root, "source-text-prepared.docx");
-    Run("docx_copy_content", new
-    {
-        input = sourcePath,
-        changes = inlineChanges,
-        output = textPrepared,
-        receiptOutput = Path.Combine(root, "source-text-prepared-receipt.json")
+        input,
+        output = Path.Combine(root, stem + "-index.json")
     });
-
-    var translatedParagraphs = rows.SelectMany(row => row.GetProperty("cells").EnumerateArray())
-        .SelectMany(cell => cell.GetProperty("paragraphs").EnumerateArray())
-        .Where(paragraph => paragraph.GetProperty("text").GetString() == "English translation")
-        .Select(paragraph => paragraph.GetProperty("address").Clone()).ToArray();
-    var prepared = Path.Combine(root, "source-prepared.docx");
-    Run("docx_delete_object", new
+    return Run("docx_read_table", new
     {
-        input = textPrepared,
-        changes = new[] { new { addresses = translatedParagraphs } },
-        output = prepared,
-        receiptOutput = Path.Combine(root, "source-prepared-receipt.json")
+        input,
+        table = index.GetProperty("tables")[0].GetProperty("address").Clone(),
+        output = Path.Combine(root, stem + "-table.json")
     });
-    return prepared;
-}
-
-object[]? RetainedRanges(JsonElement paragraph)
-{
-    foreach (var textNode in paragraph.GetProperty("textNodes").EnumerateArray())
-    {
-        var value = textNode.GetProperty("text").GetString()!;
-        foreach (var excluded in new[] { "The English sentence should be omitted.", "Experimenter 1" })
-        {
-            var start = value.IndexOf(excluded, StringComparison.Ordinal);
-            if (start < 0) continue;
-            var selections = new List<object>();
-            if (start > 0)
-                selections.Add(new
-                {
-                    address = textNode.GetProperty("address").Clone(),
-                    range = new { start = 0, length = start }
-                });
-            var suffixStart = start + excluded.Length;
-            if (suffixStart < value.Length)
-            {
-                selections.Add(new
-                {
-                    address = textNode.GetProperty("address").Clone(),
-                    range = new { start = suffixStart, length = value.Length - suffixStart }
-                });
-            }
-            return selections.ToArray();
-        }
-    }
-    return null;
-}
-
-TargetState ObserveTarget(string input, string stem)
-{
-    var table = FirstObject(Run("docx_list_objects", new
-    {
-        input, kinds = new[] { "table" }, scope = "/word/document.xml",
-        limit = 10, output = Path.Combine(root, stem + "-tables.json")
-    }));
-    var rows = Objects(Run("docx_list_objects", new
-    {
-        input, kinds = new[] { "row" }, scope = "/word/document.xml", parent = Address(table),
-        limit = 20, output = Path.Combine(root, stem + "-rows.json")
-    }));
-    var headerRead = Run("docx_read_object", new
-    {
-        input, addresses = new[] { Address(rows[0]) }, kinds = new[] { "cell", "paragraph" },
-        output = Path.Combine(root, stem + "-header.json")
-    });
-    return new TargetState(table, rows, ChildObjects(Observation(headerRead, 0)));
 }
 
 JsonElement Run(string command, object request)
@@ -317,95 +265,55 @@ void RunInput(string command, string input)
     return (process.ExitCode, output, error);
 }
 
-void CreateSource(string path)
+void CreateDocument(string path)
 {
     using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
     var main = document.AddMainDocumentPart();
-    var table = BaseTable();
-    table.Append(Header("字段", "内容"));
-    table.Append(DataRow("甲", "甲内容", MergedCellValues.Restart));
-    table.Append(DataRow("", "甲续行", MergedCellValues.Continue));
-    table.Append(DataRow("乙", "乙内容", MergedCellValues.Restart));
-    table.Append(DataRow("", "乙续行", MergedCellValues.Continue));
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(
+            new GridColumn { Width = "1200" },
+            new GridColumn { Width = "1200" },
+            new GridColumn { Width = "1800" },
+            new GridColumn { Width = "1800" }));
+    table.Append(new TableRow(
+        new TableRowProperties(new TableHeader()),
+        Cell("分组一", span: 2),
+        Cell("分组二", span: 2)));
+    table.Append(new TableRow(
+        new TableRowProperties(new CantSplit()),
+        Cell("甲", merge: MergedCellValues.Restart), Cell("甲一"), Cell("甲二"), Cell("甲三")));
+    table.Append(new TableRow(
+        Cell("", merge: MergedCellValues.Continue), Cell("乙一"), Cell("乙二"), Cell("乙三")));
+    table.Append(new TableRow(Cell("独立"), Cell("丙一"), Cell("丙二"), Cell("丙三")));
     main.Document = new Document(new Body(table));
     main.Document.Save();
 }
 
-void CreateTarget(string path)
+void CreateFlatDocument(string path)
 {
     using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
     var main = document.AddMainDocumentPart();
-    var table = BaseTable();
-    table.Append(Header("字段", "内容"));
-    for (var index = 0; index < 6; index++) table.Append(DataRow("", "", null, bilingual: false));
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(
+            new GridColumn { Width = "1000" }, new GridColumn { Width = "1000" },
+            new GridColumn { Width = "1000" }, new GridColumn { Width = "1000" }),
+        new TableRow(Cell("一"), Cell("二"), Cell("三"), Cell("四")));
     main.Document = new Document(new Body(table));
     main.Document.Save();
 }
 
-Table BaseTable() => new(
-    new TableProperties(new TableBorders(
-        new TopBorder { Val = BorderValues.Single }, new LeftBorder { Val = BorderValues.Single },
-        new BottomBorder { Val = BorderValues.Single }, new RightBorder { Val = BorderValues.Single },
-        new InsideHorizontalBorder { Val = BorderValues.Single }, new InsideVerticalBorder { Val = BorderValues.Single })),
-    new TableGrid(new GridColumn { Width = "3000" }, new GridColumn { Width = "6000" }));
-
-TableRow Header(string left, string right) => new(Cell(left, null, false), Cell(right, null, false));
-
-TableRow DataRow(string left, string right, MergedCellValues? merge, bool bilingual = true) =>
-    new(Cell(left, merge, bilingual), Cell(right, null, bilingual));
-
-TableCell Cell(string text, MergedCellValues? merge, bool bilingual)
+TableCell Cell(string text, int span = 1, MergedCellValues? merge = null)
 {
-    var properties = new TableCellProperties();
+    var properties = new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "1200" });
+    if (span > 1) properties.Append(new GridSpan { Val = span });
     if (merge is not null) properties.Append(new VerticalMerge { Val = merge.Value });
-    var cell = new TableCell(properties, new Paragraph(new Run(new Text(text))));
-    if (bilingual)
-    {
-        cell.Append(new Paragraph(new Run(new Text(text.Length == 0 ? "English continuation" : "English translation"))));
-        if (text == "甲内容")
-        {
-            cell.Append(new Paragraph(new Run(new Text("R2=1.000"))));
-            cell.Append(new Paragraph(new Run(new Text("采用 HPLC 检测"))));
-            cell.Append(new Paragraph(new Run(new Text("中文。The English sentence should be omitted.后文"))));
-            cell.Append(new Paragraph(new Run(new Text("中文。Protein concentration后文"))));
-            cell.Append(new Paragraph(new Run(new Text("实验员1 Experimenter 1："))));
-        }
-    }
-    return cell;
+    return new TableCell(properties, new Paragraph(new Run(new Text(text))));
 }
 
-void ValidateFinal(string path)
-{
-    using var document = WordprocessingDocument.Open(path, false);
-    var rows = document.MainDocumentPart!.Document.Body!.Elements<Table>().Single().Elements<TableRow>().ToArray();
-    var texts = rows.Skip(1).Select(row => row.InnerText).ToArray();
-    Require(texts.SequenceEqual(new[]
-        {
-            "甲甲内容R2=1.000采用 HPLC 检测中文。后文中文。Protein concentration后文实验员1 ：",
-            "English continuation甲续行",
-            "乙乙内容",
-            "English continuation乙续行"
-        }),
-        "final complete source rows are wrong: " + string.Join(" | ", texts));
-    var merges = rows.Skip(1).Select(row => row.Elements<TableCell>().First()
-        .TableCellProperties?.GetFirstChild<VerticalMerge>()?.Val?.Value).ToArray();
-    Require(merges.SequenceEqual(new MergedCellValues?[]
-        { MergedCellValues.Restart, MergedCellValues.Continue, MergedCellValues.Restart, MergedCellValues.Continue }),
-        "vertical merge sequence is wrong");
-}
-
-static IReadOnlyList<JsonElement> Objects(JsonElement root) =>
-    root.GetProperty("objects").EnumerateArray().Select(item => item.Clone()).ToArray();
-static JsonElement FirstObject(JsonElement root) => Objects(root).Single();
-static JsonElement Observation(JsonElement root, int index) => root.GetProperty("observations")[index];
-static IReadOnlyList<JsonElement> ChildObservations(JsonElement observation) =>
-    observation.GetProperty("children").EnumerateArray().Select(item => item.Clone()).ToArray();
-static IReadOnlyList<JsonElement> ChildObjects(JsonElement observation) =>
-    ChildObservations(observation).Select(item => item.GetProperty("object").Clone()).ToArray();
 static JsonElement Address(JsonElement value) => value.GetProperty("address").Clone();
 static void Require(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);
 }
-
-sealed record TargetState(JsonElement Table, IReadOnlyList<JsonElement> Rows, IReadOnlyList<JsonElement> HeaderCells);

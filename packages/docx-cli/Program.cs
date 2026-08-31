@@ -24,11 +24,12 @@ public static class Cli
         .. ObservationCommand.Commands,
         NativeContentCopy.Command,
         NativeTextMutation.Command,
-        NativeTableRowReplace.Command,
         NativeObjectMutation.InsertCommand,
         NativeObjectMutation.DeleteCommand,
         NativeCellMutation.MergeCommand,
         NativeCellMutation.SplitCommand,
+        NativeTableColumnMutation.InsertCommand,
+        NativeTableColumnMutation.DeleteCommand,
         NativePolicyMutation.FontCommand,
         NativePolicyMutation.TocCommand,
     ];
@@ -80,11 +81,12 @@ public static class Cli
                 _ when ObservationCommand.IsCommand(args[0]) => Task.FromResult(ObservationCommand.Run(args[0], args[1..])),
                 _ when args[0] == NativeContentCopy.Command => Task.FromResult(NativeContentCopy.Run(args[1..])),
                 _ when args[0] == NativeTextMutation.Command => Task.FromResult(NativeTextMutation.Run(args[1..])),
-                _ when args[0] == NativeTableRowReplace.Command => Task.FromResult(NativeTableRowReplace.Run(args[1..])),
                 _ when args[0] is NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                     => Task.FromResult(NativeObjectMutation.Run(args[0], args[1..])),
                 _ when args[0] is NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
                     => Task.FromResult(NativeCellMutation.Run(args[0], args[1..])),
+                _ when args[0] is NativeTableColumnMutation.InsertCommand or NativeTableColumnMutation.DeleteCommand
+                    => Task.FromResult(NativeTableColumnMutation.Run(args[0], args[1..])),
                 _ when args[0] is NativePolicyMutation.FontCommand or NativePolicyMutation.TocCommand
                     => Task.FromResult(NativePolicyMutation.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
@@ -182,9 +184,10 @@ public static class Cli
         {
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
             _ when ObservationCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
-            _ when command is NativeContentCopy.Command or NativeTextMutation.Command or NativeTableRowReplace.Command
+            _ when command is NativeContentCopy.Command or NativeTextMutation.Command
                 or NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                 or NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
+                or NativeTableColumnMutation.InsertCommand or NativeTableColumnMutation.DeleteCommand
                 or NativePolicyMutation.FontCommand or NativePolicyMutation.TocCommand
                 => $"tiwater-docx {command} <request.json>",
             "compare" => "tiwater-docx compare <old.docx> <new.docx> [--json]",

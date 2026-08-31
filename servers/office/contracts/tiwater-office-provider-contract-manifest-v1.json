@@ -2,7 +2,7 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.18.17"
+    "version": "0.19.0"
   },
   "tools": [
     {
@@ -61,6 +61,17 @@
       }
     },
     {
+      "name": "docx_delete_table_columns",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_delete_table_columns.schema.json",
+        "sha256": "4ce8f6d047fe30f50c711a4d9c1ee10efd6de886294f217e5d11f0bab58c9a90"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_delete_table_columns.schema.json",
+        "sha256": "4ce8f6d047fe30f50c711a4d9c1ee10efd6de886294f217e5d11f0bab58c9a90"
+      }
+    },
+    {
       "name": "docx_export_json",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_export_json.schema.json",
@@ -80,6 +91,17 @@
       "inputContract": {
         "path": "office/contracts/docx_insert_objects.schema.json",
         "sha256": "7cf239b13a9a5bfe15d426f9ed5747c5900a908d4877eeb77ddd9088afe8966f"
+      }
+    },
+    {
+      "name": "docx_insert_table_columns",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_insert_table_columns.schema.json",
+        "sha256": "bd07a489c6b6cd3538e133b99613fac84438de3097ff6ed8f5f1a32ef18a7b5a"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_insert_table_columns.schema.json",
+        "sha256": "bd07a489c6b6cd3538e133b99613fac84438de3097ff6ed8f5f1a32ef18a7b5a"
       }
     },
     {
@@ -157,17 +179,6 @@
       "inputContract": {
         "path": "office/contracts/docx_replace_style_ids.schema.json",
         "sha256": "25f4d4e7c69fa5a2c4a82621aa58ea8eda21245636f84f2243ca4e9092616b68"
-      }
-    },
-    {
-      "name": "docx_replace_table_rows",
-      "providerContract": {
-        "source": "packages/docx-cli/contracts/mcp-input/docx_replace_table_rows.schema.json",
-        "sha256": "180cd21147fcd8158d640d769d9b6e435f0fe8761a0c41a03b711582dfb9c64c"
-      },
-      "inputContract": {
-        "path": "office/contracts/docx_replace_table_rows.schema.json",
-        "sha256": "180cd21147fcd8158d640d769d9b6e435f0fe8761a0c41a03b711582dfb9c64c"
       }
     },
     {
