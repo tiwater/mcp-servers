@@ -54,17 +54,20 @@ public static class NativeCellMutation
             var changedPaths = new List<string>();
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {
+                var outputCells = resolved.Select(item =>
+                    Observation.ResolveNativePath(output, item.StoryPart, item.NativePath) as TableCell
+                        ?? throw new InvalidOperationException("cell-address-not-found-in-output")).ToArray();
                 var offset = 0;
+                var changedCells = new List<TableCell>();
                 foreach (var change in request.Changes)
                 {
-                    var cells = resolved.Skip(offset).Take(change.Cells.Count)
-                        .Select(item => Observation.ResolveNativePath(output, item.StoryPart, item.NativePath) as TableCell
-                            ?? throw new InvalidOperationException("cell-address-not-found-in-output"))
-                        .ToArray();
+                    var cells = outputCells.Skip(offset).Take(change.Cells.Count).ToArray();
                     offset += change.Cells.Count;
                     var changed = command == MergeCommand ? Merge(cells) : Split(cells);
-                    changedPaths.AddRange(changed.Select(Observation.NativePathFor));
+                    changedCells.AddRange(changed);
                 }
+                changedPaths.AddRange(changedCells.Distinct()
+                    .Select(cell => Observation.NativePathFor(cell)));
                 output.MainDocumentPart?.Document?.Save();
                 RejectAddedValidationIssues(output, baseline);
             }

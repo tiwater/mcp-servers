@@ -153,15 +153,52 @@ public static class Observation
         var selected = ResolveAddresses(snapshot, new[] { address }, "table").Single();
         if (selected.Kind != "table" || selected.Element is not Table table)
             throw new InvalidOperationException("table-reference-kind-invalid");
-        var rows = table.Elements<TableRow>().Select(row => new DocxTableReadRow(
+        var gridColumns = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>()
+            .Select(column => new DocxTableReadGridColumn(
+                Address(selected.StoryPart, NativePathFor(column)),
+                int.TryParse(column.Width?.Value, out var width) ? width : null))
+            .ToArray() ?? [];
+        var nativeRows = table.Elements<TableRow>().ToArray();
+        var projectedRows = nativeRows.Select(row =>
+        {
+            var cursor = RowOffset(row.TableRowProperties, "gridBefore");
+            var cells = row.Elements<TableCell>().Select(cell =>
+            {
+                var span = Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1);
+                var projection = new ProjectedTableCell(cell, cursor, span, VerticalMergeValue(cell.TableCellProperties));
+                cursor += span;
+                return projection;
+            }).ToArray();
+            return cells;
+        }).ToArray();
+        DocxObjectAddress? MergeOwner(int rowIndex, ProjectedTableCell cell)
+        {
+            if (cell.VerticalMerge is null) return null;
+            if (cell.VerticalMerge == "restart")
+                return Address(selected.StoryPart, NativePathFor(cell.Cell));
+            for (var previous = rowIndex - 1; previous >= 0; previous--)
+            {
+                var candidate = projectedRows[previous].SingleOrDefault(item =>
+                    item.GridColumnStart == cell.GridColumnStart && item.GridSpan == cell.GridSpan);
+                if (candidate is null || candidate.VerticalMerge is null) break;
+                if (candidate.VerticalMerge == "restart")
+                    return Address(selected.StoryPart, NativePathFor(candidate.Cell));
+            }
+            throw new InvalidOperationException("vertical-merge-owner-not-found");
+        }
+        var rows = nativeRows.Select((row, rowIndex) => new DocxTableReadRow(
             Address(selected.StoryPart, NativePathFor(row)),
+            row.TableRowProperties?.GetFirstChild<TableHeader>() is not null,
+            row.TableRowProperties?.GetFirstChild<CantSplit>() is not null,
             RowOffset(row.TableRowProperties, "gridBefore"),
             RowOffset(row.TableRowProperties, "gridAfter"),
-            row.Elements<TableCell>().Select(cell => new DocxTableReadCell(
-                Address(selected.StoryPart, NativePathFor(cell)),
-                Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1),
-                VerticalMergeValue(cell.TableCellProperties),
-                cell.Elements<Paragraph>().Select(paragraph => new DocxTableReadParagraph(
+            projectedRows[rowIndex].Select(cell => new DocxTableReadCell(
+                Address(selected.StoryPart, NativePathFor(cell.Cell)),
+                cell.GridColumnStart,
+                cell.GridSpan,
+                cell.VerticalMerge,
+                MergeOwner(rowIndex, cell),
+                cell.Cell.Elements<Paragraph>().Select(paragraph => new DocxTableReadParagraph(
                     Address(selected.StoryPart, NativePathFor(paragraph)),
                     paragraph.InnerText,
                     paragraph.Descendants<Text>().Select(value => new DocxTableReadText(
@@ -175,8 +212,8 @@ public static class Observation
                 .DefaultIfEmpty(0).Max());
         var context = TableContext(snapshot,
             snapshot.Objects.Single(item => item.Address == selected.Address));
-        return new DocxTableReadResult("tiwater.docx-table-read/v1", address, rows.Length,
-            columnCount, context.PrecedingParagraph, context.FollowingParagraph, rows);
+        return new DocxTableReadResult("tiwater.docx-table-read/v2", address, rows.Length,
+            columnCount, gridColumns, context.PrecedingParagraph, context.FollowingParagraph, rows);
     }
 
     private static DocxTableContext TableContext(Snapshot snapshot, NativeObject table)
@@ -670,24 +707,39 @@ public sealed record DocxTableReadParagraph(
 
 public sealed record DocxTableReadCell(
     [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("gridColumnStart")] int GridColumnStart,
     [property: JsonPropertyName("gridSpan")] int GridSpan,
     [property: JsonPropertyName("verticalMerge")] string? VerticalMerge,
+    [property: JsonPropertyName("verticalMergeOwner")] DocxObjectAddress? VerticalMergeOwner,
     [property: JsonPropertyName("paragraphs")] IReadOnlyList<DocxTableReadParagraph> Paragraphs);
 
 public sealed record DocxTableReadRow(
     [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("repeatHeader")] bool RepeatHeader,
+    [property: JsonPropertyName("cantSplit")] bool CantSplit,
     [property: JsonPropertyName("gridBefore")] int GridBefore,
     [property: JsonPropertyName("gridAfter")] int GridAfter,
     [property: JsonPropertyName("cells")] IReadOnlyList<DocxTableReadCell> Cells);
+
+public sealed record DocxTableReadGridColumn(
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("widthTwips")] int? WidthTwips);
 
 public sealed record DocxTableReadResult(
     [property: JsonPropertyName("schema")] string Schema,
     [property: JsonPropertyName("address")] DocxObjectAddress Address,
     [property: JsonPropertyName("rowCount")] int RowCount,
     [property: JsonPropertyName("columnCount")] int ColumnCount,
+    [property: JsonPropertyName("gridColumns")] IReadOnlyList<DocxTableReadGridColumn> GridColumns,
     [property: JsonPropertyName("precedingParagraph")] DocxTableContextParagraph? PrecedingParagraph,
     [property: JsonPropertyName("followingParagraph")] DocxTableContextParagraph? FollowingParagraph,
     [property: JsonPropertyName("rows")] IReadOnlyList<DocxTableReadRow> Rows);
+
+internal sealed record ProjectedTableCell(
+    TableCell Cell,
+    int GridColumnStart,
+    int GridSpan,
+    string? VerticalMerge);
 
 internal sealed record ResolvedDocxAddress(
     DocxObjectAddress Address,
