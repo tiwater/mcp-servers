@@ -286,6 +286,7 @@ const docxTableReadOutput = artifactOutput('docx_read_table').extend({
       verticalMerge: z.string().nullable(),
       verticalMergeOwner: docxAddress.nullable(),
       text: z.string(),
+      logicalText: z.string(),
     }).strict()),
   }).strict()),
 }).strict();
@@ -336,7 +337,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Each call retains full paragraph and text-node detail for exactly the returned row page at output; it never builds another whole-table data object. The machine response is the compact form of that page: each row and cell keeps its reusable native address, grid position and span, vertical-merge owner, and joined text. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value. Process the current page before continuing once with receipt.nextOffset; never revisit an earlier offset. Use docx_read_object only when one selected object needs a narrower descendant view. The provider reports physical structure only; the Agent decides the template and business meaning.',
+    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Each call retains full paragraph and text-node detail for exactly the returned row page at output; it never builds another whole-table data object. The machine response is the compact form of that page: each row and cell keeps its reusable native address, grid position and span, vertical-merge owner, physical text, and logical text. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Process the current page before continuing once with receipt.nextOffset; never revisit an earlier offset. Use docx_read_object only when one selected object needs a narrower descendant view. The provider reports physical structure only; the Agent decides the template and business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -730,6 +731,7 @@ async function docxObservation(tool, args) {
             verticalMerge: cell.verticalMerge,
             verticalMergeOwner: cell.verticalMergeOwner,
             text: cell.paragraphs.map(paragraph => paragraph.text).join('\n'),
+            logicalText: cell.logicalText,
           })),
         };
         const candidate = [...rows, row];
