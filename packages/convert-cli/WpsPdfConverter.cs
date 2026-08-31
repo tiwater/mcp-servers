@@ -100,8 +100,8 @@ public static class WpsPdfConverter
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
         var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
-            process, completionMarker, () => IsDocx(output), TimeSpan.FromMinutes(3),
-            "WPS RPC document field refresh timed out after 180 seconds.");
+            process, completionMarker, () => IsDocx(output), WpsRpcSession.OfficeOperationTimeout,
+            "WPS RPC document field refresh timed out after 600 seconds.");
         var details = WpsRpcSession.CollectDiagnosticOutput(stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
         if ((!completedOutput && process.ExitCode != 0) || !IsDocx(output))
             throw new InvalidOperationException($"WPS RPC failed to refresh document fields for {input}." +
@@ -117,8 +117,8 @@ public static class WpsPdfConverter
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
         var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
-            process, completionMarker, () => IsPdf(output), TimeSpan.FromMinutes(3),
-            "WPS RPC PDF conversion timed out after 180 seconds.");
+            process, completionMarker, () => IsPdf(output), WpsRpcSession.OfficeOperationTimeout,
+            "WPS RPC PDF conversion timed out after 600 seconds.");
         var details = WpsRpcSession.CollectDiagnosticOutput(
             stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
         if ((!completedOutput && process.ExitCode != 0) || !IsPdf(output))
