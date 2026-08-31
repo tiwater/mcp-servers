@@ -128,6 +128,7 @@ public static class Observation
         var tables = snapshot.Objects.Where(item => item.Kind == "table").Select(item =>
         {
             var identity = ToObject(snapshot, item);
+            var context = TableContext(snapshot, item);
             var table = (Table)item.Element;
             var rows = table.Elements<TableRow>().ToList();
             var columnCount = Math.Max(
@@ -139,7 +140,9 @@ public static class Observation
                 rows.Count,
                 columnCount,
                 identity.TextPreview ?? string.Empty,
-                identity.TextLength ?? 0);
+                identity.TextLength ?? 0,
+                context.PrecedingParagraph,
+                context.FollowingParagraph);
         }).ToList();
         return new DocxTableIndexResult("tiwater.docx-table-index/v1", tables);
     }
@@ -170,8 +173,35 @@ public static class Observation
             table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count() ?? 0,
             rows.Select(row => row.GridBefore + row.Cells.Sum(cell => cell.GridSpan) + row.GridAfter)
                 .DefaultIfEmpty(0).Max());
+        var context = TableContext(snapshot,
+            snapshot.Objects.Single(item => item.Address == selected.Address));
         return new DocxTableReadResult("tiwater.docx-table-read/v1", address, rows.Length,
-            columnCount, rows);
+            columnCount, context.PrecedingParagraph, context.FollowingParagraph, rows);
+    }
+
+    private static DocxTableContext TableContext(Snapshot snapshot, NativeObject table)
+    {
+        var parentAddress = PublishedParentAddress(snapshot, table);
+        if (parentAddress is null) return new DocxTableContext(null, null);
+        var parent = snapshot.Objects.First(item => item.Address == parentAddress);
+        var siblings = snapshot.Objects
+            .Where(item => IsDirectPublishedChild(snapshot, item, parent))
+            .ToList();
+        var tableIndex = siblings.FindIndex(item => ReferenceEquals(item.Element, table.Element));
+        if (tableIndex < 0) return new DocxTableContext(null, null);
+
+        DocxTableContextParagraph? ParagraphAt(IEnumerable<NativeObject> candidates)
+        {
+            var paragraph = candidates.FirstOrDefault(item =>
+                item.Kind == "paragraph" && !string.IsNullOrWhiteSpace(TechnicalText(item.Element)));
+            if (paragraph is null) return null;
+            var text = TechnicalText(paragraph.Element);
+            return new DocxTableContextParagraph(paragraph.Address, Clip(text, 160), text.Length);
+        }
+
+        return new DocxTableContext(
+            ParagraphAt(siblings.Take(tableIndex).Reverse()),
+            ParagraphAt(siblings.Skip(tableIndex + 1)));
     }
 
     private static string? VerticalMergeValue(TableCellProperties? properties)
@@ -612,7 +642,18 @@ public sealed record DocxTableIndexEntry(
     [property: JsonPropertyName("rowCount")] int RowCount,
     [property: JsonPropertyName("columnCount")] int ColumnCount,
     [property: JsonPropertyName("textPreview")] string TextPreview,
+    [property: JsonPropertyName("textLength")] int TextLength,
+    [property: JsonPropertyName("precedingParagraph")] DocxTableContextParagraph? PrecedingParagraph,
+    [property: JsonPropertyName("followingParagraph")] DocxTableContextParagraph? FollowingParagraph);
+
+public sealed record DocxTableContextParagraph(
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("textPreview")] string TextPreview,
     [property: JsonPropertyName("textLength")] int TextLength);
+
+public sealed record DocxTableContext(
+    DocxTableContextParagraph? PrecedingParagraph,
+    DocxTableContextParagraph? FollowingParagraph);
 
 public sealed record DocxTableIndexResult(
     [property: JsonPropertyName("schema")] string Schema,
@@ -644,6 +685,8 @@ public sealed record DocxTableReadResult(
     [property: JsonPropertyName("address")] DocxObjectAddress Address,
     [property: JsonPropertyName("rowCount")] int RowCount,
     [property: JsonPropertyName("columnCount")] int ColumnCount,
+    [property: JsonPropertyName("precedingParagraph")] DocxTableContextParagraph? PrecedingParagraph,
+    [property: JsonPropertyName("followingParagraph")] DocxTableContextParagraph? FollowingParagraph,
     [property: JsonPropertyName("rows")] IReadOnlyList<DocxTableReadRow> Rows);
 
 internal sealed record ResolvedDocxAddress(

@@ -225,6 +225,16 @@ const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
     columnCount: z.number().int().nonnegative(),
     textPreview: z.string(),
     textLength: z.number().int().nonnegative(),
+    precedingParagraph: z.object({
+      address: docxAddress,
+      textPreview: z.string(),
+      textLength: z.number().int().nonnegative(),
+    }).strict().nullable(),
+    followingParagraph: z.object({
+      address: docxAddress,
+      textPreview: z.string(),
+      textLength: z.number().int().nonnegative(),
+    }).strict().nullable(),
   }).strict()),
 }).strict();
 
@@ -233,6 +243,16 @@ const docxTableReadOutput = artifactOutput('docx_read_table').extend({
   address: docxAddress,
   rowCount: z.number().int().nonnegative(),
   columnCount: z.number().int().nonnegative(),
+  precedingParagraph: z.object({
+    address: docxAddress,
+    textPreview: z.string(),
+    textLength: z.number().int().nonnegative(),
+  }).strict().nullable(),
+  followingParagraph: z.object({
+    address: docxAddress,
+    textPreview: z.string(),
+    textLength: z.number().int().nonnegative(),
+  }).strict().nullable(),
   rows: z.array(z.object({
     address: docxAddress,
     gridBefore: z.number().int().nonnegative(),
@@ -276,7 +296,7 @@ const tools = [
   },
   {
     name: 'docx_table_index',
-    description: 'Locate tables in one current DOCX. Returns one compact index containing every table address, shape, and short text preview. Choose the needed address from this index, then call docx_read_table. It does not return full cell content or decide table semantics.',
+    description: 'Locate tables in one current DOCX. Returns one compact index containing every table address, shape, short text preview, and the nearest non-empty paragraph before and after each table. Choose the needed address from this index, then call docx_read_table. It does not return full cell content or decide table semantics.',
     inputSchema: inputContract('docx_table_index'),
     outputSchema: docxTableIndexOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -292,7 +312,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Returns its rows, cells, spans, vertical merges, paragraphs, text nodes, and reusable addresses in document order. It does not locate a table or decide business meaning.',
+    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Returns its nearest non-empty paragraph before and after the table, rows, cells, spans, vertical merges, paragraphs, text nodes, and reusable addresses in document order. It does not locate a table or decide business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
