@@ -335,7 +335,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Writes the complete table, including text nodes, to output and returns a bounded row page with cells, spans, vertical merges, paragraph text, and reusable addresses. Continue with receipt.nextOffset. If receipt.narrowingRequired is true, list rows under the same table and read smaller objects. It does not locate a table or decide business meaning.',
+    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Writes the complete table, including text nodes, to output and returns a bounded row page with cells, spans, vertical merges, paragraph text, and reusable addresses. In a vertical merge, restart begins one logical cell and following continue cells belong to it; a continue cell is not an independent row value. Continue with receipt.nextOffset. If receipt.narrowingRequired is true, list rows under the same table and read smaller objects. It does not locate a table or decide business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -350,7 +350,7 @@ const tools = [
   },
   {
     name: 'docx_set_text',
-    description: 'Replace the whole text content of observed paragraph or cell objects while retaining target formatting and bookmarks. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. This sets already-derived text; it does not insert objects, copy source formatting, or decide business wording.',
+    description: 'Replace the whole text content of observed paragraph or cell objects while retaining target formatting, bookmarks, spans, and vertical merges. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. This sets already-derived text; it does not insert objects, change table structure, copy source formatting, or decide business wording.',
     inputSchema: inputContract('docx_set_text'),
     outputSchema: fixedEditOutput('docx_set_text'),
     handler: args => fixedEdit('docx_set_text', args),

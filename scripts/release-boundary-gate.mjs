@@ -705,6 +705,21 @@ function checkSourceBoundObservationOutputs(tools) {
   note(`${names.length} inspect/export outputs bind their exact source artifacts`);
 }
 
+function checkDocxMergedCellDescriptions(tools) {
+  const check = 'docx-merged-cell-descriptions';
+  const readDescription = tools.find(tool => tool?.name === 'docx_read_table')?.description || '';
+  const setDescription = tools.find(tool => tool?.name === 'docx_set_text')?.description || '';
+  if (!readDescription.includes('restart')
+      || !readDescription.includes('continue cell is not an independent row value')) {
+    fail(check, 'docx_read_table does not explain vertical-merge logical-cell identity');
+  }
+  if (!setDescription.includes('restart cell rather than a continue cell')
+      || !setDescription.includes('does not insert objects, change table structure')) {
+    fail(check, 'docx_set_text does not explain merged-cell and structural non-goals');
+  }
+  note('DOCX table read/write descriptions preserve vertical-merge logical-cell semantics');
+}
+
 function unboundedResponseArrays(schema, location = '$', found = []) {
   if (Array.isArray(schema)) {
     schema.forEach((entry, index) => unboundedResponseArrays(entry, `${location}[${index}]`, found));
@@ -746,6 +761,7 @@ async function main() {
     await checkPublicSchemas(packageRoot);
     const toolNames = await smokeInstalledPackage(archive, tempRoot);
     checkSourceBoundObservationOutputs(toolNames);
+    checkDocxMergedCellDescriptions(toolNames);
     checkBoundedInspectionOutputs(toolNames);
     const packedPackage = await readJson(path.join(packageRoot, 'package.json'));
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);
