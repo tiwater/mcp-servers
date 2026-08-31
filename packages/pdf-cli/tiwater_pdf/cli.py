@@ -16,7 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 from . import __version__
 
 DEFAULT_OCR_MODEL = "qwen3.8-max"
