@@ -363,11 +363,11 @@ const tools = [
     handler: args => fixedEdit('docx_replace_table_rows', args),
   },
   {
-    name: 'docx_copy_object',
-    description: 'Insert selected objects only when the target needs a new object under an existing parent. Do not use this to populate or replace rows in an existing target table; use docx_replace_table_rows instead.',
-    inputSchema: inputContract('docx_copy_object'),
-    outputSchema: fixedEditOutput('docx_copy_object'),
-    handler: args => fixedEdit('docx_copy_object', args),
+    name: 'docx_insert_objects',
+    description: 'Insert selected current DOCX objects under an existing parent. Table rows are objects: expand a target table by copying observed row patterns into that table, using before for insertion position and repeat for count; sourceInput may equal input. This inserts new rows only; use docx_replace_table_rows to replace an existing data-row range from a source table.',
+    inputSchema: inputContract('docx_insert_objects'),
+    outputSchema: fixedEditOutput('docx_insert_objects'),
+    handler: args => fixedEdit('docx_insert_objects', args),
   },
   {
     name: 'docx_delete_object',
