@@ -10,7 +10,9 @@ namespace Dockit.Docx;
 
 internal static class NativeMutationSupport
 {
-    public static (string Input, string Output, string Receipt) Paths(
+    public sealed record PathsResult(string Input, string Output, string Receipt, bool InPlace);
+
+    public static PathsResult Paths(
         string input,
         string output,
         string receiptOutput)
@@ -18,13 +20,23 @@ internal static class NativeMutationSupport
         var inputPath = Path.GetFullPath(input);
         var outputPath = Path.GetFullPath(output);
         var receiptPath = Path.GetFullPath(receiptOutput);
-        RequireNewPath(outputPath, "output");
+        if (!File.Exists(inputPath) || Directory.Exists(inputPath))
+            throw new InvalidOperationException("input-file-not-found");
+        var inPlace = StringComparer.OrdinalIgnoreCase.Equals(inputPath, outputPath);
+        if (!inPlace) RequireNewPath(outputPath, "output");
         RequireNewPath(receiptPath, "receiptOutput");
         if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath))
             throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
-        if (StringComparer.OrdinalIgnoreCase.Equals(inputPath, outputPath))
-            throw new InvalidOperationException("output-must-not-overwrite-input");
-        return (inputPath, outputPath, receiptPath);
+        return new PathsResult(inputPath, outputPath, receiptPath, inPlace);
+    }
+
+    public static void Commit(string temporaryPath, PathsResult paths)
+        => File.Move(temporaryPath, paths.Output, paths.InPlace);
+
+    public static void CleanupFailure(string temporaryPath, PathsResult paths)
+    {
+        Cleanup(temporaryPath, paths.Receipt);
+        if (!paths.InPlace) Cleanup(paths.Output);
     }
 
     public static IReadOnlyDictionary<string, int> ValidationIssueCounts(WordprocessingDocument document)

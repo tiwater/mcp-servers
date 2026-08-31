@@ -33,13 +33,10 @@ public static class NativeCellMutation
     {
         if (command is not MergeCommand and not SplitCommand) throw new InvalidOperationException("cell-mutation-command-invalid");
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var targetPath = Path.GetFullPath(request.Input);
-        var outputPath = Path.GetFullPath(request.Output);
-        var receiptPath = Path.GetFullPath(request.ReceiptOutput);
-        RequireNewPath(outputPath, "output");
-        RequireNewPath(receiptPath, "receiptOutput");
-        if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath)) throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
-        if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, targetPath)) throw new InvalidOperationException("output-must-not-overwrite-input");
+        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        var targetPath = paths.Input;
+        var outputPath = paths.Output;
+        var receiptPath = paths.Receipt;
 
         var addresses = request.Changes.SelectMany(change => change.Cells).ToArray();
         if (addresses.Length == 0 || addresses.Distinct().Count() != addresses.Length)
@@ -71,7 +68,7 @@ public static class NativeCellMutation
                 output.MainDocumentPart?.Document?.Save();
                 RejectAddedValidationIssues(output, baseline);
             }
-            File.Move(temporaryPath, outputPath);
+            NativeMutationSupport.Commit(temporaryPath, paths);
             IReadOnlyList<CellMutationReadback> changes;
             using (var output = WordprocessingDocument.Open(outputPath, false))
                 changes = changedPaths.Select(path => Readback(
@@ -85,7 +82,7 @@ public static class NativeCellMutation
         }
         catch
         {
-            foreach (var path in new[] { temporaryPath, outputPath, receiptPath }) if (File.Exists(path)) File.Delete(path);
+            NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
     }
@@ -262,13 +259,6 @@ public static class NativeCellMutation
     {
         var added = ValidationIssueCounts(document).FirstOrDefault(item => item.Value > baseline.GetValueOrDefault(item.Key));
         if (added.Key is not null) throw new InvalidOperationException($"output-added-openxml-validation-issues: {added.Key}");
-    }
-
-    private static void RequireNewPath(string path, string name)
-    {
-        if (File.Exists(path) || Directory.Exists(path)) throw new InvalidOperationException($"{name}-already-exists");
-        var directory = Path.GetDirectoryName(path);
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) throw new InvalidOperationException($"{name}-directory-not-found");
     }
 
     private static ObjectArtifact Describe(string path)

@@ -58,7 +58,17 @@ try
     var freshState = ObserveTarget(first, "first");
     Require(Address(freshState.Table).GetRawText() == Address(targetState.Table).GetRawText(), "unchanged table address changed after row content replacement");
 
-    var final = Path.Combine(root, "final.docx");
+    var beforeRejectedInPlace = File.ReadAllBytes(first);
+    var rejectedInPlace = RunExpectFailure("docx_replace_table_rows", Replacement(
+        first, freshState, source, sourceTable, sourceRows, sourceRead,
+        sourceFirst: 2, sourceLast: 4, targetFirst: 1, targetLast: freshState.Rows.Count - 1,
+        first, Path.Combine(root, "rejected-in-place-receipt.json")));
+    Require(rejectedInPlace.Contains("source-row-range-starts-inside-vertical-merge", StringComparison.Ordinal),
+        "invalid in-place mutation did not report its technical failure");
+    Require(File.ReadAllBytes(first).SequenceEqual(beforeRejectedInPlace),
+        "invalid in-place mutation changed the input document");
+
+    var final = first;
     Run("docx_replace_table_rows", Replacement(
         first, freshState, source, sourceTable, sourceRows, sourceRead,
         sourceFirst: 3, sourceLast: 4, targetFirst: 3, targetLast: freshState.Rows.Count - 1,

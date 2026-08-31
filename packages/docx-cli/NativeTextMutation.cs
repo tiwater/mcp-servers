@@ -78,7 +78,7 @@ public static class NativeTextMutation
                 SaveChangedStories(output, resolved.Select(item => item.StoryPart));
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
             }
-            File.Move(temporaryPath, paths.Output);
+            NativeMutationSupport.Commit(temporaryPath, paths);
             IReadOnlyList<SetTextReadback> readback;
             using (var output = WordprocessingDocument.Open(paths.Output, false))
             {
@@ -106,7 +106,7 @@ public static class NativeTextMutation
         }
         catch
         {
-            NativeMutationSupport.Cleanup(temporaryPath, paths.Output, paths.Receipt);
+            NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
     }

@@ -62,7 +62,7 @@ public static class NativePolicyMutation
                 output.MainDocumentPart!.Document!.Save();
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
             }
-            File.Move(temporaryPath, paths.Output);
+            NativeMutationSupport.Commit(temporaryPath, paths);
             var validation = FontPolicy.Validate(paths.Output, normalized, policySha256);
             if (!validation.Pass) throw new InvalidOperationException("output-font-policy-readback-failed");
             return WriteReceipt(
@@ -75,7 +75,7 @@ public static class NativePolicyMutation
         }
         catch
         {
-            NativeMutationSupport.Cleanup(temporaryPath, paths.Output, paths.Receipt);
+            NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
     }
@@ -102,7 +102,7 @@ public static class NativePolicyMutation
                 output.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Save();
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
             }
-            File.Move(temporaryPath, paths.Output);
+            NativeMutationSupport.Commit(temporaryPath, paths);
             var validation = TocStylePolicy.Validate(paths.Output, request.Italic, request.IndentCharactersPerLevel);
             if (!validation.Pass) throw new InvalidOperationException("output-toc-style-policy-readback-failed");
             return WriteReceipt(
@@ -115,13 +115,13 @@ public static class NativePolicyMutation
         }
         catch
         {
-            NativeMutationSupport.Cleanup(temporaryPath, paths.Output, paths.Receipt);
+            NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
     }
 
     private static PolicyMutationReceipt WriteReceipt(
-        (string Input, string Output, string Receipt) paths,
+        NativeMutationSupport.PathsResult paths,
         string schema,
         string policySha256,
         int bodyRunCount,

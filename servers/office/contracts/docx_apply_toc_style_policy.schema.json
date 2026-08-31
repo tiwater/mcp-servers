@@ -6,7 +6,7 @@
     "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
     "italic": { "type": "boolean" },
     "indentCharactersPerLevel": { "type": "integer", "minimum": 0, "maximum": 21474836 },
-    "output": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write" },
+    "output": { "type": "string", "minLength": 1, "description": "Output DOCX path; may equal input for an atomic in-place update.", "x-tiwater-file-role": "write" },
     "receiptOutput": {
       "type": "string",
       "minLength": 1,
