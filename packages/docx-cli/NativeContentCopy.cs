@@ -33,15 +33,10 @@ public static class NativeContentCopy
     public static CopyContentReceipt Apply(CopyContentRequest request)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var targetPath = Path.GetFullPath(request.Input);
-        var outputPath = Path.GetFullPath(request.Output);
-        var receiptPath = Path.GetFullPath(request.ReceiptOutput);
-        RequireNewPath(outputPath, "output");
-        RequireNewPath(receiptPath, "receiptOutput");
-        if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath))
-            throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
-        if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, targetPath))
-            throw new InvalidOperationException("output-must-not-overwrite-input");
+        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        var targetPath = paths.Input;
+        var outputPath = paths.Output;
+        var receiptPath = paths.Receipt;
 
         var targetRefs = Observation.ResolveAddresses(
             targetPath,
@@ -77,7 +72,7 @@ public static class NativeContentCopy
                 if (added.Key is not null)
                     throw new InvalidOperationException($"output-added-openxml-validation-issues: {added.Key}");
             }
-            File.Move(temporaryPath, outputPath);
+            NativeMutationSupport.Commit(temporaryPath, paths);
             var readback = ReadBack(outputPath, prepared);
             var receipt = new CopyContentReceipt(
                 "tiwater.docx-copy-content-receipt",
@@ -90,9 +85,7 @@ public static class NativeContentCopy
         }
         catch
         {
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-            if (File.Exists(outputPath)) File.Delete(outputPath);
-            if (File.Exists(receiptPath)) File.Delete(receiptPath);
+            NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
     }
@@ -343,14 +336,6 @@ public static class NativeContentCopy
         => new OpenXmlValidator().Validate(document)
             .GroupBy(issue => $"{issue.Id}\0{issue.Description}", StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-
-    private static void RequireNewPath(string path, string name)
-    {
-        if (File.Exists(path) || Directory.Exists(path)) throw new InvalidOperationException($"{name}-already-exists");
-        var directory = Path.GetDirectoryName(path);
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            throw new InvalidOperationException($"{name}-directory-not-found");
-    }
 
     private static CopyContentArtifact Describe(string path)
     {

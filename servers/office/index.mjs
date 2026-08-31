@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { McpServer } from '@modelcontextprotocol/server';
@@ -610,34 +610,39 @@ async function docxRefreshFields(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const output = path.resolve(requireString(args.output, 'output'));
   const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
+  const inPlace = input === output;
+  const invocationOutput = inPlace ? temporarySibling(output) : output;
   if (path.extname(input).toLowerCase() !== '.docx' || path.extname(output).toLowerCase() !== '.docx') {
     throw Object.assign(new Error('DOCX field refresh requires .docx input and output'), { code: -32602 });
   }
-  await requireNewFile(output, 'output');
+  if (!inPlace) await requireNewFile(output, 'output');
   await requireNewFile(receiptOutput, 'receiptOutput');
   const inputArtifact = await fileArtifact(input);
   try {
-    const result = await runJsonCandidateChain(convertCandidates, ['refresh-docx-fields', input, output]);
+    const result = await runJsonCandidateChain(convertCandidates, ['refresh-docx-fields', input, invocationOutput]);
     const providerReceipt = docxFieldRefreshReceipt.parse(result.json);
-    const outputArtifact = await fileArtifact(output);
+    const invocationArtifact = await fileArtifact(invocationOutput);
     if (path.resolve(providerReceipt.input) !== input
-        || path.resolve(providerReceipt.output) !== output
+        || path.resolve(providerReceipt.output) !== invocationOutput
         || providerReceipt.input_sha256 !== inputArtifact.sha256
-        || providerReceipt.output_sha256 !== outputArtifact.sha256) {
+        || providerReceipt.output_sha256 !== invocationArtifact.sha256) {
       throw new Error('DOCX field refresh receipt is not bound to the current input and output');
     }
+    if (inPlace) await rename(invocationOutput, output);
+    const outputArtifact = await fileArtifact(output);
+    const acceptedReceipt = { ...providerReceipt, output, output_sha256: outputArtifact.sha256 };
     return {
       tool: 'docx_refresh_fields',
       runtime: commandRuntime(result),
       output: outputArtifact,
-      receipt: await writeJsonArtifact(receiptOutput, providerReceipt),
+      receipt: await writeJsonArtifact(receiptOutput, acceptedReceipt),
       summary: {
         backend: providerReceipt.backend,
         refreshScope: providerReceipt.refresh_scope,
       },
     };
   } catch (error) {
-    await rm(output, { force: true });
+    await rm(invocationOutput, { force: true });
     throw error;
   }
 }
@@ -645,15 +650,24 @@ async function docxRefreshFields(args) {
 async function copyTransform(tool, candidates, command, args, suffix = []) {
   const input = path.resolve(requireString(args.input, 'input'));
   const output = path.resolve(requireString(args.output, 'output'));
-  await requireNewFile(output, 'output');
-  const result = await runCandidateChain(candidates, [...command, input, output, ...suffix]);
-  return { tool, runtime: commandRuntime(result), output: await fileArtifact(output) };
+  const inPlace = input === output;
+  const invocationOutput = inPlace ? temporarySibling(output) : output;
+  if (!inPlace) await requireNewFile(output, 'output');
+  try {
+    const result = await runCandidateChain(candidates, [...command, input, invocationOutput, ...suffix]);
+    if (inPlace) await rename(invocationOutput, output);
+    return { tool, runtime: commandRuntime(result), output: await fileArtifact(output) };
+  } catch (error) {
+    await rm(invocationOutput, { force: true });
+    throw error;
+  }
 }
 
 async function fixedEdit(tool, args) {
+  const input = path.resolve(requireString(args.input, 'input'));
   const output = path.resolve(requireString(args.output, 'output'));
   const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
-  await requireNewFile(output, 'output');
+  if (!(tool.startsWith('docx_') && input === output)) await requireNewFile(output, 'output');
   await requireNewFile(receiptOutput, 'receiptOutput');
   const candidates = tool.startsWith('docx_') ? docxCandidates
     : tool.startsWith('xlsx_') ? xlsxCandidates
@@ -878,6 +892,12 @@ async function requireNewFile(filePath, label) {
     throw error;
   }
   throw Object.assign(new Error(`${label} already exists: ${filePath}`), { code: -32602 });
+}
+
+function temporarySibling(filePath) {
+  const extension = path.extname(filePath);
+  const stem = path.basename(filePath, extension);
+  return path.join(path.dirname(filePath), `.${stem}.${randomUUID()}.tmp${extension}`);
 }
 
 function commandRuntime(result) {

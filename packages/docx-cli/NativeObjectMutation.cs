@@ -56,10 +56,10 @@ public static class NativeObjectMutation
 
     public static CopyObjectReceipt Copy(CopyObjectRequest request)
     {
-        ValidatePaths(request.Input, request.Output, request.ReceiptOutput);
-        var targetPath = Path.GetFullPath(request.Input);
-        var outputPath = Path.GetFullPath(request.Output);
-        var receiptPath = Path.GetFullPath(request.ReceiptOutput);
+        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        var targetPath = paths.Input;
+        var outputPath = paths.Output;
+        var receiptPath = paths.Receipt;
         var prepared = PrepareCopies(request, targetPath);
         IReadOnlyDictionary<string, int> baseline;
         using (var target = WordprocessingDocument.Open(targetPath, false))
@@ -79,7 +79,7 @@ public static class NativeObjectMutation
                 output.MainDocumentPart?.Document?.Save();
                 RejectAddedValidationIssues(output, baseline);
             }
-            File.Move(temporaryPath, outputPath);
+            NativeMutationSupport.Commit(temporaryPath, paths);
             IReadOnlyList<ObjectReadback> readback;
             using (var output = WordprocessingDocument.Open(outputPath, false))
             {
@@ -93,17 +93,17 @@ public static class NativeObjectMutation
         }
         catch
         {
-            Cleanup(temporaryPath, outputPath, receiptPath);
+            NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
     }
 
     public static DeleteObjectReceipt Delete(DeleteObjectRequest request)
     {
-        ValidatePaths(request.Input, request.Output, request.ReceiptOutput);
-        var targetPath = Path.GetFullPath(request.Input);
-        var outputPath = Path.GetFullPath(request.Output);
-        var receiptPath = Path.GetFullPath(request.ReceiptOutput);
+        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        var targetPath = paths.Input;
+        var outputPath = paths.Output;
+        var receiptPath = paths.Receipt;
         var addresses = request.Changes.SelectMany(change => change.Addresses).ToArray();
         if (addresses.Length == 0 || addresses.Distinct().Count() != addresses.Length)
             throw new InvalidOperationException("delete-addresses-empty-or-duplicate");
@@ -134,7 +134,7 @@ public static class NativeObjectMutation
                 output.MainDocumentPart?.Document?.Save();
                 RejectAddedValidationIssues(output, baseline);
             }
-            File.Move(temporaryPath, outputPath);
+            NativeMutationSupport.Commit(temporaryPath, paths);
             var receipt = new DeleteObjectReceipt(
                 "tiwater.docx-delete-object-receipt", "tiwater.docx.cli", RuntimeIdentity.Version,
                 resolved.Select(item => item.Address).ToArray(), outputPath, receiptPath);
@@ -143,7 +143,7 @@ public static class NativeObjectMutation
         }
         catch
         {
-            Cleanup(temporaryPath, outputPath, receiptPath);
+            NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
     }
@@ -256,17 +256,6 @@ public static class NativeObjectMutation
             Observation.Address(MainStory, nativePath), kind, element.InnerText);
     }
 
-    private static void ValidatePaths(string input, string output, string receiptOutput)
-    {
-        var inputPath = Path.GetFullPath(input);
-        var outputPath = Path.GetFullPath(output);
-        var receiptPath = Path.GetFullPath(receiptOutput);
-        RequireNewPath(outputPath, "output");
-        RequireNewPath(receiptPath, "receiptOutput");
-        if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath)) throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
-        if (StringComparer.OrdinalIgnoreCase.Equals(inputPath, outputPath)) throw new InvalidOperationException("output-must-not-overwrite-input");
-    }
-
     private static IReadOnlyDictionary<string, int> ValidationIssueCounts(WordprocessingDocument document)
         => new OpenXmlValidator().Validate(document).GroupBy(issue => $"{issue.Id}\0{issue.Description}", StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
@@ -275,13 +264,6 @@ public static class NativeObjectMutation
     {
         var added = ValidationIssueCounts(document).FirstOrDefault(item => item.Value > baseline.GetValueOrDefault(item.Key));
         if (added.Key is not null) throw new InvalidOperationException($"output-added-openxml-validation-issues: {added.Key}");
-    }
-
-    private static void RequireNewPath(string path, string name)
-    {
-        if (File.Exists(path) || Directory.Exists(path)) throw new InvalidOperationException($"{name}-already-exists");
-        var directory = Path.GetDirectoryName(path);
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) throw new InvalidOperationException($"{name}-directory-not-found");
     }
 
     private static void Cleanup(params string[] paths)

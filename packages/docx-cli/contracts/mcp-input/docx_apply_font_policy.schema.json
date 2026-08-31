@@ -10,7 +10,7 @@
       "x-tiwater-file-role": "read",
       "description": "Path to the current caller-authorized tiwater.docx-font-policy/v1 JSON asset."
     },
-    "output": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write" },
+    "output": { "type": "string", "minLength": 1, "description": "Output DOCX path; may equal input for an atomic in-place update.", "x-tiwater-file-role": "write" },
     "receiptOutput": {
       "type": "string",
       "minLength": 1,

@@ -47,15 +47,10 @@ public static class NativeTableRowReplace
         RequireAbsolutePath(request.Input, "input");
         RequireAbsolutePath(request.Output, "output");
         RequireAbsolutePath(request.ReceiptOutput, "receiptOutput");
-        var targetPath = Path.GetFullPath(request.Input);
-        var outputPath = request.Output;
-        var receiptPath = request.ReceiptOutput;
-        RequireNewPath(outputPath, "output");
-        RequireNewPath(receiptPath, "receiptOutput");
-        if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath))
-            throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
-        if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, targetPath))
-            throw new InvalidOperationException("output-must-not-overwrite-input");
+        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        var targetPath = paths.Input;
+        var outputPath = paths.Output;
+        var receiptPath = paths.Receipt;
 
         var prepared = Prepare(request, targetPath);
         if (prepared.Select(change => change.TargetTable.Address).Distinct().Count() != prepared.Count)
@@ -80,7 +75,7 @@ public static class NativeTableRowReplace
                 if (added.Key is not null)
                     throw new InvalidOperationException($"output-added-openxml-validation-issues: {added.Key}");
             }
-            File.Move(temporaryPath, outputPath);
+            NativeMutationSupport.Commit(temporaryPath, paths);
             var readback = ReadBack(outputPath, prepared);
             var receipt = new TableRowReplaceReceipt(
                 "tiwater.docx-replace-table-rows-receipt/v1",
@@ -93,9 +88,7 @@ public static class NativeTableRowReplace
         }
         catch
         {
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-            if (File.Exists(outputPath)) File.Delete(outputPath);
-            if (File.Exists(receiptPath)) File.Delete(receiptPath);
+            NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
     }
@@ -738,14 +731,6 @@ public static class NativeTableRowReplace
         => new OpenXmlValidator().Validate(document)
             .GroupBy(issue => $"{issue.Id}\0{issue.Description}", StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-
-    private static void RequireNewPath(string path, string name)
-    {
-        if (File.Exists(path) || Directory.Exists(path)) throw new InvalidOperationException($"{name}-already-exists");
-        var directory = Path.GetDirectoryName(path);
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            throw new InvalidOperationException($"{name}-directory-not-found");
-    }
 
     private static void RequireAbsolutePath(string path, string name)
     {
