@@ -14,6 +14,7 @@ public static class NativeObjectMutation
     public const string InsertCommand = "docx_insert_objects";
     public const string DeleteCommand = "docx_delete_object";
     private const string MainStory = "/word/document.xml";
+    private const string Word2010Namespace = "http://schemas.microsoft.com/office/word/2010/wordml";
 
     public static int Run(string command, string[] args)
     {
@@ -236,6 +237,7 @@ public static class NativeObjectMutation
                     for (var count = 0; count < change.Repeat; count++)
                     {
                         var clone = template.CloneNode(true);
+                        RemoveCopiedIdentities(clone);
                         DocxObjectActions.RewriteRelationships(clone, relationshipMap);
                         DocxObjectActions.RemapDrawingIds(outputBody, [clone]);
                         if (before is null) parent.AppendChild(clone); else parent.InsertBefore(clone, before);
@@ -243,6 +245,15 @@ public static class NativeObjectMutation
                     }
                 }
             }
+        }
+    }
+
+    private static void RemoveCopiedIdentities(OpenXmlElement root)
+    {
+        foreach (var item in new[] { root }.Concat(root.Descendants()))
+        {
+            item.RemoveAttribute("paraId", Word2010Namespace);
+            item.RemoveAttribute("textId", Word2010Namespace);
         }
     }
 
