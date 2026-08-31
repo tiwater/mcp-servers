@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
@@ -102,20 +103,25 @@ public static class NativeTableRowReplace
         for (var tableIndex = 0; tableIndex < request.Tables.Count; tableIndex++)
         {
             var change = request.Tables[tableIndex];
-            var targetAddresses = new[]
-            {
-                change.TargetTable,
-                change.TargetRows.First,
-                change.TargetRows.Last,
-            }.Concat(change.Columns.Select(column => column.TargetHeader)).ToArray();
+            var targetAddresses = new[] { change.TargetTable, change.TargetRows.First }
+                .Concat(change.TargetRows.Last is null ? [] : [change.TargetRows.Last])
+                .Concat(change.Columns.Select(column => column.TargetHeader)).ToArray();
             var targetResolved = Observation.ResolveAddresses(targetPath, targetAddresses, $"tables[{tableIndex}].target");
-            RequireKinds(targetResolved, "table", "row", "row", change.Columns.Count, "cell", "target");
+            var targetHeaderOffset = change.TargetRows.Last is null ? 2 : 3;
+            if (targetResolved.Count != targetHeaderOffset + change.Columns.Count
+                || targetResolved[0].Kind != "table" || targetResolved[1].Kind != "row"
+                || (change.TargetRows.Last is not null && targetResolved[2].Kind != "row")
+                || targetResolved.Skip(targetHeaderOffset).Any(item => item.Kind != "cell"))
+                throw new InvalidOperationException("target-reference-kind-invalid");
             var targetTable = Resolve<Table>(targetDocument, targetResolved[0], "target-table");
             var allTargetRows = targetTable.Elements<TableRow>().ToArray();
+            var targetLastRow = change.TargetRows.Last is null
+                ? allTargetRows[^1]
+                : Resolve<TableRow>(targetDocument, targetResolved[2], "target-last-row");
             var targetRows = Range(allTargetRows,
                 Resolve<TableRow>(targetDocument, targetResolved[1], "target-first-row"),
-                Resolve<TableRow>(targetDocument, targetResolved[2], "target-last-row"), "target");
-            var targetHeaderCells = targetResolved.Skip(3).Select(item =>
+                targetLastRow, "target");
+            var targetHeaderCells = targetResolved.Skip(targetHeaderOffset).Select(item =>
                 Resolve<TableCell>(targetDocument, item, "target-header-cell")).ToArray();
             RequireOneHeaderRow(targetHeaderCells, targetRows, "target");
             var targetHeaderSlots = targetHeaderCells.Select(cell => GridSlot(targetTable, cell)).ToArray();
@@ -153,12 +159,16 @@ public static class NativeTableRowReplace
             RequireClosedRangeBoundary(allSourceRows, sourceRows, sourceGridCount, "source");
             var sourceCellContents = PrepareSourceCellContents(
                 sourcePath, sourceDocument, sourceRows, change.SourceCellContents ?? []);
+            if (change.SourceCellContents is { Count: > 0 } && change.SourceParagraphMode is not null)
+                throw new InvalidOperationException("source-cell-contents-and-source-paragraph-mode-are-mutually-exclusive");
+            RequireSourceParagraphMode(change.SourceParagraphMode);
 
             var mappings = BuildMappings(sourceHeaderSlots, targetHeaderSlots, change.Columns);
             var targetGridWidths = BuildTargetGridWidths(sourceTable, targetTable, mappings);
 
             var preparedRows = sourceRows
-                .Select(row => PrepareRow(row, mappings, targetGridWidths.Count, sourceCellContents))
+                .Select(row => PrepareRow(row, mappings, targetGridWidths.Count, sourceCellContents,
+                    change.SourceParagraphMode))
                 .ToArray();
             RequireClosedMergeChains(preparedRows, targetGridWidths.Count, "source");
             result.Add(new PreparedTable(tableIndex, targetResolved[0],
@@ -174,7 +184,8 @@ public static class NativeTableRowReplace
         TableRow sourceRow,
         IReadOnlyList<ColumnMapping> mappings,
         int targetGridCount,
-        IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> sourceCellContents)
+        IReadOnlyDictionary<string, IReadOnlyList<Paragraph>> sourceCellContents,
+        string? sourceParagraphMode)
     {
         var prepared = new List<PreparedCell>();
         foreach (var cell in Cells(sourceRow))
@@ -195,7 +206,7 @@ public static class NativeTableRowReplace
             var sourceCellPath = Observation.NativePathFor(cell.Cell);
             var paragraphs = sourceCellContents.TryGetValue(sourceCellPath, out var selectedContent)
                 ? selectedContent
-                : CloneCellParagraphs(cell.Cell);
+                : CloneCellParagraphs(cell.Cell, sourceParagraphMode);
             prepared.Add(new PreparedCell(
                 cell.Start,
                 cell.Span,
@@ -260,12 +271,44 @@ public static class NativeTableRowReplace
         return result;
     }
 
-    private static IReadOnlyList<Paragraph> CloneCellParagraphs(TableCell cell)
+    private static IReadOnlyList<Paragraph> CloneCellParagraphs(TableCell cell, string? sourceParagraphMode)
     {
         if (cell.ChildElements.Any(element => element is not TableCellProperties
             and not Paragraph and not BookmarkStart and not BookmarkEnd))
             throw new InvalidOperationException("source-cell-contains-non-paragraph-content");
-        return cell.Elements<Paragraph>().Select(NativeContentCopy.CloneParagraph).ToArray();
+        var paragraphs = cell.Elements<Paragraph>().ToArray();
+        if (sourceParagraphMode is null)
+            return paragraphs.Select(NativeContentCopy.CloneParagraph).ToArray();
+
+        var selected = new List<Paragraph>();
+        var precedingRetainedTextHasHan = false;
+        foreach (var paragraph in paragraphs)
+        {
+            var text = paragraph.InnerText.Trim();
+            if (text.Length == 0)
+            {
+                selected.Add(NativeContentCopy.CloneParagraph(paragraph));
+                continue;
+            }
+            var hasHan = HanText.IsMatch(text);
+            var isLatinProse = !hasHan && LatinWord.IsMatch(text);
+            if (sourceParagraphMode == OmitPairedLatinProse && precedingRetainedTextHasHan && isLatinProse)
+                continue;
+            selected.Add(NativeContentCopy.CloneParagraph(paragraph));
+            precedingRetainedTextHasHan = hasHan;
+        }
+        if (selected.Count == 0) selected.Add(new Paragraph());
+        return selected;
+    }
+
+    private const string OmitPairedLatinProse = "omit-paired-latin-prose";
+    private static readonly Regex HanText = new("[\\u3400-\\u4DBF\\u4E00-\\u9FFF]", RegexOptions.CultureInvariant);
+    private static readonly Regex LatinWord = new("[a-z]{2,}", RegexOptions.CultureInvariant);
+
+    private static void RequireSourceParagraphMode(string? mode)
+    {
+        if (mode is not null && mode != OmitPairedLatinProse)
+            throw new InvalidOperationException("source-paragraph-mode-invalid");
     }
 
     private static void PreflightImports(WordprocessingDocument targetDocument, IReadOnlyList<PreparedTable> tables)
@@ -767,15 +810,17 @@ internal static class TableRowReplaceReferenceExtensions
 }
 
 public sealed record TableRowReplaceRange(DocxObjectAddress First, DocxObjectAddress Last);
+public sealed record TableRowReplaceTargetRange(DocxObjectAddress First, DocxObjectAddress? Last = null);
 public sealed record TableRowReplaceColumn(DocxObjectAddress SourceHeader, DocxObjectAddress TargetHeader);
 public sealed record TableRowReplaceCellContent(
     DocxObjectAddress SourceCell,
     IReadOnlyList<CopyContentSelection> SourceSelections);
 public sealed record TableRowReplaceTable(string SourceInput,
     DocxObjectAddress SourceTable, TableRowReplaceRange SourceRows,
-    DocxObjectAddress TargetTable, TableRowReplaceRange TargetRows,
+    DocxObjectAddress TargetTable, TableRowReplaceTargetRange TargetRows,
     IReadOnlyList<TableRowReplaceColumn> Columns,
-    IReadOnlyList<TableRowReplaceCellContent>? SourceCellContents = null);
+    IReadOnlyList<TableRowReplaceCellContent>? SourceCellContents = null,
+    string? SourceParagraphMode = null);
 public sealed record TableRowReplaceRequest(string Input,
     IReadOnlyList<TableRowReplaceTable> Tables,
     string Output, string ReceiptOutput);

@@ -357,7 +357,7 @@ const tools = [
   },
   {
     name: 'docx_replace_table_rows',
-    description: 'Replace one or more data-row ranges in one current target document. Read both tables first. Each selected row range excludes its header and encloses complete vertical-merge groups; header-cell mappings cover both complete grids. Source cells copy all paragraphs by default. To keep selected content only, each sourceSelections item puts the observed address in its address field; range is optional for a substring.',
+    description: 'Replace data rows in existing target tables after reading both tables. Each range excludes its header and closes vertical merges; omit targetRows.last to replace through the table end. Source cells copy all paragraphs by default. sourceParagraphMode can omit paired Latin prose while retaining Han text and standalone technical expressions; explicit sourceCellContents remains available for exact selections.',
     inputSchema: inputContract('docx_replace_table_rows'),
     outputSchema: fixedEditOutput('docx_replace_table_rows'),
     handler: args => fixedEdit('docx_replace_table_rows', args),
