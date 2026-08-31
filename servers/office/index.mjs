@@ -228,6 +228,31 @@ const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
   }).strict()),
 }).strict();
 
+const docxTableReadOutput = artifactOutput('docx_read_table').extend({
+  schema: z.literal('tiwater.docx-table-read/v1'),
+  address: docxAddress,
+  rowCount: z.number().int().nonnegative(),
+  columnCount: z.number().int().nonnegative(),
+  rows: z.array(z.object({
+    address: docxAddress,
+    gridBefore: z.number().int().nonnegative(),
+    gridAfter: z.number().int().nonnegative(),
+    cells: z.array(z.object({
+      address: docxAddress,
+      gridSpan: z.number().int().positive(),
+      verticalMerge: z.string().nullable(),
+      paragraphs: z.array(z.object({
+        address: docxAddress,
+        text: z.string(),
+        textNodes: z.array(z.object({
+          address: docxAddress,
+          text: z.string(),
+        }).strict()),
+      }).strict()),
+    }).strict()),
+  }).strict()),
+}).strict();
+
 const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
   observations: z.array(docxObservationNode).min(1),
 }).strict();
@@ -259,11 +284,19 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read selected tables, rows, cells, or paragraphs from one native DOCX in one call and return them in address order. Pass the document path once and only the OpenXML addresses needed for the current target. For exact inline content, use an observed cell or paragraph address and request run or text.',
+    description: 'Read selected rows, cells, or paragraphs from one native DOCX in one call and return their requested descendants in address order. Use docx_read_table when the current task needs one complete table. For exact inline content, use an observed cell or paragraph address and request run or text.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxReadObject,
+  },
+  {
+    name: 'docx_read_table',
+    description: 'Read one complete table selected by its native OpenXML address. Returns compact rows, cells, spans, vertical merges, paragraphs, text nodes, and their reusable addresses in document order. It does not search for a table or decide business meaning.',
+    inputSchema: inputContract('docx_read_table'),
+    outputSchema: docxTableReadOutput,
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: args => docxObservation('docx_read_table', args),
   },
   {
     name: 'docx_copy_content',
@@ -579,7 +612,7 @@ async function docxObservation(tool, args) {
     if (tool === 'docx_list_objects') {
       return { ...retained, ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
     }
-    if (tool === 'docx_table_index') return { ...retained, ...payload };
+    if (tool === 'docx_table_index' || tool === 'docx_read_table') return { ...retained, ...payload };
     throw new Error(`unsupported-docx-observation-tool:${tool}`);
   });
 }

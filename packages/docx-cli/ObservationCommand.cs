@@ -9,6 +9,7 @@ public static class ObservationCommand
     {
         "docx_list_objects",
         "docx_table_index",
+        "docx_read_table",
         "docx_find_literal",
         "docx_read_object",
     };
@@ -33,6 +34,7 @@ public static class ObservationCommand
                 OptionalInt(request, "limit") ?? Observation.DefaultPageLimit,
                 OptionalInt(request, "offset") ?? 0),
             "docx_table_index" => Observation.TableIndex(input),
+            "docx_read_table" => Observation.ReadTable(input, RequireAddress(request, "table")),
             "docx_find_literal" => Observation.Find(
                 input,
                 RequireString(request, "literal"),
@@ -80,6 +82,11 @@ public static class ObservationCommand
 
     private static DocxObjectAddress? OptionalAddress(JsonObject request, string property)
         => request[property] is null ? null : ReadAddress(request[property]!, property);
+
+    private static DocxObjectAddress RequireAddress(JsonObject request, string property)
+        => request[property] is null
+            ? throw new InvalidOperationException($"{property}-is-required")
+            : ReadAddress(request[property]!, property);
 
     private static DocxObjectAddress ReadAddress(JsonNode node, string name)
     {

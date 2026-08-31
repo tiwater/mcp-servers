@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_read_table/v1",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
+    },
+    "table": {
+      "type": "object",
+      "properties": {
+        "part": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^\\/" }
+      },
+      "required": ["part", "path"],
+      "additionalProperties": false
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "write"
+    }
+  },
+  "required": ["input", "table", "output"],
+  "additionalProperties": false
+}

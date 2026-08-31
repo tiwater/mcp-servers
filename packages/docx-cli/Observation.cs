@@ -144,6 +144,42 @@ public static class Observation
         return new DocxTableIndexResult("tiwater.docx-table-index/v1", tables);
     }
 
+    public static DocxTableReadResult ReadTable(string input, DocxObjectAddress address)
+    {
+        var snapshot = Snapshot.Open(input);
+        var selected = ResolveAddresses(snapshot, new[] { address }, "table").Single();
+        if (selected.Kind != "table" || selected.Element is not Table table)
+            throw new InvalidOperationException("table-reference-kind-invalid");
+        var rows = table.Elements<TableRow>().Select(row => new DocxTableReadRow(
+            Address(selected.StoryPart, NativePathFor(row)),
+            RowOffset(row.TableRowProperties, "gridBefore"),
+            RowOffset(row.TableRowProperties, "gridAfter"),
+            row.Elements<TableCell>().Select(cell => new DocxTableReadCell(
+                Address(selected.StoryPart, NativePathFor(cell)),
+                Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1),
+                VerticalMergeValue(cell.TableCellProperties),
+                cell.Elements<Paragraph>().Select(paragraph => new DocxTableReadParagraph(
+                    Address(selected.StoryPart, NativePathFor(paragraph)),
+                    paragraph.InnerText,
+                    paragraph.Descendants<Text>().Select(value => new DocxTableReadText(
+                        Address(selected.StoryPart, NativePathFor(value)), value.Text)).ToArray()
+                )).ToArray()
+            )).ToArray()
+        )).ToArray();
+        var columnCount = Math.Max(
+            table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count() ?? 0,
+            rows.Select(row => row.GridBefore + row.Cells.Sum(cell => cell.GridSpan) + row.GridAfter)
+                .DefaultIfEmpty(0).Max());
+        return new DocxTableReadResult("tiwater.docx-table-read/v1", address, rows.Length,
+            columnCount, rows);
+    }
+
+    private static string? VerticalMergeValue(TableCellProperties? properties)
+        => properties?.VerticalMerge is null
+            ? null
+            : properties.VerticalMerge.GetAttributes()
+                .FirstOrDefault(attribute => attribute.LocalName == "val").Value ?? "continue";
+
     private static int TableRowWidth(TableRow row)
         => RowOffset(row.TableRowProperties, "gridBefore")
             + row.Elements<TableCell>().Sum(cell => Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1))
@@ -581,6 +617,34 @@ public sealed record DocxTableIndexEntry(
 public sealed record DocxTableIndexResult(
     [property: JsonPropertyName("schema")] string Schema,
     [property: JsonPropertyName("tables")] IReadOnlyList<DocxTableIndexEntry> Tables);
+
+public sealed record DocxTableReadText(
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("text")] string Text);
+
+public sealed record DocxTableReadParagraph(
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("textNodes")] IReadOnlyList<DocxTableReadText> TextNodes);
+
+public sealed record DocxTableReadCell(
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("gridSpan")] int GridSpan,
+    [property: JsonPropertyName("verticalMerge")] string? VerticalMerge,
+    [property: JsonPropertyName("paragraphs")] IReadOnlyList<DocxTableReadParagraph> Paragraphs);
+
+public sealed record DocxTableReadRow(
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("gridBefore")] int GridBefore,
+    [property: JsonPropertyName("gridAfter")] int GridAfter,
+    [property: JsonPropertyName("cells")] IReadOnlyList<DocxTableReadCell> Cells);
+
+public sealed record DocxTableReadResult(
+    [property: JsonPropertyName("schema")] string Schema,
+    [property: JsonPropertyName("address")] DocxObjectAddress Address,
+    [property: JsonPropertyName("rowCount")] int RowCount,
+    [property: JsonPropertyName("columnCount")] int ColumnCount,
+    [property: JsonPropertyName("rows")] IReadOnlyList<DocxTableReadRow> Rows);
 
 internal sealed record ResolvedDocxAddress(
     DocxObjectAddress Address,
