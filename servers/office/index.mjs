@@ -246,14 +246,14 @@ const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
 }).strict();
 
 const docxTableReadOutput = artifactOutput('docx_read_table').extend({
-  schema: z.literal('tiwater.docx-table-read/v2'),
+  schema: z.literal('tiwater.docx-table-page/v1'),
   receipt: z.object({
-    schema: z.literal('tiwater.docx-table-read-receipt/v1'),
+    schema: z.literal('tiwater.docx-table-page-receipt/v1'),
     totalRowCount: z.number().int().nonnegative(),
     returnedRowCount: z.number().int().nonnegative(),
     remaining: z.number().int().nonnegative(),
     nextOffset: z.number().int().nonnegative().nullable(),
-    inlineTextNodesOmitted: z.literal(true),
+    detailPageRetained: z.literal(true),
     narrowingRequired: z.boolean(),
   }).strict(),
   address: docxAddress,
@@ -285,14 +285,7 @@ const docxTableReadOutput = artifactOutput('docx_read_table').extend({
       gridSpan: z.number().int().positive(),
       verticalMerge: z.string().nullable(),
       verticalMergeOwner: docxAddress.nullable(),
-      paragraphs: z.array(z.object({
-        address: docxAddress,
-        text: z.string(),
-        textNodes: z.array(z.object({
-          address: docxAddress,
-          text: z.string(),
-        }).strict()),
-      }).strict()),
+      text: z.string(),
     }).strict()),
   }).strict()),
 }).strict();
@@ -343,7 +336,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Writes the complete table, including text nodes, to output and returns a bounded row page with grid-column addresses and widths, each cell\'s zero-based grid start and span, vertical-merge owner, repeated-header and no-split row properties, paragraph text, and reusable addresses. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value. The provider reports physical structure only; the Agent decides the template and business meaning. Continue with receipt.nextOffset. If receipt.narrowingRequired is true, list rows under the same table and read smaller objects.',
+    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Each call retains full paragraph and text-node detail for exactly the returned row page at output; it never builds another whole-table data object. The machine response is the compact form of that page: each row and cell keeps its reusable native address, grid position and span, vertical-merge owner, and joined text. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value. Process the current page before continuing once with receipt.nextOffset; never revisit an earlier offset. Use docx_read_object only when one selected object needs a narrower descendant view. The provider reports physical structure only; the Agent decides the template and business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -665,7 +658,9 @@ async function docxObservation(tool, args) {
       tool,
       runtime: payload.runtime,
       source: await fileArtifact(input),
-      artifact: await writeJsonArtifact(output, result.json),
+      ...(tool === 'docx_read_table' ? {} : {
+        artifact: await writeJsonArtifact(output, result.json),
+      }),
     };
     if (tool === 'docx_list_objects') {
       const totalCount = payload.receipt.totalCount;
@@ -723,10 +718,18 @@ async function docxObservation(tool, args) {
       let narrowingRequired = false;
       for (const sourceRow of payload.rows.slice(offset, offset + requestedLimit)) {
         const row = {
-          ...sourceRow,
+          address: sourceRow.address,
+          repeatHeader: sourceRow.repeatHeader,
+          cantSplit: sourceRow.cantSplit,
+          gridBefore: sourceRow.gridBefore,
+          gridAfter: sourceRow.gridAfter,
           cells: sourceRow.cells.map(cell => ({
-            ...cell,
-            paragraphs: cell.paragraphs.map(paragraph => ({ ...paragraph, textNodes: [] })),
+            address: cell.address,
+            gridColumnStart: cell.gridColumnStart,
+            gridSpan: cell.gridSpan,
+            verticalMerge: cell.verticalMerge,
+            verticalMergeOwner: cell.verticalMergeOwner,
+            text: cell.paragraphs.map(paragraph => paragraph.text).join('\n'),
           })),
         };
         const candidate = [...rows, row];
@@ -739,9 +742,28 @@ async function docxObservation(tool, args) {
       const nextOffset = !narrowingRequired && offset + rows.length < totalRowCount
         ? offset + rows.length
         : null;
+      const pageReceipt = {
+        schema: 'tiwater.docx-table-page-receipt/v1',
+        totalRowCount,
+        returnedRowCount: rows.length,
+        remaining: totalRowCount - offset - rows.length,
+        nextOffset,
+      };
+      const detailPage = {
+        schema: 'tiwater.docx-table-detail-page/v1',
+        address: payload.address,
+        rowCount: payload.rowCount,
+        columnCount: payload.columnCount,
+        gridColumns: payload.gridColumns,
+        precedingParagraph: payload.precedingParagraph,
+        followingParagraph: payload.followingParagraph,
+        receipt: pageReceipt,
+        rows: payload.rows.slice(offset, offset + rows.length),
+      };
       return {
         ...retained,
-        schema: payload.schema,
+        artifact: await writeJsonArtifact(output, detailPage),
+        schema: 'tiwater.docx-table-page/v1',
         address: payload.address,
         rowCount: payload.rowCount,
         columnCount: payload.columnCount,
@@ -749,12 +771,8 @@ async function docxObservation(tool, args) {
         precedingParagraph: payload.precedingParagraph,
         followingParagraph: payload.followingParagraph,
         receipt: {
-          schema: 'tiwater.docx-table-read-receipt/v1',
-          totalRowCount,
-          returnedRowCount: rows.length,
-          remaining: totalRowCount - offset - rows.length,
-          nextOffset,
-          inlineTextNodesOmitted: true,
+          ...pageReceipt,
+          detailPageRetained: true,
           narrowingRequired,
         },
         rows,

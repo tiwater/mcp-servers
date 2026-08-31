@@ -720,6 +720,26 @@ function checkDocxMergedCellDescriptions(tools) {
   note('DOCX table read/write descriptions preserve vertical-merge logical-cell semantics');
 }
 
+function checkDocxTableStreamingContract(tools) {
+  const check = 'docx-table-streaming-contract';
+  const tool = tools.find(entry => entry?.name === 'docx_read_table');
+  const description = tool?.description || '';
+  const row = tool?.outputSchema?.properties?.rows?.items;
+  const cell = row?.properties?.cells?.items;
+  const receipt = tool?.outputSchema?.properties?.receipt;
+  if (!description.includes('exactly the returned row page')
+      || !description.includes('never builds another whole-table data object')
+      || !description.includes('never revisit an earlier offset')) {
+    fail(check, 'docx_read_table does not describe one-pass page consumption');
+  }
+  if (cell?.properties?.text?.type !== 'string'
+      || Object.hasOwn(cell?.properties ?? {}, 'paragraphs')
+      || receipt?.properties?.detailPageRetained?.const !== true) {
+    fail(check, 'docx_read_table response is not a compact page backed by one detailed page');
+  }
+  note('DOCX table pages expose compact cell text while retaining selected-page detail on disk');
+}
+
 function unboundedResponseArrays(schema, location = '$', found = []) {
   if (Array.isArray(schema)) {
     schema.forEach((entry, index) => unboundedResponseArrays(entry, `${location}[${index}]`, found));
@@ -762,6 +782,7 @@ async function main() {
     const toolNames = await smokeInstalledPackage(archive, tempRoot);
     checkSourceBoundObservationOutputs(toolNames);
     checkDocxMergedCellDescriptions(toolNames);
+    checkDocxTableStreamingContract(toolNames);
     checkBoundedInspectionOutputs(toolNames);
     const packedPackage = await readJson(path.join(packageRoot, 'package.json'));
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);

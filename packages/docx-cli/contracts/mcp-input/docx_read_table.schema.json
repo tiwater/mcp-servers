@@ -27,7 +27,7 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991,
-      "description": "Zero-based row offset. Continue from receipt.nextOffset until it is null."
+      "description": "Zero-based row offset. Process each returned compact page once and continue from receipt.nextOffset; do not revisit an earlier offset."
     },
     "output": {
       "type": "string",
