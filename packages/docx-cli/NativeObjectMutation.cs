@@ -179,12 +179,14 @@ public static class NativeObjectMutation
                     throw new InvalidOperationException("table-insert-requires-row-sources-and-row-boundary");
                 if (before is not null && !ReferenceEquals(before.Element.Parent, parent.Element))
                     throw new InvalidOperationException("before-must-be-direct-child-of-target-parent");
-                ValidateInsertionBoundary((Table)parent.Element, before?.Element as TableRow);
             }
             using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
             var sourceElements = source.Select(item =>
                 Observation.ResolveNativePath(sourceDocument, item.StoryPart, item.NativePath)).ToArray();
-            if (parent.Kind == "table") ValidateRowSourceSelection(sourceElements.Cast<TableRow>().ToArray());
+            if (parent.Kind == "table") ValidateRowSourceSelection(
+                sourceElements.Cast<TableRow>().ToArray(),
+                (Table)parent.Element,
+                before?.Element as TableRow);
             var clones = sourceElements.Select(item => item.CloneNode(true)).ToArray();
             result.Add(new PreparedCopy(sourcePath, parent, before, repeat, clones));
         }
@@ -270,46 +272,69 @@ public static class NativeObjectMutation
             Observation.Address(MainStory, nativePath), kind, element.InnerText);
     }
 
-    private static void ValidateRowSourceSelection(IReadOnlyList<TableRow> selectedRows)
+    private static void ValidateRowSourceSelection(
+        IReadOnlyList<TableRow> selectedRows,
+        Table targetTable,
+        TableRow? before)
     {
         if (selectedRows.Count == 0) throw new InvalidOperationException("row-source-selection-empty");
         var table = selectedRows[0].Parent as Table ?? throw new InvalidOperationException("row-source-table-not-found");
         if (selectedRows.Any(row => !ReferenceEquals(row.Parent, table)))
             throw new InvalidOperationException("row-sources-must-share-one-table");
-        var rows = table.Elements<TableRow>().ToArray();
-        var indices = selectedRows.Select(row => Array.IndexOf(rows, row)).ToArray();
+        var sourceRows = table.Elements<TableRow>().ToArray();
+        var indices = selectedRows.Select(row => Array.IndexOf(sourceRows, row)).ToArray();
         if (indices.Any(index => index < 0) || !indices.SequenceEqual(indices.OrderBy(index => index))
             || indices.Zip(indices.Skip(1)).Any(pair => pair.Second != pair.First + 1))
             throw new InvalidOperationException("row-sources-must-be-one-contiguous-native-range");
-        RequireClosedVerticalMergeGroups(table, selectedRows.ToHashSet());
+        var targetRows = targetTable.Elements<TableRow>().ToArray();
+        var boundary = before is null ? targetRows.Length : Array.IndexOf(targetRows, before);
+        if (boundary < 0) throw new InvalidOperationException("before-row-not-found-in-target-table");
+        var activeAtBoundary = VerticalMergeGroups(targetTable).Where(group =>
+        {
+            var groupIndices = group.Rows.Select(row => Array.IndexOf(targetRows, row)).ToArray();
+            return groupIndices.Min() < boundary && boundary <= groupIndices.Max();
+        }).Select(group => group.Key).ToHashSet();
+        var firstRowMerges = VerticalMergeCells(selectedRows[0]).ToDictionary(cell => cell.Key, cell => cell.Kind);
+        var leadingContinuations = firstRowMerges.Where(item => item.Value == MergedCellValues.Continue)
+            .Select(item => item.Key).ToHashSet();
+        if (!leadingContinuations.IsSubsetOf(activeAtBoundary))
+            throw new InvalidOperationException("row-leading-vertical-merge-requires-compatible-target-boundary");
+        foreach (var key in activeAtBoundary)
+        {
+            if (selectedRows.Any(row => !VerticalMergeCells(row).Any(cell =>
+                    cell.Key == key && cell.Kind == MergedCellValues.Continue)))
+                throw new InvalidOperationException("row-insert-boundary-requires-compatible-vertical-merge");
+        }
     }
 
-    private static void ValidateInsertionBoundary(Table table, TableRow? before)
+    private static IReadOnlyList<((int Start, int Span) Key, MergedCellValues Kind)> VerticalMergeCells(TableRow row)
     {
-        var rows = table.Elements<TableRow>().ToArray();
-        var boundary = before is null ? rows.Length : Array.IndexOf(rows, before);
-        if (boundary < 0) throw new InvalidOperationException("before-row-not-found-in-target-table");
-        foreach (var group in VerticalMergeGroups(table))
+        var result = new List<((int Start, int Span) Key, MergedCellValues Kind)>();
+        var cursor = RowOffset(row.TableRowProperties, "gridBefore");
+        foreach (var cell in row.Elements<TableCell>())
         {
-            var indices = group.Select(row => Array.IndexOf(rows, row)).ToArray();
-            if (indices.Min() < boundary && boundary <= indices.Max())
-                throw new InvalidOperationException("row-insert-boundary-is-inside-vertical-merge");
+            var span = Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1);
+            var merge = cell.TableCellProperties?.VerticalMerge;
+            if (merge is not null)
+                result.Add(((cursor, span), merge.Val?.Value ?? MergedCellValues.Continue));
+            cursor += span;
         }
+        return result;
     }
 
     private static void RequireClosedVerticalMergeGroups(Table table, IReadOnlySet<TableRow> selected)
     {
         foreach (var group in VerticalMergeGroups(table))
         {
-            var selectedCount = group.Count(selected.Contains);
-            if (selectedCount > 0 && selectedCount != group.Count)
+            var selectedCount = group.Rows.Count(selected.Contains);
+            if (selectedCount > 0 && selectedCount != group.Rows.Count)
                 throw new InvalidOperationException("row-selection-splits-vertical-merge");
         }
     }
 
-    private static IReadOnlyList<IReadOnlyList<TableRow>> VerticalMergeGroups(Table table)
+    private static IReadOnlyList<VerticalMergeGroup> VerticalMergeGroups(Table table)
     {
-        var groups = new List<IReadOnlyList<TableRow>>();
+        var groups = new List<VerticalMergeGroup>();
         var active = new Dictionary<(int Start, int Span), List<TableRow>>();
         foreach (var row in table.Elements<TableRow>())
         {
@@ -343,7 +368,7 @@ public static class NativeObjectMutation
         void Close((int Start, int Span) key)
         {
             if (!active.Remove(key, out var group)) return;
-            groups.Add(group);
+            groups.Add(new VerticalMergeGroup(key, group));
         }
     }
 
@@ -376,6 +401,7 @@ public static class NativeObjectMutation
     }
 
     private sealed record PreparedCopy(string SourcePath, ResolvedDocxAddress Parent, ResolvedDocxAddress? Before, int Repeat, IReadOnlyList<OpenXmlElement> Clones);
+    private sealed record VerticalMergeGroup((int Start, int Span) Key, IReadOnlyList<TableRow> Rows);
 }
 
 public sealed record InsertObjectsChange(string SourceInput, IReadOnlyList<DocxObjectAddress> Sources, DocxObjectAddress TargetParent, DocxObjectAddress? Before = null, int? Repeat = null);
