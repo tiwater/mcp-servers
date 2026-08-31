@@ -13,6 +13,7 @@ workflow protocol.
 ```bash
 tiwater-docx inspect input.docx --json
 tiwater-docx docx_list_objects request.json
+tiwater-docx docx_list_siblings request.json
 tiwater-docx docx_read_object request.json
 tiwater-docx export-json input.docx output.json
 tiwater-docx compare old.docx new.docx --json

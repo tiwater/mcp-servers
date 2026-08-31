@@ -216,6 +216,14 @@ const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
   runtime: runtimeIdentity,
 }).strict();
 
+const docxListSiblingsOutput = artifactOutput('docx_list_siblings').extend({
+  schema: z.literal('tiwater.docx-sibling-list/v1'),
+  anchor: docxObjectIdentity,
+  parentAddress: docxAddress,
+  preceding: z.array(docxObjectIdentity),
+  following: z.array(docxObjectIdentity),
+}).strict();
+
 const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
   schema: z.literal('tiwater.docx-table-index/v1'),
   tables: z.array(z.object({
@@ -273,6 +281,14 @@ const tools = [
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_list_objects', args),
+  },
+  {
+    name: 'docx_list_siblings',
+    description: 'Navigate from one observed OpenXML address to a small number of matching direct siblings before or after it. Returns compact addresses and previews in document order. Use docx_read_object afterward for exact selected content. It does not search text, read descendants, or list the whole document.',
+    inputSchema: inputContract('docx_list_siblings'),
+    outputSchema: docxListSiblingsOutput,
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: args => docxObservation('docx_list_siblings', args),
   },
   {
     name: 'docx_table_index',
@@ -611,6 +627,15 @@ async function docxObservation(tool, args) {
     };
     if (tool === 'docx_list_objects') {
       return { ...retained, ...payload, objects: payload.objects.map(compactDocxObjectIdentity) };
+    }
+    if (tool === 'docx_list_siblings') {
+      return {
+        ...retained,
+        ...payload,
+        anchor: compactDocxObjectIdentity(payload.anchor),
+        preceding: payload.preceding.map(compactDocxObjectIdentity),
+        following: payload.following.map(compactDocxObjectIdentity),
+      };
     }
     if (tool === 'docx_table_index' || tool === 'docx_read_table') return { ...retained, ...payload };
     throw new Error(`unsupported-docx-observation-tool:${tool}`);

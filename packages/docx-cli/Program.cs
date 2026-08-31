@@ -153,6 +153,7 @@ public static class Cli
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.docx> [--json]");
         Console.WriteLine("  docx_list_objects <request.json>");
+        Console.WriteLine("  docx_list_siblings <request.json>");
         Console.WriteLine("  docx_find_literal <request.json>");
         Console.WriteLine("  docx_read_object <request.json>");
         Console.WriteLine("  compare <old.docx> <new.docx> [--json]");

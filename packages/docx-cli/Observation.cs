@@ -122,6 +122,42 @@ public static class Observation
             details);
     }
 
+    public static DocxSiblingListResult ListSiblings(
+        string input,
+        DocxObjectAddress anchor,
+        IReadOnlySet<string> kinds,
+        int before,
+        int after)
+    {
+        if (kinds.Count == 0) throw new InvalidOperationException("kinds-is-required");
+        foreach (var kind in kinds)
+            if (!ListKinds.Contains(kind)) throw new InvalidOperationException($"unsupported-list-kind: {kind}");
+        if (before < 0 || after < 0 || before == 0 && after == 0)
+            throw new InvalidOperationException("before-or-after-must-be-positive");
+
+        var snapshot = Snapshot.Open(input);
+        ValidateAddress(anchor, "anchor");
+        var selected = snapshot.Objects.FirstOrDefault(item => item.Address == anchor)
+            ?? throw new InvalidOperationException("anchor-address-not-found");
+        var parentAddress = PublishedParentAddress(snapshot, selected)
+            ?? throw new InvalidOperationException("anchor-parent-not-found");
+        var parent = snapshot.Objects.First(item => item.Address == parentAddress);
+        var siblings = snapshot.Objects.Where(item => IsDirectPublishedChild(snapshot, item, parent)).ToList();
+        var anchorIndex = siblings.FindIndex(item => ReferenceEquals(item.Element, selected.Element));
+        if (anchorIndex < 0) throw new InvalidOperationException("anchor-is-not-published-child-of-parent");
+
+        var preceding = siblings.Take(anchorIndex).Where(item => kinds.Contains(item.Kind)).TakeLast(before)
+            .Select(item => ToObject(snapshot, item)).ToList();
+        var following = siblings.Skip(anchorIndex + 1).Where(item => kinds.Contains(item.Kind)).Take(after)
+            .Select(item => ToObject(snapshot, item)).ToList();
+        return new DocxSiblingListResult(
+            "tiwater.docx-sibling-list/v1",
+            ToObject(snapshot, selected),
+            parentAddress,
+            preceding,
+            following);
+    }
+
     public static DocxTableIndexResult TableIndex(string input)
     {
         var snapshot = Snapshot.Open(input);
@@ -605,6 +641,13 @@ public sealed record DocxObservationReadResult(
     [property: JsonPropertyName("schema")] string Schema,
     [property: JsonPropertyName("receipt")] DocxObservationReceipt Receipt,
     [property: JsonPropertyName("observations")] IReadOnlyList<DocxObservationDetail> Observations);
+
+public sealed record DocxSiblingListResult(
+    [property: JsonPropertyName("schema")] string Schema,
+    [property: JsonPropertyName("anchor")] DocxObservationObject Anchor,
+    [property: JsonPropertyName("parentAddress")] DocxObjectAddress ParentAddress,
+    [property: JsonPropertyName("preceding")] IReadOnlyList<DocxObservationObject> Preceding,
+    [property: JsonPropertyName("following")] IReadOnlyList<DocxObservationObject> Following);
 
 public sealed record DocxTableIndexEntry(
     [property: JsonPropertyName("address")] DocxObjectAddress Address,

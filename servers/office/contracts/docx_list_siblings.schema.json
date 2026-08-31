@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_list_siblings/v1",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Current DOCX path.",
+      "x-tiwater-file-role": "read"
+    },
+    "anchor": {
+      "type": "object",
+      "description": "Previously observed OpenXML address whose direct siblings are required.",
+      "properties": {
+        "part": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^\\/" }
+      },
+      "required": ["part", "path"],
+      "additionalProperties": false
+    },
+    "kinds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": ["paragraph", "table", "gridColumn", "row", "cell", "run", "text", "drawing"]
+      },
+      "description": "Sibling object kinds to return."
+    },
+    "before": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of nearest matching preceding siblings to return in document order."
+    },
+    "after": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of nearest matching following siblings to return in document order."
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New JSON artifact path for the compact sibling result.",
+      "x-tiwater-file-role": "write"
+    }
+  },
+  "required": ["input", "anchor", "kinds", "before", "after", "output"],
+  "anyOf": [
+    { "properties": { "before": { "minimum": 1 } } },
+    { "properties": { "after": { "minimum": 1 } } }
+  ],
+  "additionalProperties": false
+}

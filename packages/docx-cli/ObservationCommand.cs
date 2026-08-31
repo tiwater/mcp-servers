@@ -8,6 +8,7 @@ public static class ObservationCommand
     private static readonly IReadOnlySet<string> CommandSet = new HashSet<string>(StringComparer.Ordinal)
     {
         "docx_list_objects",
+        "docx_list_siblings",
         "docx_table_index",
         "docx_read_table",
         "docx_find_literal",
@@ -33,6 +34,12 @@ public static class ObservationCommand
                 OptionalAddress(request, "parent"),
                 OptionalInt(request, "limit") ?? Observation.DefaultPageLimit,
                 OptionalInt(request, "offset") ?? 0),
+            "docx_list_siblings" => Observation.ListSiblings(
+                input,
+                RequireAddress(request, "anchor"),
+                RequireStringArray(request, "kinds"),
+                OptionalInt(request, "before") ?? 0,
+                OptionalInt(request, "after") ?? 0),
             "docx_table_index" => Observation.TableIndex(input),
             "docx_read_table" => Observation.ReadTable(input, RequireAddress(request, "table")),
             "docx_find_literal" => Observation.Find(
