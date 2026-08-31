@@ -285,7 +285,7 @@
           "sourceParagraphMode": {
             "type": "string",
             "const": "omit-paired-latin-prose",
-            "description": "Optional deterministic paragraph selection for every mapped source cell. omit-paired-latin-prose preserves Han or mixed-language paragraphs and standalone technical expressions, while omitting adjacent Latin prose paired after Han text. It cannot be combined with sourceCellContents."
+            "description": "Optional deterministic text selection for every mapped source cell. omit-paired-latin-prose preserves Han content and standalone technical expressions while omitting adjacent Latin prose paragraphs and punctuation-delimited translation clauses. It cannot be combined with sourceCellContents."
           }
         },
         "required": [

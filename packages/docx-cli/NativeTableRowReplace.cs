@@ -294,7 +294,10 @@ public static class NativeTableRowReplace
             var isLatinProse = !hasHan && LatinWord.IsMatch(text);
             if (sourceParagraphMode == OmitPairedLatinProse && precedingRetainedTextHasHan && isLatinProse)
                 continue;
-            selected.Add(NativeContentCopy.CloneParagraph(paragraph));
+            var cloned = NativeContentCopy.CloneParagraph(paragraph);
+            if (sourceParagraphMode == OmitPairedLatinProse && hasHan)
+                OmitInlinePairedLatinProse(cloned);
+            selected.Add(cloned);
             precedingRetainedTextHasHan = hasHan;
         }
         if (selected.Count == 0) selected.Add(new Paragraph());
@@ -304,6 +307,57 @@ public static class NativeTableRowReplace
     private const string OmitPairedLatinProse = "omit-paired-latin-prose";
     private static readonly Regex HanText = new("[\\u3400-\\u4DBF\\u4E00-\\u9FFF]", RegexOptions.CultureInvariant);
     private static readonly Regex LatinWord = new("[a-z]{2,}", RegexOptions.CultureInvariant);
+    private static readonly Regex LatinProseWord = new("[A-Za-z]*[a-z]{2,}[A-Za-z]*", RegexOptions.CultureInvariant);
+    private static readonly Regex ClauseAfterPunctuation = new(
+        "(?<=[：；。！？:;.!?])[\\s\\u00A0]*[A-Z][^\\u3400-\\u4DBF\\u4E00-\\u9FFF]*",
+        RegexOptions.CultureInvariant);
+    private static readonly Regex LabelBeforeChineseColon = new(
+        "\\s+[A-Z][A-Za-z]*(?:\\s+[A-Za-z0-9]+)*\\s*(?=：)", RegexOptions.CultureInvariant);
+    private static readonly Regex FinalLatinSuffix = new(
+        "(?<=[\\u3400-\\u4DBF\\u4E00-\\u9FFF])[A-Z][A-Za-z]*(?:\\s+[A-Za-z]+)*$",
+        RegexOptions.CultureInvariant);
+
+    private static void OmitInlinePairedLatinProse(Paragraph paragraph)
+    {
+        var textNodes = paragraph.Descendants<Text>().ToArray();
+        var text = string.Concat(textNodes.Select(node => node.Text));
+        if (text.Length == 0 || text != paragraph.InnerText) return;
+
+        var ranges = new List<(int Start, int Length)>();
+        foreach (Match match in ClauseAfterPunctuation.Matches(text))
+        {
+            var wordCount = LatinProseWord.Matches(match.Value).Count;
+            var terminalClause = match.Index + match.Length == text.Length;
+            var endsAsClause = match.Value.TrimEnd().EndsWith(':')
+                || match.Value.TrimEnd().EndsWith(';');
+            if (wordCount >= 3 || (terminalClause && wordCount >= 2) || (endsAsClause && wordCount >= 1))
+                ranges.Add((match.Index, match.Length));
+        }
+        foreach (Match match in LabelBeforeChineseColon.Matches(text))
+            if (LatinProseWord.IsMatch(match.Value))
+                ranges.Add((match.Index, match.Length));
+        foreach (Match match in FinalLatinSuffix.Matches(text))
+            if (LatinProseWord.IsMatch(match.Value))
+                ranges.Add((match.Index, match.Length));
+        if (ranges.Count == 0) return;
+
+        var removed = new bool[text.Length];
+        foreach (var range in ranges)
+            for (var index = range.Start; index < range.Start + range.Length; index++) removed[index] = true;
+        var offset = 0;
+        foreach (var node in textNodes)
+        {
+            var original = node.Text;
+            var retained = new StringBuilder(original.Length);
+            for (var index = 0; index < original.Length; index++)
+                if (!removed[offset + index]) retained.Append(original[index]);
+            node.Text = retained.ToString();
+            node.Space = node.Text.Length > 0 && (char.IsWhiteSpace(node.Text[0]) || char.IsWhiteSpace(node.Text[^1]))
+                ? SpaceProcessingModeValues.Preserve
+                : null;
+            offset += original.Length;
+        }
+    }
 
     private static void RequireSourceParagraphMode(string? mode)
     {
