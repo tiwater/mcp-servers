@@ -314,7 +314,7 @@ const tools = [
   },
   {
     name: 'docx_replace_table_rows',
-    description: 'Replace one or more data-row ranges in one current target document. input appears once; each tables item binds sourceInput and exact source and target OpenXML addresses. All source-cell paragraphs copy by default; sourceCellContents selects exact observed content that the target keeps.',
+    description: 'Replace one or more data-row ranges in one current target document. Each tables item binds sourceInput and exact source and target OpenXML addresses. Source cells copy all paragraphs by default. To keep selected content only, each sourceSelections item is a selection object with the observed address in its address field; range is optional for a substring.',
     inputSchema: inputContract('docx_replace_table_rows'),
     outputSchema: fixedEditOutput('docx_replace_table_rows'),
     handler: args => fixedEdit('docx_replace_table_rows', args),

@@ -198,6 +198,7 @@
           },
           "sourceCellContents": {
             "type": "array",
+            "description": "Optional per-cell content selections. Omit this field to copy every paragraph from each mapped source cell.",
             "items": {
               "type": "object",
               "properties": {
@@ -221,11 +222,13 @@
                 },
                 "sourceSelections": {
                   "type": "array",
+                  "description": "Content selections inside sourceCell. Each item is a selection object; put the observed OpenXML address in its required address field and add range only for a substring.",
                   "items": {
                     "type": "object",
                     "properties": {
                       "address": {
                         "type": "object",
+                        "description": "Observed paragraph, run, or text OpenXML address selected from sourceCell.",
                         "properties": {
                           "part": {
                             "type": "string",
