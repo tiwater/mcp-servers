@@ -4,10 +4,12 @@ import argparse
 import base64
 import contextlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
 import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1715,6 +1717,59 @@ def inspect(pdf_path: Path) -> dict:
     return metadata
 
 
+def render_pages(pdf_path: Path, output_dir: Path, zoom: float = 2.0) -> dict:
+    """Render every PDF page to a revision-bound PNG set."""
+    if not isinstance(zoom, (int, float)) or zoom <= 0:
+        raise ValueError("--zoom must be greater than zero")
+    input_path = pdf_path.resolve(strict=True)
+    destination = output_dir.resolve()
+    if destination.exists():
+        raise FileExistsError(f"output directory already exists: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
+    try:
+        input_sha256 = hashlib.sha256(input_path.read_bytes()).hexdigest()
+        pages = []
+        with fitz.open(input_path) as document:
+            if document.page_count < 1:
+                raise ValueError("PDF contains no pages")
+            digits = max(4, len(str(document.page_count)))
+            matrix = fitz.Matrix(float(zoom), float(zoom))
+            for page_index, page in enumerate(document):
+                filename = f"page-{page_index + 1:0{digits}d}.png"
+                staged_path = staging / filename
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                pixmap.save(staged_path)
+                page_bytes = staged_path.read_bytes()
+                pages.append({
+                    "page": page_index + 1,
+                    "path": str(destination / filename),
+                    "sha256": hashlib.sha256(page_bytes).hexdigest(),
+                    "bytes": len(page_bytes),
+                    "width": pixmap.width,
+                    "height": pixmap.height,
+                })
+        result = {
+            "schema": "tiwater.pdf-render-pages/v1",
+            "provider": "tiwater-pdf",
+            "version": __version__,
+            "input": str(input_path),
+            "input_sha256": input_sha256,
+            "zoom": float(zoom),
+            "page_count": len(pages),
+            "pages": pages,
+        }
+        (staging / "manifest.json").write_text(
+            json.dumps(result, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(staging, destination)
+        return result
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
 def _normalize_header(header: list[str]) -> tuple[str, ...]:
     """Normalize header for comparison by removing whitespace and newlines."""
     return tuple(" ".join(h.split()) if h else "" for h in header)
@@ -1764,6 +1819,12 @@ def main() -> int:
     inspect_parser = subparsers.add_parser("inspect", help="Inspect PDF metadata")
     inspect_parser.add_argument("input", type=Path, help="PDF file to inspect")
     inspect_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    render_parser = subparsers.add_parser("render-pages", help="Render every PDF page to PNG")
+    render_parser.add_argument("input", type=Path, help="PDF file to render")
+    render_parser.add_argument("--output-dir", type=Path, required=True, help="New directory for page PNGs and manifest.json")
+    render_parser.add_argument("--zoom", type=float, default=2.0, help="PDF render zoom")
+    render_parser.add_argument("--json", action="store_true", help="Output manifest as JSON")
 
     # extract-tables command
     extract_parser = subparsers.add_parser("extract-tables", help="Extract tables from PDF")
@@ -1838,6 +1899,14 @@ def main() -> int:
                 print(f"File: {result['file']}")
                 print(f"Pages: {result['pages']}")
                 print(f"Metadata: {result['metadata']}")
+
+        elif args.command == "render-pages":
+            result = render_pages(args.input, args.output_dir, zoom=args.zoom)
+            if args.json:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            else:
+                print(f"Pages: {result['page_count']}")
+                print(f"Manifest: {args.output_dir.resolve() / 'manifest.json'}")
 
         elif args.command == "extract-tables":
             pages = None
