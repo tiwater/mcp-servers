@@ -11,14 +11,14 @@ namespace Dockit.Docx;
 
 public static class NativeContentCopy
 {
-    public const string Command = "docx_copy_content";
+    public const string Command = "docx_replace_content_from_source";
     private const string MainStory = "/word/document.xml";
 
     public static int Run(string[] args)
     {
         if (args.Length != 1) throw new InvalidOperationException($"{Command} requires <request.json>");
         var request = JsonSerializer.Deserialize<CopyContentRequest>(File.ReadAllText(args[0]), Json.Options)
-            ?? throw new InvalidOperationException("copy-content-request-invalid");
+            ?? throw new InvalidOperationException("replace-content-from-source-request-invalid");
         var receipt = Apply(request);
         Console.WriteLine(JsonSerializer.Serialize(new
         {
@@ -75,7 +75,7 @@ public static class NativeContentCopy
             NativeMutationSupport.Commit(temporaryPath, paths);
             var readback = ReadBack(outputPath, prepared);
             var receipt = new CopyContentReceipt(
-                "tiwater.docx-copy-content-receipt",
+                "tiwater.docx-replace-content-from-source-receipt/v1",
                 "tiwater.docx.cli",
                 RuntimeIdentity.Version,
                 readback,

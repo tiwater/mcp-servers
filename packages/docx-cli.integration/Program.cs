@@ -44,6 +44,82 @@ try
             == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
         "narrow cell read did not resolve the restart cell text");
 
+    var replacementSource = Path.Combine(root, "content-replacement-source.docx");
+    var replacementTarget = Path.Combine(root, "content-replacement-target.docx");
+    CreateContentReplacementSourceDocument(replacementSource);
+    CreateContentReplacementTargetDocument(replacementTarget);
+    var replacementSourceState = ReadTable(replacementSource, "content-replacement-source");
+    var replacementTargetState = ReadTable(replacementTarget, "content-replacement-target");
+    var replacementSourceRows = replacementSourceState.GetProperty("rows");
+    var replacementTargetRows = replacementTargetState.GetProperty("rows");
+    var chineseItem = replacementSourceRows[1].GetProperty("cells")[0]
+        .GetProperty("paragraphs")[0].GetProperty("address").Clone();
+    var chineseResult = replacementSourceRows[1].GetProperty("cells")[1]
+        .GetProperty("paragraphs")[0].GetProperty("address").Clone();
+    var invalidSourceAddress = new
+    {
+        part = chineseResult.GetProperty("part").GetString(),
+        path = replacementSourceRows[1].GetProperty("cells")[1].GetProperty("address")
+            .GetProperty("path").GetString() + "/w:p[99]",
+    };
+    var invalidReplacementReceipt = Path.Combine(root, "content-replacement-invalid-receipt.json");
+    var invalidReplacement = RunExpectAtomicFailure(
+        "docx_replace_content_from_source", replacementTarget, invalidReplacementReceipt, new
+        {
+            input = replacementTarget,
+            changes = new object[]
+            {
+                new
+                {
+                    target = CellAt(replacementTargetState, 1, 1).GetProperty("address").Clone(),
+                    sourceInput = replacementSource,
+                    sourceSelections = new[] { new { address = chineseResult } },
+                },
+                new
+                {
+                    target = CellAt(replacementTargetState, 1, 0).GetProperty("address").Clone(),
+                    sourceInput = replacementSource,
+                    sourceSelections = new[] { new { address = invalidSourceAddress } },
+                },
+            },
+            output = replacementTarget,
+            receiptOutput = invalidReplacementReceipt,
+        });
+    Require(invalidReplacement.Contains("object-address-not-found", StringComparison.Ordinal),
+        "invalid source selection did not fail before content replacement");
+
+    var replacementReceipt = Path.Combine(root, "content-replacement-receipt.json");
+    Run("docx_replace_content_from_source", new
+    {
+        input = replacementTarget,
+        changes = new object[]
+        {
+            new
+            {
+                target = CellAt(replacementTargetState, 1, 0).GetProperty("address").Clone(),
+                sourceInput = replacementSource,
+                sourceSelections = new[] { new { address = chineseItem } },
+            },
+            new
+            {
+                target = CellAt(replacementTargetState, 1, 1).GetProperty("address").Clone(),
+                sourceInput = replacementSource,
+                sourceSelections = new[] { new { address = chineseResult } },
+            },
+        },
+        output = replacementTarget,
+        receiptOutput = replacementReceipt,
+    });
+    var replacedContent = ReadTable(replacementTarget, "content-replacement-output");
+    Require(CellAt(replacedContent, 1, 0).GetProperty("logicalText").GetString() == "中文项目"
+            && CellAt(replacedContent, 1, 1).GetProperty("logicalText").GetString() == "中文结果",
+        "selected source paragraphs were not retained as target content");
+    Require(CellAt(replacedContent, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(replacedContent, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
+            && CellAt(replacedContent, 2, 0).GetProperty("logicalText").GetString() == "中文项目",
+        "content replacement changed the target vertical merge");
+    RunInput("validate-openxml", replacementTarget);
+
     var fillSource = Path.Combine(root, "fill-source.docx");
     var fillTarget = Path.Combine(root, "fill-target.docx");
     CreateFillSourceDocument(fillSource);
@@ -1707,6 +1783,37 @@ void CreateFillSourceDocument(string path)
             Cell("", merge: MergedCellValues.Continue), Cell("", merge: MergedCellValues.Continue),
             Cell("", merge: MergedCellValues.Continue), Cell("值四"), Cell("通过")),
         new TableRow(Cell("组乙"), Cell("标准乙"), Cell("控制"), Cell("单值"), Cell("通过")));
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateContentReplacementSourceDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(new GridColumn { Width = "2000" }, new GridColumn { Width = "2000" }),
+        new TableRow(Cell("项目"), Cell("结果")),
+        new TableRow(
+            CellWithParagraphs("中文项目", "English item"),
+            CellWithParagraphs("中文结果", "English result")));
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateContentReplacementTargetDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(new GridColumn { Width = "2000" }, new GridColumn { Width = "2000" }),
+        new TableRow(Cell("项目"), Cell("结果")),
+        new TableRow(Cell("占位", merge: MergedCellValues.Restart), Cell("占位结果")),
+        new TableRow(Cell("", merge: MergedCellValues.Continue), Cell("保留")));
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();
