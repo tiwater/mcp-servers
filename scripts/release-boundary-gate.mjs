@@ -839,6 +839,26 @@ function checkBoundedInspectionOutputs(tools) {
   note(`${inspections.length} inspect outputs keep complete evidence in artifacts and bound every response collection`);
 }
 
+function checkCompactInspectionSummaries(tools) {
+  const check = 'compact-inspection-summaries';
+  const expected = new Map([
+    ['xlsx_inspect', 'sheets'],
+    ['pptx_inspect', 'openingSlides'],
+  ]);
+  for (const [name, collection] of expected) {
+    const schema = tools.find(tool => tool?.name === name)?.outputSchema;
+    const summary = schema?.properties?.summary;
+    const items = summary?.properties?.[collection];
+    if (!schema?.required?.includes('summary')
+        || summary?.type !== 'object'
+        || items?.type !== 'array'
+        || !Number.isInteger(items.maxItems)) {
+      fail(check, `${name} does not publish a required bounded identity summary`);
+    }
+  }
+  note('XLSX and PPTX inspection always return bounded identity summaries');
+}
+
 async function main() {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'tiwater-office-boundary-'));
   try {
@@ -856,6 +876,7 @@ async function main() {
     checkDocxMergedCellDescriptions(toolNames);
     checkDocxTableStreamingContract(toolNames);
     checkBoundedInspectionOutputs(toolNames);
+    checkCompactInspectionSummaries(toolNames);
     const packedPackage = await readJson(path.join(packageRoot, 'package.json'));
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);
   } catch (error) {
