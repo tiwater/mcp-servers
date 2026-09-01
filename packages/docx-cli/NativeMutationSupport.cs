@@ -27,6 +27,8 @@ internal static class NativeMutationSupport
         RequireNewPath(receiptPath, "receiptOutput");
         if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath))
             throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
+        if (!inPlace) Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         return new PathsResult(inputPath, outputPath, receiptPath, inPlace);
     }
 
@@ -128,7 +130,7 @@ internal static class NativeMutationSupport
         if (File.Exists(path) || Directory.Exists(path))
             throw new InvalidOperationException($"{name}-already-exists");
         var directory = Path.GetDirectoryName(path);
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            throw new InvalidOperationException($"{name}-directory-not-found");
+        if (string.IsNullOrWhiteSpace(directory))
+            throw new InvalidOperationException($"{name}-directory-invalid");
     }
 }

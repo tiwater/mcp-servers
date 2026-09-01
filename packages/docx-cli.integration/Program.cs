@@ -44,6 +44,25 @@ try
             == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
         "narrow cell read did not resolve the restart cell text");
 
+    var nestedOutput = Path.Combine(root, "new-artifacts", "documents", "result.docx");
+    var nestedReceipt = Path.Combine(root, "new-artifacts", "receipts", "result.json");
+    Run("docx_set_text", new
+    {
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                target = rows[1].GetProperty("cells")[1].GetProperty("address").Clone(),
+                text = "nested output parent"
+            }
+        },
+        output = nestedOutput,
+        receiptOutput = nestedReceipt
+    });
+    Require(File.Exists(nestedOutput) && File.Exists(nestedReceipt),
+        "mutation did not create requested output parent directories");
+
     var setBodyOutput = Path.Combine(root, "set-table-body.docx");
     var setBodyReceipt = Path.Combine(root, "set-table-body-receipt.json");
     var bodyColumns = initial.GetProperty("gridColumns").EnumerateArray()
