@@ -640,7 +640,7 @@ function buildServer() {
   const server = new McpServer(
     { name: 'tiwater-office', version: packageMetadata.version },
     {
-      instructions: 'Use these tools only for generic Office observation, conversion, editing, validation, and native rendering. Callers own all selected objects, values, and business decisions.',
+      instructions: 'Use these tools only for generic Office observation, conversion, editing, validation, and native rendering. Callers own all selected objects, values, and business decisions. A read-only output path is an immutable artifact identity: an identical request may replay it; every different request uses a different path.',
     },
   );
   for (const tool of tools) {

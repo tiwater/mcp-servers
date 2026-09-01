@@ -628,6 +628,7 @@ async function smokeInstalledPackage(archive, tempRoot) {
     let stderr = '';
     let settled = false;
     let toolsListRequested = false;
+    let serverInstructions = '';
     const finish = (result, error = null) => {
       if (settled) return;
       settled = true;
@@ -646,6 +647,8 @@ async function smokeInstalledPackage(archive, tempRoot) {
           if (message.error) {
             finish(null, new Error(`MCP initialize returned error: ${JSON.stringify(message.error)}`));
           } else if (message.result && typeof message.result === 'object') {
+            serverInstructions = typeof message.result.instructions === 'string'
+              ? message.result.instructions : '';
             toolsListRequested = true;
             child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) + '\n');
           }
@@ -661,7 +664,7 @@ async function smokeInstalledPackage(archive, tempRoot) {
             } else if (new Set(tools.map(tool => tool.name)).size !== tools.length) {
               finish(null, new Error('MCP tools/list returned duplicate tool names'));
             } else {
-              finish({ initialized: true, tools });
+              finish({ initialized: true, tools, serverInstructions });
             }
           } else {
             finish(null, new Error('MCP tools/list returned no tools array'));
@@ -687,6 +690,11 @@ async function smokeInstalledPackage(archive, tempRoot) {
     }) + '\n');
   });
   if (!response.initialized) fail(check, 'MCP initialize did not complete');
+  if (!response.serverInstructions.includes('A read-only output path is an immutable artifact identity')
+      || !response.serverInstructions.includes('an identical request may replay it')
+      || !response.serverInstructions.includes('every different request uses a different path')) {
+    fail(check, 'MCP instructions do not publish immutable read artifact path semantics');
+  }
   note(`isolated MCP initialize and tools/list completed (${response.tools?.length || 0} tools)${response.stderr.trim() ? ' with stderr output' : ''}`);
   return response.tools || [];
 }
