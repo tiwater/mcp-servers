@@ -5,16 +5,19 @@
     "input": {
       "type": "string",
       "minLength": 1,
+      "description": "Current target DOCX containing every target paragraph or table cell.",
       "x-tiwater-file-role": "read"
     },
     "changes": {
       "minItems": 1,
       "type": "array",
+      "description": "Atomic source-to-target content replacements. Every source selection is resolved and validated before the target document is changed.",
       "items": {
         "type": "object",
         "properties": {
           "target": {
             "type": "object",
+            "description": "Existing main-document paragraph or table-cell address whose inline content is replaced while its container formatting and table structure remain unchanged.",
             "properties": {
               "part": {
                 "type": "string",
@@ -35,16 +38,19 @@
           "sourceInput": {
             "type": "string",
             "minLength": 1,
+            "description": "Current source DOCX containing this change's sourceSelections.",
             "x-tiwater-file-role": "read"
           },
           "sourceSelections": {
             "minItems": 1,
             "type": "array",
+            "description": "Ordered native source paragraphs, runs, or text nodes. Their selected inline content becomes the target content without Agent transcription.",
             "items": {
               "type": "object",
               "properties": {
                 "address": {
                   "type": "object",
+                  "description": "Native source object address returned by docx_read_object or docx_read_table. Selecting a paragraph copies that paragraph's inline content; selecting a cell copies its direct paragraphs.",
                   "properties": {
                     "part": {
                       "type": "string",
@@ -64,6 +70,7 @@
                 },
                 "range": {
                   "type": "object",
+                  "description": "Optional Unicode-scalar substring of a selected run or text node. Omit it to copy the complete selected object.",
                   "properties": {
                     "start": {
                       "type": "integer",
@@ -101,12 +108,13 @@
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "Output DOCX path; may equal input for an atomic in-place update.",
+      "description": "Output DOCX path; may equal input for one atomic in-place update after every replacement has passed preflight.",
       "x-tiwater-file-role": "write"
     },
     "receiptOutput": {
       "type": "string",
       "minLength": 1,
+      "description": "New JSON receipt path containing target readback for every completed replacement.",
       "x-tiwater-file-role": "write",
       "x-tiwater-file-effect": false
     }
@@ -118,5 +126,5 @@
     "receiptOutput"
   ],
   "additionalProperties": false,
-  "$id": "tiwater.office-mcp-input/docx_copy_content"
+  "$id": "tiwater.office-mcp-input/docx_replace_content_from_source"
 }
