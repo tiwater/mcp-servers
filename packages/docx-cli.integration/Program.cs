@@ -44,6 +44,21 @@ try
             == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
         "narrow cell read did not resolve the restart cell text");
 
+    var validAddress = rows[1].GetProperty("address");
+    var malformedAddress = new
+    {
+        part = validAddress.GetProperty("part").GetString(),
+        path = validAddress.GetProperty("path").GetString() + "}]"
+    };
+    var malformedAddressError = RunExpectFailure("docx_read_object", new
+    {
+        input = original,
+        addresses = new[] { malformedAddress },
+        kinds = new[] { "paragraph" }
+    });
+    Require(malformedAddressError.Contains("addresses[0].path-is-invalid", StringComparison.Ordinal),
+        "malformed native path did not fail at the address contract");
+
     var nestedOutput = Path.Combine(root, "new-artifacts", "documents", "result.docx");
     var nestedReceipt = Path.Combine(root, "new-artifacts", "receipts", "result.json");
     Run("docx_set_text", new

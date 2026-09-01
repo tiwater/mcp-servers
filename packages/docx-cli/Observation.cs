@@ -299,8 +299,17 @@ public static class Observation
     private static void ValidateAddress(DocxObjectAddress address, string name)
     {
         if (string.IsNullOrWhiteSpace(address.Part)) throw new InvalidOperationException($"{name}.part-is-required");
-        if (string.IsNullOrWhiteSpace(address.Path) || !address.Path.StartsWith("/", StringComparison.Ordinal))
+        if (!IsNativePath(address.Path))
             throw new InvalidOperationException($"{name}.path-is-invalid");
+    }
+
+    private static bool IsNativePath(string? nativePath)
+    {
+        if (string.IsNullOrWhiteSpace(nativePath) || !nativePath.StartsWith("/", StringComparison.Ordinal))
+            return false;
+        var segments = nativePath[1..].Split('/', StringSplitOptions.None);
+        return segments.Length > 0
+            && segments.All(segment => TryParseSegment(segment, out _, out _, out _));
     }
 
     internal static OpenXmlElement ResolveNativePath(
