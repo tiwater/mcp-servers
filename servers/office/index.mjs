@@ -19,6 +19,7 @@ import {
   fileArtifact,
   resultChannels,
   returnedContentBudgetBytes,
+  writeIdempotentJsonArtifact,
   writeJsonArtifact,
 } from '../_shared/large-json-result.mjs';
 import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
@@ -746,7 +747,7 @@ async function docxInspect(args) {
     returnContent: delivery.returnContent,
     artifact: delivery.output === null
       ? null
-      : await writeJsonArtifact(delivery.output, result.json),
+      : await writeIdempotentJsonArtifact(delivery.output, result.json),
     ...(delivery.returnContent ? compactDocxInspection(result.json) : {}),
   };
 }
@@ -770,7 +771,7 @@ async function docxObservation(tool, args) {
       const offset = Math.min(args.offset ?? 0, totalCount);
       const withArtifact = delivery.output === null ? retained : {
         ...retained,
-        artifact: await writeJsonArtifact(delivery.output, result.json),
+        artifact: await writeIdempotentJsonArtifact(delivery.output, result.json),
       };
       if (!delivery.returnContent) {
         return {
@@ -805,7 +806,7 @@ async function docxObservation(tool, args) {
       const totalCount = payload.tables.length;
       const withArtifact = delivery.output === null ? retained : {
         ...retained,
-        artifact: await writeJsonArtifact(delivery.output, result.json),
+        artifact: await writeIdempotentJsonArtifact(delivery.output, result.json),
       };
       if (!delivery.returnContent) {
         return {
@@ -872,7 +873,7 @@ async function docxObservation(tool, args) {
       };
       const withArtifact = delivery.output === null ? retained : {
         ...retained,
-        artifact: await writeJsonArtifact(delivery.output, detailPage),
+        artifact: await writeIdempotentJsonArtifact(delivery.output, detailPage),
       };
       if (!delivery.returnContent) {
         return {
@@ -964,7 +965,7 @@ async function docxReadObject(args) {
       returnContent: delivery.returnContent,
       artifact: delivery.output === null
         ? null
-        : await writeJsonArtifact(delivery.output, result.json),
+        : await writeIdempotentJsonArtifact(delivery.output, result.json),
       receipt: {
         schema: 'tiwater.docx-read-object-receipt/v1',
         observationCount: observations.length,
