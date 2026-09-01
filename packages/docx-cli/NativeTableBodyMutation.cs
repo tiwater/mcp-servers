@@ -129,13 +129,16 @@ public static class NativeTableBodyMutation
         int columnCount)
     {
         var result = new List<PreparedRow>(requests.Count);
-        var previousVertical = new Dictionary<(int Start, int Span), VerticalMergeState>();
+        var active = new Dictionary<int, ActiveVerticalCell>();
         for (var rowIndex = 0; rowIndex < requests.Count; rowIndex++)
         {
-            var cells = new List<PreparedCell>();
-            var occupied = new HashSet<int>();
-            var currentVertical = new Dictionary<(int Start, int Span), VerticalMergeState>();
-            var continuedKeys = new HashSet<(int Start, int Span)>();
+            var cells = active.Values
+                .Select(item => new PreparedCell(item.Start, item.Span, string.Empty, "continue"))
+                .ToList();
+            var occupied = active.Values
+                .SelectMany(item => Enumerable.Range(item.Start, item.Span)).ToHashSet();
+            var next = active.Values.Where(item => item.Remaining > 1)
+                .ToDictionary(item => item.Start, item => item with { Remaining = item.Remaining - 1 });
 
             foreach (var (cell, cellIndex) in requests[rowIndex].Cells.Select((value, index) => (value, index)))
             {
@@ -152,45 +155,22 @@ public static class NativeTableBodyMutation
                     throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}].columns-not-contiguous");
                 if (positions.Any(position => !occupied.Add(position)))
                     throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}].columns-overlap");
+                var rowSpan = cell.RowSpan ?? 1;
+                if (rowSpan < 1 || rowSpan > requests.Count - rowIndex)
+                    throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}].rowSpan-invalid");
                 var start = positions[0];
                 var span = positions.Length;
-                var key = (start, span);
-                var preparedText = cell.Text;
-                if (cell.VerticalMerge is not null and not "restart" and not "continue")
-                    throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}].verticalMerge-invalid");
-                if (cell.VerticalMerge == "continue")
-                {
-                    if (!previousVertical.TryGetValue(key, out var previous))
-                        throw new InvalidOperationException(
-                            $"rows[{rowIndex}].cells[{cellIndex}].verticalMerge-continue-without-previous");
-                    if (cell.Text.Length != 0 && !StringComparer.Ordinal.Equals(cell.Text, previous.Text))
-                        throw new InvalidOperationException(
-                            $"rows[{rowIndex}].cells[{cellIndex}].verticalMerge-continue-text-must-match-restart");
-                    preparedText = "";
-                    currentVertical.Add(key, new VerticalMergeState(true, previous.Text));
-                    continuedKeys.Add(key);
-                }
-                else if (cell.VerticalMerge == "restart")
-                {
-                    currentVertical.Add(key, new VerticalMergeState(false, cell.Text));
-                }
-                cells.Add(new PreparedCell(start, span, preparedText, cell.VerticalMerge));
+                cells.Add(new PreparedCell(start, span, cell.Text, rowSpan > 1 ? "restart" : null));
+                if (rowSpan > 1) next.Add(start, new ActiveVerticalCell(start, span, rowSpan - 1));
             }
             if (!occupied.SetEquals(Enumerable.Range(0, columnCount)))
                 throw new InvalidOperationException($"rows[{rowIndex}]-does-not-cover-table-grid");
-            foreach (var (key, state) in previousVertical)
-            {
-                if (!continuedKeys.Contains(key) && !state.HasContinuation)
-                    throw new InvalidOperationException(
-                        $"rows[{rowIndex - 1}].verticalMerge-restart-without-continuation");
-            }
             result.Add(new PreparedRow(
                 (TableRow)prototypes[rowIndex].CloneNode(true),
                 cells.OrderBy(cell => cell.Start).ToArray()));
-            previousVertical = currentVertical;
+            active = next;
         }
-        if (previousVertical.Values.Any(state => !state.HasContinuation))
-            throw new InvalidOperationException("last-row-verticalMerge-restart-without-continuation");
+        if (active.Count != 0) throw new InvalidOperationException("rowSpan-exceeds-final-row");
         return result;
     }
 
@@ -381,7 +361,7 @@ public static class NativeTableBodyMutation
     }
 
     private sealed record CellPosition(TableCell Cell, int Start, int Span);
-    private sealed record VerticalMergeState(bool HasContinuation, string Text);
+    private sealed record ActiveVerticalCell(int Start, int Span, int Remaining);
     private sealed record PreparedCell(int Start, int Span, string Text, string? VerticalMerge);
     private sealed record PreparedRow(TableRow Prototype, IReadOnlyList<PreparedCell> Cells);
     private sealed record PreparedTable(
@@ -394,7 +374,7 @@ public static class NativeTableBodyMutation
 
 public sealed record SetTableBodyRowRange(DocxObjectAddress First, DocxObjectAddress Last);
 public sealed record SetTableBodyColumn(string Id, DocxObjectAddress GridColumn);
-public sealed record SetTableBodyCell(IReadOnlyList<string> Columns, string Text, string? VerticalMerge = null);
+public sealed record SetTableBodyCell(IReadOnlyList<string> Columns, string Text, int? RowSpan = null);
 public sealed record SetTableBodyRow(DocxObjectAddress PrototypeRow, IReadOnlyList<SetTableBodyCell> Cells);
 public sealed record SetTableBodyRequest(
     string Input,

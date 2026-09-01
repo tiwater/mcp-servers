@@ -822,15 +822,14 @@ function checkDocxMergedCellDescriptions(tools) {
       || !mergeDescription.includes('All selected cell content moves into the top-left owner')) {
     fail(check, 'docx_merge_cells does not explain vertical grouping and content ownership');
   }
-  if (!setBodyDescription.includes('cover every row completely with explicit cells')
-      || !setBodyDescription.includes('restart cell followed by continue cells')
-      || setBodyCell?.properties?.verticalMerge?.type !== 'string'
-      || !setBodyCell?.properties?.verticalMerge?.enum?.includes('restart')
-      || !setBodyCell?.properties?.verticalMerge?.enum?.includes('continue')
-      || Object.hasOwn(setBodyCell?.properties ?? {}, 'rowSpan')) {
-    fail(check, 'docx_set_table_body does not expose explicit native vertical-merge cells');
+  if (!setBodyDescription.includes('Set rowSpan')
+      || !setBodyDescription.includes('provider writes native vertical merge cells')
+      || setBodyCell?.properties?.rowSpan?.type !== 'integer'
+      || setBodyCell?.properties?.rowSpan?.minimum !== 1
+      || Object.hasOwn(setBodyCell?.properties ?? {}, 'verticalMerge')) {
+    fail(check, 'docx_set_table_body does not expose one logical row-span input');
   }
-  note('DOCX table read/write descriptions preserve vertical-merge logical-cell semantics');
+  note('DOCX table reads expose native merges while the body helper accepts logical row spans');
 }
 
 function checkDocxTableStreamingContract(tools) {

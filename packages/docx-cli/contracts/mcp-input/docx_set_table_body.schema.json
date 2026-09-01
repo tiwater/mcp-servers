@@ -69,7 +69,7 @@
     "rows": {
       "type": "array",
       "minItems": 0,
-      "description": "Exact final physical rows; an empty array removes the declared range when at least one table row remains. Each final row names one current row in existingRows as its style prototype, and its cells cover the complete target grid exactly once.",
+      "description": "Final logical rows; an empty array removes the range when another row remains. Cells plus active row spans cover the complete target grid exactly once.",
       "items": {
         "type": "object",
         "properties": {
@@ -95,10 +95,11 @@
                   "items": { "type": "string", "minLength": 1, "maxLength": 80 }
                 },
                 "text": { "type": "string" },
-                "verticalMerge": {
-                  "type": "string",
-                  "enum": ["restart", "continue"],
-                  "description": "Native OpenXML vertical merge state. A restart cell owns the text; the same columns in the next physical row use continue. A continue cell may repeat the restart text as its logical value or use empty text; it is written physically empty. Omit for an unmerged cell."
+                "rowSpan": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "Logical row count occupied by this cell; omitted means one. Later rows omit these columns."
                 }
               },
               "required": ["columns", "text"],

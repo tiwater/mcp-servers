@@ -297,6 +297,8 @@ public static class NativeObjectMutation
         if (indices.Any(index => index < 0) || !indices.SequenceEqual(indices.OrderBy(index => index))
             || indices.Zip(indices.Skip(1)).Any(pair => pair.Second != pair.First + 1))
             throw new InvalidOperationException("row-sources-must-be-one-contiguous-native-range");
+        if (TableColumnCount(table) != TableColumnCount(targetTable))
+            throw new InvalidOperationException("row-source-table-grid-incompatible-with-target");
         var targetRows = targetTable.Elements<TableRow>().ToArray();
         var boundary = before is null ? targetRows.Length : Array.IndexOf(targetRows, before);
         if (boundary < 0) throw new InvalidOperationException("before-row-not-found-in-target-table");
@@ -389,6 +391,16 @@ public static class NativeObjectMutation
             ?.GetAttributes().FirstOrDefault(attribute => attribute.LocalName == "val").Value;
         return int.TryParse(value, out var result) ? result : 0;
     }
+
+    private static int TableColumnCount(Table table)
+        => Math.Max(
+            table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count() ?? 0,
+            table.Elements<TableRow>().Select(row =>
+                    RowOffset(row.TableRowProperties, "gridBefore")
+                    + row.Elements<TableCell>().Sum(cell =>
+                        Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1))
+                    + RowOffset(row.TableRowProperties, "gridAfter"))
+                .DefaultIfEmpty(0).Max());
 
     private static IReadOnlyDictionary<string, int> ValidationIssueCounts(WordprocessingDocument document)
         => new OpenXmlValidator().Validate(document).GroupBy(issue => $"{issue.Id}\0{issue.Description}", StringComparer.Ordinal)

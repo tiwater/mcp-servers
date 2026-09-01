@@ -85,10 +85,10 @@ try
                 prototypeRow = rows[1].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "精密度", verticalMerge = (string?)"restart" },
-                    new { columns = new[] { "c1" }, text = "标准一", verticalMerge = (string?)null },
-                    new { columns = new[] { "c2" }, text = "结果一", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "通过", verticalMerge = (string?)"restart" },
+                    new { columns = new[] { "c0" }, text = "精密度", rowSpan = (int?)2 },
+                    new { columns = new[] { "c1" }, text = "标准一", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果一", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "通过", rowSpan = (int?)2 },
                 }
             },
             new
@@ -96,10 +96,8 @@ try
                 prototypeRow = rows[3].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "精密度", verticalMerge = (string?)"continue" },
-                    new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "通过", verticalMerge = (string?)"continue" },
+                    new { columns = new[] { "c1" }, text = "标准二", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果二", rowSpan = (int?)null },
                 }
             }
         },
@@ -225,8 +223,8 @@ try
     Require(failedBody.Contains("does-not-cover-table-grid", StringComparison.Ordinal),
         "incomplete table body did not fail explicitly");
 
-    var orphanContinueReceipt = Path.Combine(root, "set-table-body-orphan-continue-receipt.json");
-    var orphanContinue = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, orphanContinueReceipt, new
+    var invalidRowSpanReceipt = Path.Combine(root, "set-table-body-invalid-row-span-receipt.json");
+    var invalidRowSpan = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, invalidRowSpanReceipt, new
     {
         input = setBodyOutput,
         table = setBodyState.GetProperty("address").Clone(),
@@ -245,10 +243,10 @@ try
                 prototypeRow = setRows[1].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "", verticalMerge = (string?)"continue" },
-                    new { columns = new[] { "c1" }, text = "标准一", verticalMerge = (string?)null },
-                    new { columns = new[] { "c2" }, text = "结果一", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "结论一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c0" }, text = "项目一", rowSpan = (int?)3 },
+                    new { columns = new[] { "c1" }, text = "标准一", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果一", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "结论一", rowSpan = (int?)null },
                 }
             },
             new
@@ -256,21 +254,21 @@ try
                 prototypeRow = setRows[2].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "项目二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "结论二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c0" }, text = "项目二", rowSpan = (int?)null },
+                    new { columns = new[] { "c1" }, text = "标准二", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果二", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "结论二", rowSpan = (int?)null },
                 }
             }
         },
         output = setBodyOutput,
-        receiptOutput = orphanContinueReceipt,
+        receiptOutput = invalidRowSpanReceipt,
     });
-    Require(orphanContinue.Contains("verticalMerge-continue-without-previous", StringComparison.Ordinal),
-        "orphan vertical continuation did not fail explicitly");
+    Require(invalidRowSpan.Contains("rowSpan-invalid", StringComparison.Ordinal),
+        "row span beyond the final row did not fail explicitly");
 
-    var mismatchedContinueReceipt = Path.Combine(root, "set-table-body-mismatched-continue-receipt.json");
-    var mismatchedContinue = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, mismatchedContinueReceipt, new
+    var overlappingRowSpanReceipt = Path.Combine(root, "set-table-body-overlapping-row-span-receipt.json");
+    var overlappingRowSpan = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, overlappingRowSpanReceipt, new
     {
         input = setBodyOutput,
         table = setBodyState.GetProperty("address").Clone(),
@@ -289,10 +287,10 @@ try
                 prototypeRow = setRows[1].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "项目一", verticalMerge = (string?)"restart" },
-                    new { columns = new[] { "c1" }, text = "标准一", verticalMerge = (string?)null },
-                    new { columns = new[] { "c2" }, text = "结果一", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "结论一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c0" }, text = "项目一", rowSpan = (int?)2 },
+                    new { columns = new[] { "c1" }, text = "标准一", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果一", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "结论一", rowSpan = (int?)null },
                 }
             },
             new
@@ -300,62 +298,18 @@ try
                 prototypeRow = setRows[2].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "另一个项目", verticalMerge = (string?)"continue" },
-                    new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "结论二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c0" }, text = "另一个项目", rowSpan = (int?)null },
+                    new { columns = new[] { "c1" }, text = "标准二", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果二", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "结论二", rowSpan = (int?)null },
                 }
             }
         },
         output = setBodyOutput,
-        receiptOutput = mismatchedContinueReceipt,
+        receiptOutput = overlappingRowSpanReceipt,
     });
-    Require(mismatchedContinue.Contains("verticalMerge-continue-text-must-match-restart", StringComparison.Ordinal),
-        "mismatched vertical continuation text did not fail explicitly");
-
-    var loneRestartReceipt = Path.Combine(root, "set-table-body-lone-restart-receipt.json");
-    var loneRestart = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, loneRestartReceipt, new
-    {
-        input = setBodyOutput,
-        table = setBodyState.GetProperty("address").Clone(),
-        existingRows = new
-        {
-            first = setRows[1].GetProperty("address").Clone(),
-            last = setRows[2].GetProperty("address").Clone(),
-        },
-        columns = setBodyState.GetProperty("gridColumns").EnumerateArray()
-            .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
-            .ToArray(),
-        rows = new[]
-        {
-            new
-            {
-                prototypeRow = setRows[1].GetProperty("address").Clone(),
-                cells = new[]
-                {
-                    new { columns = new[] { "c0" }, text = "项目一", verticalMerge = (string?)"restart" },
-                    new { columns = new[] { "c1" }, text = "标准一", verticalMerge = (string?)null },
-                    new { columns = new[] { "c2" }, text = "结果一", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "结论一", verticalMerge = (string?)null },
-                }
-            },
-            new
-            {
-                prototypeRow = setRows[2].GetProperty("address").Clone(),
-                cells = new[]
-                {
-                    new { columns = new[] { "c0" }, text = "项目二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "结论二", verticalMerge = (string?)null },
-                }
-            }
-        },
-        output = setBodyOutput,
-        receiptOutput = loneRestartReceipt,
-    });
-    Require(loneRestart.Contains("verticalMerge-restart-without-continuation", StringComparison.Ordinal),
-        "vertical restart without a continuation did not fail explicitly");
+    Require(overlappingRowSpan.Contains("columns-overlap", StringComparison.Ordinal),
+        "a cell overlapping an active row span did not fail explicitly");
 
     var splitBodyReceipt = Path.Combine(root, "set-table-body-split-merge-receipt.json");
     var splitBody = RunExpectAtomicFailure("docx_set_table_body", original, splitBodyReceipt, new
@@ -533,6 +487,28 @@ try
     });
     Require(incompatibleInsert.Contains("row-insert-boundary-requires-compatible-vertical-merge", StringComparison.Ordinal),
         "row insertion accepted an incompatible vertical-merge boundary");
+
+    var narrowSource = Path.Combine(root, "narrow-source.docx");
+    CreateNarrowDocument(narrowSource);
+    var narrowState = ReadTable(narrowSource, "narrow-source");
+    var incompatibleGridReceipt = Path.Combine(root, "incompatible-grid-insert-receipt.json");
+    var incompatibleGridInsert = RunExpectAtomicFailure("docx_insert_objects", deletedColumns, incompatibleGridReceipt, new
+    {
+        input = deletedColumns,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = narrowSource,
+                sources = new[] { narrowState.GetProperty("rows")[0].GetProperty("address").Clone() },
+                targetParent = afterDelete.GetProperty("address").Clone()
+            }
+        },
+        output = Path.Combine(root, "incompatible-grid-insert.docx"),
+        receiptOutput = incompatibleGridReceipt
+    });
+    Require(incompatibleGridInsert.Contains("row-source-table-grid-incompatible-with-target", StringComparison.Ordinal),
+        "row insertion accepted a source row from an incompatible table grid");
 
     var invalidDelete = RunExpectFailure("docx_delete_object", new
     {
@@ -1521,6 +1497,20 @@ void CreateFlatDocument(string path)
             new GridColumn { Width = "1000" }, new GridColumn { Width = "1000" },
             new GridColumn { Width = "1000" }, new GridColumn { Width = "1000" }),
         new TableRow(Cell("一"), Cell("二"), Cell("三"), Cell("四")));
+    main.Document = new Document(new Body(table));
+    main.Document.Save();
+}
+
+void CreateNarrowDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(
+            new GridColumn { Width = "1000" }, new GridColumn { Width = "1000" },
+            new GridColumn { Width = "1000" }),
+        new TableRow(Cell("一"), Cell("二"), Cell("三")));
     main.Document = new Document(new Body(table));
     main.Document.Save();
 }
