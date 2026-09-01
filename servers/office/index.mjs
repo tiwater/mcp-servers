@@ -417,7 +417,7 @@ const tools = [
   },
   {
     name: 'docx_set_text',
-    description: 'Replace the whole text content of observed paragraph or cell objects while retaining target formatting, bookmarks, spans, and vertical merges. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. This sets already-derived text; it does not insert objects, change table structure, copy source formatting, or decide business wording.',
+    description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. This sets already-derived text; it does not insert objects, change table structure, copy source formatting, or decide business wording.',
     inputSchema: inputContract('docx_set_text'),
     outputSchema: fixedEditOutput('docx_set_text'),
     handler: args => fixedEdit('docx_set_text', args),
@@ -640,7 +640,7 @@ function buildServer() {
   const server = new McpServer(
     { name: 'tiwater-office', version: packageMetadata.version },
     {
-      instructions: 'Use these tools only for generic Office observation, conversion, editing, validation, and native rendering. Callers own all selected objects, values, and business decisions. A read-only output path is an immutable artifact identity: an identical request may replay it; every different request uses a different path. Every mutation receiptOutput is a new immutable receipt identity for that exact call and must use a path that has never been used, including when the same document object is updated again.',
+      instructions: 'Use these tools only for generic Office observation, conversion, editing, validation, and native rendering. Callers own all selected objects, values, and business decisions. Every native DOCX address belongs only to the exact input file whose observation returned it and must not be reused with another DOCX. A read-only output path is an immutable artifact identity: an identical request may replay it; every different request uses a different path. Every mutation receiptOutput is a new immutable receipt identity for that exact call and must use a path that has never been used, including when the same document object is updated again.',
     },
   );
   for (const tool of tools) {
