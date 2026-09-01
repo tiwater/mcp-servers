@@ -14,7 +14,7 @@
             "type": "object",
             "properties": {
               "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
-              "path": { "type": "string", "pattern": "^\\/" }
+              "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
             },
             "required": ["part", "path"],
             "additionalProperties": false
@@ -26,7 +26,7 @@
               "type": "object",
               "properties": {
                 "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
-                "path": { "type": "string", "pattern": "^\\/" }
+                "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
               },
               "required": ["part", "path"],
               "additionalProperties": false

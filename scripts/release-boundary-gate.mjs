@@ -21,6 +21,7 @@ const generatedManifestRelativePath = 'office/contracts/tiwater-office-provider-
 const generatedContractDeclaration = 'office/contracts/*.schema.json';
 const fileRoleKey = 'x-tiwater-file-role';
 const fileEffectKey = 'x-tiwater-file-effect';
+const nativeDocxPathPattern = '^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$';
 const expectedFileRolesByProperty = new Map([
   ['input', 'read'],
   ['baseline', 'read'],
@@ -343,18 +344,18 @@ function schemaSignals(value, location = '$', signals = []) {
   return signals;
 }
 
-function docxAddressPartSignals(value, location = '$', signals = []) {
+function docxAddressContractSignals(value, location = '$', signals = []) {
   if (Array.isArray(value)) {
-    value.forEach((item, index) => docxAddressPartSignals(item, `${location}[${index}]`, signals));
+    value.forEach((item, index) => docxAddressContractSignals(item, `${location}[${index}]`, signals));
     return signals;
   }
   if (!value || typeof value !== 'object') return signals;
-  if (value.properties?.part && value.properties?.path
-      && value.properties.part.pattern !== '^\\/') {
-    signals.push(`${location}.properties.part`);
+  if (value.properties?.part && value.properties?.path) {
+    if (value.properties.part.pattern !== '^\\/') signals.push(`${location}.properties.part`);
+    if (value.properties.path.pattern !== nativeDocxPathPattern) signals.push(`${location}.properties.path`);
   }
   for (const [key, child] of Object.entries(value)) {
-    docxAddressPartSignals(child, `${location}.${key}`, signals);
+    docxAddressContractSignals(child, `${location}.${key}`, signals);
   }
   return signals;
 }
@@ -389,8 +390,8 @@ async function checkPublicSchemas(packageRoot) {
     const signals = schemaSignals(schema);
     for (const signal of signals) fail(check, `${path.relative(root, file)} contains business type signal ${signal}`);
     if (path.basename(file).startsWith('docx_')) {
-      for (const signal of docxAddressPartSignals(schema)) {
-        fail(check, `${path.relative(root, file)} does not require an absolute DOCX part URI at ${signal}`);
+      for (const signal of docxAddressContractSignals(schema)) {
+        fail(check, `${path.relative(root, file)} has an incomplete native DOCX address contract at ${signal}`);
       }
     }
     const text = JSON.stringify(schema);
