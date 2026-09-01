@@ -8,6 +8,10 @@
       "minLength": 1,
       "x-tiwater-file-role": "read"
     },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Whether to return the explicitly selected compact row page directly in the tool response. May be combined with output."
+    },
     "table": {
       "type": "object",
       "properties": {
@@ -27,14 +31,15 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991,
-      "description": "Zero-based row offset. Process each returned compact page once and continue from receipt.nextOffset; do not revisit an earlier offset."
+      "description": "Zero-based row offset. Continue only when an unreturned row is needed for the current operation; unused blank template rows need not be read."
     },
     "output": {
       "type": "string",
       "minLength": 1,
+      "description": "Optional path for retaining the selected detailed row page. May be combined with returnContent.",
       "x-tiwater-file-role": "write"
     }
   },
-  "required": ["input", "table", "output"],
+  "required": ["input", "table", "returnContent"],
   "additionalProperties": false
 }

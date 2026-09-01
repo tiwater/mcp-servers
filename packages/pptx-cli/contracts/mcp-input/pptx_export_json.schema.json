@@ -7,6 +7,10 @@
       "minLength": 1,
       "x-tiwater-file-role": "read"
     },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Return the complete result directly when it fits the published response limit."
+    },
     "output": {
       "type": "string",
       "minLength": 1,
@@ -16,7 +20,7 @@
   },
   "required": [
     "input",
-    "output"
+    "returnContent"
   ],
   "additionalProperties": false
 }

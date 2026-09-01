@@ -7,6 +7,10 @@
       "minLength": 1,
       "x-tiwater-file-role": "read"
     },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Whether to return the bounded object page directly in the tool response. May be combined with output."
+    },
     "kinds": {
       "minItems": 1,
       "type": "array",
@@ -64,13 +68,14 @@
     "output": {
       "type": "string",
       "minLength": 1,
+      "description": "Optional path for retaining the complete requested page. May be combined with returnContent.",
       "x-tiwater-file-role": "write"
     }
   },
   "required": [
     "input",
     "kinds",
-    "output"
+    "returnContent"
   ],
   "additionalProperties": false,
   "$id": "tiwater.office-mcp-input/docx_list_objects/v1"

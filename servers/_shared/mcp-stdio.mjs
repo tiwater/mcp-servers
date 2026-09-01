@@ -14,7 +14,9 @@ function toError(code, message, data) {
 
 function normalizeToolCallError(error) {
   if (!error) return toError(-32603, 'Unknown error');
-  if (error.code && error.message) return error;
+  if (Number.isInteger(error.code) && error.message) {
+    return toError(error.code, error.message, error.data);
+  }
   return toError(-32603, error instanceof Error ? error.message : String(error));
 }
 

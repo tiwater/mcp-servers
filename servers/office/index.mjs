@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { McpServer } from '@modelcontextprotocol/server';
@@ -15,6 +14,13 @@ import {
   runJsonCandidateChain,
   withTempJsonFile,
 } from '../_shared/tool-runtime.mjs';
+import {
+  deliverLargeJsonResult,
+  fileArtifact,
+  resultChannels,
+  returnedContentBudgetBytes,
+  writeJsonArtifact,
+} from '../_shared/large-json-result.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const inputContractManifest = JSON.parse(await readFile(
@@ -157,8 +163,30 @@ function fixedEditOutput(tool) {
   }).strict();
 }
 
-function artifactOutput(tool) {
-  return z.object({ tool: z.literal(tool), runtime: runtimeIdentity, source: artifact, artifact }).strict();
+function largeResultOutput(tool) {
+  return z.object({
+    tool: z.literal(tool),
+    runtime: runtimeIdentity,
+    sources: z.array(artifact).min(1).max(2),
+    returnContent: z.boolean(),
+    artifact: artifact.nullable(),
+    receipt: z.object({
+      contentBytes: z.number().int().nonnegative(),
+      contentReturned: z.boolean(),
+      contentWritten: z.boolean(),
+    }).strict(),
+    content: z.unknown().optional(),
+  }).strict();
+}
+
+function docxObservationOutput(tool) {
+  return z.object({
+    tool: z.literal(tool),
+    runtime: runtimeIdentity,
+    source: artifact,
+    returnContent: z.boolean(),
+    artifact: artifact.nullable(),
+  }).strict();
 }
 
 const docxAddress = z.object({
@@ -167,14 +195,14 @@ const docxAddress = z.object({
 }).strict();
 
 function docxInspectionOutput(tool) {
-  return artifactOutput(tool).extend({
+  return docxObservationOutput(tool).extend({
     summary: z.object({
       tableCount: z.number().int().nonnegative(),
       openingParagraphs: z.array(z.object({
         address: docxAddress,
         textPreview: z.string().min(1).max(240),
       }).strict()).max(6),
-    }).strict(),
+    }).strict().optional(),
   }).strict();
 }
 
@@ -211,14 +239,14 @@ const docxObservationReceipt = z.object({
   nextOffset: z.number().int().nonnegative().nullable(),
 }).strict();
 
-const docxListObjectsOutput = artifactOutput('docx_list_objects').extend({
+const docxListObjectsOutput = docxObservationOutput('docx_list_objects').extend({
   schema: z.literal('tiwater.docx-observation-list/v1'),
   receipt: docxObservationReceipt,
-  objects: z.array(docxObjectIdentity),
+  objects: z.array(docxObjectIdentity).optional(),
   runtime: runtimeIdentity,
 }).strict();
 
-const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
+const docxTableIndexOutput = docxObservationOutput('docx_table_index').extend({
   schema: z.literal('tiwater.docx-table-index/v1'),
   receipt: z.object({
     schema: z.literal('tiwater.docx-table-index-receipt/v1'),
@@ -244,10 +272,10 @@ const docxTableIndexOutput = artifactOutput('docx_table_index').extend({
       textPreview: z.string(),
       textLength: z.number().int().nonnegative(),
     }).strict().nullable(),
-  }).strict()),
+  }).strict()).optional(),
 }).strict();
 
-const docxTableReadOutput = artifactOutput('docx_read_table').extend({
+const docxTableReadOutput = docxObservationOutput('docx_read_table').extend({
   schema: z.literal('tiwater.docx-table-page/v1'),
   receipt: z.object({
     schema: z.literal('tiwater.docx-table-page-receipt/v1'),
@@ -255,7 +283,7 @@ const docxTableReadOutput = artifactOutput('docx_read_table').extend({
     returnedRowCount: z.number().int().nonnegative(),
     remaining: z.number().int().nonnegative(),
     nextOffset: z.number().int().nonnegative().nullable(),
-    detailPageRetained: z.literal(true),
+    detailPageRetained: z.boolean(),
     narrowingRequired: z.boolean(),
   }).strict(),
   address: docxAddress,
@@ -290,10 +318,10 @@ const docxTableReadOutput = artifactOutput('docx_read_table').extend({
       text: z.string(),
       logicalText: z.string(),
     }).strict()),
-  }).strict()),
+  }).strict()).optional(),
 }).strict();
 
-const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
+const docxReadObjectOutput = docxObservationOutput('docx_read_object').extend({
   receipt: z.object({
     schema: z.literal('tiwater.docx-read-object-receipt/v1'),
     observationCount: z.number().int().positive(),
@@ -301,13 +329,13 @@ const docxReadObjectOutput = artifactOutput('docx_read_object').extend({
     responseComplete: z.boolean(),
     narrowingRequired: z.boolean(),
   }).strict(),
-  observations: z.array(docxObservationNode),
+  observations: z.array(docxObservationNode).optional(),
 }).strict();
 
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX and retain its complete machine observation at output. The response returns the observation artifact, table count, and up to six opening non-empty body paragraphs with their OpenXML addresses. Use list and read operations to traverse selected document objects in native structure order.',
+    description: 'Inspect one current DOCX. Set returnContent true to return the compact identity summary. Provide output to retain the complete machine observation and return its artifact receipt. These channels are independent and may be used together. At least one channel is required. Use list and read operations to traverse selected document objects in native structure order.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -315,7 +343,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'Page through mixed nearest-child OpenXML objects when document order or paragraph relationships are required. The complete requested provider page is retained at output; the response returns a byte-bounded prefix. Continue with receipt.nextOffset and descend through a returned parent address. Do not use this tool to locate tables or read a whole document: use docx_table_index to locate tables, then docx_read_table for one selected table.',
+    description: 'Page through mixed nearest-child OpenXML objects only when document order or paragraph relationships are required. Set returnContent true to return a byte-bounded object page. Provide output to store the complete requested page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Continue from receipt.nextOffset only when an unreturned object is needed for the current decision. Do not use this tool to locate tables or read a whole document: use docx_table_index to locate tables, then a narrow table or object read.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -323,7 +351,7 @@ const tools = [
   },
   {
     name: 'docx_table_index',
-    description: 'Locate tables in one current DOCX. Writes the complete index to output and returns a bounded page containing table address, shape, short text preview, and nearest non-empty paragraphs. Continue with receipt.nextOffset, then call docx_read_table for one selected address. It does not return full cell content or decide table semantics.',
+    description: 'Locate tables in one current DOCX without returning full cell content or deciding table semantics. Set returnContent true to return a bounded page of addresses, shapes, short previews, and nearest non-empty paragraphs. Provide output to store the complete index and return its artifact receipt. These channels are independent and may be used together; at least one is required. Continue from receipt.nextOffset only when an unreturned table is needed for the current decision, then read one selected native address.',
     inputSchema: inputContract('docx_table_index'),
     outputSchema: docxTableIndexOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -331,7 +359,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read selected rows, cells, or paragraphs from one native DOCX and retain the complete result at output. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. The response returns compact requested descendants when bounded; if receipt.narrowingRequired is true, request fewer observed addresses or descendants. Use docx_read_table for a table.',
+    description: 'Read explicitly selected rows, cells, or paragraphs from one native DOCX. Set returnContent true to return compact requested descendants; if receipt.narrowingRequired is true, request fewer addresses or descendant kinds. Provide output to store the complete selected observation and return its artifact receipt. These channels are independent and may be used together; at least one is required. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. Use docx_read_table for a table range.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -339,7 +367,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read exactly one table selected from docx_table_index by native OpenXML address. Each call retains full paragraph and text-node detail for exactly the returned row page at output; it never builds another whole-table data object. The machine response is the compact form of that page: each row and cell keeps its reusable native address, grid position and span, vertical-merge owner, physical text, and logical text. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. A table observation is complete only when receipt.remaining is 0; process each page once in ascending receipt.nextOffset order. Use docx_read_object only when one selected object needs a narrower descendant view. The provider reports physical structure only; the Agent decides the template and business meaning.',
+    description: 'Read an explicit row range from exactly one table selected by native OpenXML address; it never builds another whole-table data object. Set returnContent true to return a byte-bounded compact row page. Provide output to store full paragraph and text-node detail for the selected row page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Request only rows needed for the current decision; receipt.remaining is navigation information, not an obligation to read unused rows, and blank template rows need not be paged through. Each returned row and cell keeps its reusable native address, zero-based logical gridColumnStart, gridSpan, vertical-merge owner, physical text, and logical text. Match columns across rows by gridColumnStart; a tc[n] path or array position is only that row\'s physical cell ordinal and is not a column identity when gridSpan or gridBefore is present. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Use docx_read_object when one exact object needs a narrower descendant view. The provider reports physical structure only; the Agent decides template and business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -403,30 +431,33 @@ const tools = [
   },
   {
     name: 'docx_compare',
-    description: 'Compare two DOCX files and report package, metric, and style differences.',
+    description: 'Compare two DOCX files and report package, metric, and style differences. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('docx_compare'),
+    outputSchema: largeResultOutput('docx_compare'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxCompare,
   },
   {
     name: 'docx_export_json',
-    description: 'Write a body-only DOCX JSON projection only when a downstream consumer explicitly requires that format. It is not a companion to docx_inspect and does not replace bounded list/find/read object selection.',
+    description: 'Produce a body-only DOCX JSON projection only when a downstream consumer explicitly requires that format. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required. This does not replace bounded list and read operations.',
     inputSchema: inputContract('docx_export_json'),
-    outputSchema: artifactOutput('docx_export_json'),
+    outputSchema: largeResultOutput('docx_export_json'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxExportJson,
   },
   {
     name: 'docx_validate',
-    description: 'Validate a current DOCX package against the published OpenXML contract.',
+    description: 'Validate a current DOCX package against the published OpenXML contract. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('docx_validate'),
+    outputSchema: largeResultOutput('docx_validate'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxValidate,
   },
   {
     name: 'docx_validate_font_policy',
-    description: 'Validate current DOCX text against an explicit font policy.',
+    description: 'Validate current DOCX text against an explicit font policy. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('docx_validate_font_policy'),
+    outputSchema: largeResultOutput('docx_validate_font_policy'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxValidateFontPolicy,
   },
@@ -439,8 +470,9 @@ const tools = [
   },
   {
     name: 'docx_validate_toc_style_policy',
-    description: 'Validate current DOCX table-of-contents paragraph styles against an explicit policy.',
+    description: 'Validate current DOCX table-of-contents paragraph styles against an explicit policy. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('docx_validate_toc_style_policy'),
+    outputSchema: largeResultOutput('docx_validate_toc_style_policy'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: docxValidateTocStylePolicy,
   },
@@ -485,41 +517,42 @@ const tools = [
   },
   {
     name: 'xlsx_inspect',
-    description: 'Inspect a current XLSX workbook or legacy XLS workbook and write one JSON observation containing workbook structure, exported values, formulas, styles, merged ranges, and any published legacy-format conversion evidence.',
+    description: 'Inspect a current XLSX workbook or legacy XLS workbook, including workbook structure, exported values, formulas, styles, merged ranges, and published legacy-format conversion evidence. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('xlsx_inspect'),
-    outputSchema: artifactOutput('xlsx_inspect'),
+    outputSchema: largeResultOutput('xlsx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxInspect,
   },
   {
     name: 'xlsx_export_json',
-    description: 'Export workbook sheet data from XLSX as structured JSON.',
+    description: 'Export workbook sheet data from XLSX as structured JSON. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('xlsx_export_json'),
-    outputSchema: artifactOutput('xlsx_export_json'),
+    outputSchema: largeResultOutput('xlsx_export_json'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxExportJson,
   },
   ...fixedToolDefinitions(xlsxFixedTools),
   {
     name: 'xlsx_validate',
-    description: 'Validate an XLSX workbook package and return Open XML validation evidence.',
+    description: 'Validate an XLSX workbook package and produce OpenXML validation evidence. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('xlsx_validate'),
+    outputSchema: largeResultOutput('xlsx_validate'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxValidate,
   },
   {
     name: 'pptx_inspect',
-    description: 'Inspect a PPTX file and write one detailed JSON observation containing slides, masters, layouts, shapes, transforms, paragraphs, runs, and placeholders.',
+    description: 'Inspect a PPTX file, including slides, masters, layouts, shapes, transforms, paragraphs, runs, and placeholders. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('pptx_inspect'),
-    outputSchema: artifactOutput('pptx_inspect'),
+    outputSchema: largeResultOutput('pptx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: pptxInspect,
   },
   {
     name: 'pptx_export_json',
-    description: 'Export PPTX slide text, notes, and placeholder hints to a new JSON artifact without returning the full presentation through MCP.',
+    description: 'Export PPTX slide text, notes, and placeholder hints as structured JSON. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('pptx_export_json'),
-    outputSchema: artifactOutput('pptx_export_json'),
+    outputSchema: largeResultOutput('pptx_export_json'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: pptxExportJson,
   },
@@ -553,8 +586,9 @@ const tools = [
   },
   {
     name: 'pptx_validate',
-    description: 'Validate a current PPTX package against the published OpenXML contract.',
+    description: 'Validate a current PPTX package against the published OpenXML contract. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('pptx_validate'),
+    outputSchema: largeResultOutput('pptx_validate'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: pptxValidate,
   },
@@ -618,6 +652,24 @@ function compactDocxObjectIdentity(object) {
   };
 }
 
+function compactTableIndexEntry(table) {
+  const paragraph = value => value === null ? null : {
+    address: value.address,
+    textPreview: value.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 160),
+    textLength: value.textLength,
+  };
+  return {
+    address: table.address,
+    parentAddress: table.parentAddress,
+    rowCount: table.rowCount,
+    columnCount: table.columnCount,
+    textPreview: table.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 240),
+    textLength: table.textLength,
+    precedingParagraph: paragraph(table.precedingParagraph),
+    followingParagraph: paragraph(table.followingParagraph),
+  };
+}
+
 function compactDocxObservation(observation) {
   if (!observation?.object) throw new Error('docx-read-object-missing-observation');
   function compactNode(node) {
@@ -642,20 +694,24 @@ function compactDocxObservation(observation) {
 
 async function docxInspect(args) {
   const input = path.resolve(requireString(args.input, 'input'));
+  const delivery = resultChannels(args);
   const result = await runJsonCandidateChain(docxCandidates, ['inspect', input, '--json']);
   return {
     tool: 'docx_inspect',
     runtime: commandRuntime(result),
     source: await fileArtifact(input),
-    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
-    ...compactDocxInspection(result.json),
+    returnContent: delivery.returnContent,
+    artifact: delivery.output === null
+      ? null
+      : await writeJsonArtifact(delivery.output, result.json),
+    ...(delivery.returnContent ? compactDocxInspection(result.json) : {}),
   };
 }
 
 async function docxObservation(tool, args) {
   const input = path.resolve(requireString(args.input, 'input'));
-  const output = requireString(args.output, 'output');
-  const { output: _output, ...request } = args;
+  const delivery = resultChannels(args);
+  const { output: _output, returnContent: _returnContent, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, [tool, requestPath]);
     const payload = { ...result.json, runtime: commandRuntime(result) };
@@ -663,22 +719,33 @@ async function docxObservation(tool, args) {
       tool,
       runtime: payload.runtime,
       source: await fileArtifact(input),
-      ...(tool === 'docx_read_table' ? {} : {
-        artifact: await writeJsonArtifact(output, result.json),
-      }),
+      returnContent: delivery.returnContent,
+      artifact: null,
     };
     if (tool === 'docx_list_objects') {
       const totalCount = payload.receipt.totalCount;
       const offset = Math.min(args.offset ?? 0, totalCount);
+      const withArtifact = delivery.output === null ? retained : {
+        ...retained,
+        artifact: await writeJsonArtifact(delivery.output, result.json),
+      };
+      if (!delivery.returnContent) {
+        return {
+          ...withArtifact,
+          schema: payload.schema,
+          receipt: payload.receipt,
+        };
+      }
       const objects = [];
       for (const sourceObject of payload.objects.map(compactDocxObjectIdentity)) {
         const candidate = [...objects, sourceObject];
-        if (objects.length > 0 && Buffer.byteLength(JSON.stringify(candidate)) > 6_500) break;
+        if (objects.length > 0
+            && Buffer.byteLength(JSON.stringify(candidate)) > returnedContentBudgetBytes) break;
         objects.push(sourceObject);
       }
       const nextOffset = offset + objects.length < totalCount ? offset + objects.length : null;
       return {
-        ...retained,
+        ...withArtifact,
         schema: payload.schema,
         receipt: {
           schema: 'tiwater.docx-observation-receipt/v1',
@@ -693,17 +760,36 @@ async function docxObservation(tool, args) {
     }
     if (tool === 'docx_table_index') {
       const totalCount = payload.tables.length;
+      const withArtifact = delivery.output === null ? retained : {
+        ...retained,
+        artifact: await writeJsonArtifact(delivery.output, result.json),
+      };
+      if (!delivery.returnContent) {
+        return {
+          ...withArtifact,
+          schema: payload.schema,
+          receipt: {
+            schema: 'tiwater.docx-table-index-receipt/v1',
+            totalCount,
+            returnedCount: totalCount,
+            remaining: 0,
+            nextOffset: null,
+          },
+        };
+      }
       const offset = Math.min(args.offset ?? 0, totalCount);
       const requestedLimit = args.limit ?? totalCount;
       const tables = [];
-      for (const table of payload.tables.slice(offset, offset + requestedLimit)) {
+      for (const sourceTable of payload.tables.slice(offset, offset + requestedLimit)) {
+        const table = compactTableIndexEntry(sourceTable);
         const candidate = [...tables, table];
-        if (tables.length > 0 && Buffer.byteLength(JSON.stringify(candidate)) > 7_000) break;
+        if (tables.length > 0
+            && Buffer.byteLength(JSON.stringify(candidate)) > returnedContentBudgetBytes) break;
         tables.push(table);
       }
       const nextOffset = offset + tables.length < totalCount ? offset + tables.length : null;
       return {
-        ...retained,
+        ...withArtifact,
         schema: payload.schema,
         receipt: {
           schema: 'tiwater.docx-table-index-receipt/v1',
@@ -719,9 +805,52 @@ async function docxObservation(tool, args) {
       const totalRowCount = payload.rows.length;
       const offset = Math.min(args.offset ?? 0, totalRowCount);
       const requestedLimit = args.limit ?? totalRowCount;
+      const selectedRows = payload.rows.slice(offset, offset + requestedLimit);
+      const selectedNextOffset = offset + selectedRows.length < totalRowCount
+        ? offset + selectedRows.length
+        : null;
+      const selectedPageReceipt = {
+        schema: 'tiwater.docx-table-page-receipt/v1',
+        totalRowCount,
+        returnedRowCount: selectedRows.length,
+        remaining: totalRowCount - offset - selectedRows.length,
+        nextOffset: selectedNextOffset,
+      };
+      const detailPage = {
+        schema: 'tiwater.docx-table-detail-page/v1',
+        address: payload.address,
+        rowCount: payload.rowCount,
+        columnCount: payload.columnCount,
+        gridColumns: payload.gridColumns,
+        precedingParagraph: payload.precedingParagraph,
+        followingParagraph: payload.followingParagraph,
+        receipt: selectedPageReceipt,
+        rows: selectedRows,
+      };
+      const withArtifact = delivery.output === null ? retained : {
+        ...retained,
+        artifact: await writeJsonArtifact(delivery.output, detailPage),
+      };
+      if (!delivery.returnContent) {
+        return {
+          ...withArtifact,
+          schema: 'tiwater.docx-table-page/v1',
+          address: payload.address,
+          rowCount: payload.rowCount,
+          columnCount: payload.columnCount,
+          gridColumns: payload.gridColumns,
+          precedingParagraph: payload.precedingParagraph,
+          followingParagraph: payload.followingParagraph,
+          receipt: {
+            ...selectedPageReceipt,
+            detailPageRetained: true,
+            narrowingRequired: false,
+          },
+        };
+      }
       const rows = [];
       let narrowingRequired = false;
-      for (const sourceRow of payload.rows.slice(offset, offset + requestedLimit)) {
+      for (const sourceRow of selectedRows) {
         const row = {
           address: sourceRow.address,
           repeatHeader: sourceRow.repeatHeader,
@@ -739,7 +868,7 @@ async function docxObservation(tool, args) {
           })),
         };
         const candidate = [...rows, row];
-        if (Buffer.byteLength(JSON.stringify(candidate)) > 6_500) {
+        if (Buffer.byteLength(JSON.stringify(candidate)) > returnedContentBudgetBytes) {
           narrowingRequired = rows.length === 0;
           break;
         }
@@ -755,20 +884,8 @@ async function docxObservation(tool, args) {
         remaining: totalRowCount - offset - rows.length,
         nextOffset,
       };
-      const detailPage = {
-        schema: 'tiwater.docx-table-detail-page/v1',
-        address: payload.address,
-        rowCount: payload.rowCount,
-        columnCount: payload.columnCount,
-        gridColumns: payload.gridColumns,
-        precedingParagraph: payload.precedingParagraph,
-        followingParagraph: payload.followingParagraph,
-        receipt: pageReceipt,
-        rows: payload.rows.slice(offset, offset + rows.length),
-      };
       return {
-        ...retained,
-        artifact: await writeJsonArtifact(output, detailPage),
+        ...withArtifact,
         schema: 'tiwater.docx-table-page/v1',
         address: payload.address,
         rowCount: payload.rowCount,
@@ -778,7 +895,7 @@ async function docxObservation(tool, args) {
         followingParagraph: payload.followingParagraph,
         receipt: {
           ...pageReceipt,
-          detailPageRetained: true,
+          detailPageRetained: delivery.output !== null,
           narrowingRequired,
         },
         rows,
@@ -790,46 +907,53 @@ async function docxObservation(tool, args) {
 
 async function docxReadObject(args) {
   const input = path.resolve(requireString(args.input, 'input'));
-  const output = requireString(args.output, 'output');
-  const { output: _output, ...request } = args;
+  const delivery = resultChannels(args);
+  const { output: _output, returnContent: _returnContent, ...request } = args;
   return withTempJsonFile(request, async requestPath => {
     const result = await runJsonCandidateChain(docxCandidates, ['docx_read_object', requestPath]);
     const observations = result.json.observations.map(compactDocxObservation);
-    const responseComplete = Buffer.byteLength(JSON.stringify(observations)) <= 6_500;
+    const responseComplete = delivery.returnContent
+      && Buffer.byteLength(JSON.stringify(observations)) <= returnedContentBudgetBytes;
     return {
       tool: 'docx_read_object',
       runtime: commandRuntime(result),
       source: await fileArtifact(input),
-      artifact: await writeJsonArtifact(output, result.json),
+      returnContent: delivery.returnContent,
+      artifact: delivery.output === null
+        ? null
+        : await writeJsonArtifact(delivery.output, result.json),
       receipt: {
         schema: 'tiwater.docx-read-object-receipt/v1',
         observationCount: observations.length,
         returnedCount: responseComplete ? observations.length : 0,
         responseComplete,
-        narrowingRequired: !responseComplete,
+        narrowingRequired: delivery.returnContent && !responseComplete,
       },
-      observations: responseComplete ? observations : [],
+      ...(responseComplete ? { observations } : {}),
     };
   });
 }
 
 async function docxValidate(args) {
-  const result = await runJsonCandidateChain(docxCandidates, ['validate-openxml', requireString(args.input, 'input')], { allowedExitCodes: [0, 1] });
-  return { tool: 'docx_validate', runtime: commandRuntime(result), result: result.json };
+  const input = path.resolve(requireString(args.input, 'input'));
+  const result = await runJsonCandidateChain(docxCandidates, ['validate-openxml', input], { allowedExitCodes: [0, 1] });
+  return deliverLargeJsonResult({ tool: 'docx_validate', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function docxValidateFontPolicy(args) {
   return withTempJsonFile(args.policy, async policyPath => {
-    const result = await runJsonCandidateChain(docxCandidates, ['validate-font-policy', requireString(args.input, 'input'), policyPath], { allowedExitCodes: [0, 1] });
-    return { tool: 'docx_validate_font_policy', runtime: commandRuntime(result), result: result.json };
+    const input = path.resolve(requireString(args.input, 'input'));
+    const result = await runJsonCandidateChain(docxCandidates, ['validate-font-policy', input, policyPath], { allowedExitCodes: [0, 1] });
+    return deliverLargeJsonResult({ tool: 'docx_validate_font_policy', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
   });
 }
 
 async function docxValidateTocStylePolicy(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(docxCandidates, [
-    'validate-toc-style-policy', requireString(args.input, 'input'), String(args.italic), String(args.indentCharactersPerLevel),
+    'validate-toc-style-policy', input, String(args.italic), String(args.indentCharactersPerLevel),
   ], { allowedExitCodes: [0, 1] });
-  return { tool: 'docx_validate_toc_style_policy', runtime: commandRuntime(result), result: result.json };
+  return deliverLargeJsonResult({ tool: 'docx_validate_toc_style_policy', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function docxStripDirectFormatting(args) {
@@ -925,21 +1049,16 @@ async function fixedEdit(tool, args) {
 }
 
 async function docxCompare(args) {
-  const baseline = requireString(args.baseline, 'baseline');
-  const updated = requireString(args.updated, 'updated');
+  const baseline = path.resolve(requireString(args.baseline, 'baseline'));
+  const updated = path.resolve(requireString(args.updated, 'updated'));
   const result = await runJsonCandidateChain(docxCandidates, ['compare', baseline, updated, '--json']);
-  return { tool: 'docx_compare', runtime: commandRuntime(result), report: result.json };
+  return deliverLargeJsonResult({ tool: 'docx_compare', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [baseline, updated] });
 }
 
 async function docxExportJson(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(docxCandidates, ['export-json', input]);
-  return {
-    tool: 'docx_export_json',
-    runtime: commandRuntime(result),
-    source: await fileArtifact(input),
-    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
-  };
+  return deliverLargeJsonResult({ tool: 'docx_export_json', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function officeRenderPdf(args) {
@@ -1027,12 +1146,7 @@ function nativeRenderBackend(sourceFormat) {
 async function xlsxInspect(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(xlsxCandidates, ['inspect', input, '--json']);
-  return {
-    tool: 'xlsx_inspect',
-    runtime: commandRuntime(result),
-    source: await fileArtifact(input),
-    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
-  };
+  return deliverLargeJsonResult({ tool: 'xlsx_inspect', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function xlsxExportJson(args) {
@@ -1042,45 +1156,31 @@ async function xlsxExportJson(args) {
     cmdArgs.push('--resolve-merged-cells');
   }
   const result = await runJsonCandidateChain(xlsxCandidates, cmdArgs);
-  return {
-    tool: 'xlsx_export_json',
-    runtime: commandRuntime(result),
-    source: await fileArtifact(input),
-    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
-  };
+  return deliverLargeJsonResult({ tool: 'xlsx_export_json', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function xlsxValidate(args) {
-  const input = requireString(args.input, 'input');
+  const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(xlsxCandidates, ['validate', input], { allowedExitCodes: [0, 1] });
-  return { tool: 'xlsx_validate', runtime: commandRuntime(result), result: result.json };
+  return deliverLargeJsonResult({ tool: 'xlsx_validate', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function pptxInspect(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json']);
-  return {
-    tool: 'pptx_inspect',
-    runtime: commandRuntime(result),
-    source: await fileArtifact(input),
-    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
-  };
+  return deliverLargeJsonResult({ tool: 'pptx_inspect', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function pptxExportJson(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(pptxCandidates, ['export-json', input]);
-  return {
-    tool: 'pptx_export_json',
-    runtime: commandRuntime(result),
-    source: await fileArtifact(input),
-    artifact: await writeJsonArtifact(requireString(args.output, 'output'), result.json),
-  };
+  return deliverLargeJsonResult({ tool: 'pptx_export_json', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function pptxValidate(args) {
-  const result = await runJsonCandidateChain(pptxCandidates, ['validate', requireString(args.input, 'input')], { allowedExitCodes: [0, 1] });
-  return { tool: 'pptx_validate', runtime: commandRuntime(result), result: result.json };
+  const input = path.resolve(requireString(args.input, 'input'));
+  const result = await runJsonCandidateChain(pptxCandidates, ['validate', input], { allowedExitCodes: [0, 1] });
+  return deliverLargeJsonResult({ tool: 'pptx_validate', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
 async function requireReturnedArtifact(returned, expectedPath, label) {
@@ -1091,31 +1191,6 @@ async function requireReturnedArtifact(returned, expectedPath, label) {
   if (!isDeepStrictEqual(current, returned)) {
     throw new Error(`${label} artifact identity does not match provider output`);
   }
-}
-
-async function writeJsonArtifact(output, payload) {
-  const fullPath = path.resolve(output);
-  await mkdir(path.dirname(fullPath), { recursive: true });
-  const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-  await writeFile(fullPath, bytes, { flag: 'wx' });
-  return {
-    path: fullPath,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
-    bytes: bytes.length,
-  };
-}
-
-async function fileArtifact(filePath) {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(filePath)) {
-    hash.update(chunk);
-  }
-  const file = await stat(filePath);
-  return {
-    path: path.resolve(filePath),
-    sha256: hash.digest('hex'),
-    bytes: file.size,
-  };
 }
 
 async function requireNewFile(filePath, label) {

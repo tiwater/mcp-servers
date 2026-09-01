@@ -7,16 +7,20 @@
       "minLength": 1,
       "x-tiwater-file-role": "read"
     },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Whether to return the compact observation directly in the tool response. May be combined with output."
+    },
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "Absolute path for a new JSON artifact inside the caller-authorized output directory. Existing files are never overwritten.",
+      "description": "Optional absolute path for retaining the complete observation inside the caller-authorized output directory; existing files are never overwritten. May be combined with returnContent.",
       "x-tiwater-file-role": "write"
     }
   },
   "required": [
     "input",
-    "output"
+    "returnContent"
   ],
   "additionalProperties": false
 }
