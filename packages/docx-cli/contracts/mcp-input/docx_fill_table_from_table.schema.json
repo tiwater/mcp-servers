@@ -100,18 +100,23 @@
     "columnMappings": {
       "type": "array",
       "minItems": 1,
-      "description": "Complete source-to-target grid-column mapping. Target columns that belong to one prototype cell remain one cell. When the selected target columns cover multiple prototype cells, those cells receive the source column's logical values in source-row order and unused trailing cells stay blank.",
+      "description": "Complete source-to-target grid-column projection. Multiple adjacent source columns may compose one target cell. One source column may spread its logical values across several prototype cells. Composition and spreading cannot occur in the same mapping. Target columns that belong to one prototype cell remain one cell, and unused trailing spread cells stay blank.",
       "items": {
         "type": "object",
         "properties": {
-          "sourceColumn": {
-            "type": "object",
-            "properties": {
-              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
-              "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
-            },
-            "required": ["part", "path"],
-            "additionalProperties": false
+          "sourceColumns": {
+            "type": "array",
+            "minItems": 1,
+            "description": "One or more contiguous source grid columns in native order. Multiple columns compose one target cell; a source cell spanning several selected columns contributes once.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+                "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+              },
+              "required": ["part", "path"],
+              "additionalProperties": false
+            }
           },
           "targetColumns": {
             "type": "array",
@@ -125,9 +130,13 @@
               "required": ["part", "path"],
               "additionalProperties": false
             }
+          },
+          "joinWith": {
+            "type": "string",
+            "description": "Separator used when sourceColumns compose one target cell. Defaults to a newline. It does not apply when one source column spreads across multiple target cells."
           }
         },
-        "required": ["sourceColumn", "targetColumns"],
+        "required": ["sourceColumns", "targetColumns"],
         "additionalProperties": false
       }
     },

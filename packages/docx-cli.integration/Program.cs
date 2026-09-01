@@ -75,11 +75,11 @@ try
         sourceRecordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
         columnMappings = new object[]
         {
-            new { sourceColumn = fillSourceColumns[0].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[0].GetProperty("address").Clone() } },
-            new { sourceColumn = fillSourceColumns[1].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[1].GetProperty("address").Clone() } },
-            new { sourceColumn = fillSourceColumns[2].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[2].GetProperty("address").Clone() } },
-            new { sourceColumn = fillSourceColumns[3].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[3].GetProperty("address").Clone(), fillTargetColumns[4].GetProperty("address").Clone() } },
-            new { sourceColumn = fillSourceColumns[4].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[5].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[0].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[0].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[1].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[1].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[2].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[2].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[3].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[3].GetProperty("address").Clone(), fillTargetColumns[4].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[4].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[5].GetProperty("address").Clone() } },
         },
         output = fillOutput,
         receiptOutput = Path.Combine(root, "fill-output-receipt.json"),
@@ -126,10 +126,10 @@ try
         sourceRecordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
         columnMappings = new object[]
         {
-            new { sourceColumn = fillSourceColumns[0].GetProperty("address").Clone(), targetColumns = new[] { horizontalTargetColumns[0].GetProperty("address").Clone(), horizontalTargetColumns[1].GetProperty("address").Clone() } },
-            new { sourceColumn = fillSourceColumns[2].GetProperty("address").Clone(), targetColumns = new[] { horizontalTargetColumns[2].GetProperty("address").Clone() } },
-            new { sourceColumn = fillSourceColumns[3].GetProperty("address").Clone(), targetColumns = new[] { horizontalTargetColumns[3].GetProperty("address").Clone(), horizontalTargetColumns[4].GetProperty("address").Clone() } },
-            new { sourceColumn = fillSourceColumns[4].GetProperty("address").Clone(), targetColumns = new[] { horizontalTargetColumns[5].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[0].GetProperty("address").Clone() }, targetColumns = new[] { horizontalTargetColumns[0].GetProperty("address").Clone(), horizontalTargetColumns[1].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[2].GetProperty("address").Clone() }, targetColumns = new[] { horizontalTargetColumns[2].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[3].GetProperty("address").Clone() }, targetColumns = new[] { horizontalTargetColumns[3].GetProperty("address").Clone(), horizontalTargetColumns[4].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[4].GetProperty("address").Clone() }, targetColumns = new[] { horizontalTargetColumns[5].GetProperty("address").Clone() } },
         },
         output = horizontalFillOutput,
         receiptOutput = Path.Combine(root, "fill-output-horizontal-receipt.json"),
@@ -140,6 +140,64 @@ try
             && CellAt(horizontalFillState, 2, 0).GetProperty("gridSpan").GetInt32() == 2
             && CellAt(horizontalFillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue",
         "table fill did not retain a prototype horizontal span while deriving a vertical group");
+
+    var composedFillTarget = Path.Combine(root, "fill-target-composed.docx");
+    CreateComposedFillTargetDocument(composedFillTarget);
+    var composedTargetState = ReadTable(composedFillTarget, "fill-target-composed");
+    var composedTargetRows = composedTargetState.GetProperty("rows");
+    var composedTargetColumns = composedTargetState.GetProperty("gridColumns");
+    var composedFillOutput = Path.Combine(root, "fill-output-composed.docx");
+    var composedFillReceipt = Path.Combine(root, "fill-output-composed-receipt.json");
+    Run("docx_fill_table_from_table", new
+    {
+        input = composedFillTarget,
+        table = composedTargetState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = composedTargetRows[1].GetProperty("address").Clone(),
+            last = composedTargetRows[2].GetProperty("address").Clone(),
+        },
+        prototypeRow = composedTargetRows[1].GetProperty("address").Clone(),
+        sourceInput = fillSource,
+        sourceTable = fillSourceState.GetProperty("address").Clone(),
+        sourceRows = new
+        {
+            first = fillSourceRows[1].GetProperty("address").Clone(),
+            last = fillSourceRows[5].GetProperty("address").Clone(),
+        },
+        sourceRecordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
+        columnMappings = new object[]
+        {
+            new
+            {
+                sourceColumns = new[]
+                {
+                    fillSourceColumns[0].GetProperty("address").Clone(),
+                    fillSourceColumns[1].GetProperty("address").Clone(),
+                },
+                targetColumns = new[] { composedTargetColumns[0].GetProperty("address").Clone() },
+                joinWith = "\n",
+            },
+            new { sourceColumns = new[] { fillSourceColumns[2].GetProperty("address").Clone() }, targetColumns = new[] { composedTargetColumns[1].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[3].GetProperty("address").Clone() }, targetColumns = new[] { composedTargetColumns[2].GetProperty("address").Clone(), composedTargetColumns[3].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[4].GetProperty("address").Clone() }, targetColumns = new[] { composedTargetColumns[4].GetProperty("address").Clone() } },
+        },
+        output = composedFillOutput,
+        receiptOutput = composedFillReceipt,
+    });
+    var composedFillState = ReadTable(composedFillOutput, "fill-output-composed");
+    var composedReceiptState = JsonDocument.Parse(File.ReadAllText(composedFillReceipt)).RootElement;
+    Require(composedFillState.GetProperty("rowCount").GetInt32() == 4,
+        "composed table fill did not derive one row per logical record");
+    var composedOwner = CellAt(composedFillState, 1, 0);
+    var composedContinuation = CellAt(composedFillState, 2, 0);
+    Require(composedOwner.GetProperty("logicalText").GetString() == "组甲标准甲"
+            && composedReceiptState.GetProperty("rows")[0].GetProperty("cells")[0]
+                .GetProperty("text").GetString() == "组甲\n标准甲"
+            && composedOwner.GetProperty("verticalMerge").GetString() == "restart"
+            && composedContinuation.GetProperty("verticalMerge").GetString() == "continue",
+        $"composed table fill mismatch: text={composedOwner.GetProperty("logicalText").GetString()}; "
+        + $"owner={composedOwner.GetProperty("verticalMerge")}; continuation={composedContinuation.GetProperty("verticalMerge")}");
 
     var invalidFillReceipt = Path.Combine(root, "invalid-fill-receipt.json");
     var invalidFill = RunExpectAtomicFailure("docx_fill_table_from_table", fillTarget, invalidFillReceipt, new
@@ -162,7 +220,7 @@ try
         sourceRecordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
         columnMappings = new[]
         {
-            new { sourceColumn = fillSourceColumns[0].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[0].GetProperty("address").Clone() } },
+            new { sourceColumns = new[] { fillSourceColumns[0].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[0].GetProperty("address").Clone() } },
         },
         output = fillTarget,
         receiptOutput = invalidFillReceipt,
@@ -1670,6 +1728,21 @@ void CreateFillTargetDocument(string path, bool horizontalFirstCell = false)
         new TableRow(Cell("分组"), Cell("标准"), Cell("记录"), Cell("结果一"), Cell("结果二"), Cell("结论")),
         firstBody,
         secondBody);
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateComposedFillTargetDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(Enumerable.Range(0, 5).Select(_ => new GridColumn { Width = "1000" })),
+        new TableRow(Cell("项目"), Cell("记录"), Cell("结果一"), Cell("结果二"), Cell("结论")),
+        new TableRow(Cell(""), Cell(""), Cell(""), Cell(""), Cell("")),
+        new TableRow(Cell(""), Cell(""), Cell(""), Cell(""), Cell("")));
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();
