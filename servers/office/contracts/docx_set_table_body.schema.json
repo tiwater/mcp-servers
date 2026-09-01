@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_set_table_body",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
+    },
+    "table": {
+      "type": "object",
+      "properties": {
+        "part": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^\\/" }
+      },
+      "required": ["part", "path"],
+      "additionalProperties": false,
+      "description": "Current target table address returned by docx_read_table or docx_table_index."
+    },
+    "existingRows": {
+      "type": "object",
+      "description": "Exact contiguous current row range to replace. Rows outside this range stay unchanged, and the range must enclose every vertical merge it intersects.",
+      "properties": {
+        "first": {
+          "type": "object",
+          "properties": {
+            "part": { "type": "string", "minLength": 1 },
+            "path": { "type": "string", "pattern": "^\\/" }
+          },
+          "required": ["part", "path"],
+          "additionalProperties": false
+        },
+        "last": {
+          "type": "object",
+          "properties": {
+            "part": { "type": "string", "minLength": 1 },
+            "path": { "type": "string", "pattern": "^\\/" }
+          },
+          "required": ["part", "path"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["first", "last"],
+      "additionalProperties": false
+    },
+    "columns": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Complete target table grid in the native order returned by docx_read_table. IDs are request-local names used only by rows below.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "gridColumn": {
+            "type": "object",
+            "properties": {
+              "part": { "type": "string", "minLength": 1 },
+              "path": { "type": "string", "pattern": "^\\/" }
+            },
+            "required": ["part", "path"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "gridColumn"],
+        "additionalProperties": false
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 0,
+      "description": "Exact final rows; an empty array removes the declared range when at least one table row remains. Each final row names one current row in existingRows as its style prototype. Cells plus active row spans must cover the complete target grid exactly once.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "prototypeRow": {
+            "type": "object",
+            "properties": {
+              "part": { "type": "string", "minLength": 1 },
+              "path": { "type": "string", "pattern": "^\\/" }
+            },
+            "required": ["part", "path"],
+            "additionalProperties": false
+          },
+          "cells": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "columns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "One or more contiguous request-local column IDs occupied by this cell.",
+                  "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+                },
+                "text": { "type": "string" },
+                "rowSpan": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "Number of final rows occupied by this cell; omitted means one row."
+                }
+              },
+              "required": ["columns", "text"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["prototypeRow", "cells"],
+        "additionalProperties": false
+      }
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Output DOCX path; may equal input for one atomic in-place update.",
+      "x-tiwater-file-role": "write"
+    },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
+    }
+  },
+  "required": ["input", "table", "existingRows", "columns", "rows", "output", "receiptOutput"],
+  "additionalProperties": false
+}

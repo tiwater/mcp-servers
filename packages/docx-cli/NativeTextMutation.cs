@@ -111,7 +111,7 @@ public static class NativeTextMutation
         }
     }
 
-    private static void SetText(OpenXmlElement target, string text)
+    internal static void SetText(OpenXmlElement target, string text)
     {
         switch (target)
         {

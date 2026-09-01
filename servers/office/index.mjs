@@ -422,6 +422,13 @@ const tools = [
     handler: args => fixedEdit('docx_set_text', args),
   },
   {
+    name: 'docx_set_table_body',
+    description: 'Atomically replace one exact current target-table row range with final text rows while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. Name every target grid column in native order, choose one current row as the style prototype for each final row, and express horizontal spans with contiguous column IDs and vertical spans with rowSpan. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read a source table, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content.',
+    inputSchema: inputContract('docx_set_table_body'),
+    outputSchema: fixedEditOutput('docx_set_table_body'),
+    handler: args => fixedEdit('docx_set_table_body', args),
+  },
+  {
     name: 'docx_insert_objects',
     description: 'Insert selected current DOCX objects under an existing parent. Table rows are objects: expand a target table by copying one contiguous observed row range and use repeat for count; sourceInput may equal input. A row range beginning with vertical-merge continuations may be inserted only inside a target boundary with the same active grid spans, which extends those merges. Individual table cells are not raw insertion targets because that would bypass the table grid.',
     inputSchema: inputContract('docx_insert_objects'),

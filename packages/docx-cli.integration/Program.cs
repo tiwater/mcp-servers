@@ -44,6 +44,197 @@ try
             == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
         "narrow cell read did not resolve the restart cell text");
 
+    var setBodyOutput = Path.Combine(root, "set-table-body.docx");
+    var setBodyReceipt = Path.Combine(root, "set-table-body-receipt.json");
+    var bodyColumns = initial.GetProperty("gridColumns").EnumerateArray()
+        .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+        .ToArray();
+    Run("docx_set_table_body", new
+    {
+        input = original,
+        table = initial.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = rows[1].GetProperty("address").Clone(),
+            last = rows[3].GetProperty("address").Clone(),
+        },
+        columns = bodyColumns,
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = rows[1].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "精密度—重复性", rowSpan = (int?)null },
+                    new { columns = new[] { "c1" }, text = "标准一", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果一", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "通过", rowSpan = (int?)2 },
+                }
+            },
+            new
+            {
+                prototypeRow = rows[3].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "精密度—中间精密度", rowSpan = (int?)null },
+                    new { columns = new[] { "c1" }, text = "标准二", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果二", rowSpan = (int?)null },
+                }
+            }
+        },
+        output = setBodyOutput,
+        receiptOutput = setBodyReceipt,
+    });
+    var setBodyState = ReadTable(setBodyOutput, "set-table-body");
+    Require(setBodyState.GetProperty("rowCount").GetInt32() == 3,
+        "set table body did not replace the complete data range");
+    var setRows = setBodyState.GetProperty("rows");
+    Require(CellAt(setBodyState, 1, 0).GetProperty("logicalText").GetString() == "精密度—重复性"
+            && CellAt(setBodyState, 1, 1).GetProperty("logicalText").GetString() == "标准一"
+            && CellAt(setBodyState, 1, 2).GetProperty("logicalText").GetString() == "结果一"
+            && CellAt(setBodyState, 1, 3).GetProperty("logicalText").GetString() == "通过",
+        "set table body shifted semantic columns");
+    Require(CellAt(setBodyState, 2, 0).GetProperty("logicalText").GetString() == "精密度—中间精密度"
+            && CellAt(setBodyState, 2, 1).GetProperty("logicalText").GetString() == "标准二"
+            && CellAt(setBodyState, 2, 2).GetProperty("logicalText").GetString() == "结果二",
+        "set table body lost the second semantic row");
+    Require(CellAt(setBodyState, 1, 3).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(setBodyState, 2, 3).GetProperty("verticalMerge").GetString() == "continue"
+            && CellAt(setBodyState, 2, 3).GetProperty("logicalText").GetString() == "通过",
+        "set table body did not preserve the declared vertical group");
+
+    var expandedBodyOutput = Path.Combine(root, "set-table-body-expanded.docx");
+    Run("docx_set_table_body", new
+    {
+        input = original,
+        table = initial.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = rows[1].GetProperty("address").Clone(),
+            last = rows[3].GetProperty("address").Clone(),
+        },
+        columns = bodyColumns,
+        rows = Enumerable.Range(1, 5).Select(index => new
+        {
+            prototypeRow = rows[3].GetProperty("address").Clone(),
+            cells = new[]
+            {
+                new { columns = new[] { "c0", "c1" }, text = "横向" + index, rowSpan = (int?)null },
+                new { columns = new[] { "c2" }, text = "结果" + index, rowSpan = (int?)null },
+                new { columns = new[] { "c3" }, text = "结论" + index, rowSpan = (int?)null },
+            }
+        }).ToArray(),
+        output = expandedBodyOutput,
+        receiptOutput = Path.Combine(root, "set-table-body-expanded-receipt.json"),
+    });
+    var expandedBodyState = ReadTable(expandedBodyOutput, "set-table-body-expanded");
+    Require(expandedBodyState.GetProperty("rowCount").GetInt32() == 6
+            && CellAt(expandedBodyState, 1, 0).GetProperty("gridSpan").GetInt32() == 2
+            && CellAt(expandedBodyState, 5, 0).GetProperty("logicalText").GetString() == "横向5",
+        "set table body did not expand rows with horizontal spans");
+
+    var emptyBodyOutput = Path.Combine(root, "set-table-body-empty.docx");
+    Run("docx_set_table_body", new
+    {
+        input = original,
+        table = initial.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = rows[1].GetProperty("address").Clone(),
+            last = rows[3].GetProperty("address").Clone(),
+        },
+        columns = bodyColumns,
+        rows = Array.Empty<object>(),
+        output = emptyBodyOutput,
+        receiptOutput = Path.Combine(root, "set-table-body-empty-receipt.json"),
+    });
+    var emptyBodyState = ReadTable(emptyBodyOutput, "set-table-body-empty");
+    Require(emptyBodyState.GetProperty("rowCount").GetInt32() == 1
+            && CellAt(emptyBodyState, 0, 0).GetProperty("logicalText").GetString() == "分组一",
+        "empty table body did not retain the row outside the replaced range");
+
+    var emptyTableReceipt = Path.Combine(root, "set-table-body-empty-table-receipt.json");
+    var emptyTable = RunExpectAtomicFailure("docx_set_table_body", original, emptyTableReceipt, new
+    {
+        input = original,
+        table = initial.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = rows[0].GetProperty("address").Clone(),
+            last = rows[3].GetProperty("address").Clone(),
+        },
+        columns = bodyColumns,
+        rows = Array.Empty<object>(),
+        output = original,
+        receiptOutput = emptyTableReceipt,
+    });
+    Require(emptyTable.Contains("table-must-retain-at-least-one-row", StringComparison.Ordinal),
+        "removing every table row did not fail explicitly");
+
+    var failedBodyReceipt = Path.Combine(root, "set-table-body-failure-receipt.json");
+    var failedBody = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, failedBodyReceipt, new
+    {
+        input = setBodyOutput,
+        table = setBodyState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = setRows[1].GetProperty("address").Clone(),
+            last = setRows[2].GetProperty("address").Clone(),
+        },
+        columns = setBodyState.GetProperty("gridColumns").EnumerateArray()
+            .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+            .ToArray(),
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = setRows[1].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "缺列", rowSpan = (int?)null },
+                    new { columns = new[] { "c1" }, text = "标准", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果", rowSpan = (int?)null },
+                }
+            }
+        },
+        output = setBodyOutput,
+        receiptOutput = failedBodyReceipt,
+    });
+    Require(failedBody.Contains("does-not-cover-table-grid", StringComparison.Ordinal),
+        "incomplete table body did not fail explicitly");
+
+    var splitBodyReceipt = Path.Combine(root, "set-table-body-split-merge-receipt.json");
+    var splitBody = RunExpectAtomicFailure("docx_set_table_body", original, splitBodyReceipt, new
+    {
+        input = original,
+        table = initial.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = rows[1].GetProperty("address").Clone(),
+            last = rows[1].GetProperty("address").Clone(),
+        },
+        columns = bodyColumns,
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = rows[1].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "项目", rowSpan = (int?)null },
+                    new { columns = new[] { "c1" }, text = "标准", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "结果", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "结论", rowSpan = (int?)null },
+                }
+            }
+        },
+        output = original,
+        receiptOutput = splitBodyReceipt,
+    });
+    Require(splitBody.Contains("existingRows-split-vertical-merge", StringComparison.Ordinal),
+        "table body range that split a vertical merge did not fail explicitly");
+
     var batchColumns = Path.Combine(root, "batch-columns.docx");
     Run("docx_insert_table_columns", new
     {
