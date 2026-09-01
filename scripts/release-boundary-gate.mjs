@@ -797,6 +797,7 @@ function checkDocxTableStreamingContract(tools) {
       || !description.includes('Match columns across rows by gridColumnStart')
       || !description.includes('physical cell ordinal and is not a column identity')
       || !description.includes('receipt.remaining is navigation information, not an obligation')
+      || !description.includes('receipt.nextOffset is present only when another row page exists')
       || !description.includes('blank template rows need not be paged through')) {
     fail(check, 'docx_read_table does not describe logical columns and current-decision page consumption');
   }
@@ -805,6 +806,8 @@ function checkDocxTableStreamingContract(tools) {
       || cell?.properties?.text?.type !== 'string'
       || cell?.properties?.logicalText?.type !== 'string'
       || Object.hasOwn(cell?.properties ?? {}, 'paragraphs')
+      || receipt?.properties?.nextOffset?.type !== 'integer'
+      || receipt?.required?.includes('nextOffset')
       || receipt?.properties?.detailPageRetained?.type !== 'boolean') {
     fail(check, 'docx_read_table response is not a compact page backed by one detailed page');
   }

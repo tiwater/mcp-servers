@@ -316,7 +316,7 @@ const docxTableReadOutput = docxObservationOutput('docx_read_table').extend({
     totalRowCount: z.number().int().nonnegative(),
     returnedRowCount: z.number().int().nonnegative(),
     remaining: z.number().int().nonnegative(),
-    nextOffset: z.number().int().nonnegative().nullable(),
+    nextOffset: z.number().int().nonnegative().optional(),
     detailPageRetained: z.boolean(),
     narrowingRequired: z.boolean(),
   }).strict(),
@@ -401,7 +401,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read an explicit row range from exactly one table selected by native OpenXML address; it never builds another whole-table data object. Set returnContent true to return a byte-bounded compact row page. Provide output to store full paragraph and text-node detail for the selected row page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Request only rows needed for the current decision; receipt.remaining is navigation information, not an obligation to read unused rows, and blank template rows need not be paged through. Each returned row and cell keeps its reusable native address, zero-based logical gridColumnStart, gridSpan, vertical-merge owner, physical text, and logical text. Match columns across rows by gridColumnStart; a tc[n] path or array position is only that row\'s physical cell ordinal and is not a column identity when gridSpan or gridBefore is present. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Use docx_read_object when one exact object needs a narrower descendant view. The provider reports physical structure only; the Agent decides template and business meaning.',
+    description: 'Read an explicit row range from exactly one table selected by native OpenXML address; it never builds another whole-table data object. Set returnContent true to return a byte-bounded compact row page. Provide output to store full paragraph and text-node detail for the selected row page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Request only rows needed for the current decision; receipt.remaining is navigation information, not an obligation to read unused rows, and blank template rows need not be paged through. receipt.nextOffset is present only when another row page exists. Each returned row and cell keeps its reusable native address, zero-based logical gridColumnStart, gridSpan, vertical-merge owner, physical text, and logical text. Match columns across rows by gridColumnStart; a tc[n] path or array position is only that row\'s physical cell ordinal and is not a column identity when gridSpan or gridBefore is present. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Use docx_read_object when one exact object needs a narrower descendant view. The provider reports physical structure only; the Agent decides template and business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -857,7 +857,7 @@ async function docxObservation(tool, args) {
         totalRowCount,
         returnedRowCount: selectedRows.length,
         remaining: totalRowCount - offset - selectedRows.length,
-        nextOffset: selectedNextOffset,
+        ...(selectedNextOffset === null ? {} : { nextOffset: selectedNextOffset }),
       };
       const detailPage = {
         schema: 'tiwater.docx-table-detail-page/v1',
@@ -925,7 +925,7 @@ async function docxObservation(tool, args) {
         totalRowCount,
         returnedRowCount: rows.length,
         remaining: totalRowCount - offset - rows.length,
-        nextOffset,
+        ...(nextOffset === null ? {} : { nextOffset }),
       };
       return {
         ...withArtifact,
