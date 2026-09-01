@@ -21,6 +21,7 @@ import {
   returnedContentBudgetBytes,
   writeJsonArtifact,
 } from '../_shared/large-json-result.mjs';
+import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const inputContractManifest = JSON.parse(await readFile(
@@ -644,7 +645,9 @@ function buildServer() {
         ...(tool.annotations ? { annotations: tool.annotations } : {}),
       },
       async args => {
-        const payload = await tool.handler(args);
+        const payload = typeof args.output === 'string'
+          ? await withOutputWriteLock(args.output, () => tool.handler(args))
+          : await tool.handler(args);
         return createToolResult(payload, { isError: payload?.summary?.pass === false });
       },
     );
