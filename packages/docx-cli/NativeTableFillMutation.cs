@@ -45,8 +45,17 @@ public static class NativeTableFillMutation
 
         var mappings = request.ColumnMappings.Select((mapping, mappingIndex) =>
         {
+            if (mapping.SourceColumns.Count == 0)
+                throw new InvalidOperationException($"columnMappings[{mappingIndex}].sourceColumns-must-not-be-empty");
             if (mapping.TargetColumns.Count == 0)
                 throw new InvalidOperationException($"columnMappings[{mappingIndex}].targetColumns-must-not-be-empty");
+            var sources = mapping.SourceColumns
+                .Select(column => ColumnIndex(source.GridColumns, column, "columnMappings.sourceColumns"))
+                .ToArray();
+            if (sources.Distinct().Count() != sources.Length
+                || !sources.SequenceEqual(sources.Order())
+                || !sources.SequenceEqual(Enumerable.Range(sources[0], sources.Length)))
+                throw new InvalidOperationException($"columnMappings[{mappingIndex}].sourceColumns-must-be-unique-contiguous-in-native-order");
             var targets = mapping.TargetColumns
                 .Select(column => ColumnIndex(target.GridColumns, column, "columnMappings.targetColumns"))
                 .ToArray();
@@ -59,9 +68,10 @@ public static class NativeTableFillMutation
             var covered = slots.SelectMany(item => Enumerable.Range(item.slot.Start, item.slot.Span)).ToArray();
             if (!covered.SequenceEqual(targets))
                 throw new InvalidOperationException($"columnMappings[{mappingIndex}].targetColumns-must-cover-whole-prototype-cells");
-            return new PreparedMapping(
-                ColumnIndex(source.GridColumns, mapping.SourceColumn, "columnMappings.sourceColumn"),
-                slots.Select(item => item.index).ToArray());
+            var targetSlotIndexes = slots.Select(item => item.index).ToArray();
+            if (sources.Length > 1 && targetSlotIndexes.Length > 1)
+                throw new InvalidOperationException($"columnMappings[{mappingIndex}]-cannot-compose-and-spread");
+            return new PreparedMapping(sources, targetSlotIndexes, mapping.JoinWith ?? "\n");
         }).ToArray();
         var mappedSlots = mappings.SelectMany(mapping => mapping.TargetSlots).ToArray();
         if (mappedSlots.Distinct().Count() != mappedSlots.Length)
@@ -149,7 +159,8 @@ public static class NativeTableFillMutation
             var rows = group.Select(item => item.Address).Distinct().ToArray();
             var count = rows.Count(selected.Contains);
             if (count > 0 && count != rows.Length)
-                throw new InvalidOperationException(name + "-split-vertical-merge");
+                throw new InvalidOperationException(
+                    $"{name}-split-vertical-merge:owner={group.Key.Path};requiredFirst={rows[0].Path};requiredLast={rows[^1].Path}");
         }
     }
 
@@ -185,21 +196,29 @@ public static class NativeTableFillMutation
             .Select(_ => new PreparedValue(string.Empty, null)).ToArray();
         foreach (var mapping in mappings)
         {
-            var logicalCells = rows.Select(row => CellAt(row, mapping.SourceColumn))
-                .GroupAdjacentBy(LogicalOwner)
-                .Select(group => group.First())
-                .ToArray();
             if (mapping.TargetSlots.Count == 1)
             {
-                var distinctTexts = logicalCells.Select(cell => cell.LogicalText)
-                    .Distinct(StringComparer.Ordinal).ToArray();
-                if (distinctTexts.Length != 1)
-                    throw new InvalidOperationException("scalar-source-values-differ-within-record");
-                var owner = logicalCells.Length == 1 ? LogicalOwner(logicalCells[0]) : null;
-                result[mapping.TargetSlots[0]] = new PreparedValue(distinctTexts[0], owner);
+                var components = new List<DocxTableReadCell>();
+                foreach (var sourceColumn in mapping.SourceColumns)
+                {
+                    var scalarCells = LogicalCells(rows, sourceColumn);
+                    var distinctTexts = scalarCells.Select(cell => cell.LogicalText)
+                        .Distinct(StringComparer.Ordinal).ToArray();
+                    if (distinctTexts.Length != 1)
+                        throw new InvalidOperationException("scalar-source-values-differ-within-record");
+                    components.Add(scalarCells[0]);
+                }
+                var unique = components.GroupAdjacentBy(LogicalOwner).Select(group => group.First()).ToArray();
+                var text = string.Join(mapping.JoinWith,
+                    unique.Select(cell => cell.LogicalText).Where(value => !string.IsNullOrEmpty(value)));
+                var owner = components.All(cell => LogicalCells(rows, cell.GridColumnStart).Length == 1)
+                    ? string.Join("\u001f", unique.Select(cell => OwnerKey(LogicalOwner(cell))))
+                    : null;
+                result[mapping.TargetSlots[0]] = new PreparedValue(text, owner);
                 continue;
             }
 
+            var logicalCells = LogicalCells(rows, mapping.SourceColumns.Single());
             if (logicalCells.Length > mapping.TargetSlots.Count)
                 throw new InvalidOperationException("source-record-has-more-values-than-target-columns");
             for (var index = 0; index < logicalCells.Length; index++)
@@ -245,6 +264,14 @@ public static class NativeTableFillMutation
     private static DocxObjectAddress LogicalOwner(DocxTableReadCell cell)
         => cell.VerticalMergeOwner ?? cell.Address;
 
+    private static string OwnerKey(DocxObjectAddress owner) => owner.Part + "\u001e" + owner.Path;
+
+    private static DocxTableReadCell[] LogicalCells(IReadOnlyList<DocxTableReadRow> rows, int sourceColumn)
+        => rows.Select(row => CellAt(row, sourceColumn))
+            .GroupAdjacentBy(LogicalOwner)
+            .Select(group => group.First())
+            .ToArray();
+
     private static IReadOnlyList<TargetSlot> TargetSlots(DocxTableReadRow prototype, int columnCount)
     {
         if (prototype.GridBefore != 0 || prototype.GridAfter != 0)
@@ -256,9 +283,12 @@ public static class NativeTableFillMutation
         return slots;
     }
 
-    private sealed record PreparedMapping(int SourceColumn, IReadOnlyList<int> TargetSlots);
+    private sealed record PreparedMapping(
+        IReadOnlyList<int> SourceColumns,
+        IReadOnlyList<int> TargetSlots,
+        string JoinWith);
     private sealed record TargetSlot(int Start, int Span);
-    private sealed record PreparedValue(string Text, DocxObjectAddress? Owner);
+    private sealed record PreparedValue(string Text, string? Owner);
     private sealed record PreparedRecord(IReadOnlyList<PreparedValue> Values);
 }
 
@@ -289,8 +319,9 @@ internal static class AdjacentGroupingExtensions
 }
 
 public sealed record FillTableColumnMapping(
-    DocxObjectAddress SourceColumn,
-    IReadOnlyList<DocxObjectAddress> TargetColumns);
+    IReadOnlyList<DocxObjectAddress> SourceColumns,
+    IReadOnlyList<DocxObjectAddress> TargetColumns,
+    string? JoinWith = null);
 
 public sealed record FillTableFromTableRequest(
     string Input,
