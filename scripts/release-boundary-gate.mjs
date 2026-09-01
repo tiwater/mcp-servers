@@ -699,6 +699,10 @@ async function smokeInstalledPackage(archive, tempRoot) {
       || !response.serverInstructions.includes('when the same document object is updated again')) {
     fail(check, 'MCP instructions do not publish per-call mutation receipt identity');
   }
+  if (!response.serverInstructions.includes('Every native DOCX address belongs only to the exact input file')
+      || !response.serverInstructions.includes('must not be reused with another DOCX')) {
+    fail(check, 'MCP instructions do not publish native DOCX address scope');
+  }
   note(`isolated MCP initialize and tools/list completed (${response.tools?.length || 0} tools)${response.stderr.trim() ? ' with stderr output' : ''}`);
   return response.tools || [];
 }
