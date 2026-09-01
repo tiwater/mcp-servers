@@ -695,6 +695,10 @@ async function smokeInstalledPackage(archive, tempRoot) {
       || !response.serverInstructions.includes('every different request uses a different path')) {
     fail(check, 'MCP instructions do not publish immutable read artifact path semantics');
   }
+  if (!response.serverInstructions.includes('Every mutation receiptOutput is a new immutable receipt identity')
+      || !response.serverInstructions.includes('when the same document object is updated again')) {
+    fail(check, 'MCP instructions do not publish per-call mutation receipt identity');
+  }
   note(`isolated MCP initialize and tools/list completed (${response.tools?.length || 0} tools)${response.stderr.trim() ? ' with stderr output' : ''}`);
   return response.tools || [];
 }
