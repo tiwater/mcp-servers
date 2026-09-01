@@ -85,7 +85,7 @@
       },
       "required": ["first", "last"],
       "additionalProperties": false,
-      "description": "Exact contiguous source data-row range; it must enclose every vertical merge it intersects."
+      "description": "Exact contiguous source data-row range. Intersecting native vertical merges are clipped to this range, retain their owner content, and restart at the first selected row."
     },
     "sourceRecordColumn": {
       "type": "object",
