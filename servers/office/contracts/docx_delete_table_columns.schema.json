@@ -13,7 +13,7 @@
           "table": {
             "type": "object",
             "properties": {
-              "part": { "type": "string", "minLength": 1 },
+              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
               "path": { "type": "string", "pattern": "^\\/" }
             },
             "required": ["part", "path"],
@@ -25,7 +25,7 @@
             "items": {
               "type": "object",
               "properties": {
-                "part": { "type": "string", "minLength": 1 },
+                "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
                 "path": { "type": "string", "pattern": "^\\/" }
               },
               "required": ["part", "path"],
