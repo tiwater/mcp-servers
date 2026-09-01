@@ -762,6 +762,9 @@ function checkDocxMergedCellDescriptions(tools) {
   const narrowObject = narrowRead?.outputSchema?.$defs?.__schema0?.properties?.object;
   const setDescription = tools.find(tool => tool?.name === 'docx_set_text')?.description || '';
   const mergeDescription = tools.find(tool => tool?.name === 'docx_merge_cells')?.description || '';
+  const setBody = tools.find(tool => tool?.name === 'docx_set_table_body');
+  const setBodyDescription = setBody?.description || '';
+  const setBodyCell = setBody?.inputSchema?.properties?.rows?.items?.properties?.cells?.items;
   if (!readDescription.includes('restart')
       || !readDescription.includes('continue cell is not an independent row value')
       || !readDescription.includes('logicalText resolves the restart cell value')) {
@@ -780,6 +783,14 @@ function checkDocxMergedCellDescriptions(tools) {
   if (!mergeDescription.includes('one-column, multi-row rectangle creates a vertical merge')
       || !mergeDescription.includes('All selected cell content moves into the top-left owner')) {
     fail(check, 'docx_merge_cells does not explain vertical grouping and content ownership');
+  }
+  if (!setBodyDescription.includes('cover every row completely with explicit cells')
+      || !setBodyDescription.includes('restart cell followed by continue cells')
+      || setBodyCell?.properties?.verticalMerge?.type !== 'string'
+      || !setBodyCell?.properties?.verticalMerge?.enum?.includes('restart')
+      || !setBodyCell?.properties?.verticalMerge?.enum?.includes('continue')
+      || Object.hasOwn(setBodyCell?.properties ?? {}, 'rowSpan')) {
+    fail(check, 'docx_set_table_body does not expose explicit native vertical-merge cells');
   }
   note('DOCX table read/write descriptions preserve vertical-merge logical-cell semantics');
 }
