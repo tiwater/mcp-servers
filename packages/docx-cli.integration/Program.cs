@@ -275,6 +275,57 @@ try
         $"composed table fill mismatch: text={composedOwner.GetProperty("logicalText").GetString()}; "
         + $"owner={composedOwner.GetProperty("verticalMerge")}; continuation={composedContinuation.GetProperty("verticalMerge")}");
 
+    var clippedFillSource = Path.Combine(root, "fill-source-clipped.docx");
+    var clippedFillTarget = Path.Combine(root, "fill-target-clipped.docx");
+    CreateClippedFillSourceDocument(clippedFillSource);
+    CreateComposedFillTargetDocument(clippedFillTarget);
+    var clippedSourceState = ReadTable(clippedFillSource, "fill-source-clipped");
+    var clippedTargetState = ReadTable(clippedFillTarget, "fill-target-clipped");
+    var clippedSourceRows = clippedSourceState.GetProperty("rows");
+    var clippedTargetRows = clippedTargetState.GetProperty("rows");
+    var clippedSourceColumns = clippedSourceState.GetProperty("gridColumns");
+    var clippedTargetColumns = clippedTargetState.GetProperty("gridColumns");
+    var clippedFillOutput = Path.Combine(root, "fill-output-clipped.docx");
+    Run("docx_fill_table_from_table", new
+    {
+        input = clippedFillTarget,
+        table = clippedTargetState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = clippedTargetRows[1].GetProperty("address").Clone(),
+            last = clippedTargetRows[2].GetProperty("address").Clone(),
+        },
+        prototypeRow = clippedTargetRows[1].GetProperty("address").Clone(),
+        sourceInput = clippedFillSource,
+        sourceTable = clippedSourceState.GetProperty("address").Clone(),
+        sourceRows = new
+        {
+            first = clippedSourceRows[2].GetProperty("address").Clone(),
+            last = clippedSourceRows[3].GetProperty("address").Clone(),
+        },
+        sourceRecordColumn = clippedSourceColumns[2].GetProperty("address").Clone(),
+        columnMappings = Enumerable.Range(0, 5).Select(index => new
+        {
+            sourceColumns = new[] { clippedSourceColumns[index].GetProperty("address").Clone() },
+            targetColumns = new[] { clippedTargetColumns[index].GetProperty("address").Clone() },
+        }).ToArray(),
+        output = clippedFillOutput,
+        receiptOutput = Path.Combine(root, "fill-output-clipped-receipt.json"),
+    });
+    var clippedFillState = ReadTable(clippedFillOutput, "fill-output-clipped");
+    Require(clippedFillState.GetProperty("rowCount").GetInt32() == 3,
+        "clipped table fill did not retain exactly the selected source records");
+    Require(CellAt(clippedFillState, 1, 0).GetProperty("logicalText").GetString() == "共享项目"
+            && CellAt(clippedFillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(clippedFillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
+            && CellAt(clippedFillState, 1, 4).GetProperty("logicalText").GetString() == "通过"
+            && CellAt(clippedFillState, 1, 4).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(clippedFillState, 2, 4).GetProperty("verticalMerge").GetString() == "continue",
+        "table fill did not clip intersecting source vertical merges to the selected row range");
+    Require(CellAt(clippedFillState, 1, 2).GetProperty("logicalText").GetString() == "记录乙"
+            && CellAt(clippedFillState, 2, 2).GetProperty("logicalText").GetString() == "记录丙",
+        "clipped table fill changed the selected record order or values");
+
     var invalidFillReceipt = Path.Combine(root, "invalid-fill-receipt.json");
     var invalidFill = RunExpectAtomicFailure("docx_fill_table_from_table", fillTarget, invalidFillReceipt, new
     {
@@ -1783,6 +1834,31 @@ void CreateFillSourceDocument(string path)
             Cell("", merge: MergedCellValues.Continue), Cell("", merge: MergedCellValues.Continue),
             Cell("", merge: MergedCellValues.Continue), Cell("值四"), Cell("通过")),
         new TableRow(Cell("组乙"), Cell("标准乙"), Cell("控制"), Cell("单值"), Cell("通过")));
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateClippedFillSourceDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(Enumerable.Range(0, 5).Select(_ => new GridColumn { Width = "1200" })),
+        new TableRow(Cell("项目"), Cell("标准"), Cell("记录"), Cell("结果"), Cell("结论")),
+        new TableRow(
+            Cell("共享项目", merge: MergedCellValues.Restart), Cell("标准甲"), Cell("记录甲"), Cell("结果甲"),
+            Cell("通过", merge: MergedCellValues.Restart)),
+        new TableRow(
+            Cell("", merge: MergedCellValues.Continue), Cell("标准乙"), Cell("记录乙"), Cell("结果乙"),
+            Cell("", merge: MergedCellValues.Continue)),
+        new TableRow(
+            Cell("", merge: MergedCellValues.Continue), Cell("标准丙"), Cell("记录丙"), Cell("结果丙"),
+            Cell("", merge: MergedCellValues.Continue)),
+        new TableRow(
+            Cell("", merge: MergedCellValues.Continue), Cell("标准丁"), Cell("记录丁"), Cell("结果丁"),
+            Cell("", merge: MergedCellValues.Continue)));
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();

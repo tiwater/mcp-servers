@@ -35,7 +35,6 @@ public static class NativeTableFillMutation
         var source = Observation.ReadTable(sourceInput, request.SourceTable);
         var target = Observation.ReadTable(paths.Input, request.Table);
         var sourceRows = SelectRows(source.Rows, request.SourceRows, "sourceRows");
-        RequireClosedVerticalMerges(source.Rows, sourceRows, "sourceRows");
 
         var sourceRecordColumn = ColumnIndex(source.GridColumns, request.SourceRecordColumn,
             "sourceRecordColumn");
@@ -141,27 +140,6 @@ public static class NativeTableFillMutation
         for (var index = 0; index < columns.Count; index++)
             if (columns[index].Address == address) return index;
         throw new InvalidOperationException(name + "-not-found-in-table-grid");
-    }
-
-    private static void RequireClosedVerticalMerges(
-        IReadOnlyList<DocxTableReadRow> allRows,
-        IReadOnlyList<DocxTableReadRow> selectedRows,
-        string name)
-    {
-        var selected = selectedRows.Select(row => row.Address).ToHashSet();
-        var groups = allRows
-            .SelectMany(row => row.Cells
-                .Where(cell => cell.VerticalMergeOwner is not null)
-                .Select(cell => (row.Address, Owner: cell.VerticalMergeOwner!)))
-            .GroupBy(item => item.Owner);
-        foreach (var group in groups)
-        {
-            var rows = group.Select(item => item.Address).Distinct().ToArray();
-            var count = rows.Count(selected.Contains);
-            if (count > 0 && count != rows.Length)
-                throw new InvalidOperationException(
-                    $"{name}-split-vertical-merge:owner={group.Key.Path};requiredFirst={rows[0].Path};requiredLast={rows[^1].Path}");
-        }
     }
 
     private static IReadOnlyList<IReadOnlyList<DocxTableReadRow>> GroupRecords(
