@@ -46,8 +46,7 @@ public static class NativeTableBodyMutation
                 output.MainDocumentPart?.Document?.Save();
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
             }
-            NativeMutationSupport.Commit(temporaryPath, paths);
-            var readback = ReadBack(paths.Output, prepared);
+            var readback = ReadBack(temporaryPath, prepared);
             var receipt = new SetTableBodyReceipt(
                 "tiwater.docx-set-table-body-receipt/v1",
                 "tiwater.docx.cli",
@@ -56,6 +55,7 @@ public static class NativeTableBodyMutation
                 readback,
                 paths.Output);
             File.WriteAllText(paths.Receipt, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
+            NativeMutationSupport.Commit(temporaryPath, paths);
             return receipt;
         }
         catch

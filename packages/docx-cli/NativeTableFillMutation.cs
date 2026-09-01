@@ -4,13 +4,13 @@ namespace Dockit.Docx;
 
 public static class NativeTableFillMutation
 {
-    public const string Command = "docx_fill_table_from_table";
+    public const string Command = "docx_fill_table_from_tables";
 
     public static int Run(string[] args)
     {
         if (args.Length != 1) throw new InvalidOperationException($"{Command} requires <request.json>");
-        var request = JsonSerializer.Deserialize<FillTableFromTableRequest>(File.ReadAllText(args[0]), Json.Options)
-            ?? throw new InvalidOperationException("fill-table-from-table-request-invalid");
+        var request = JsonSerializer.Deserialize<FillTableFromTablesRequest>(File.ReadAllText(args[0]), Json.Options)
+            ?? throw new InvalidOperationException("fill-table-from-tables-request-invalid");
         var receipt = Apply(request);
         Console.WriteLine(JsonSerializer.Serialize(new
         {
@@ -22,68 +22,43 @@ public static class NativeTableFillMutation
         return 0;
     }
 
-    public static FillTableFromTableReceipt Apply(FillTableFromTableRequest request)
+    public static FillTableFromTablesReceipt Apply(FillTableFromTablesRequest request)
     {
-        if (request.ColumnMappings.Count == 0)
-            throw new InvalidOperationException("columnMappings-must-not-be-empty");
+        if (request.Sources.Count == 0)
+            throw new InvalidOperationException("sources-must-not-be-empty");
 
         var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
-        var sourceInput = Path.GetFullPath(request.SourceInput);
-        if (!File.Exists(sourceInput) || Directory.Exists(sourceInput))
-            throw new InvalidOperationException("sourceInput-file-not-found");
-
-        var source = Observation.ReadTable(sourceInput, request.SourceTable);
         var target = Observation.ReadTable(paths.Input, request.Table);
-        var sourceRows = SelectRows(source.Rows, request.SourceRows, "sourceRows");
-
-        var sourceRecordColumn = ColumnIndex(source.GridColumns, request.SourceRecordColumn,
-            "sourceRecordColumn");
         var prototype = target.Rows.SingleOrDefault(row => row.Address == request.PrototypeRow)
             ?? throw new InvalidOperationException("prototypeRow-not-found-in-target-table");
         var targetSlots = TargetSlots(prototype, target.ColumnCount);
-
-        var mappings = request.ColumnMappings.Select((mapping, mappingIndex) =>
+        var values = new List<PreparedRecord>();
+        var sourceReadbacks = new List<FillTableSourceReadback>();
+        for (var sourceIndex = 0; sourceIndex < request.Sources.Count; sourceIndex++)
         {
-            if (mapping.SourceColumns.Count == 0)
-                throw new InvalidOperationException($"columnMappings[{mappingIndex}].sourceColumns-must-not-be-empty");
-            if (mapping.TargetColumns.Count == 0)
-                throw new InvalidOperationException($"columnMappings[{mappingIndex}].targetColumns-must-not-be-empty");
-            var sources = mapping.SourceColumns
-                .Select(column => ColumnIndex(source.GridColumns, column, "columnMappings.sourceColumns"))
-                .ToArray();
-            if (sources.Distinct().Count() != sources.Length
-                || !sources.SequenceEqual(sources.Order())
-                || !sources.SequenceEqual(Enumerable.Range(sources[0], sources.Length)))
-                throw new InvalidOperationException($"columnMappings[{mappingIndex}].sourceColumns-must-be-unique-contiguous-in-native-order");
-            var targets = mapping.TargetColumns
-                .Select(column => ColumnIndex(target.GridColumns, column, "columnMappings.targetColumns"))
-                .ToArray();
-            if (!targets.SequenceEqual(targets.Order())
-                || !targets.SequenceEqual(Enumerable.Range(targets[0], targets.Length)))
-                throw new InvalidOperationException($"columnMappings[{mappingIndex}].targetColumns-must-be-contiguous-in-native-order");
-            var slots = targetSlots.Select((slot, index) => (slot, index))
-                .Where(item => targets.Contains(item.slot.Start))
-                .ToArray();
-            var covered = slots.SelectMany(item => Enumerable.Range(item.slot.Start, item.slot.Span)).ToArray();
-            if (!covered.SequenceEqual(targets))
-                throw new InvalidOperationException($"columnMappings[{mappingIndex}].targetColumns-must-cover-whole-prototype-cells");
-            var targetSlotIndexes = slots.Select(item => item.index).ToArray();
-            if (sources.Length > 1 && targetSlotIndexes.Length > 1)
-                throw new InvalidOperationException($"columnMappings[{mappingIndex}]-cannot-compose-and-spread");
-            return new PreparedMapping(sources, targetSlotIndexes, mapping.JoinWith ?? "\n");
-        }).ToArray();
-        var mappedSlots = mappings.SelectMany(mapping => mapping.TargetSlots).ToArray();
-        if (mappedSlots.Distinct().Count() != mappedSlots.Length)
-            throw new InvalidOperationException("target-cells-must-be-unique");
-        if (!mappedSlots.Order().SequenceEqual(Enumerable.Range(0, targetSlots.Count)))
-            throw new InvalidOperationException("target-columns-must-cover-table-grid");
-
-        var records = GroupRecords(sourceRows, sourceRecordColumn);
-        if (records.Count == 0) throw new InvalidOperationException("sourceRows-must-contain-a-record");
-        var values = records.Select(record => BuildRecord(record, mappings, targetSlots.Count)).ToArray();
+            var requestSource = request.Sources[sourceIndex];
+            var sourceInput = Path.GetFullPath(requestSource.Input);
+            if (!File.Exists(sourceInput) || Directory.Exists(sourceInput))
+                throw new InvalidOperationException($"sources[{sourceIndex}].input-file-not-found");
+            var source = Observation.ReadTable(sourceInput, requestSource.Table);
+            var sourceRows = SelectRows(source.Rows, requestSource.Rows, $"sources[{sourceIndex}].rows");
+            var sourceRecordColumn = ColumnIndex(source.GridColumns, requestSource.RecordColumn,
+                $"sources[{sourceIndex}].recordColumn");
+            var mappings = PrepareMappings(source, target, targetSlots, requestSource.ColumnMappings, sourceIndex);
+            var records = GroupRecords(sourceRows, sourceRecordColumn);
+            if (records.Count == 0)
+                throw new InvalidOperationException($"sources[{sourceIndex}].rows-must-contain-a-record");
+            var ownerScope = "source-" + sourceIndex;
+            values.AddRange(records.Select(record =>
+                BuildRecord(record, mappings, targetSlots.Count, ownerScope)));
+            sourceReadbacks.Add(new FillTableSourceReadback(
+                sourceInput, requestSource.Table, requestSource.Rows, records.Count));
+        }
         var rows = BuildTargetRows(values, request.PrototypeRow, targetSlots);
 
-        var internalReceipt = paths.Receipt + ".table-body-" + Guid.NewGuid().ToString("N");
+        var identity = Guid.NewGuid().ToString("N");
+        var internalReceipt = paths.Receipt + ".table-body-" + identity;
+        var temporaryOutput = paths.Output + ".projection-" + identity;
         try
         {
             var bodyReceipt = NativeTableBodyMutation.Apply(new SetTableBodyRequest(
@@ -93,24 +68,78 @@ public static class NativeTableFillMutation
                 target.GridColumns.Select((column, index) =>
                     new SetTableBodyColumn("c" + index, column.Address)).ToArray(),
                 rows,
-                paths.Output,
+                temporaryOutput,
                 internalReceipt));
-            var receipt = new FillTableFromTableReceipt(
-                "tiwater.docx-fill-table-from-table-receipt/v1",
+            var receipt = new FillTableFromTablesReceipt(
+                "tiwater.docx-fill-table-from-tables-receipt/v1",
                 "tiwater.docx.cli",
                 RuntimeIdentity.Version,
-                request.SourceTable,
+                sourceReadbacks,
                 request.Table,
-                records.Count,
+                values.Count,
                 bodyReceipt.Rows,
                 paths.Output);
             File.WriteAllText(paths.Receipt, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
+            NativeMutationSupport.Commit(temporaryOutput, paths);
             return receipt;
+        }
+        catch
+        {
+            NativeMutationSupport.CleanupFailure(temporaryOutput, paths);
+            throw;
         }
         finally
         {
             NativeMutationSupport.Cleanup(internalReceipt);
         }
+    }
+
+    private static IReadOnlyList<PreparedMapping> PrepareMappings(
+        DocxTableReadResult source,
+        DocxTableReadResult target,
+        IReadOnlyList<TargetSlot> targetSlots,
+        IReadOnlyList<FillTableColumnMapping> requested,
+        int sourceIndex)
+    {
+        if (requested.Count == 0)
+            throw new InvalidOperationException($"sources[{sourceIndex}].columnMappings-must-not-be-empty");
+        var mappings = requested.Select((mapping, mappingIndex) =>
+        {
+            var prefix = $"sources[{sourceIndex}].columnMappings[{mappingIndex}]";
+            if (mapping.SourceColumns.Count == 0)
+                throw new InvalidOperationException($"{prefix}.sourceColumns-must-not-be-empty");
+            if (mapping.TargetColumns.Count == 0)
+                throw new InvalidOperationException($"{prefix}.targetColumns-must-not-be-empty");
+            var sources = mapping.SourceColumns
+                .Select(column => ColumnIndex(source.GridColumns, column, prefix + ".sourceColumns"))
+                .ToArray();
+            if (sources.Distinct().Count() != sources.Length
+                || !sources.SequenceEqual(sources.Order())
+                || !sources.SequenceEqual(Enumerable.Range(sources[0], sources.Length)))
+                throw new InvalidOperationException($"{prefix}.sourceColumns-must-be-unique-contiguous-in-native-order");
+            var targets = mapping.TargetColumns
+                .Select(column => ColumnIndex(target.GridColumns, column, prefix + ".targetColumns"))
+                .ToArray();
+            if (!targets.SequenceEqual(targets.Order())
+                || !targets.SequenceEqual(Enumerable.Range(targets[0], targets.Length)))
+                throw new InvalidOperationException($"{prefix}.targetColumns-must-be-contiguous-in-native-order");
+            var slots = targetSlots.Select((slot, index) => (slot, index))
+                .Where(item => targets.Contains(item.slot.Start))
+                .ToArray();
+            var covered = slots.SelectMany(item => Enumerable.Range(item.slot.Start, item.slot.Span)).ToArray();
+            if (!covered.SequenceEqual(targets))
+                throw new InvalidOperationException($"{prefix}.targetColumns-must-cover-whole-prototype-cells");
+            var targetSlotIndexes = slots.Select(item => item.index).ToArray();
+            if (sources.Length > 1 && targetSlotIndexes.Length > 1)
+                throw new InvalidOperationException($"{prefix}-cannot-compose-and-spread");
+            return new PreparedMapping(sources, targetSlotIndexes, mapping.JoinWith ?? "\n");
+        }).ToArray();
+        var mappedSlots = mappings.SelectMany(mapping => mapping.TargetSlots).ToArray();
+        if (mappedSlots.Distinct().Count() != mappedSlots.Length)
+            throw new InvalidOperationException($"sources[{sourceIndex}].target-cells-must-be-unique");
+        if (!mappedSlots.Order().SequenceEqual(Enumerable.Range(0, targetSlots.Count)))
+            throw new InvalidOperationException($"sources[{sourceIndex}].target-columns-must-cover-table-grid");
+        return mappings;
     }
 
     private static IReadOnlyList<DocxTableReadRow> SelectRows(
@@ -168,7 +197,8 @@ public static class NativeTableFillMutation
     private static PreparedRecord BuildRecord(
         IReadOnlyList<DocxTableReadRow> rows,
         IReadOnlyList<PreparedMapping> mappings,
-        int targetSlotCount)
+        int targetSlotCount,
+        string ownerScope)
     {
         var result = Enumerable.Range(0, targetSlotCount)
             .Select(_ => new PreparedValue(string.Empty, null)).ToArray();
@@ -190,7 +220,7 @@ public static class NativeTableFillMutation
                 var text = string.Join(mapping.JoinWith,
                     unique.Select(cell => cell.LogicalText).Where(value => !string.IsNullOrEmpty(value)));
                 var owner = components.All(cell => LogicalCells(rows, cell.GridColumnStart).Length == 1)
-                    ? string.Join("\u001f", unique.Select(cell => OwnerKey(LogicalOwner(cell))))
+                    ? string.Join("\u001f", unique.Select(cell => OwnerKey(ownerScope, LogicalOwner(cell))))
                     : null;
                 result[mapping.TargetSlots[0]] = new PreparedValue(text, owner);
                 continue;
@@ -242,7 +272,8 @@ public static class NativeTableFillMutation
     private static DocxObjectAddress LogicalOwner(DocxTableReadCell cell)
         => cell.VerticalMergeOwner ?? cell.Address;
 
-    private static string OwnerKey(DocxObjectAddress owner) => owner.Part + "\u001e" + owner.Path;
+    private static string OwnerKey(string scope, DocxObjectAddress owner)
+        => scope + "\u001d" + owner.Part + "\u001e" + owner.Path;
 
     private static DocxTableReadCell[] LogicalCells(IReadOnlyList<DocxTableReadRow> rows, int sourceColumn)
         => rows.Select(row => CellAt(row, sourceColumn))
@@ -301,24 +332,33 @@ public sealed record FillTableColumnMapping(
     IReadOnlyList<DocxObjectAddress> TargetColumns,
     string? JoinWith = null);
 
-public sealed record FillTableFromTableRequest(
+public sealed record FillTableSource(
+    string Input,
+    DocxObjectAddress Table,
+    SetTableBodyRowRange Rows,
+    DocxObjectAddress RecordColumn,
+    IReadOnlyList<FillTableColumnMapping> ColumnMappings);
+
+public sealed record FillTableFromTablesRequest(
     string Input,
     DocxObjectAddress Table,
     SetTableBodyRowRange ExistingRows,
     DocxObjectAddress PrototypeRow,
-    string SourceInput,
-    DocxObjectAddress SourceTable,
-    SetTableBodyRowRange SourceRows,
-    DocxObjectAddress SourceRecordColumn,
-    IReadOnlyList<FillTableColumnMapping> ColumnMappings,
+    IReadOnlyList<FillTableSource> Sources,
     string Output,
     string ReceiptOutput);
 
-public sealed record FillTableFromTableReceipt(
+public sealed record FillTableSourceReadback(
+    string Input,
+    DocxObjectAddress Table,
+    SetTableBodyRowRange Rows,
+    int RecordCount);
+
+public sealed record FillTableFromTablesReceipt(
     string Schema,
     string Provider,
     string ToolVersion,
-    DocxObjectAddress SourceTable,
+    IReadOnlyList<FillTableSourceReadback> Sources,
     DocxObjectAddress Table,
     int RecordCount,
     IReadOnlyList<SetTableBodyRowReadback> Rows,
