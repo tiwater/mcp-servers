@@ -44,6 +44,132 @@ try
             == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
         "narrow cell read did not resolve the restart cell text");
 
+    var fillSource = Path.Combine(root, "fill-source.docx");
+    var fillTarget = Path.Combine(root, "fill-target.docx");
+    CreateFillSourceDocument(fillSource);
+    CreateFillTargetDocument(fillTarget);
+    var fillSourceState = ReadTable(fillSource, "fill-source");
+    var fillTargetState = ReadTable(fillTarget, "fill-target");
+    var fillSourceRows = fillSourceState.GetProperty("rows");
+    var fillTargetRows = fillTargetState.GetProperty("rows");
+    var fillSourceColumns = fillSourceState.GetProperty("gridColumns");
+    var fillTargetColumns = fillTargetState.GetProperty("gridColumns");
+    var fillOutput = Path.Combine(root, "fill-output.docx");
+    Run("docx_fill_table_from_table", new
+    {
+        input = fillTarget,
+        table = fillTargetState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = fillTargetRows[1].GetProperty("address").Clone(),
+            last = fillTargetRows[2].GetProperty("address").Clone(),
+        },
+        prototypeRow = fillTargetRows[1].GetProperty("address").Clone(),
+        sourceInput = fillSource,
+        sourceTable = fillSourceState.GetProperty("address").Clone(),
+        sourceRows = new
+        {
+            first = fillSourceRows[1].GetProperty("address").Clone(),
+            last = fillSourceRows[5].GetProperty("address").Clone(),
+        },
+        sourceRecordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
+        columnMappings = new object[]
+        {
+            new { sourceColumn = fillSourceColumns[0].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[0].GetProperty("address").Clone() } },
+            new { sourceColumn = fillSourceColumns[1].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[1].GetProperty("address").Clone() } },
+            new { sourceColumn = fillSourceColumns[2].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[2].GetProperty("address").Clone() } },
+            new { sourceColumn = fillSourceColumns[3].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[3].GetProperty("address").Clone(), fillTargetColumns[4].GetProperty("address").Clone() } },
+            new { sourceColumn = fillSourceColumns[4].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[5].GetProperty("address").Clone() } },
+        },
+        output = fillOutput,
+        receiptOutput = Path.Combine(root, "fill-output-receipt.json"),
+    });
+    var fillState = ReadTable(fillOutput, "fill-output");
+    Require(fillState.GetProperty("rowCount").GetInt32() == 4,
+        "table fill did not derive one target row per logical source record");
+    Require(CellAt(fillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(fillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
+            && CellAt(fillState, 2, 0).GetProperty("logicalText").GetString() == "组甲",
+        "table fill did not preserve a source group merge across target records");
+    Require(CellAt(fillState, 1, 2).GetProperty("logicalText").GetString() == "记录一"
+            && CellAt(fillState, 1, 3).GetProperty("logicalText").GetString() == "值一"
+            && CellAt(fillState, 1, 4).GetProperty("logicalText").GetString() == "值二",
+        "table fill did not spread a multi-row source record into target columns");
+    Require(CellAt(fillState, 3, 2).GetProperty("logicalText").GetString() == "控制"
+            && CellAt(fillState, 3, 3).GetProperty("logicalText").GetString() == "单值"
+            && CellAt(fillState, 3, 4).GetProperty("logicalText").GetString() == "",
+        "table fill did not handle a one-row source record or blank trailing target");
+
+    var horizontalFillTarget = Path.Combine(root, "fill-target-horizontal.docx");
+    CreateFillTargetDocument(horizontalFillTarget, horizontalFirstCell: true);
+    var horizontalTargetState = ReadTable(horizontalFillTarget, "fill-target-horizontal");
+    var horizontalTargetRows = horizontalTargetState.GetProperty("rows");
+    var horizontalTargetColumns = horizontalTargetState.GetProperty("gridColumns");
+    var horizontalFillOutput = Path.Combine(root, "fill-output-horizontal.docx");
+    Run("docx_fill_table_from_table", new
+    {
+        input = horizontalFillTarget,
+        table = horizontalTargetState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = horizontalTargetRows[1].GetProperty("address").Clone(),
+            last = horizontalTargetRows[2].GetProperty("address").Clone(),
+        },
+        prototypeRow = horizontalTargetRows[1].GetProperty("address").Clone(),
+        sourceInput = fillSource,
+        sourceTable = fillSourceState.GetProperty("address").Clone(),
+        sourceRows = new
+        {
+            first = fillSourceRows[1].GetProperty("address").Clone(),
+            last = fillSourceRows[5].GetProperty("address").Clone(),
+        },
+        sourceRecordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
+        columnMappings = new object[]
+        {
+            new { sourceColumn = fillSourceColumns[0].GetProperty("address").Clone(), targetColumns = new[] { horizontalTargetColumns[0].GetProperty("address").Clone(), horizontalTargetColumns[1].GetProperty("address").Clone() } },
+            new { sourceColumn = fillSourceColumns[2].GetProperty("address").Clone(), targetColumns = new[] { horizontalTargetColumns[2].GetProperty("address").Clone() } },
+            new { sourceColumn = fillSourceColumns[3].GetProperty("address").Clone(), targetColumns = new[] { horizontalTargetColumns[3].GetProperty("address").Clone(), horizontalTargetColumns[4].GetProperty("address").Clone() } },
+            new { sourceColumn = fillSourceColumns[4].GetProperty("address").Clone(), targetColumns = new[] { horizontalTargetColumns[5].GetProperty("address").Clone() } },
+        },
+        output = horizontalFillOutput,
+        receiptOutput = Path.Combine(root, "fill-output-horizontal-receipt.json"),
+    });
+    var horizontalFillState = ReadTable(horizontalFillOutput, "fill-output-horizontal");
+    Require(CellAt(horizontalFillState, 1, 0).GetProperty("gridSpan").GetInt32() == 2
+            && CellAt(horizontalFillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(horizontalFillState, 2, 0).GetProperty("gridSpan").GetInt32() == 2
+            && CellAt(horizontalFillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue",
+        "table fill did not retain a prototype horizontal span while deriving a vertical group");
+
+    var invalidFillReceipt = Path.Combine(root, "invalid-fill-receipt.json");
+    var invalidFill = RunExpectAtomicFailure("docx_fill_table_from_table", fillTarget, invalidFillReceipt, new
+    {
+        input = fillTarget,
+        table = fillTargetState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = fillTargetRows[1].GetProperty("address").Clone(),
+            last = fillTargetRows[2].GetProperty("address").Clone(),
+        },
+        prototypeRow = fillTargetRows[1].GetProperty("address").Clone(),
+        sourceInput = fillSource,
+        sourceTable = fillSourceState.GetProperty("address").Clone(),
+        sourceRows = new
+        {
+            first = fillSourceRows[1].GetProperty("address").Clone(),
+            last = fillSourceRows[5].GetProperty("address").Clone(),
+        },
+        sourceRecordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
+        columnMappings = new[]
+        {
+            new { sourceColumn = fillSourceColumns[0].GetProperty("address").Clone(), targetColumns = new[] { fillTargetColumns[0].GetProperty("address").Clone() } },
+        },
+        output = fillTarget,
+        receiptOutput = invalidFillReceipt,
+    });
+    Require(invalidFill.Contains("target-columns-must-cover-table-grid", StringComparison.Ordinal),
+        "incomplete table fill mapping did not fail explicitly");
+
     var validAddress = rows[1].GetProperty("address");
     var malformedAddress = new
     {
@@ -1497,6 +1623,53 @@ void CreateDocument(string path)
     table.Append(new TableRow(
         Cell("", merge: MergedCellValues.Continue), Cell("乙一"), Cell("乙二"), Cell("乙三")));
     table.Append(new TableRow(Cell("独立"), Cell("丙一"), Cell("丙二"), Cell("丙三")));
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateFillSourceDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(Enumerable.Range(0, 5).Select(_ => new GridColumn { Width = "1200" })),
+        new TableRow(Cell("分组"), Cell("标准"), Cell("记录"), Cell("结果"), Cell("结论")),
+        new TableRow(
+            Cell("组甲", merge: MergedCellValues.Restart), Cell("标准甲", merge: MergedCellValues.Restart),
+            Cell("记录一", merge: MergedCellValues.Restart), Cell("值一"), Cell("通过")),
+        new TableRow(
+            Cell("", merge: MergedCellValues.Continue), Cell("", merge: MergedCellValues.Continue),
+            Cell("", merge: MergedCellValues.Continue), Cell("值二"), Cell("通过")),
+        new TableRow(
+            Cell("", merge: MergedCellValues.Continue), Cell("", merge: MergedCellValues.Continue),
+            Cell("记录二", merge: MergedCellValues.Restart), Cell("值三"), Cell("通过")),
+        new TableRow(
+            Cell("", merge: MergedCellValues.Continue), Cell("", merge: MergedCellValues.Continue),
+            Cell("", merge: MergedCellValues.Continue), Cell("值四"), Cell("通过")),
+        new TableRow(Cell("组乙"), Cell("标准乙"), Cell("控制"), Cell("单值"), Cell("通过")));
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateFillTargetDocument(string path, bool horizontalFirstCell = false)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var firstBody = horizontalFirstCell
+        ? new TableRow(Cell("", span: 2), Cell(""), Cell(""), Cell(""), Cell(""))
+        : new TableRow(Cell(""), Cell(""), Cell(""), Cell(""), Cell(""), Cell(""));
+    var secondBody = horizontalFirstCell
+        ? new TableRow(Cell("", span: 2), Cell(""), Cell(""), Cell(""), Cell(""))
+        : new TableRow(Cell(""), Cell(""), Cell(""), Cell(""), Cell(""), Cell(""));
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(Enumerable.Range(0, 6).Select(_ => new GridColumn { Width = "1000" })),
+        new TableRow(Cell("分组"), Cell("标准"), Cell("记录"), Cell("结果一"), Cell("结果二"), Cell("结论")),
+        firstBody,
+        secondBody);
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();

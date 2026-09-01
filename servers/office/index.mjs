@@ -430,6 +430,13 @@ const tools = [
     handler: args => fixedEdit('docx_set_table_body', args),
   },
   {
+    name: 'docx_fill_table_from_table',
+    description: 'Fill one current target-table body from one current source-table row range. Select the source grid column whose native vertical merges define logical records, then map source grid columns onto the target prototype cells. Target columns belonging to one prototype cell retain that horizontal span; multiple prototype cells receive source values in row order. The provider derives output rows and vertical merges, validates the complete target grid, commits once, and returns structural readback. It does not choose source or target business meaning, filter records, translate or rewrite text, or apply business-specific rules.',
+    inputSchema: inputContract('docx_fill_table_from_table'),
+    outputSchema: fixedEditOutput('docx_fill_table_from_table'),
+    handler: args => fixedEdit('docx_fill_table_from_table', args),
+  },
+  {
     name: 'docx_insert_objects',
     description: 'Insert selected current DOCX objects under an existing parent. Table rows are objects: expand a target table by copying one contiguous observed row range and use repeat for count; sourceInput may equal input. A row range beginning with vertical-merge continuations may be inserted only inside a target boundary with the same active grid spans, which extends those merges. Individual table cells are not raw insertion targets because that would bypass the table grid.',
     inputSchema: inputContract('docx_insert_objects'),
