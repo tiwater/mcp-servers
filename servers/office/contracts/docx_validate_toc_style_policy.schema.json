@@ -14,12 +14,23 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Return the complete result directly when it fits the published response limit."
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path for a new JSON file containing the complete result. Existing files are never overwritten.",
+      "x-tiwater-file-role": "write"
     }
   },
   "required": [
     "input",
     "italic",
-    "indentCharactersPerLevel"
+    "indentCharactersPerLevel",
+    "returnContent"
   ],
   "additionalProperties": false
 }

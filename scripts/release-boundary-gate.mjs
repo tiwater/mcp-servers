@@ -587,7 +587,12 @@ function canonicalMcpValue(value, location) {
       return !allowedMcpSchemaMetadata.get(key).has(child);
     })
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-    .map(([key, child]) => [key, canonicalMcpValue(child, `${location}.${key}`)]));
+    .map(([key, child]) => {
+      if (key === 'required' && Array.isArray(child) && child.every(item => typeof item === 'string')) {
+        return [key, [...child].sort()];
+      }
+      return [key, canonicalMcpValue(child, `${location}.${key}`)];
+    }));
 }
 
 function readLines(buffer) {
@@ -687,22 +692,66 @@ async function smokeInstalledPackage(archive, tempRoot) {
 
 function checkSourceBoundObservationOutputs(tools) {
   const check = 'source-bound-observation-output';
-  const names = [
-    'docx_inspect', 'docx_export_json',
-    'xlsx_inspect', 'xlsx_export_json', 'pptx_inspect', 'pptx_export_json',
+  const inspectSchema = tools.find(tool => tool?.name === 'docx_inspect')?.outputSchema;
+  const inspectSource = inspectSchema?.properties?.source;
+  if (!inspectSchema?.required?.includes('source')
+      || inspectSource?.type !== 'object'
+      || !['path', 'sha256', 'bytes'].every(key => inspectSource.required?.includes(key))) {
+    fail(check, 'docx_inspect does not publish an exact source artifact identity');
+  }
+  const largeResultNames = [
+    'docx_compare', 'docx_export_json', 'docx_validate', 'docx_validate_font_policy',
+    'docx_validate_toc_style_policy', 'xlsx_inspect', 'xlsx_export_json', 'xlsx_validate',
+    'pptx_inspect', 'pptx_export_json', 'pptx_validate',
   ];
-  for (const name of names) {
-    const schema = tools.find(tool => tool?.name === name)?.outputSchema;
-    const source = schema?.properties?.source;
-    if (schema?.type !== 'object'
-      || !Array.isArray(schema.required)
-      || !schema.required.includes('source')
-      || source?.type !== 'object'
-      || !['path', 'sha256', 'bytes'].every(key => source.required?.includes(key))) {
-      fail(check, `${name} does not publish an exact source artifact identity`);
+  for (const name of largeResultNames) {
+    const sources = tools.find(tool => tool?.name === name)?.outputSchema?.properties?.sources;
+    const item = sources?.items;
+    if (sources?.type !== 'array'
+        || sources.minItems !== 1
+        || sources.maxItems !== 2
+        || item?.type !== 'object'
+        || !['path', 'sha256', 'bytes'].every(key => item.required?.includes(key))) {
+      fail(check, `${name} does not publish exact source artifact identities`);
     }
   }
-  note(`${names.length} inspect/export outputs bind their exact source artifacts`);
+  note(`${largeResultNames.length + 1} large-result tools bind their exact source artifacts`);
+}
+
+function checkLargeResultChannels(tools) {
+  const check = 'large-result-channels';
+  const names = [
+    'docx_compare', 'docx_export_json', 'docx_validate', 'docx_validate_font_policy',
+    'docx_validate_toc_style_policy', 'xlsx_inspect', 'xlsx_export_json', 'xlsx_validate',
+    'pptx_inspect', 'pptx_export_json', 'pptx_validate',
+  ];
+  for (const name of names) {
+    const tool = tools.find(entry => entry?.name === name);
+    const input = tool?.inputSchema;
+    const output = tool?.outputSchema;
+    if (input?.properties?.returnContent?.type !== 'boolean'
+        || !input.required?.includes('returnContent')
+        || input.required?.includes('output')
+        || input.properties?.output?.type !== 'string') {
+      fail(check, `${name} does not publish independent returnContent and output inputs`);
+    }
+    if (!output?.required?.includes('returnContent')
+        || !output.required?.includes('artifact')
+        || !output.required?.includes('receipt')
+        || output.properties?.returnContent?.type !== 'boolean'
+        || output.properties?.artifact?.anyOf?.length !== 2
+        || output.properties?.receipt?.type !== 'object') {
+      fail(check, `${name} does not publish the common large-result receipt`);
+    }
+    const description = tool?.description || '';
+    if (!description.includes('Set returnContent true')
+        || !description.includes('Provide output')
+        || !description.includes('independent')
+        || !description.includes('at least one is required')) {
+      fail(check, `${name} does not explain the two independent result choices`);
+    }
+  }
+  note(`${names.length} large-result tools share one bounded-return and file-output contract`);
 }
 
 function checkDocxMergedCellDescriptions(tools) {
@@ -742,19 +791,24 @@ function checkDocxTableStreamingContract(tools) {
   const row = tool?.outputSchema?.properties?.rows?.items;
   const cell = row?.properties?.cells?.items;
   const receipt = tool?.outputSchema?.properties?.receipt;
-  if (!description.includes('exactly the returned row page')
+  if (!description.includes('selected row page')
       || !description.includes('never builds another whole-table data object')
-      || !description.includes('complete only when receipt.remaining is 0')
-      || !description.includes('each page once in ascending receipt.nextOffset order')) {
-    fail(check, 'docx_read_table does not describe one-pass page consumption');
+      || !description.includes('zero-based logical gridColumnStart')
+      || !description.includes('Match columns across rows by gridColumnStart')
+      || !description.includes('physical cell ordinal and is not a column identity')
+      || !description.includes('receipt.remaining is navigation information, not an obligation')
+      || !description.includes('blank template rows need not be paged through')) {
+    fail(check, 'docx_read_table does not describe logical columns and current-decision page consumption');
   }
-  if (cell?.properties?.text?.type !== 'string'
+  if (cell?.properties?.gridColumnStart?.type !== 'integer'
+      || cell?.properties?.gridColumnStart?.minimum !== 0
+      || cell?.properties?.text?.type !== 'string'
       || cell?.properties?.logicalText?.type !== 'string'
       || Object.hasOwn(cell?.properties ?? {}, 'paragraphs')
-      || receipt?.properties?.detailPageRetained?.const !== true) {
+      || receipt?.properties?.detailPageRetained?.type !== 'boolean') {
     fail(check, 'docx_read_table response is not a compact page backed by one detailed page');
   }
-  note('DOCX table pages expose compact cell text while retaining selected-page detail on disk');
+  note('DOCX table pages expose logical columns and compact cell text while retaining selected-page detail on disk');
 }
 
 function unboundedResponseArrays(schema, location = '$', found = []) {
@@ -798,6 +852,7 @@ async function main() {
     await checkPublicSchemas(packageRoot);
     const toolNames = await smokeInstalledPackage(archive, tempRoot);
     checkSourceBoundObservationOutputs(toolNames);
+    checkLargeResultChannels(toolNames);
     checkDocxMergedCellDescriptions(toolNames);
     checkDocxTableStreamingContract(toolNames);
     checkBoundedInspectionOutputs(toolNames);

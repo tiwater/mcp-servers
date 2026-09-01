@@ -1,6 +1,6 @@
 {
   "name": "@tiwater/office-mcp",
-  "version": "0.20.4",
+  "version": "0.21.0",
   "description": "Published MCP server for Tiwater Office document capabilities",
   "type": "module",
   "license": "MIT",
@@ -17,6 +17,7 @@
   },
   "files": [
     "_shared/tool-runtime.mjs",
+    "_shared/large-json-result.mjs",
     "office/index.mjs",
     "office/README.md",
     "office/contracts/tiwater-office-provider-contract-manifest-v1.json",

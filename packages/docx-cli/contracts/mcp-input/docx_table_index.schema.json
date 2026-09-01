@@ -9,10 +9,14 @@
       "description": "Current DOCX path.",
       "x-tiwater-file-role": "read"
     },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Whether to return a bounded table-summary page directly in the tool response. May be combined with output."
+    },
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "New JSON artifact path for the complete table index.",
+      "description": "Optional new JSON artifact path for retaining the complete table index. May be combined with returnContent.",
       "x-tiwater-file-role": "write"
     },
     "limit": {
@@ -25,9 +29,9 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991,
-      "description": "Zero-based table offset. Continue from receipt.nextOffset until it is null."
+      "description": "Zero-based table offset. Continue only when an unreturned table is needed for the current operation."
     }
   },
-  "required": ["input", "output"],
+  "required": ["input", "returnContent"],
   "additionalProperties": false
 }
