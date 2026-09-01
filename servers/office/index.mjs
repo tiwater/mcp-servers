@@ -410,7 +410,7 @@ const tools = [
   },
   {
     name: 'docx_replace_content_from_source',
-    description: 'Replace existing target paragraph or table-cell content from explicitly selected native source paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. Use it after docx_fill_table_from_table when the target needs selected source child content instead of the whole source cell; supply returned target-cell addresses and observed source descendant addresses, never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
+    description: 'Replace existing target paragraph or table-cell content from explicitly selected native source paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. Use it after docx_fill_table_from_tables when the target needs selected source child content instead of the whole source cell; supply returned target-cell addresses and observed source descendant addresses, never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
     inputSchema: inputContract('docx_replace_content_from_source'),
     outputSchema: fixedEditOutput('docx_replace_content_from_source'),
     handler: args => fixedEdit('docx_replace_content_from_source', args),
@@ -424,17 +424,17 @@ const tools = [
   },
   {
     name: 'docx_set_table_body',
-    description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read a source table, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_table and docx_replace_content_from_source for source-owned table content.',
+    description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
     inputSchema: inputContract('docx_set_table_body'),
     outputSchema: fixedEditOutput('docx_set_table_body'),
     handler: args => fixedEdit('docx_set_table_body', args),
   },
   {
-    name: 'docx_fill_table_from_table',
-    description: 'Fill one current target-table body from one current source-table row range. Select the source grid column whose native vertical merges define logical records, then map source grid columns onto the target prototype cells. Target columns belonging to one prototype cell retain that horizontal span; multiple prototype cells receive source values in row order. The provider derives output rows and vertical merges, validates the complete target grid, commits once, and returns structural readback. It does not choose source or target business meaning, filter records, translate or rewrite text, or apply business-specific rules. When only selected source paragraphs belong in the target, use its returned target-cell addresses with docx_replace_content_from_source before readback.',
-    inputSchema: inputContract('docx_fill_table_from_table'),
-    outputSchema: fixedEditOutput('docx_fill_table_from_table'),
-    handler: args => fixedEdit('docx_fill_table_from_table', args),
+    name: 'docx_fill_table_from_tables',
+    description: 'Fill one current target-table body from one or more explicitly ordered current source-table row ranges. For each source, select the grid column whose native vertical merges define logical records and map its grid columns onto every target prototype cell. The provider concatenates source records in declared order, preserves horizontal spans, rebuilds vertical merges only within each source range, validates the complete target grid, commits once, and returns structural readback. It does not discover source tables, choose source or target business meaning, filter records, translate or rewrite text, or apply business-specific rules. A single source uses the same sources array with one item. When only selected source paragraphs belong in the target, use its returned target-cell addresses with docx_replace_content_from_source before readback.',
+    inputSchema: inputContract('docx_fill_table_from_tables'),
+    outputSchema: fixedEditOutput('docx_fill_table_from_tables'),
+    handler: args => fixedEdit('docx_fill_table_from_tables', args),
   },
   {
     name: 'docx_insert_objects',
