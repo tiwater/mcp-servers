@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { requireString } from './tool-runtime.mjs';
@@ -31,7 +31,7 @@ export async function deliverLargeJsonResult({ tool, args, runtime, payload, sou
     runtime,
     sources: await Promise.all(sourcePaths.map(fileArtifact)),
     returnContent: channels.returnContent,
-    artifact: channels.output === null ? null : await writeJsonArtifact(channels.output, payload),
+    artifact: channels.output === null ? null : await writeIdempotentJsonArtifact(channels.output, payload),
     receipt: {
       contentBytes,
       contentReturned,
@@ -47,6 +47,28 @@ export async function writeJsonArtifact(output, payload) {
   const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8');
   await mkdir(path.dirname(fullPath), { recursive: true });
   await writeFile(fullPath, bytes, { flag: 'wx' });
+  return describeJsonArtifact(fullPath, bytes);
+}
+
+export async function writeIdempotentJsonArtifact(output, payload) {
+  const fullPath = path.resolve(output);
+  const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  await mkdir(path.dirname(fullPath), { recursive: true });
+  try {
+    await writeFile(fullPath, bytes, { flag: 'wx' });
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    const existing = await readFile(fullPath);
+    if (!existing.equals(bytes)) {
+      throw Object.assign(new Error(`artifact-path-already-exists-with-different-content:${fullPath}`), {
+        code: 'EEXIST',
+      });
+    }
+  }
+  return describeJsonArtifact(fullPath, bytes);
+}
+
+function describeJsonArtifact(fullPath, bytes) {
   return {
     path: fullPath,
     sha256: createHash('sha256').update(bytes).digest('hex'),

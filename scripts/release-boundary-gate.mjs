@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { writeIdempotentJsonArtifact } from '../servers/_shared/large-json-result.mjs';
 
 const execFileAsync = promisify(execFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -873,6 +874,27 @@ function checkCompactInspectionSummaries(tools) {
   note('XLSX and PPTX inspection always return bounded identity summaries');
 }
 
+async function checkIdempotentReadArtifacts(tempRoot) {
+  const check = 'idempotent-read-artifact';
+  const output = path.join(tempRoot, 'idempotent-read.json');
+  const payload = { schema: 'test/read-result', rows: [{ value: 'same' }] };
+  const first = await writeIdempotentJsonArtifact(output, payload);
+  const replay = await writeIdempotentJsonArtifact(output, payload);
+  if (JSON.stringify(first) !== JSON.stringify(replay)) {
+    fail(check, 'identical read replay did not return the existing artifact identity');
+  }
+  let rejected = false;
+  try {
+    await writeIdempotentJsonArtifact(output, { ...payload, rows: [{ value: 'different' }] });
+  } catch (error) {
+    rejected = error?.code === 'EEXIST';
+  }
+  if (!rejected || JSON.stringify(await readJson(output)) !== JSON.stringify(payload)) {
+    fail(check, 'different read content did not preserve and reject the existing artifact');
+  }
+  note('read artifacts accept identical replay and reject different content without overwrite');
+}
+
 async function main() {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'tiwater-office-boundary-'));
   try {
@@ -891,6 +913,7 @@ async function main() {
     checkDocxTableStreamingContract(toolNames);
     checkBoundedInspectionOutputs(toolNames);
     checkCompactInspectionSummaries(toolNames);
+    await checkIdempotentReadArtifacts(tempRoot);
     const packedPackage = await readJson(path.join(packageRoot, 'package.json'));
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);
   } catch (error) {
