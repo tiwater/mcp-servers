@@ -824,6 +824,8 @@ function checkDocxMergedCellDescriptions(tools) {
   }
   if (!setBodyDescription.includes('Set rowSpan')
       || !setBodyDescription.includes('provider writes native vertical merge cells')
+      || !setBodyDescription.includes('existingRows starts after all of them')
+      || !setBodyDescription.includes('never at a verticalMerge=continue row')
       || setBodyCell?.properties?.rowSpan?.type !== 'integer'
       || setBodyCell?.properties?.rowSpan?.minimum !== 1
       || Object.hasOwn(setBodyCell?.properties ?? {}, 'verticalMerge')) {
