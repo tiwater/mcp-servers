@@ -98,7 +98,7 @@
                 "verticalMerge": {
                   "type": "string",
                   "enum": ["restart", "continue"],
-                  "description": "Native OpenXML vertical merge state. A restart cell owns the text; the same columns in the next physical row use continue with empty text. Omit for an unmerged cell."
+                  "description": "Native OpenXML vertical merge state. A restart cell owns the text; the same columns in the next physical row use continue. A continue cell may repeat the restart text as its logical value or use empty text; it is written physically empty. Omit for an unmerged cell."
                 }
               },
               "required": ["columns", "text"],

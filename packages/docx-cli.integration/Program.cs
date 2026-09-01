@@ -96,10 +96,10 @@ try
                 prototypeRow = rows[3].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "", verticalMerge = (string?)"continue" },
+                    new { columns = new[] { "c0" }, text = "精密度", verticalMerge = (string?)"continue" },
                     new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
                     new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
-                    new { columns = new[] { "c3" }, text = "", verticalMerge = (string?)"continue" },
+                    new { columns = new[] { "c3" }, text = "通过", verticalMerge = (string?)"continue" },
                 }
             }
         },
@@ -268,6 +268,50 @@ try
     });
     Require(orphanContinue.Contains("verticalMerge-continue-without-previous", StringComparison.Ordinal),
         "orphan vertical continuation did not fail explicitly");
+
+    var mismatchedContinueReceipt = Path.Combine(root, "set-table-body-mismatched-continue-receipt.json");
+    var mismatchedContinue = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, mismatchedContinueReceipt, new
+    {
+        input = setBodyOutput,
+        table = setBodyState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = setRows[1].GetProperty("address").Clone(),
+            last = setRows[2].GetProperty("address").Clone(),
+        },
+        columns = setBodyState.GetProperty("gridColumns").EnumerateArray()
+            .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+            .ToArray(),
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = setRows[1].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "项目一", verticalMerge = (string?)"restart" },
+                    new { columns = new[] { "c1" }, text = "标准一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "结论一", verticalMerge = (string?)null },
+                }
+            },
+            new
+            {
+                prototypeRow = setRows[2].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "另一个项目", verticalMerge = (string?)"continue" },
+                    new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "结论二", verticalMerge = (string?)null },
+                }
+            }
+        },
+        output = setBodyOutput,
+        receiptOutput = mismatchedContinueReceipt,
+    });
+    Require(mismatchedContinue.Contains("verticalMerge-continue-text-must-match-restart", StringComparison.Ordinal),
+        "mismatched vertical continuation text did not fail explicitly");
 
     var loneRestartReceipt = Path.Combine(root, "set-table-body-lone-restart-receipt.json");
     var loneRestart = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, loneRestartReceipt, new

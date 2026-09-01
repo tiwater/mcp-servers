@@ -155,24 +155,26 @@ public static class NativeTableBodyMutation
                 var start = positions[0];
                 var span = positions.Length;
                 var key = (start, span);
+                var preparedText = cell.Text;
                 if (cell.VerticalMerge is not null and not "restart" and not "continue")
                     throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}].verticalMerge-invalid");
                 if (cell.VerticalMerge == "continue")
                 {
-                    if (!previousVertical.ContainsKey(key))
+                    if (!previousVertical.TryGetValue(key, out var previous))
                         throw new InvalidOperationException(
                             $"rows[{rowIndex}].cells[{cellIndex}].verticalMerge-continue-without-previous");
-                    if (cell.Text.Length != 0)
+                    if (cell.Text.Length != 0 && !StringComparer.Ordinal.Equals(cell.Text, previous.Text))
                         throw new InvalidOperationException(
-                            $"rows[{rowIndex}].cells[{cellIndex}].verticalMerge-continue-text-must-be-empty");
-                    currentVertical.Add(key, new VerticalMergeState(true));
+                            $"rows[{rowIndex}].cells[{cellIndex}].verticalMerge-continue-text-must-match-restart");
+                    preparedText = "";
+                    currentVertical.Add(key, new VerticalMergeState(true, previous.Text));
                     continuedKeys.Add(key);
                 }
                 else if (cell.VerticalMerge == "restart")
                 {
-                    currentVertical.Add(key, new VerticalMergeState(false));
+                    currentVertical.Add(key, new VerticalMergeState(false, cell.Text));
                 }
-                cells.Add(new PreparedCell(start, span, cell.Text, cell.VerticalMerge));
+                cells.Add(new PreparedCell(start, span, preparedText, cell.VerticalMerge));
             }
             if (!occupied.SetEquals(Enumerable.Range(0, columnCount)))
                 throw new InvalidOperationException($"rows[{rowIndex}]-does-not-cover-table-grid");
@@ -379,7 +381,7 @@ public static class NativeTableBodyMutation
     }
 
     private sealed record CellPosition(TableCell Cell, int Start, int Span);
-    private sealed record VerticalMergeState(bool HasContinuation);
+    private sealed record VerticalMergeState(bool HasContinuation, string Text);
     private sealed record PreparedCell(int Start, int Span, string Text, string? VerticalMerge);
     private sealed record PreparedRow(TableRow Prototype, IReadOnlyList<PreparedCell> Cells);
     private sealed record PreparedTable(
