@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_fill_table_from_table",
+  "type": "object",
+  "properties": {
+    "input": { "type": "string", "minLength": 1, "description": "Current target DOCX.", "x-tiwater-file-role": "read" },
+    "table": {
+      "type": "object",
+      "properties": {
+        "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+        "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+      },
+      "required": ["part", "path"],
+      "additionalProperties": false,
+      "description": "Current target table address returned by docx_read_table or docx_table_index."
+    },
+    "existingRows": {
+      "type": "object",
+      "properties": {
+        "first": {
+          "type": "object",
+          "properties": {
+            "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+            "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+          },
+          "required": ["part", "path"],
+          "additionalProperties": false
+        },
+        "last": {
+          "type": "object",
+          "properties": {
+            "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+            "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+          },
+          "required": ["part", "path"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["first", "last"],
+      "additionalProperties": false,
+      "description": "Exact contiguous current target row range to replace; it must enclose every vertical merge it intersects."
+    },
+    "prototypeRow": {
+      "type": "object",
+      "properties": {
+        "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+        "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+      },
+      "required": ["part", "path"],
+      "additionalProperties": false,
+      "description": "One current row inside existingRows whose cell formatting is reused for every generated body row."
+    },
+    "sourceInput": { "type": "string", "minLength": 1, "description": "Current source DOCX.", "x-tiwater-file-role": "read" },
+    "sourceTable": {
+      "type": "object",
+      "properties": {
+        "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+        "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+      },
+      "required": ["part", "path"],
+      "additionalProperties": false,
+      "description": "Current source table address returned by docx_read_table or docx_table_index."
+    },
+    "sourceRows": {
+      "type": "object",
+      "properties": {
+        "first": {
+          "type": "object",
+          "properties": {
+            "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+            "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+          },
+          "required": ["part", "path"],
+          "additionalProperties": false
+        },
+        "last": {
+          "type": "object",
+          "properties": {
+            "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+            "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+          },
+          "required": ["part", "path"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["first", "last"],
+      "additionalProperties": false,
+      "description": "Exact contiguous source data-row range; it must enclose every vertical merge it intersects."
+    },
+    "sourceRecordColumn": {
+      "type": "object",
+      "properties": {
+        "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+        "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+      },
+      "required": ["part", "path"],
+      "additionalProperties": false,
+      "description": "Source grid-column address whose native vertical-merge owners define consecutive logical records. An unmerged cell defines one record."
+    },
+    "columnMappings": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Complete source-to-target grid-column mapping. Target columns that belong to one prototype cell remain one cell. When the selected target columns cover multiple prototype cells, those cells receive the source column's logical values in source-row order and unused trailing cells stay blank.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sourceColumn": {
+            "type": "object",
+            "properties": {
+              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+              "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+            },
+            "required": ["part", "path"],
+            "additionalProperties": false
+          },
+          "targetColumns": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+                "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+              },
+              "required": ["part", "path"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["sourceColumn", "targetColumns"],
+        "additionalProperties": false
+      }
+    },
+    "output": { "type": "string", "minLength": 1, "description": "Output DOCX path; may equal input for one atomic in-place update.", "x-tiwater-file-role": "write" },
+    "receiptOutput": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write", "x-tiwater-file-effect": false }
+  },
+  "required": ["input", "table", "existingRows", "prototypeRow", "sourceInput", "sourceTable", "sourceRows", "sourceRecordColumn", "columnMappings", "output", "receiptOutput"],
+  "additionalProperties": false
+}

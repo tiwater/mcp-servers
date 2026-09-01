@@ -29,6 +29,7 @@ public static class Cli
         NativeCellMutation.MergeCommand,
         NativeCellMutation.SplitCommand,
         NativeTableBodyMutation.Command,
+        NativeTableFillMutation.Command,
         NativeTableColumnMutation.InsertCommand,
         NativeTableColumnMutation.DeleteCommand,
         NativePolicyMutation.FontCommand,
@@ -88,6 +89,8 @@ public static class Cli
                     => Task.FromResult(NativeCellMutation.Run(args[0], args[1..])),
                 _ when args[0] == NativeTableBodyMutation.Command
                     => Task.FromResult(NativeTableBodyMutation.Run(args[1..])),
+                _ when args[0] == NativeTableFillMutation.Command
+                    => Task.FromResult(NativeTableFillMutation.Run(args[1..])),
                 _ when args[0] is NativeTableColumnMutation.InsertCommand or NativeTableColumnMutation.DeleteCommand
                     => Task.FromResult(NativeTableColumnMutation.Run(args[0], args[1..])),
                 _ when args[0] is NativePolicyMutation.FontCommand or NativePolicyMutation.TocCommand
@@ -190,7 +193,7 @@ public static class Cli
             _ when command is NativeContentCopy.Command or NativeTextMutation.Command
                 or NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                 or NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
-                or NativeTableBodyMutation.Command
+                or NativeTableBodyMutation.Command or NativeTableFillMutation.Command
                 or NativeTableColumnMutation.InsertCommand or NativeTableColumnMutation.DeleteCommand
                 or NativePolicyMutation.FontCommand or NativePolicyMutation.TocCommand
                 => $"tiwater-docx {command} <request.json>",
