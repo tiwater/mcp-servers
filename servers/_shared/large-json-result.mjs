@@ -16,7 +16,7 @@ export function resultChannels(args) {
   return { returnContent, output };
 }
 
-export async function deliverLargeJsonResult({ tool, args, runtime, payload, sourcePaths }) {
+export async function deliverLargeJsonResult({ tool, args, runtime, payload, sourcePaths, summary }) {
   const channels = resultChannels(args);
   const contentBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
   const contentReturned = channels.returnContent && contentBytes <= returnedContentBudgetBytes;
@@ -37,6 +37,7 @@ export async function deliverLargeJsonResult({ tool, args, runtime, payload, sou
       contentReturned,
       contentWritten: channels.output !== null,
     },
+    ...(summary === undefined ? {} : { summary }),
     ...(contentReturned ? { content: payload } : {}),
   };
 }

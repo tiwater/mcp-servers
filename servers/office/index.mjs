@@ -179,6 +179,39 @@ function largeResultOutput(tool) {
   }).strict();
 }
 
+function largeInspectionOutput(tool, summary) {
+  return largeResultOutput(tool).extend({ summary }).strict();
+}
+
+const xlsxInspectionSummary = z.object({
+  sheetCount: z.number().int().nonnegative(),
+  sheets: z.array(z.object({
+    name: z.string(),
+    rowCount: z.number().int().nonnegative(),
+    columnCount: z.number().int().nonnegative(),
+    usedRange: z.string().nullable(),
+    mergedRangeCount: z.number().int().nonnegative(),
+    formulaCellCount: z.number().int().nonnegative(),
+    openingText: z.array(z.object({
+      reference: z.string(),
+      textPreview: z.string(),
+    }).strict()).max(6),
+  }).strict()).max(6),
+}).strict();
+
+const pptxInspectionSummary = z.object({
+  slideCount: z.number().int().nonnegative(),
+  masterCount: z.number().int().nonnegative(),
+  slideSize: z.object({
+    cx: z.number().int().nonnegative(),
+    cy: z.number().int().nonnegative(),
+  }).strict().nullable(),
+  openingSlides: z.array(z.object({
+    slideNumber: z.number().int().positive(),
+    textPreview: z.string(),
+  }).strict()).max(6),
+}).strict();
+
 function docxObservationOutput(tool) {
   return z.object({
     tool: z.literal(tool),
@@ -519,7 +552,7 @@ const tools = [
     name: 'xlsx_inspect',
     description: 'Inspect a current XLSX workbook or legacy XLS workbook, including workbook structure, exported values, formulas, styles, merged ranges, and published legacy-format conversion evidence. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('xlsx_inspect'),
-    outputSchema: largeResultOutput('xlsx_inspect'),
+    outputSchema: largeInspectionOutput('xlsx_inspect', xlsxInspectionSummary),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxInspect,
   },
@@ -544,7 +577,7 @@ const tools = [
     name: 'pptx_inspect',
     description: 'Inspect a PPTX file, including slides, masters, layouts, shapes, transforms, paragraphs, runs, and placeholders. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('pptx_inspect'),
-    outputSchema: largeResultOutput('pptx_inspect'),
+    outputSchema: largeInspectionOutput('pptx_inspect', pptxInspectionSummary),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: pptxInspect,
   },
@@ -1146,7 +1179,14 @@ function nativeRenderBackend(sourceFormat) {
 async function xlsxInspect(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(xlsxCandidates, ['inspect', input, '--json']);
-  return deliverLargeJsonResult({ tool: 'xlsx_inspect', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
+  return deliverLargeJsonResult({
+    tool: 'xlsx_inspect',
+    args,
+    runtime: commandRuntime(result),
+    payload: result.json,
+    sourcePaths: [input],
+    summary: compactXlsxInspection(result.json),
+  });
 }
 
 async function xlsxExportJson(args) {
@@ -1168,7 +1208,14 @@ async function xlsxValidate(args) {
 async function pptxInspect(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(pptxCandidates, ['inspect', input, '--json']);
-  return deliverLargeJsonResult({ tool: 'pptx_inspect', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
+  return deliverLargeJsonResult({
+    tool: 'pptx_inspect',
+    args,
+    runtime: commandRuntime(result),
+    payload: result.json,
+    sourcePaths: [input],
+    summary: compactPptxInspection(result.json),
+  });
 }
 
 async function pptxExportJson(args) {
@@ -1181,6 +1228,58 @@ async function pptxValidate(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(pptxCandidates, ['validate', input], { allowedExitCodes: [0, 1] });
   return deliverLargeJsonResult({ tool: 'pptx_validate', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
+}
+
+function compactPreview(value, maximum) {
+  return typeof value === 'string'
+    ? value.trim().replace(/\s+/gu, ' ').slice(0, maximum)
+    : '';
+}
+
+function compactXlsxInspection(payload) {
+  const workbook = payload?.workbook ?? {};
+  const allSheets = Array.isArray(workbook.sheets) ? workbook.sheets : [];
+  return {
+    sheetCount: Number.isInteger(workbook.sheetCount) ? workbook.sheetCount : allSheets.length,
+    sheets: allSheets.slice(0, 6).map(sheet => ({
+      name: compactPreview(sheet?.name, 120),
+      rowCount: Number.isInteger(sheet?.rowCount) ? sheet.rowCount : 0,
+      columnCount: Number.isInteger(sheet?.columnCount) ? sheet.columnCount : 0,
+      usedRange: typeof sheet?.usedRange === 'string' ? compactPreview(sheet.usedRange, 120) : null,
+      mergedRangeCount: Array.isArray(sheet?.mergedRanges) ? sheet.mergedRanges.length : 0,
+      formulaCellCount: Number.isInteger(sheet?.formulaCellCount) ? sheet.formulaCellCount : 0,
+      openingText: (Array.isArray(sheet?.textCells) ? sheet.textCells : [])
+        .filter(cell => typeof cell?.text === 'string' && cell.text.trim() !== '')
+        .slice(0, 6)
+        .map(cell => ({
+          reference: compactPreview(cell.reference, 40),
+          textPreview: compactPreview(cell.text, 160),
+        })),
+    })),
+  };
+}
+
+function compactPptxInspection(payload) {
+  const slides = Array.isArray(payload?.slides) ? payload.slides : [];
+  return {
+    slideCount: Number.isInteger(payload?.slideCount) ? payload.slideCount : slides.length,
+    masterCount: Array.isArray(payload?.masters) ? payload.masters.length : 0,
+    slideSize: Number.isInteger(payload?.slideSize?.cx) && Number.isInteger(payload?.slideSize?.cy)
+      ? { cx: payload.slideSize.cx, cy: payload.slideSize.cy }
+      : null,
+    openingSlides: slides.slice(0, 6).map((slide, index) => ({
+      slideNumber: Number.isInteger(slide?.slideNumber) && slide.slideNumber > 0
+        ? slide.slideNumber
+        : index + 1,
+      textPreview: compactPreview(
+        (Array.isArray(slide?.shapes) ? slide.shapes : [])
+          .map(shape => shape?.text)
+          .filter(text => typeof text === 'string' && text.trim() !== '')
+          .join(' '),
+        240,
+      ),
+    })),
+  };
 }
 
 async function requireReturnedArtifact(returned, expectedPath, label) {
