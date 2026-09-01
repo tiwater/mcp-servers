@@ -66,10 +66,10 @@ try
                 prototypeRow = rows[1].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "精密度—重复性", rowSpan = (int?)null },
-                    new { columns = new[] { "c1" }, text = "标准一", rowSpan = (int?)null },
-                    new { columns = new[] { "c2" }, text = "结果一", rowSpan = (int?)null },
-                    new { columns = new[] { "c3" }, text = "通过", rowSpan = (int?)2 },
+                    new { columns = new[] { "c0" }, text = "精密度", verticalMerge = (string?)"restart" },
+                    new { columns = new[] { "c1" }, text = "标准一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "通过", verticalMerge = (string?)"restart" },
                 }
             },
             new
@@ -77,9 +77,10 @@ try
                 prototypeRow = rows[3].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "精密度—中间精密度", rowSpan = (int?)null },
-                    new { columns = new[] { "c1" }, text = "标准二", rowSpan = (int?)null },
-                    new { columns = new[] { "c2" }, text = "结果二", rowSpan = (int?)null },
+                    new { columns = new[] { "c0" }, text = "", verticalMerge = (string?)"continue" },
+                    new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "", verticalMerge = (string?)"continue" },
                 }
             }
         },
@@ -90,12 +91,13 @@ try
     Require(setBodyState.GetProperty("rowCount").GetInt32() == 3,
         "set table body did not replace the complete data range");
     var setRows = setBodyState.GetProperty("rows");
-    Require(CellAt(setBodyState, 1, 0).GetProperty("logicalText").GetString() == "精密度—重复性"
+    Require(CellAt(setBodyState, 1, 0).GetProperty("logicalText").GetString() == "精密度"
             && CellAt(setBodyState, 1, 1).GetProperty("logicalText").GetString() == "标准一"
             && CellAt(setBodyState, 1, 2).GetProperty("logicalText").GetString() == "结果一"
             && CellAt(setBodyState, 1, 3).GetProperty("logicalText").GetString() == "通过",
         "set table body shifted semantic columns");
-    Require(CellAt(setBodyState, 2, 0).GetProperty("logicalText").GetString() == "精密度—中间精密度"
+    Require(CellAt(setBodyState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
+            && CellAt(setBodyState, 2, 0).GetProperty("logicalText").GetString() == "精密度"
             && CellAt(setBodyState, 2, 1).GetProperty("logicalText").GetString() == "标准二"
             && CellAt(setBodyState, 2, 2).GetProperty("logicalText").GetString() == "结果二",
         "set table body lost the second semantic row");
@@ -120,9 +122,9 @@ try
             prototypeRow = rows[3].GetProperty("address").Clone(),
             cells = new[]
             {
-                new { columns = new[] { "c0", "c1" }, text = "横向" + index, rowSpan = (int?)null },
-                new { columns = new[] { "c2" }, text = "结果" + index, rowSpan = (int?)null },
-                new { columns = new[] { "c3" }, text = "结论" + index, rowSpan = (int?)null },
+                new { columns = new[] { "c0", "c1" }, text = "横向" + index, verticalMerge = (string?)null },
+                new { columns = new[] { "c2" }, text = "结果" + index, verticalMerge = (string?)null },
+                new { columns = new[] { "c3" }, text = "结论" + index, verticalMerge = (string?)null },
             }
         }).ToArray(),
         output = expandedBodyOutput,
@@ -192,9 +194,9 @@ try
                 prototypeRow = setRows[1].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "缺列", rowSpan = (int?)null },
-                    new { columns = new[] { "c1" }, text = "标准", rowSpan = (int?)null },
-                    new { columns = new[] { "c2" }, text = "结果", rowSpan = (int?)null },
+                    new { columns = new[] { "c0" }, text = "缺列", verticalMerge = (string?)null },
+                    new { columns = new[] { "c1" }, text = "标准", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果", verticalMerge = (string?)null },
                 }
             }
         },
@@ -203,6 +205,94 @@ try
     });
     Require(failedBody.Contains("does-not-cover-table-grid", StringComparison.Ordinal),
         "incomplete table body did not fail explicitly");
+
+    var orphanContinueReceipt = Path.Combine(root, "set-table-body-orphan-continue-receipt.json");
+    var orphanContinue = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, orphanContinueReceipt, new
+    {
+        input = setBodyOutput,
+        table = setBodyState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = setRows[1].GetProperty("address").Clone(),
+            last = setRows[2].GetProperty("address").Clone(),
+        },
+        columns = setBodyState.GetProperty("gridColumns").EnumerateArray()
+            .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+            .ToArray(),
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = setRows[1].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "", verticalMerge = (string?)"continue" },
+                    new { columns = new[] { "c1" }, text = "标准一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "结论一", verticalMerge = (string?)null },
+                }
+            },
+            new
+            {
+                prototypeRow = setRows[2].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "项目二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "结论二", verticalMerge = (string?)null },
+                }
+            }
+        },
+        output = setBodyOutput,
+        receiptOutput = orphanContinueReceipt,
+    });
+    Require(orphanContinue.Contains("verticalMerge-continue-without-previous", StringComparison.Ordinal),
+        "orphan vertical continuation did not fail explicitly");
+
+    var loneRestartReceipt = Path.Combine(root, "set-table-body-lone-restart-receipt.json");
+    var loneRestart = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, loneRestartReceipt, new
+    {
+        input = setBodyOutput,
+        table = setBodyState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = setRows[1].GetProperty("address").Clone(),
+            last = setRows[2].GetProperty("address").Clone(),
+        },
+        columns = setBodyState.GetProperty("gridColumns").EnumerateArray()
+            .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+            .ToArray(),
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = setRows[1].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "项目一", verticalMerge = (string?)"restart" },
+                    new { columns = new[] { "c1" }, text = "标准一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果一", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "结论一", verticalMerge = (string?)null },
+                }
+            },
+            new
+            {
+                prototypeRow = setRows[2].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "c0" }, text = "项目二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c1" }, text = "标准二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果二", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "结论二", verticalMerge = (string?)null },
+                }
+            }
+        },
+        output = setBodyOutput,
+        receiptOutput = loneRestartReceipt,
+    });
+    Require(loneRestart.Contains("verticalMerge-restart-without-continuation", StringComparison.Ordinal),
+        "vertical restart without a continuation did not fail explicitly");
 
     var splitBodyReceipt = Path.Combine(root, "set-table-body-split-merge-receipt.json");
     var splitBody = RunExpectAtomicFailure("docx_set_table_body", original, splitBodyReceipt, new
@@ -222,10 +312,10 @@ try
                 prototypeRow = rows[1].GetProperty("address").Clone(),
                 cells = new[]
                 {
-                    new { columns = new[] { "c0" }, text = "项目", rowSpan = (int?)null },
-                    new { columns = new[] { "c1" }, text = "标准", rowSpan = (int?)null },
-                    new { columns = new[] { "c2" }, text = "结果", rowSpan = (int?)null },
-                    new { columns = new[] { "c3" }, text = "结论", rowSpan = (int?)null },
+                    new { columns = new[] { "c0" }, text = "项目", verticalMerge = (string?)null },
+                    new { columns = new[] { "c1" }, text = "标准", verticalMerge = (string?)null },
+                    new { columns = new[] { "c2" }, text = "结果", verticalMerge = (string?)null },
+                    new { columns = new[] { "c3" }, text = "结论", verticalMerge = (string?)null },
                 }
             }
         },
