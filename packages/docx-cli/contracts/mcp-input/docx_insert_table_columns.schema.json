@@ -13,7 +13,7 @@
           "table": {
             "type": "object",
             "properties": {
-              "part": { "type": "string", "minLength": 1 },
+              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
               "path": { "type": "string", "pattern": "^\\/" }
             },
             "required": ["part", "path"],
@@ -22,7 +22,7 @@
           "sourceColumn": {
             "type": "object",
             "properties": {
-              "part": { "type": "string", "minLength": 1 },
+              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
               "path": { "type": "string", "pattern": "^\\/" }
             },
             "required": ["part", "path"],
@@ -31,7 +31,7 @@
           "before": {
             "type": "object",
             "properties": {
-              "part": { "type": "string", "minLength": 1 },
+              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
               "path": { "type": "string", "pattern": "^\\/" }
             },
             "required": ["part", "path"],

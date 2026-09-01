@@ -343,6 +343,22 @@ function schemaSignals(value, location = '$', signals = []) {
   return signals;
 }
 
+function docxAddressPartSignals(value, location = '$', signals = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => docxAddressPartSignals(item, `${location}[${index}]`, signals));
+    return signals;
+  }
+  if (!value || typeof value !== 'object') return signals;
+  if (value.properties?.part && value.properties?.path
+      && value.properties.part.pattern !== '^\\/') {
+    signals.push(`${location}.properties.part`);
+  }
+  for (const [key, child] of Object.entries(value)) {
+    docxAddressPartSignals(child, `${location}.${key}`, signals);
+  }
+  return signals;
+}
+
 async function checkPublicSchemas(packageRoot) {
   const check = 'public-schemas';
   const packedFiles = (await collectFiles(packageRoot))
@@ -372,6 +388,11 @@ async function checkPublicSchemas(packageRoot) {
     }
     const signals = schemaSignals(schema);
     for (const signal of signals) fail(check, `${path.relative(root, file)} contains business type signal ${signal}`);
+    if (path.basename(file).startsWith('docx_')) {
+      for (const signal of docxAddressPartSignals(schema)) {
+        fail(check, `${path.relative(root, file)} does not require an absolute DOCX part URI at ${signal}`);
+      }
+    }
     const text = JSON.stringify(schema);
     if (forbiddenSchemaTerms.test(text)) fail(check, `${path.relative(root, file)} hits schema keyword backstop`);
   }
