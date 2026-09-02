@@ -46,6 +46,7 @@ try
 
     RunVerticalTextAlignmentObservation();
     RunNativeInlineSelectionComposition();
+    RunBookmarkedParagraphInsertion();
 
     var replacementSource = Path.Combine(root, "content-replacement-source.docx");
     var replacementTarget = Path.Combine(root, "content-replacement-target.docx");
@@ -1267,6 +1268,53 @@ void CreateTocPolicyDocument(string path)
         TocEntry("TemplateTocTop", "_TocPolicyOne", "Entry one", true),
         TocEntry("7", "_TocPolicyTwo", "Entry two", true)));
     main.Document.Save();
+}
+
+void RunBookmarkedParagraphInsertion()
+{
+    var input = Path.Combine(root, "bookmarked-paragraph-insertion.docx");
+    using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+        stylesPart.Styles = new Styles(HeadingStyle("Heading1", 0));
+        stylesPart.Styles.Save();
+        main.Document = new Document(new Body(
+            Heading("Heading1", "_TocInsertionSource", "Reusable heading", "14"),
+            new Paragraph(new Run(new Text("Insertion boundary")))));
+        AssignParagraphIdentities(main.Document);
+        main.Document.Save();
+    }
+
+    var output = Path.Combine(root, "bookmarked-paragraph-insertion-output.docx");
+    Run("docx_insert_objects", new
+    {
+        input,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = input,
+                sources = new[] { new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" } },
+                targetParent = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]" },
+                before = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[2]" },
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, "bookmarked-paragraph-insertion-receipt.json")
+    });
+
+    using var result = WordprocessingDocument.Open(output, false);
+    var body = result.MainDocumentPart?.Document?.Body
+        ?? throw new InvalidOperationException("bookmarked paragraph output body missing");
+    Require(body.Elements<Paragraph>().Count(paragraph => paragraph.InnerText == "Reusable heading") == 2,
+        "bookmarked paragraph was not inserted");
+    Require(body.Descendants<BookmarkStart>().Count() == 1
+            && body.Descendants<BookmarkEnd>().Count() == 1,
+        "inserted paragraph retained source bookmark identity");
+    RequireUniqueWordIdentities(output);
+    RunInput("validate-openxml", output);
+    Console.WriteLine("PASS bookmarked paragraph insertion");
 }
 
 void CreateMergedHeaderSetBodyDocument(string path)

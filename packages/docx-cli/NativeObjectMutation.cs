@@ -250,10 +250,11 @@ public static class NativeObjectMutation
 
     private static void RemoveCopiedIdentities(OpenXmlElement root)
     {
-        foreach (var item in new[] { root }.Concat(root.Descendants()))
+        foreach (var item in new[] { root }.Concat(root.Descendants()).ToArray())
         {
             item.RemoveAttribute("paraId", Word2010Namespace);
             item.RemoveAttribute("textId", Word2010Namespace);
+            if (item is BookmarkStart or BookmarkEnd) item.Remove();
         }
     }
 
