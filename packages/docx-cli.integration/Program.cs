@@ -166,10 +166,10 @@ try
     var fillState = ReadTable(fillOutput, "fill-output");
     Require(fillState.GetProperty("rowCount").GetInt32() == 4,
         "table fill did not derive one target row per logical source record");
-    Require(CellAt(fillState, 1, 0).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
-            && CellAt(fillState, 2, 0).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
+    Require(CellAt(fillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(fillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
             && CellAt(fillState, 2, 0).GetProperty("logicalText").GetString() == "组甲",
-        "table fill merged a source group across target record boundaries");
+        "table fill did not preserve a source group merge across target records");
     Require(CellAt(fillState, 1, 2).GetProperty("logicalText").GetString() == "记录一"
             && CellAt(fillState, 1, 3).GetProperty("logicalText").GetString() == "值一"
             && CellAt(fillState, 1, 4).GetProperty("logicalText").GetString() == "值二",
@@ -218,10 +218,10 @@ try
     });
     var horizontalFillState = ReadTable(horizontalFillOutput, "fill-output-horizontal");
     Require(CellAt(horizontalFillState, 1, 0).GetProperty("gridSpan").GetInt32() == 2
-            && CellAt(horizontalFillState, 1, 0).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
+            && CellAt(horizontalFillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
             && CellAt(horizontalFillState, 2, 0).GetProperty("gridSpan").GetInt32() == 2
-            && CellAt(horizontalFillState, 2, 0).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null,
-        "table fill did not retain a prototype horizontal span within record boundaries");
+            && CellAt(horizontalFillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue",
+        "table fill did not retain a prototype horizontal span while deriving a vertical group");
 
     var composedFillTarget = Path.Combine(root, "fill-target-composed.docx");
     CreateComposedFillTargetDocument(composedFillTarget);
@@ -279,8 +279,8 @@ try
     Require(composedOwner.GetProperty("logicalText").GetString() == "组甲标准甲"
             && composedReceiptState.GetProperty("rows")[0].GetProperty("cells")[0]
                 .GetProperty("text").GetString() == "组甲\n标准甲"
-            && composedOwner.GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
-            && composedContinuation.GetProperty("verticalMerge").ValueKind == JsonValueKind.Null,
+            && composedOwner.GetProperty("verticalMerge").GetString() == "restart"
+            && composedContinuation.GetProperty("verticalMerge").GetString() == "continue",
         $"composed table fill mismatch: text={composedOwner.GetProperty("logicalText").GetString()}; "
         + $"owner={composedOwner.GetProperty("verticalMerge")}; continuation={composedContinuation.GetProperty("verticalMerge")}");
 
@@ -328,12 +328,12 @@ try
     Require(clippedFillState.GetProperty("rowCount").GetInt32() == 3,
         "clipped table fill did not retain exactly the selected source records");
     Require(CellAt(clippedFillState, 1, 0).GetProperty("logicalText").GetString() == "共享项目"
-            && CellAt(clippedFillState, 1, 0).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
-            && CellAt(clippedFillState, 2, 0).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
+            && CellAt(clippedFillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(clippedFillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
             && CellAt(clippedFillState, 1, 4).GetProperty("logicalText").GetString() == "通过"
-            && CellAt(clippedFillState, 1, 4).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
-            && CellAt(clippedFillState, 2, 4).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null,
-        "table fill merged mapped source owners across logical record boundaries");
+            && CellAt(clippedFillState, 1, 4).GetProperty("verticalMerge").GetString() == "restart"
+            && CellAt(clippedFillState, 2, 4).GetProperty("verticalMerge").GetString() == "continue",
+        "table fill did not clip intersecting source vertical merges to the selected row range");
     Require(CellAt(clippedFillState, 1, 2).GetProperty("logicalText").GetString() == "记录乙"
             && CellAt(clippedFillState, 2, 2).GetProperty("logicalText").GetString() == "记录丙",
         "clipped table fill changed the selected record order or values");
