@@ -11,6 +11,33 @@ internal static class DocxFieldResultMerger
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static readonly XNamespace W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
 
+    internal static string PrepareSourceParagraphIdentities(string sourcePath, string outputDirectory)
+    {
+        var document = LoadDocument(sourcePath);
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var changed = false;
+        uint nextId = 1;
+        foreach (var paragraph in document.Descendants(W + "p"))
+        {
+            var id = (string?)paragraph.Attribute(W14 + "paraId");
+            if (!string.IsNullOrWhiteSpace(id)
+                && Regex.IsMatch(id, "^[0-9A-Fa-f]{8}$")
+                && used.Add(id))
+                continue;
+
+            string replacement;
+            do replacement = nextId++.ToString("X8");
+            while (!used.Add(replacement));
+            paragraph.SetAttributeValue(W14 + "paraId", replacement);
+            changed = true;
+        }
+        if (!changed) return sourcePath;
+
+        var preparedPath = Path.Combine(outputDirectory, "field-refresh-source.docx");
+        WriteDocumentPart(sourcePath, document, preparedPath);
+        return preparedPath;
+    }
+
     internal static void Merge(string sourcePath, string refreshedPath, string outputPath)
     {
         var source = LoadDocument(sourcePath);
@@ -27,10 +54,15 @@ internal static class DocxFieldResultMerger
         }
 
         var bodyFontPolicy = UniformExplicitBodyFontPolicy(source);
-        NormalizeTocResultStyles(sourcePath, source, refreshed, refreshedRegions);
+        NormalizeTocResultStyles(sourcePath, source, refreshed, sourceRegions, refreshedRegions);
         CopyTocBookmarks(source, refreshed, sourceRegions, refreshedRegions);
         ReplaceIndexRegions(source, refreshed, sourceRegions, refreshedRegions, bodyFontPolicy);
 
+        WriteDocumentPart(sourcePath, source, outputPath);
+    }
+
+    private static void WriteDocumentPart(string sourcePath, XDocument document, string outputPath)
+    {
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
         var temporaryOutput = Path.Combine(
@@ -45,7 +77,7 @@ internal static class DocxFieldResultMerger
                 existing.Delete();
                 var replacement = archive.CreateEntry(DocumentPart, CompressionLevel.Optimal);
                 using var stream = replacement.Open();
-                source.Save(stream, SaveOptions.DisableFormatting);
+                document.Save(stream, SaveOptions.DisableFormatting);
             }
             File.Move(temporaryOutput, outputPath, overwrite: true);
         }
@@ -153,12 +185,13 @@ internal static class DocxFieldResultMerger
         string sourcePath,
         XDocument source,
         XDocument refreshed,
+        IReadOnlyList<IndexRegion> sourceRegions,
         IReadOnlyList<IndexRegion> refreshedRegions)
     {
         var headingRegions = refreshedRegions.Where(region => region.Kind == "table-of-contents").ToList();
         if (headingRegions.Count == 0) return;
         var styles = LoadPart(sourcePath, StylesPart);
-        var tocStyles = TocStylesByLevel(styles);
+        var tocStyles = SourceTocParagraphsByLevel(source, sourceRegions, styles);
         var sourceParagraphs = ParagraphsById(source);
         var refreshedBody = refreshed.Root!.Element(W + "body")!;
         var refreshedBlocks = refreshedBody.Elements().ToList();
@@ -189,25 +222,58 @@ internal static class DocxFieldResultMerger
                     || !sourceParagraphs.TryGetValue(paragraphIds[0], out var sourceHeading))
                     throw new InvalidOperationException("WPS field refresh produced a TOC entry without a unique source heading.");
                 var level = OutlineLevel(sourceHeading, styles);
-                if (level <= 0 || !tocStyles.TryGetValue(level, out var tocStyleId))
-                    throw new InvalidOperationException("Source template does not define the TOC style required by a refreshed heading.");
-                ApplyTemplateTocStyle(paragraph, tocStyleId);
+                if (level <= 0)
+                    throw new InvalidOperationException("Source template TOC heading has no outline level.");
+                if (tocStyles.TryGetValue(level, out var tocParagraphProperties))
+                    ApplyTemplateTocStyle(paragraph, tocParagraphProperties);
+                else
+                    RemoveRefreshedTocTextFormatting(paragraph);
             }
         }
     }
 
-    private static Dictionary<int, string> TocStylesByLevel(XDocument styles)
+    private static Dictionary<int, XElement> SourceTocParagraphsByLevel(
+        XDocument source,
+        IReadOnlyList<IndexRegion> sourceRegions,
+        XDocument styles)
     {
-        var result = new Dictionary<int, string>();
-        foreach (var style in styles.Descendants(W + "style")
-                     .Where(style => string.Equals((string?)style.Attribute(W + "type"), "paragraph", StringComparison.OrdinalIgnoreCase)))
+        var body = source.Root!.Element(W + "body")!;
+        var blocks = body.Elements().ToList();
+        var indexBlocks = sourceRegions
+            .SelectMany(region => blocks.Skip(region.StartBlock).Take(region.EndBlock - region.StartBlock + 1))
+            .ToHashSet();
+        var targets = source.Descendants(W + "bookmarkStart")
+            .Where(IsTocBookmark)
+            .Where(start => !indexBlocks.Any(block => start.AncestorsAndSelf().Contains(block)))
+            .GroupBy(start => (string)start.Attribute(W + "name")!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<int, XElement>();
+        foreach (var region in sourceRegions.Where(region => region.Kind == "table-of-contents"))
         {
-            var id = (string?)style.Attribute(W + "styleId") ?? string.Empty;
-            var name = (string?)style.Element(W + "name")?.Attribute(W + "val") ?? string.Empty;
-            var token = id.StartsWith("TOC", StringComparison.OrdinalIgnoreCase) ? id[3..]
-                : name.StartsWith("toc ", StringComparison.OrdinalIgnoreCase) ? name[4..] : string.Empty;
-            if (int.TryParse(token, out var level) && level > 0 && !result.TryAdd(level, id))
-                throw new InvalidOperationException($"Source template defines duplicate TOC level {level} styles.");
+            foreach (var paragraph in blocks
+                         .Skip(region.StartBlock)
+                         .Take(region.EndBlock - region.StartBlock + 1)
+                         .SelectMany(block => block.DescendantsAndSelf(W + "p")))
+            {
+                var bookmarkNames = ReferencedBookmarkNames([paragraph]);
+                if (bookmarkNames.Count == 0) continue;
+                if (bookmarkNames.Count != 1
+                    || !targets.TryGetValue(bookmarkNames.Single(), out var starts)
+                    || starts.Count != 1)
+                    throw new InvalidOperationException("Source template TOC entry does not identify one heading.");
+                var target = starts[0].Ancestors(W + "p").FirstOrDefault()
+                    ?? throw new InvalidOperationException("Source template TOC bookmark has no heading paragraph.");
+                var level = OutlineLevel(target, styles);
+                var properties = paragraph.Element(W + "pPr")
+                    ?? throw new InvalidOperationException("Source template TOC entry has no paragraph properties.");
+                if (level <= 0) throw new InvalidOperationException("Source template TOC heading has no outline level.");
+                if (result.TryGetValue(level, out var existing))
+                {
+                    if (!XNode.DeepEquals(existing, properties))
+                        throw new InvalidOperationException($"Source template defines inconsistent TOC level {level} formatting.");
+                }
+                else result.Add(level, new XElement(properties));
+            }
         }
         return result;
     }
@@ -230,16 +296,16 @@ internal static class DocxFieldResultMerger
         return 0;
     }
 
-    private static void ApplyTemplateTocStyle(XElement paragraph, string styleId)
+    private static void ApplyTemplateTocStyle(XElement paragraph, XElement templateProperties)
     {
         var properties = paragraph.Element(W + "pPr");
-        if (properties is null)
-        {
-            properties = new XElement(W + "pPr");
-            paragraph.AddFirst(properties);
-        }
-        properties.RemoveNodes();
-        properties.Add(new XElement(W + "pStyle", new XAttribute(W + "val", styleId)));
+        if (properties is null) paragraph.AddFirst(new XElement(templateProperties));
+        else properties.ReplaceWith(new XElement(templateProperties));
+        RemoveRefreshedTocTextFormatting(paragraph);
+    }
+
+    private static void RemoveRefreshedTocTextFormatting(XElement paragraph)
+    {
         foreach (var run in paragraph.Descendants(W + "r").Where(run => run.Descendants(W + "t").Any()))
             run.Element(W + "rPr")?.Remove();
     }
@@ -303,7 +369,6 @@ internal static class DocxFieldResultMerger
         var refreshedIndexBlocks = refreshedRegions
             .SelectMany(region => refreshedBlocks.Skip(region.StartBlock).Take(region.EndBlock - region.StartBlock + 1))
             .ToHashSet();
-        var sourceReferencedBookmarkNames = ReferencedBookmarkNames(sourceIndexBlocks);
         var referencedBookmarkNames = ReferencedBookmarkNames(refreshedIndexBlocks);
         var refreshedEnds = refreshed.Descendants(W + "bookmarkEnd")
             .Where(end => !string.IsNullOrWhiteSpace((string?)end.Attribute(W + "id")))
@@ -324,7 +389,7 @@ internal static class DocxFieldResultMerger
 
         var oldStarts = source.Descendants(W + "bookmarkStart")
             .Where(IsTocBookmark)
-            .Where(start => sourceReferencedBookmarkNames.Contains((string)start.Attribute(W + "name")!))
+            .Where(start => !sourceIndexBlocks.Any(block => start.AncestorsAndSelf().Contains(block)))
             .ToList();
         var oldIds = oldStarts.Select(start => (string?)start.Attribute(W + "id"))
             .Where(id => !string.IsNullOrWhiteSpace(id))

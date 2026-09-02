@@ -15,15 +15,25 @@ public static class DocumentFieldRefresher
         if (string.Equals(Path.GetFullPath(input), Path.GetFullPath(output), StringComparison.Ordinal))
             throw new InvalidOperationException("Document field refresh requires distinct input and output paths.");
 
-        if (WpsPdfConverter.IsAvailable())
+        var preparationRoot = Path.Combine(Path.GetTempPath(), $"tiwater-docx-field-source-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(preparationRoot);
+        try
         {
-            WpsPdfConverter.RefreshDocxFields(input, output);
-            return new DocumentFieldRefreshResult("wps");
+            var preparedInput = DocxFieldResultMerger.PrepareSourceParagraphIdentities(input, preparationRoot);
+            if (WpsPdfConverter.IsAvailable())
+            {
+                WpsPdfConverter.RefreshDocxFields(preparedInput, output);
+                return new DocumentFieldRefreshResult("wps");
+            }
+            if (LimaWpsPdfConverter.IsAvailable())
+            {
+                LimaWpsPdfConverter.RefreshDocxFields(preparedInput, output);
+                return new DocumentFieldRefreshResult("wps");
+            }
         }
-        if (LimaWpsPdfConverter.IsAvailable())
+        finally
         {
-            LimaWpsPdfConverter.RefreshDocxFields(input, output);
-            return new DocumentFieldRefreshResult("wps");
+            try { Directory.Delete(preparationRoot, recursive: true); } catch { }
         }
 
         throw new InvalidOperationException(

@@ -976,6 +976,7 @@ try
     RunInput("validate-openxml", insertedInsideOtherSpan);
     RunInput("validate-openxml", merged);
 
+    RunTocStylePolicyMatrix();
     foreach (var shape in new[] { "flat", "horizontal", "vertical", "mixed", "rectangle", "irregular", "multi-paragraph" })
         RunTableOperationMatrix(shape, path => CreateMatrixDocument(path, shape));
     RunTableOperationMatrix("nested", CreateNestedMatrixDocument, tableIndex: 1);
@@ -988,6 +989,93 @@ finally
 {
     Directory.Delete(root, recursive: true);
 }
+
+void RunTocStylePolicyMatrix()
+{
+    foreach (var (italic, indentCharacters) in new[] { (false, 2), (true, 1) })
+    {
+        var input = Path.Combine(root, $"toc-policy-{italic}-input.docx");
+        var output = Path.Combine(root, $"toc-policy-{italic}-output.docx");
+        CreateTocPolicyDocument(input);
+        Run("docx_apply_toc_style_policy", new
+        {
+            input,
+            italic,
+            indentCharactersPerLevel = indentCharacters,
+            output,
+            receiptOutput = Path.Combine(root, $"toc-policy-{italic}-receipt.json")
+        });
+        using var document = WordprocessingDocument.Open(output, false);
+        var entries = document.MainDocumentPart!.Document.Body!.Elements<Paragraph>()
+            .Where(paragraph => paragraph.Descendants<Text>().Any(text => text.Text.StartsWith("Entry", StringComparison.Ordinal)))
+            .ToList();
+        Require(entries.Count == 2, "TOC policy did not retain both result entries");
+        for (var index = 0; index < entries.Count; index++)
+        {
+            var expectedIndent = index * 2 * indentCharacters * 100;
+            Require(entries[index].ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value == expectedIndent,
+                "TOC policy did not apply the actual entry indentation");
+            Require(entries[index].ParagraphProperties?.Tabs?.Elements<TabStop>()
+                    .Any(tab => tab.Val?.Value == TabStopValues.Right && tab.Leader?.Value == TabStopLeaderCharValues.Dot) == true,
+                "TOC policy removed the template tab leader");
+            Require(entries[index].Descendants<Run>().All(run =>
+                    (run.RunProperties?.Italic?.Val?.Value ?? true) == italic
+                    && (run.RunProperties?.ItalicComplexScript?.Val?.Value ?? true) == italic),
+                "TOC policy did not apply the actual entry italic setting");
+        }
+        Require(entries[1].ParagraphProperties?.ParagraphStyleId?.Val?.Value == "7",
+            "TOC policy replaced an undefined template style reference");
+        RunInput("validate-openxml", output);
+    }
+}
+
+void CreateTocPolicyDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+    stylesPart.Styles = new Styles(
+        HeadingStyle("Heading1", 0),
+        HeadingStyle("Heading3", 2),
+        new Style(new StyleName { Val = "Template TOC top" })
+        {
+            Type = StyleValues.Paragraph,
+            StyleId = "TemplateTocTop",
+            CustomStyle = true
+        });
+    stylesPart.Styles.Save();
+    main.Document = new Document(new Body(
+        Heading("Heading1", "_TocPolicyOne", "Heading one", "1"),
+        Heading("Heading3", "_TocPolicyTwo", "Heading two", "2"),
+        TocEntry("TemplateTocTop", "_TocPolicyOne", "Entry one", true),
+        TocEntry("7", "_TocPolicyTwo", "Entry two", true)));
+    main.Document.Save();
+}
+
+Style HeadingStyle(string id, int level)
+    => new(new StyleName { Val = id }, new StyleParagraphProperties(new OutlineLevel { Val = level }))
+    {
+        Type = StyleValues.Paragraph,
+        StyleId = id
+    };
+
+Paragraph Heading(string style, string bookmark, string text, string id)
+    => new(
+        new ParagraphProperties(new ParagraphStyleId { Val = style }),
+        new BookmarkStart { Name = bookmark, Id = id },
+        new Run(new Text(text)),
+        new BookmarkEnd { Id = id });
+
+Paragraph TocEntry(string style, string bookmark, string text, bool italic)
+    => new(
+        new ParagraphProperties(
+            new ParagraphStyleId { Val = style },
+            new Tabs(new TabStop { Val = TabStopValues.Right, Leader = TabStopLeaderCharValues.Dot, Position = 9000 }),
+            new Indentation { FirstLineChars = 200 }),
+        new Run(new FieldCode($" HYPERLINK \\l {bookmark} ")),
+        new Run(new RunProperties(new Italic { Val = italic }, new ItalicComplexScript { Val = italic }), new Text(text)),
+        new Run(new TabChar()),
+        new Run(new Text("1")));
 
 void RunTableOperationMatrix(string name, Action<string> create, int tableIndex = 0)
 {

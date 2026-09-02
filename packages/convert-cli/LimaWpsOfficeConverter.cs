@@ -54,9 +54,7 @@ internal static class LimaWpsPdfConverter
                 RunDocumentFieldRefresh(limactl, instance, stagedInput, stagedOutput);
             }
             ValidateDocx(stagedOutput);
-            var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
-            if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
-            File.Copy(stagedOutput, output, overwrite: true);
+            DocxFieldResultMerger.Merge(input, stagedOutput, output);
         }
         finally
         {
