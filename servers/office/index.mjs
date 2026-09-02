@@ -237,7 +237,7 @@ function docxInspectionOutput(tool) {
         address: docxAddress,
         textPreview: z.string().min(1).max(240),
       }).strict()).max(6),
-    }).strict().optional(),
+    }).strict(),
   }).strict();
 }
 
@@ -372,7 +372,7 @@ const docxReadObjectOutput = docxObservationOutput('docx_read_object').extend({
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX. Set returnContent true to return the compact identity summary. Provide output to retain the complete machine observation and return its artifact receipt. These channels are independent and may be used together. At least one channel is required. Use list and read operations to traverse selected document objects in native structure order.',
+    description: 'Inspect one current DOCX. The response always includes a bounded identity summary. Set returnContent true when that summary is the requested direct result. Provide output to retain the complete machine observation and return its artifact receipt. These channels are independent and may be used together. At least one channel is required. Use list and read operations to traverse selected document objects in native structure order.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -759,7 +759,7 @@ async function docxInspect(args) {
     artifact: delivery.output === null
       ? null
       : await writeIdempotentJsonArtifact(delivery.output, result.json),
-    ...(delivery.returnContent ? compactDocxInspection(result.json) : {}),
+    ...compactDocxInspection(result.json),
   };
 }
 
