@@ -23,6 +23,7 @@ import {
   writeJsonArtifact,
 } from '../_shared/large-json-result.mjs';
 import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
+import { compactDocxObjectIdentity } from './docx-object-identity.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const inputContractManifest = JSON.parse(await readFile(
@@ -372,7 +373,7 @@ const docxReadObjectOutput = docxObservationOutput('docx_read_object').extend({
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX. The response always includes a bounded identity summary. Set returnContent true when that summary is the requested direct result. Provide output to retain the complete machine observation and return its artifact receipt. These channels are independent and may be used together. At least one channel is required. Use list and read operations to traverse selected document objects in native structure order.',
+    description: 'Inspect one current DOCX for identity and package overview. The response always includes a bounded identity summary. Set returnContent true when that summary is the requested direct result. Provide output to retain the complete machine observation and return its artifact receipt. These channels are independent and may be used together. At least one channel is required. Use list and read operations to traverse selected document objects in native structure order. This overview is not a complete final-document readback; use docx_export_json when a downstream consumer requires the complete body projection.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -426,7 +427,7 @@ const tools = [
   },
   {
     name: 'docx_set_table_body',
-    description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
+    description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Set cantSplit on a final physical row when it must remain whole across page boundaries; omit it to preserve the prototype row property. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
     inputSchema: inputContract('docx_set_table_body'),
     outputSchema: fixedEditOutput('docx_set_table_body'),
     handler: args => fixedEdit('docx_set_table_body', args),
@@ -490,7 +491,7 @@ const tools = [
   },
   {
     name: 'docx_export_json',
-    description: 'Produce a body-only DOCX JSON projection only when a downstream consumer explicitly requires that format. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required. This does not replace bounded list and read operations.',
+    description: 'Produce the complete body-only DOCX JSON projection required for final-document readback or another downstream consumer of that format. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required. This does not replace bounded list and read operations during document processing.',
     inputSchema: inputContract('docx_export_json'),
     outputSchema: largeResultOutput('docx_export_json'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -691,18 +692,6 @@ function compactDocxInspection(report) {
       tableCount: report.tables.tables.length,
       openingParagraphs,
     },
-  };
-}
-
-function compactDocxObjectIdentity(object) {
-  return {
-    address: object.address,
-    parentAddress: object.parentAddress,
-    kind: object.kind,
-    textPreview: object.textPreview,
-    gridSpan: object.gridSpan,
-    verticalMerge: object.verticalMerge,
-    verticalTextAlignment: object.verticalTextAlignment,
   };
 }
 
