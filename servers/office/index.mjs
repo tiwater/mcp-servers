@@ -248,6 +248,7 @@ const docxObjectIdentity = z.object({
   textPreview: z.string().nullable(),
   gridSpan: z.number().int().positive().nullable(),
   verticalMerge: z.string().nullable(),
+  verticalTextAlignment: z.enum(['baseline', 'superscript', 'subscript']).nullable(),
 }).strict();
 
 const docxNestedObjectIdentity = docxObjectIdentity.pick({
@@ -259,6 +260,7 @@ const docxNestedObjectIdentity = docxObjectIdentity.pick({
   verticalMerge: z.string().optional(),
   verticalMergeOwner: docxAddress.optional(),
   logicalText: z.string().optional(),
+  verticalTextAlignment: z.enum(['baseline', 'superscript', 'subscript']).optional(),
 }).strict();
 const docxObservationNode = z.lazy(() => z.object({
   object: docxNestedObjectIdentity,
@@ -394,7 +396,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read explicitly selected rows, cells, or paragraphs from one native DOCX. Set returnContent true to return compact requested descendants; if receipt.narrowingRequired is true, request fewer addresses or descendant kinds. Provide output to store the complete selected observation and return its artifact receipt. These channels are independent and may be used together; at least one is required. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. Use docx_read_table for a table range.',
+    description: 'Read explicitly selected rows, cells, or paragraphs from one native DOCX. Set returnContent true to return compact requested descendants; if receipt.narrowingRequired is true, request fewer addresses or descendant kinds. Provide output to store the complete selected observation and return its artifact receipt. These channels are independent and may be used together; at least one is required. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. Run and text descendants expose their native verticalTextAlignment when it is baseline, superscript, or subscript. Use docx_read_table for a table range.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -402,7 +404,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read an explicit row range from exactly one table selected by native OpenXML address; it never builds another whole-table data object. Set returnContent true to return a byte-bounded compact row page. Provide output to store full paragraph and text-node detail for the selected row page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Request only rows needed for the current decision; receipt.remaining is navigation information, not an obligation to read unused rows, and blank template rows need not be paged through. receipt.nextOffset is present only when another row page exists. Each returned row and cell keeps its reusable native address, zero-based logical gridColumnStart, gridSpan, vertical-merge owner, physical text, and logical text. Match columns across rows by gridColumnStart; a tc[n] path or array position is only that row\'s physical cell ordinal and is not a column identity when gridSpan or gridBefore is present. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Use docx_read_object when one exact object needs a narrower descendant view. The provider reports physical structure only; the Agent decides template and business meaning.',
+    description: 'Read an explicit row range from exactly one table selected by native OpenXML address; it never builds another whole-table data object. Set returnContent true to return a byte-bounded compact row page. Provide output to store full paragraph and text-node detail, including native verticalTextAlignment, for the selected row page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Request only rows needed for the current decision; receipt.remaining is navigation information, not an obligation to read unused rows, and blank template rows need not be paged through. receipt.nextOffset is present only when another row page exists. Each returned row and cell keeps its reusable native address, zero-based logical gridColumnStart, gridSpan, vertical-merge owner, physical text, and logical text. Match columns across rows by gridColumnStart; a tc[n] path or array position is only that row\'s physical cell ordinal and is not a column identity when gridSpan or gridBefore is present. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Use docx_read_object when one exact object needs a narrower descendant view. The provider reports physical structure only; the Agent decides template and business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -410,7 +412,7 @@ const tools = [
   },
   {
     name: 'docx_replace_content_from_source',
-    description: 'Replace existing target paragraph or table-cell content from explicitly selected native source paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. Use it after docx_fill_table_from_tables when the target needs selected source child content instead of the whole source cell; supply returned target-cell addresses and observed source descendant addresses, never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
+    description: 'Replace existing target paragraph or table-cell content from explicitly selected native source paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. Consecutive run or text selections from one source paragraph form one target paragraph, text selections retain their owning run formatting, and source paragraph boundaries remain paragraph boundaries. Use it after docx_fill_table_from_tables when the target needs selected source child content instead of the whole source cell; supply returned target-cell addresses and observed source descendant addresses, never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
     inputSchema: inputContract('docx_replace_content_from_source'),
     outputSchema: fixedEditOutput('docx_replace_content_from_source'),
     handler: args => fixedEdit('docx_replace_content_from_source', args),
@@ -700,6 +702,7 @@ function compactDocxObjectIdentity(object) {
     textPreview: object.textPreview,
     gridSpan: object.gridSpan,
     verticalMerge: object.verticalMerge,
+    verticalTextAlignment: object.verticalTextAlignment,
   };
 }
 
@@ -734,6 +737,7 @@ function compactDocxObservation(observation) {
       ...(identity.verticalMerge === null ? {} : { verticalMerge: identity.verticalMerge }),
       ...(node.object.verticalMergeOwner === null ? {} : { verticalMergeOwner: node.object.verticalMergeOwner }),
       ...(node.object.logicalText === null ? {} : { logicalText: node.object.logicalText }),
+      ...(identity.verticalTextAlignment === null ? {} : { verticalTextAlignment: identity.verticalTextAlignment }),
     };
     return {
       object,

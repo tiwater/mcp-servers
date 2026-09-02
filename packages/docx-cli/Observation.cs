@@ -183,7 +183,9 @@ public static class Observation
                     Address(selected.StoryPart, NativePathFor(paragraph)),
                     paragraph.InnerText,
                     paragraph.Descendants<Text>().Select(value => new DocxTableReadText(
-                        Address(selected.StoryPart, NativePathFor(value)), value.Text)).ToArray()
+                        Address(selected.StoryPart, NativePathFor(value)),
+                        value.Text,
+                        VerticalTextAlignmentValue(value))).ToArray()
                     )).ToArray());
             }).ToArray()
         )).ToArray();
@@ -511,7 +513,17 @@ public static class Observation
             cellProperties is null ? null : Math.Max(1, cellProperties.GridSpan?.Val?.Value ?? 1),
             verticalMerge,
             verticalMergeOwner,
-            logicalText);
+            logicalText,
+            VerticalTextAlignmentValue(item.Element));
+    }
+
+    private static string? VerticalTextAlignmentValue(OpenXmlElement element)
+    {
+        var run = element as Run ?? element.Ancestors<Run>().FirstOrDefault();
+        if (run is null) return null;
+        var alignment = run.RunProperties?.VerticalTextAlignment;
+        return alignment?.GetAttributes()
+            .FirstOrDefault(attribute => attribute.LocalName == "val").Value;
     }
 
     private static DocxObjectAddress? PublishedParentAddress(Snapshot snapshot, NativeObject item)
@@ -681,7 +693,8 @@ public sealed record DocxObservationObject(
     [property: JsonPropertyName("gridSpan")] int? GridSpan,
     [property: JsonPropertyName("verticalMerge")] string? VerticalMerge,
     [property: JsonPropertyName("verticalMergeOwner")] DocxObjectAddress? VerticalMergeOwner,
-    [property: JsonPropertyName("logicalText")] string? LogicalText);
+    [property: JsonPropertyName("logicalText")] string? LogicalText,
+    [property: JsonPropertyName("verticalTextAlignment")] string? VerticalTextAlignment);
 
 public sealed record DocxTextMatch(
     [property: JsonPropertyName("offset")] int Offset,
@@ -739,7 +752,8 @@ public sealed record DocxTableIndexResult(
 
 public sealed record DocxTableReadText(
     [property: JsonPropertyName("address")] DocxObjectAddress Address,
-    [property: JsonPropertyName("text")] string Text);
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("verticalTextAlignment")] string? VerticalTextAlignment);
 
 public sealed record DocxTableReadParagraph(
     [property: JsonPropertyName("address")] DocxObjectAddress Address,

@@ -174,11 +174,11 @@
       "name": "docx_replace_content_from_source",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_content_from_source.schema.json",
-        "sha256": "d6ce53f684ea0991508cab930e101c910ac05e9725cc25d5312806070c20d320"
+        "sha256": "7a2616aa943597775d78444887722cf09e96c1bd4e3e920c2d773986d8626eb0"
       },
       "inputContract": {
         "path": "office/contracts/docx_replace_content_from_source.schema.json",
-        "sha256": "d6ce53f684ea0991508cab930e101c910ac05e9725cc25d5312806070c20d320"
+        "sha256": "7a2616aa943597775d78444887722cf09e96c1bd4e3e920c2d773986d8626eb0"
       }
     },
     {
