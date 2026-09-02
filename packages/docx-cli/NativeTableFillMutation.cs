@@ -49,9 +49,8 @@ public static class NativeTableFillMutation
             if (records.Count == 0)
                 throw new InvalidOperationException($"sources[{sourceIndex}].rows-must-contain-a-record");
             var ownerScope = "source-" + sourceIndex;
-            values.AddRange(records.Select((record, recordIndex) =>
-                BuildRecord(record, mappings, targetSlots.Count,
-                    ownerScope + "-record-" + recordIndex)));
+            values.AddRange(records.Select(record =>
+                BuildRecord(record, mappings, targetSlots.Count, ownerScope)));
             sourceReadbacks.Add(new FillTableSourceReadback(
                 sourceInput, requestSource.Table, requestSource.Rows, records.Count));
         }
