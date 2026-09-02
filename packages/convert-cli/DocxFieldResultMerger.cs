@@ -7,6 +7,7 @@ namespace Dockit.Convert;
 internal static class DocxFieldResultMerger
 {
     private const string DocumentPart = "word/document.xml";
+    private const string StylesPart = "word/styles.xml";
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static readonly XNamespace W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
 
@@ -26,6 +27,7 @@ internal static class DocxFieldResultMerger
         }
 
         var bodyFontPolicy = UniformExplicitBodyFontPolicy(source);
+        NormalizeTocResultStyles(sourcePath, source, refreshed, refreshedRegions);
         CopyTocBookmarks(source, refreshed, sourceRegions, refreshedRegions);
         ReplaceIndexRegions(source, refreshed, sourceRegions, refreshedRegions, bodyFontPolicy);
 
@@ -58,6 +60,15 @@ internal static class DocxFieldResultMerger
         using var archive = ZipFile.OpenRead(path);
         var entry = archive.GetEntry(DocumentPart)
             ?? throw new InvalidOperationException($"DOCX package is missing {DocumentPart}.");
+        using var stream = entry.Open();
+        return XDocument.Load(stream, LoadOptions.PreserveWhitespace);
+    }
+
+    private static XDocument LoadPart(string path, string part)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        var entry = archive.GetEntry(part)
+            ?? throw new InvalidOperationException($"DOCX package is missing {part}.");
         using var stream = entry.Open();
         return XDocument.Load(stream, LoadOptions.PreserveWhitespace);
     }
@@ -136,6 +147,101 @@ internal static class DocxFieldResultMerger
             for (var block = sourceRegion.EndBlock; block >= sourceRegion.StartBlock; block--)
                 sourceBlocks[block].Remove();
         }
+    }
+
+    private static void NormalizeTocResultStyles(
+        string sourcePath,
+        XDocument source,
+        XDocument refreshed,
+        IReadOnlyList<IndexRegion> refreshedRegions)
+    {
+        var headingRegions = refreshedRegions.Where(region => region.Kind == "table-of-contents").ToList();
+        if (headingRegions.Count == 0) return;
+        var styles = LoadPart(sourcePath, StylesPart);
+        var tocStyles = TocStylesByLevel(styles);
+        var sourceParagraphs = ParagraphsById(source);
+        var refreshedBody = refreshed.Root!.Element(W + "body")!;
+        var refreshedBlocks = refreshedBody.Elements().ToList();
+        var bookmarkParagraphIds = refreshed.Descendants(W + "bookmarkStart")
+            .Where(IsTocBookmark)
+            .Select(start => new
+            {
+                Name = (string?)start.Attribute(W + "name"),
+                ParagraphId = (string?)start.Ancestors(W + "p").FirstOrDefault()?.Attribute(W14 + "paraId")
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name) && !string.IsNullOrWhiteSpace(item.ParagraphId))
+            .GroupBy(item => item.Name!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.ParagraphId!).Distinct().ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        foreach (var region in headingRegions)
+        {
+            foreach (var paragraph in refreshedBlocks
+                         .Skip(region.StartBlock)
+                         .Take(region.EndBlock - region.StartBlock + 1)
+                         .SelectMany(block => block.DescendantsAndSelf(W + "p")))
+            {
+                var bookmarkNames = ReferencedBookmarkNames([paragraph]);
+                if (bookmarkNames.Count == 0) continue;
+                if (bookmarkNames.Count != 1
+                    || !bookmarkParagraphIds.TryGetValue(bookmarkNames.Single(), out var paragraphIds)
+                    || paragraphIds.Count != 1
+                    || !sourceParagraphs.TryGetValue(paragraphIds[0], out var sourceHeading))
+                    throw new InvalidOperationException("WPS field refresh produced a TOC entry without a unique source heading.");
+                var level = OutlineLevel(sourceHeading, styles);
+                if (level <= 0 || !tocStyles.TryGetValue(level, out var tocStyleId))
+                    throw new InvalidOperationException("Source template does not define the TOC style required by a refreshed heading.");
+                ApplyTemplateTocStyle(paragraph, tocStyleId);
+            }
+        }
+    }
+
+    private static Dictionary<int, string> TocStylesByLevel(XDocument styles)
+    {
+        var result = new Dictionary<int, string>();
+        foreach (var style in styles.Descendants(W + "style")
+                     .Where(style => string.Equals((string?)style.Attribute(W + "type"), "paragraph", StringComparison.OrdinalIgnoreCase)))
+        {
+            var id = (string?)style.Attribute(W + "styleId") ?? string.Empty;
+            var name = (string?)style.Element(W + "name")?.Attribute(W + "val") ?? string.Empty;
+            var token = id.StartsWith("TOC", StringComparison.OrdinalIgnoreCase) ? id[3..]
+                : name.StartsWith("toc ", StringComparison.OrdinalIgnoreCase) ? name[4..] : string.Empty;
+            if (int.TryParse(token, out var level) && level > 0 && !result.TryAdd(level, id))
+                throw new InvalidOperationException($"Source template defines duplicate TOC level {level} styles.");
+        }
+        return result;
+    }
+
+    private static int OutlineLevel(XElement paragraph, XDocument styles)
+    {
+        var direct = (int?)paragraph.Element(W + "pPr")?.Element(W + "outlineLvl")?.Attribute(W + "val");
+        if (direct is not null) return direct.Value + 1;
+        var styleId = (string?)paragraph.Element(W + "pPr")?.Element(W + "pStyle")?.Attribute(W + "val");
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        while (!string.IsNullOrWhiteSpace(styleId) && visited.Add(styleId))
+        {
+            var style = styles.Descendants(W + "style")
+                .FirstOrDefault(candidate => (string?)candidate.Attribute(W + "styleId") == styleId);
+            if (style is null) break;
+            var outline = (int?)style.Element(W + "pPr")?.Element(W + "outlineLvl")?.Attribute(W + "val");
+            if (outline is not null) return outline.Value + 1;
+            styleId = (string?)style.Element(W + "basedOn")?.Attribute(W + "val");
+        }
+        return 0;
+    }
+
+    private static void ApplyTemplateTocStyle(XElement paragraph, string styleId)
+    {
+        var properties = paragraph.Element(W + "pPr");
+        if (properties is null)
+        {
+            properties = new XElement(W + "pPr");
+            paragraph.AddFirst(properties);
+        }
+        properties.RemoveNodes();
+        properties.Add(new XElement(W + "pStyle", new XAttribute(W + "val", styleId)));
+        foreach (var run in paragraph.Descendants(W + "r").Where(run => run.Descendants(W + "t").Any()))
+            run.Element(W + "rPr")?.Remove();
     }
 
     private static RunFontPolicy? UniformExplicitBodyFontPolicy(XDocument document)
