@@ -97,7 +97,7 @@
           },
           "recordColumn": {
             "type": "object",
-            "description": "Source grid-column address whose native vertical-merge owners define consecutive logical records. An unmerged cell defines one record.",
+            "description": "Source grid-column address that defines output-row records. Choose an unmerged column when every physical source row must remain an output row; vertical merges in other mapped columns are still preserved. Choose a merged column only when every mapping into one target cell has one equal scalar value throughout that merge group.",
             "properties": {
               "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
               "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
