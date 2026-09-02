@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "tiwater.office-mcp-input/docx_fill_table_from_tables",
+  "description": "Project source-table rows into one target template table atomically. Use this instead of manually rebuilding rows when target cells derive from source tables. Target formatting is reused, and native vertical-merge owners are preserved within each source range.",
   "type": "object",
   "properties": {
     "input": { "type": "string", "minLength": 1, "description": "Current target DOCX.", "x-tiwater-file-role": "read" },
