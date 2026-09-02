@@ -980,6 +980,7 @@ try
     RunInput("validate-openxml", merged);
 
     RunTocStylePolicyMatrix();
+    RunMergedHeaderSetBodyMatrix();
     foreach (var shape in new[] { "flat", "horizontal", "vertical", "mixed", "rectangle", "irregular", "multi-paragraph" })
         RunTableOperationMatrix(shape, path => CreateMatrixDocument(path, shape));
     RunTableOperationMatrix("nested", CreateNestedMatrixDocument, tableIndex: 1);
@@ -1030,6 +1031,87 @@ void RunTocStylePolicyMatrix()
             "TOC policy replaced an undefined template style reference");
         RunInput("validate-openxml", output);
     }
+}
+
+void RunMergedHeaderSetBodyMatrix()
+{
+    var input = Path.Combine(root, "set-body-merged-header-input.docx");
+    var output = Path.Combine(root, "set-body-merged-header-output.docx");
+    CreateMergedHeaderSetBodyDocument(input);
+    var before = ReadTable(input, "set-body-merged-header-before");
+    var rows = before.GetProperty("rows");
+    var columns = before.GetProperty("gridColumns").EnumerateArray()
+        .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+        .ToArray();
+
+    Run("docx_set_table_body", new
+    {
+        input,
+        table = before.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = rows[2].GetProperty("address").Clone(),
+            last = rows[3].GetProperty("address").Clone(),
+        },
+        columns,
+        rows = new object[]
+        {
+            new
+            {
+                prototypeRow = rows[2].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "c0" }, text = "group", rowSpan = (int?)2 },
+                    new { columns = new[] { "c1" }, text = "item-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "method-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "v3-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c4" }, text = "v4-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c5" }, text = "v5-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c6" }, text = "v6-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c7" }, text = "v7-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c8" }, text = "v8-a", rowSpan = (int?)null },
+                }
+            },
+            new
+            {
+                prototypeRow = rows[3].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "c1" }, text = "item-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "method-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "v3-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c4" }, text = "v4-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c5" }, text = "v5-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c6" }, text = "v6-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c7" }, text = "v7-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c8" }, text = "v8-b", rowSpan = (int?)null },
+                }
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, "set-body-merged-header-receipt.json")
+    });
+
+    var after = ReadTable(output, "set-body-merged-header-after");
+    Require(after.GetProperty("columnCount").GetInt32() == 9,
+        "set table body changed the nine-column grid under a merged header");
+    Require(CellAt(after, 0, 0).GetProperty("gridSpan").GetInt32() == 2
+            && CellAt(after, 0, 3).GetProperty("gridSpan").GetInt32() == 6,
+        "set table body changed the merged header geometry");
+    Require(CellAt(after, 2, 0).GetProperty("logicalText").GetString() == "group"
+            && CellAt(after, 2, 1).GetProperty("logicalText").GetString() == "item-a"
+            && CellAt(after, 2, 2).GetProperty("logicalText").GetString() == "method-a"
+            && CellAt(after, 2, 8).GetProperty("logicalText").GetString() == "v8-a",
+        "set table body shifted a value under the merged header");
+    Require(CellAt(after, 3, 0).GetProperty("verticalMerge").GetString() == "continue"
+            && CellAt(after, 3, 0).GetProperty("logicalText").GetString() == "group"
+            && CellAt(after, 3, 1).GetProperty("logicalText").GetString() == "item-b"
+            && CellAt(after, 3, 2).GetProperty("logicalText").GetString() == "method-b"
+            && CellAt(after, 3, 8).GetProperty("logicalText").GetString() == "v8-b",
+        "set table body shifted the second row or lost its vertical merge owner");
+    RequireTableInvariants(after, "set-body-merged-header");
+    RunInput("validate-openxml", output);
+    Console.WriteLine("PASS set table body under merged two-row header");
 }
 
 void RunVerticalTextAlignmentObservation()
@@ -1184,6 +1266,32 @@ void CreateTocPolicyDocument(string path)
         Heading("Heading3", "_TocPolicyTwo", "Heading two", "2"),
         TocEntry("TemplateTocTop", "_TocPolicyOne", "Entry one", true),
         TocEntry("7", "_TocPolicyTwo", "Entry two", true)));
+    main.Document.Save();
+}
+
+void CreateMergedHeaderSetBodyDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(Enumerable.Range(0, 9).Select(_ => new GridColumn { Width = "1000" })),
+        new TableRow(
+            new TableRowProperties(new TableHeader()),
+            Cell("items", span: 2, merge: MergedCellValues.Restart),
+            Cell("method", merge: MergedCellValues.Restart),
+            Cell("validation", span: 6)),
+        new TableRow(
+            new TableRowProperties(new TableHeader()),
+            Cell("", span: 2, merge: MergedCellValues.Continue),
+            Cell("", merge: MergedCellValues.Continue),
+            Cell("v3"), Cell("v4"), Cell("v5"), Cell("v6"), Cell("v7"), Cell("v8")),
+        new TableRow(Cell("placeholder"), Cell("placeholder"), Cell("placeholder"),
+            Cell(""), Cell(""), Cell(""), Cell(""), Cell(""), Cell("")),
+        new TableRow(Cell("placeholder"), Cell("placeholder"), Cell("placeholder"),
+            Cell(""), Cell(""), Cell(""), Cell(""), Cell(""), Cell("")));
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
     main.Document.Save();
 }
 
