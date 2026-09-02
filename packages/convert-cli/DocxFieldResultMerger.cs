@@ -11,6 +11,33 @@ internal static class DocxFieldResultMerger
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static readonly XNamespace W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
 
+    internal static string PrepareSourceParagraphIdentities(string sourcePath, string outputDirectory)
+    {
+        var document = LoadDocument(sourcePath);
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var changed = false;
+        uint nextId = 1;
+        foreach (var paragraph in document.Descendants(W + "p"))
+        {
+            var id = (string?)paragraph.Attribute(W14 + "paraId");
+            if (!string.IsNullOrWhiteSpace(id)
+                && Regex.IsMatch(id, "^[0-9A-Fa-f]{8}$")
+                && used.Add(id))
+                continue;
+
+            string replacement;
+            do replacement = nextId++.ToString("X8");
+            while (!used.Add(replacement));
+            paragraph.SetAttributeValue(W14 + "paraId", replacement);
+            changed = true;
+        }
+        if (!changed) return sourcePath;
+
+        var preparedPath = Path.Combine(outputDirectory, "field-refresh-source.docx");
+        WriteDocumentPart(sourcePath, document, preparedPath);
+        return preparedPath;
+    }
+
     internal static void Merge(string sourcePath, string refreshedPath, string outputPath)
     {
         var source = LoadDocument(sourcePath);
@@ -31,6 +58,11 @@ internal static class DocxFieldResultMerger
         CopyTocBookmarks(source, refreshed, sourceRegions, refreshedRegions);
         ReplaceIndexRegions(source, refreshed, sourceRegions, refreshedRegions, bodyFontPolicy);
 
+        WriteDocumentPart(sourcePath, source, outputPath);
+    }
+
+    private static void WriteDocumentPart(string sourcePath, XDocument document, string outputPath)
+    {
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
         var temporaryOutput = Path.Combine(
@@ -45,7 +77,7 @@ internal static class DocxFieldResultMerger
                 existing.Delete();
                 var replacement = archive.CreateEntry(DocumentPart, CompressionLevel.Optimal);
                 using var stream = replacement.Open();
-                source.Save(stream, SaveOptions.DisableFormatting);
+                document.Save(stream, SaveOptions.DisableFormatting);
             }
             File.Move(temporaryOutput, outputPath, overwrite: true);
         }
