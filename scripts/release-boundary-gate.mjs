@@ -865,6 +865,37 @@ function checkDocxTableStreamingContract(tools) {
   note('DOCX table pages expose logical columns and compact cell text while retaining selected-page detail on disk');
 }
 
+function checkDocxTableIndexContract(tools) {
+  const check = 'docx-table-index-contract';
+  const tool = tools.find(entry => entry?.name === 'docx_table_index');
+  const description = tool?.description || '';
+  const input = tool?.inputSchema;
+  const table = tool?.outputSchema?.properties?.tables?.items;
+  if (Object.hasOwn(input?.properties ?? {}, 'limit')
+      || input?.properties?.offset?.type !== 'integer'
+      || !description.includes('provider chooses page size')
+      || !description.includes('pass one returned address unchanged')) {
+    fail(check, 'docx_table_index does not own bounded page sizing and native-address continuation');
+  }
+  const properties = table?.properties ?? {};
+  const nullableString = schema => Array.isArray(schema?.anyOf)
+    && schema.anyOf.some(option => option?.type === 'string')
+    && schema.anyOf.some(option => option?.type === 'null');
+  if (properties.address?.type !== 'object'
+      || properties.rowCount?.type !== 'integer'
+      || properties.columnCount?.type !== 'integer'
+      || properties.textPreview?.type !== 'string'
+      || !nullableString(properties.precedingText)
+      || !nullableString(properties.followingText)
+      || Object.hasOwn(properties, 'parentAddress')
+      || Object.hasOwn(properties, 'textLength')
+      || Object.hasOwn(properties, 'precedingParagraph')
+      || Object.hasOwn(properties, 'followingParagraph')) {
+    fail(check, 'docx_table_index response is not a compact native-address locator');
+  }
+  note('DOCX table index owns response page size and returns compact native-address locators');
+}
+
 function unboundedResponseArrays(schema, location = '$', found = []) {
   if (Array.isArray(schema)) {
     schema.forEach((entry, index) => unboundedResponseArrays(entry, `${location}[${index}]`, found));
@@ -950,6 +981,7 @@ async function main() {
     checkLargeResultChannels(toolNames);
     checkDocxMergedCellDescriptions(toolNames);
     checkDocxTableStreamingContract(toolNames);
+    checkDocxTableIndexContract(toolNames);
     checkBoundedInspectionOutputs(toolNames);
     checkCompactInspectionSummaries(toolNames);
     await checkIdempotentReadArtifacts(tempRoot);

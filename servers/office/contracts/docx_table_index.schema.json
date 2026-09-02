@@ -19,12 +19,6 @@
       "description": "Optional new JSON artifact path for retaining the complete table index. May be combined with returnContent.",
       "x-tiwater-file-role": "write"
     },
-    "limit": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 1000,
-      "description": "Maximum number of table summaries requested in this response page. The provider may return fewer to keep the machine response bounded."
-    },
     "offset": {
       "type": "integer",
       "minimum": 0,

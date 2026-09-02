@@ -295,21 +295,11 @@ const docxTableIndexOutput = docxObservationOutput('docx_table_index').extend({
   }).strict(),
   tables: z.array(z.object({
     address: docxAddress,
-    parentAddress: docxAddress.nullable(),
     rowCount: z.number().int().nonnegative(),
     columnCount: z.number().int().nonnegative(),
     textPreview: z.string(),
-    textLength: z.number().int().nonnegative(),
-    precedingParagraph: z.object({
-      address: docxAddress,
-      textPreview: z.string(),
-      textLength: z.number().int().nonnegative(),
-    }).strict().nullable(),
-    followingParagraph: z.object({
-      address: docxAddress,
-      textPreview: z.string(),
-      textLength: z.number().int().nonnegative(),
-    }).strict().nullable(),
+    precedingText: z.string().nullable(),
+    followingText: z.string().nullable(),
   }).strict()).optional(),
 }).strict();
 
@@ -389,7 +379,7 @@ const tools = [
   },
   {
     name: 'docx_table_index',
-    description: 'Locate tables in one current DOCX without returning full cell content or deciding table semantics. Set returnContent true to return a bounded page of addresses, shapes, short previews, and nearest non-empty paragraphs. Provide output to store the complete index and return its artifact receipt. These channels are independent and may be used together; at least one is required. Continue from receipt.nextOffset only when an unreturned table is needed for the current decision, then read one selected native address.',
+    description: 'Locate tables in one current DOCX without returning full cell content or deciding table semantics. Set returnContent true to return as many compact native addresses, shapes, and short text clues as fit the bounded response; the provider chooses page size. Provide output to store the complete index and return its artifact receipt. These channels are independent and may be used together; at least one is required. Continue from receipt.nextOffset only when an unreturned table is needed for the current decision, then pass one returned address unchanged to a narrow table or object read.',
     inputSchema: inputContract('docx_table_index'),
     outputSchema: docxTableIndexOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -696,20 +686,16 @@ function compactDocxInspection(report) {
 }
 
 function compactTableIndexEntry(table) {
-  const paragraph = value => value === null ? null : {
-    address: value.address,
-    textPreview: value.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 160),
-    textLength: value.textLength,
-  };
+  const paragraphText = value => value === null
+    ? null
+    : value.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 32);
   return {
     address: table.address,
-    parentAddress: table.parentAddress,
     rowCount: table.rowCount,
     columnCount: table.columnCount,
-    textPreview: table.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 240),
-    textLength: table.textLength,
-    precedingParagraph: paragraph(table.precedingParagraph),
-    followingParagraph: paragraph(table.followingParagraph),
+    textPreview: table.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 64),
+    precedingText: paragraphText(table.precedingParagraph),
+    followingText: paragraphText(table.followingParagraph),
   };
 }
 
@@ -822,9 +808,8 @@ async function docxObservation(tool, args) {
         };
       }
       const offset = Math.min(args.offset ?? 0, totalCount);
-      const requestedLimit = args.limit ?? totalCount;
       const tables = [];
-      for (const sourceTable of payload.tables.slice(offset, offset + requestedLimit)) {
+      for (const sourceTable of payload.tables.slice(offset)) {
         const table = compactTableIndexEntry(sourceTable);
         const candidate = [...tables, table];
         if (tables.length > 0
