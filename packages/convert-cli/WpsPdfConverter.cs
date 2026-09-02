@@ -38,12 +38,13 @@ public static class WpsPdfConverter
         Directory.CreateDirectory(tempRoot);
         var helperPath = Path.Combine(tempRoot, "writer_to_pdf_wps.py");
         File.WriteAllText(helperPath, EtHelperScript);
+        var renderInput = DocxWpsRenderNormalizer.Prepare(input, tempRoot);
 
         try
         {
             using var lease = AcquireRuntimeLease();
             RunWithTransientStartupRetry(
-                () => RunWpsHelper(xvfb, dbusRunSession, python, helperPath, input, output, tempRoot),
+                () => RunWpsHelper(xvfb, dbusRunSession, python, helperPath, renderInput, output, tempRoot),
                 () => { if (File.Exists(output)) File.Delete(output); });
         }
         finally
