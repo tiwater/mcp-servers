@@ -1178,6 +1178,7 @@ void RunNativeInlineSelectionComposition()
         output = Path.Combine(root, "native-inline-selection-objects.json")
     }).GetProperty("observations")[0];
     var objects = ObservationObjects(sourceObjects).ToArray();
+    const string expectedInline = "alpha xy middle pq omega";
     var firstParagraphPath = sourceParagraphs[0].GetProperty("address").GetProperty("path").GetString();
     var runAddresses = objects
         .Where(item => item.GetProperty("kind").GetString() == "run"
@@ -1220,14 +1221,26 @@ void RunNativeInlineSelectionComposition()
                 sourceSelections = sourceParagraphs.EnumerateArray()
                     .Select(paragraph => new { address = paragraph.GetProperty("address").Clone() }).ToArray(),
             },
+            new
+            {
+                target = CellAt(targetTable, 4, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = new[]
+                {
+                    new
+                    {
+                        address = sourceCell.GetProperty("address").Clone(),
+                        range = new { start = 0, length = expectedInline.Length },
+                    },
+                },
+            },
         },
         output = target,
         receiptOutput = Path.Combine(root, "native-inline-selection-receipt.json")
     });
 
     var result = ReadTable(target, "native-inline-selection-result");
-    const string expectedInline = "alpha xy middle pq omega";
-    foreach (var rowIndex in new[] { 0, 1 })
+    foreach (var rowIndex in new[] { 0, 1, 4 })
     {
         var cell = CellAt(result, rowIndex, 0);
         var paragraphs = cell.GetProperty("paragraphs");
@@ -1408,7 +1421,8 @@ void CreateNativeInlineSelectionTargetDocument(string path)
         new TableRow(Cell("run target")),
         new TableRow(Cell("text target")),
         new TableRow(Cell("range target")),
-        new TableRow(Cell("paragraph target")))));
+        new TableRow(Cell("paragraph target")),
+        new TableRow(Cell("cell range target")))));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();
 }

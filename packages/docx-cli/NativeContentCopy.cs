@@ -179,6 +179,15 @@ public static class NativeContentCopy
     {
         if (selection.Range is not null)
         {
+            if (element is TableCell or Paragraph)
+            {
+                output.AddRange(ParagraphsForTextRange(
+                    element,
+                    selection.Range.Start,
+                    selection.Range.Length));
+                activeInlineSourceParagraph = null;
+                return;
+            }
             AppendInlineSelection(
                 output,
                 ref activeInlineSourceParagraph,
@@ -214,6 +223,74 @@ public static class NativeContentCopy
             default:
                 throw new InvalidOperationException($"source-ref-kind-not-supported-for-content-copy: {element.LocalName}");
         }
+    }
+
+    private static IReadOnlyList<Paragraph> ParagraphsForTextRange(
+        OpenXmlElement element,
+        int start,
+        int length)
+    {
+        var paragraphs = element switch
+        {
+            TableCell cell => cell.Elements<Paragraph>().ToArray(),
+            Paragraph paragraph => new[] { paragraph },
+            _ => throw new InvalidOperationException("text-range-block-must-be-cell-or-paragraph"),
+        };
+        var lengths = paragraphs.Select(paragraph => ScalarLength(paragraph.InnerText)).ToArray();
+        var totalLength = lengths.Sum() + Math.Max(0, paragraphs.Length - 1);
+        if (start < 0 || length <= 0 || start > totalLength - length)
+            throw new InvalidOperationException("text-range-out-of-bounds");
+
+        var end = start + length;
+        var cursor = 0;
+        var selected = new List<Paragraph>();
+        for (var index = 0; index < paragraphs.Length; index++)
+        {
+            var paragraphEnd = cursor + lengths[index];
+            var overlapStart = Math.Max(start, cursor);
+            var overlapEnd = Math.Min(end, paragraphEnd);
+            if (overlapStart < overlapEnd)
+                selected.Add(ParagraphForTextRange(
+                    paragraphs[index],
+                    overlapStart - cursor,
+                    overlapEnd - overlapStart));
+            cursor = paragraphEnd + 1;
+        }
+        if (selected.Count == 0)
+            throw new InvalidOperationException("text-range-must-select-text");
+        return selected;
+    }
+
+    private static Paragraph ParagraphForTextRange(Paragraph source, int start, int length)
+    {
+        var sourceText = string.Concat(source.Descendants<Text>().Select(text => text.Text));
+        if (!StringComparer.Ordinal.Equals(source.InnerText, sourceText))
+            throw new InvalidOperationException("text-range-source-must-be-plain-text");
+        var output = CloneParagraph(source);
+        var cursor = 0;
+        var end = start + length;
+        foreach (var text in output.Descendants<Text>().ToArray())
+        {
+            var textLength = ScalarLength(text.Text);
+            var overlapStart = Math.Max(start, cursor);
+            var overlapEnd = Math.Min(end, cursor + textLength);
+            if (overlapStart >= overlapEnd)
+            {
+                text.Remove();
+            }
+            else
+            {
+                text.Text = SliceScalars(text.Text, overlapStart - cursor, overlapEnd - overlapStart);
+                text.Space = SpaceProcessingModeValues.Preserve;
+            }
+            cursor += textLength;
+        }
+        foreach (var run in output.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>()
+                     .Where(run => !run.Descendants<Text>().Any()).ToArray())
+            run.Remove();
+        if (!output.Descendants<Text>().Any())
+            throw new InvalidOperationException("text-range-must-select-text");
+        return output;
     }
 
     private static void AppendInlineSelection(
@@ -290,6 +367,8 @@ public static class NativeContentCopy
         foreach (var rune in runes.Skip(start).Take(length)) builder.Append(rune.ToString());
         return builder.ToString();
     }
+
+    private static int ScalarLength(string value) => value.EnumerateRunes().Count();
 
     internal static void ReplaceCellContent(TableCell target, IReadOnlyList<Paragraph> sourceParagraphs)
     {
