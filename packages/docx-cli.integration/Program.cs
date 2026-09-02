@@ -44,6 +44,9 @@ try
             == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
         "narrow cell read did not resolve the restart cell text");
 
+    RunVerticalTextAlignmentObservation();
+    RunNativeInlineSelectionComposition();
+
     var replacementSource = Path.Combine(root, "content-replacement-source.docx");
     var replacementTarget = Path.Combine(root, "content-replacement-target.docx");
     CreateContentReplacementSourceDocument(replacementSource);
@@ -1029,6 +1032,138 @@ void RunTocStylePolicyMatrix()
     }
 }
 
+void RunVerticalTextAlignmentObservation()
+{
+    var input = Path.Combine(root, "vertical-text-observation.docx");
+    CreateVerticalTextObservationDocument(input);
+    var table = ReadTable(input, "vertical-text-observation-table");
+    var paragraph = table.GetProperty("rows")[0].GetProperty("cells")[0]
+        .GetProperty("paragraphs")[0];
+    var textNodes = paragraph.GetProperty("textNodes");
+    Require(textNodes[1].GetProperty("verticalTextAlignment").GetString() == "superscript"
+            && textNodes[3].GetProperty("verticalTextAlignment").GetString() == "subscript",
+        "table detail did not expose native superscript and subscript text");
+
+    var observation = Run("docx_read_object", new
+    {
+        input,
+        addresses = new[] { paragraph.GetProperty("address").Clone() },
+        kinds = new[] { "run", "text" },
+        output = Path.Combine(root, "vertical-text-observation-object.json")
+    }).GetProperty("observations")[0];
+    var verticalRuns = ObservationObjects(observation)
+        .Where(item => item.GetProperty("kind").GetString() == "run"
+            && item.GetProperty("verticalTextAlignment").ValueKind == JsonValueKind.String)
+        .Select(item => item.GetProperty("verticalTextAlignment").GetString())
+        .ToArray();
+    Require(verticalRuns.SequenceEqual(new[] { "superscript", "subscript" }),
+        "narrow object read did not expose native superscript and subscript runs");
+    Console.WriteLine("PASS vertical text alignment observation");
+}
+
+void RunNativeInlineSelectionComposition()
+{
+    var source = Path.Combine(root, "native-inline-selection-source.docx");
+    var target = Path.Combine(root, "native-inline-selection-target.docx");
+    CreateNativeInlineSelectionSourceDocument(source);
+    CreateNativeInlineSelectionTargetDocument(target);
+
+    var sourceTable = ReadTable(source, "native-inline-selection-source");
+    var targetTable = ReadTable(target, "native-inline-selection-target");
+    var sourceCell = CellAt(sourceTable, 0, 0);
+    var sourceParagraphs = sourceCell.GetProperty("paragraphs");
+    var sourceObjects = Run("docx_read_object", new
+    {
+        input = source,
+        addresses = new[] { sourceCell.GetProperty("address").Clone() },
+        kinds = new[] { "run", "text" },
+        output = Path.Combine(root, "native-inline-selection-objects.json")
+    }).GetProperty("observations")[0];
+    var objects = ObservationObjects(sourceObjects).ToArray();
+    var firstParagraphPath = sourceParagraphs[0].GetProperty("address").GetProperty("path").GetString();
+    var runAddresses = objects
+        .Where(item => item.GetProperty("kind").GetString() == "run"
+            && item.GetProperty("address").GetProperty("path").GetString()!.StartsWith(firstParagraphPath!, StringComparison.Ordinal))
+        .Select(item => item.GetProperty("address").Clone())
+        .ToArray();
+    var textAddresses = objects
+        .Where(item => item.GetProperty("kind").GetString() == "text"
+            && item.GetProperty("address").GetProperty("path").GetString()!.StartsWith(firstParagraphPath!, StringComparison.Ordinal))
+        .Select(item => item.GetProperty("address").Clone())
+        .ToArray();
+
+    Run("docx_replace_content_from_source", new
+    {
+        input = target,
+        changes = new object[]
+        {
+            new
+            {
+                target = CellAt(targetTable, 0, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = runAddresses.Select(address => new { address }).ToArray(),
+            },
+            new
+            {
+                target = CellAt(targetTable, 1, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = textAddresses.Select(address => new { address }).ToArray(),
+            },
+            new
+            {
+                target = CellAt(targetTable, 2, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = new[] { new { address = textAddresses[1], range = new { start = 1, length = 1 } } },
+            },
+            new
+            {
+                target = CellAt(targetTable, 3, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = sourceParagraphs.EnumerateArray()
+                    .Select(paragraph => new { address = paragraph.GetProperty("address").Clone() }).ToArray(),
+            },
+        },
+        output = target,
+        receiptOutput = Path.Combine(root, "native-inline-selection-receipt.json")
+    });
+
+    var result = ReadTable(target, "native-inline-selection-result");
+    const string expectedInline = "alpha xy middle pq omega";
+    foreach (var rowIndex in new[] { 0, 1 })
+    {
+        var cell = CellAt(result, rowIndex, 0);
+        var paragraphs = cell.GetProperty("paragraphs");
+        var textNodes = paragraphs[0].GetProperty("textNodes");
+        Require(cell.GetProperty("logicalText").GetString() == expectedInline
+                && paragraphs.GetArrayLength() == 1,
+            $"inline selections did not remain in one source paragraph for target row {rowIndex}");
+        Require(textNodes[1].GetProperty("verticalTextAlignment").GetString() == "superscript"
+                && textNodes[3].GetProperty("verticalTextAlignment").GetString() == "subscript",
+            $"inline selections lost vertical text alignment for target row {rowIndex}");
+    }
+    var rangeCell = CellAt(result, 2, 0);
+    Require(rangeCell.GetProperty("logicalText").GetString() == "y"
+            && rangeCell.GetProperty("paragraphs")[0].GetProperty("textNodes")[0]
+                .GetProperty("verticalTextAlignment").GetString() == "superscript",
+        "text range did not inherit its source run formatting");
+    var multiParagraphCell = CellAt(result, 3, 0);
+    Require(multiParagraphCell.GetProperty("paragraphs").GetArrayLength() == 2
+            && multiParagraphCell.GetProperty("paragraphs")[0].GetProperty("text").GetString() == expectedInline
+            && multiParagraphCell.GetProperty("paragraphs")[1].GetProperty("text").GetString() == "second paragraph",
+        "selections from distinct source paragraphs lost their paragraph boundary");
+    RunInput("validate-openxml", target);
+    Console.WriteLine("PASS native inline selection composition");
+}
+
+IEnumerable<JsonElement> ObservationObjects(JsonElement node)
+{
+    if (node.TryGetProperty("object", out var item)) yield return item;
+    if (!node.TryGetProperty("children", out var children)) yield break;
+    foreach (var child in children.EnumerateArray())
+    foreach (var descendant in ObservationObjects(child))
+        yield return descendant;
+}
+
 void CreateTocPolicyDocument(string path)
 {
     using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
@@ -1049,6 +1184,61 @@ void CreateTocPolicyDocument(string path)
         Heading("Heading3", "_TocPolicyTwo", "Heading two", "2"),
         TocEntry("TemplateTocTop", "_TocPolicyOne", "Entry one", true),
         TocEntry("7", "_TocPolicyTwo", "Entry two", true)));
+    main.Document.Save();
+}
+
+void CreateVerticalTextObservationDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var paragraph = new Paragraph(
+        new Run(new Text("R")),
+        new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }),
+            new Text("2")),
+        new Run(new Text(" and H")),
+        new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Subscript }),
+            new Text("2")),
+        new Run(new Text("O")));
+    main.Document = new Document(new Body(new Table(
+        new TableGrid(new GridColumn { Width = "4000" }),
+        new TableRow(new TableCell(paragraph)))));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateNativeInlineSelectionSourceDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var first = new Paragraph(
+        new Run(new Text("alpha ") { Space = SpaceProcessingModeValues.Preserve }),
+        new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }),
+            new Text("xy")),
+        new Run(new Text(" middle ") { Space = SpaceProcessingModeValues.Preserve }),
+        new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Subscript }),
+            new Text("pq")),
+        new Run(new Text(" omega") { Space = SpaceProcessingModeValues.Preserve }));
+    var second = new Paragraph(new Run(new Text("second paragraph")));
+    main.Document = new Document(new Body(new Table(
+        new TableProperties(),
+        new TableGrid(new GridColumn { Width = "5000" }),
+        new TableRow(new TableCell(first, second)))));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateNativeInlineSelectionTargetDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    main.Document = new Document(new Body(new Table(
+        new TableProperties(),
+        new TableGrid(new GridColumn { Width = "5000" }),
+        new TableRow(Cell("run target")),
+        new TableRow(Cell("text target")),
+        new TableRow(Cell("range target")),
+        new TableRow(Cell("paragraph target")))));
+    AssignParagraphIdentities(main.Document);
     main.Document.Save();
 }
 
