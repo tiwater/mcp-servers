@@ -113,7 +113,7 @@ public static class NativeTableBodyMutation
 
         var idToColumn = request.Columns.Select((column, index) => (column.Id, index))
             .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
-        var preparedRows = PrepareRows(request.Rows, prototypeRows, idToColumn, grid.Length);
+        var preparedRows = PrepareRows(request.Rows, prototypeRows, selectedRows, idToColumn, grid.Length);
         return new PreparedTable(
             tableRef,
             selectedRows.Select(Observation.NativePathFor).ToArray(),
@@ -125,6 +125,7 @@ public static class NativeTableBodyMutation
     private static IReadOnlyList<PreparedRow> PrepareRows(
         IReadOnlyList<SetTableBodyRow> requests,
         IReadOnlyList<TableRow> prototypes,
+        IReadOnlyList<TableRow> existingRows,
         IReadOnlyDictionary<string, int> idToColumn,
         int columnCount)
     {
@@ -132,8 +133,15 @@ public static class NativeTableBodyMutation
         var active = new Dictionary<int, ActiveVerticalCell>();
         for (var rowIndex = 0; rowIndex < requests.Count; rowIndex++)
         {
+            var existingCells = rowIndex < existingRows.Count
+                ? CellPositions(existingRows[rowIndex]) : [];
             var cells = active.Values
-                .Select(item => new PreparedCell(item.Start, item.Span, string.Empty, "continue"))
+                .Select(item => new PreparedCell(
+                    item.Start,
+                    item.Span,
+                    string.Empty,
+                    "continue",
+                    UnchangedContent(existingCells, item.Start, item.Span, string.Empty)))
                 .ToList();
             var occupied = active.Values
                 .SelectMany(item => Enumerable.Range(item.Start, item.Span)).ToHashSet();
@@ -160,14 +168,20 @@ public static class NativeTableBodyMutation
                     throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}].rowSpan-invalid");
                 var start = positions[0];
                 var span = positions.Length;
-                cells.Add(new PreparedCell(start, span, cell.Text, rowSpan > 1 ? "restart" : null));
+                cells.Add(new PreparedCell(
+                    start,
+                    span,
+                    cell.Text,
+                    rowSpan > 1 ? "restart" : null,
+                    UnchangedContent(existingCells, start, span, cell.Text)));
                 if (rowSpan > 1) next.Add(start, new ActiveVerticalCell(start, span, rowSpan - 1));
             }
             if (!occupied.SetEquals(Enumerable.Range(0, columnCount)))
                 throw new InvalidOperationException($"rows[{rowIndex}]-does-not-cover-table-grid");
             result.Add(new PreparedRow(
                 (TableRow)prototypes[rowIndex].CloneNode(true),
-                cells.OrderBy(cell => cell.Start).ToArray()));
+                cells.OrderBy(cell => cell.Start).ToArray(),
+                requests[rowIndex].CantSplit));
             active = next;
         }
         if (active.Count != 0) throw new InvalidOperationException("rowSpan-exceeds-final-row");
@@ -190,17 +204,28 @@ public static class NativeTableBodyMutation
             row.RemoveAllChildren<TableCell>();
             RemoveGridOmissions(row);
             RemoveCopiedIdentities(row);
+            SetCantSplit(row, rowChange.CantSplit);
             foreach (var cellChange in rowChange.Cells)
             {
                 var template = templateCells.FirstOrDefault(item =>
                     item.Start <= cellChange.Start && cellChange.Start < item.Start + item.Span)?.Cell
                     ?? throw new InvalidOperationException("prototype-row-does-not-cover-output-column");
                 var cell = (TableCell)template.CloneNode(true);
-                RemoveCopiedIdentities(cell);
                 SetGridSpan(cell, cellChange.Span);
                 SetCellWidth(cell, prepared.GridWidths, cellChange.Start, cellChange.Span);
                 SetVerticalMerge(cell, cellChange.VerticalMerge);
-                NativeTextMutation.SetText(cell, cellChange.Text);
+                if (cellChange.UnchangedContent is null)
+                {
+                    NativeTextMutation.SetText(cell, cellChange.Text);
+                }
+                else
+                {
+                    foreach (var child in cell.ChildElements
+                                 .Where(child => child is not TableCellProperties).ToArray()) child.Remove();
+                    foreach (var child in cellChange.UnchangedContent)
+                        cell.Append(child.CloneNode(true));
+                }
+                RemoveCopiedIdentities(cell);
                 row.Append(cell);
             }
             if (CellPositions(row).Sum(item => item.Span) != prepared.GridWidths.Count)
@@ -235,7 +260,9 @@ public static class NativeTableBodyMutation
                 cells.Add(new SetTableBodyCellReadback(actual[cellIndex].Start, actual[cellIndex].Span, merge, text));
             }
             result.Add(new SetTableBodyRowReadback(
-                Observation.Address(MainStory, Observation.NativePathFor(rows[rowIndex])), cells));
+                Observation.Address(MainStory, Observation.NativePathFor(rows[rowIndex])),
+                rows[rowIndex].TableRowProperties?.GetFirstChild<CantSplit>() is not null,
+                cells));
         }
         return result;
     }
@@ -297,6 +324,21 @@ public static class NativeTableBodyMutation
         return result;
     }
 
+    private static IReadOnlyList<OpenXmlElement>? UnchangedContent(
+        IReadOnlyList<CellPosition> existingCells,
+        int start,
+        int span,
+        string text)
+    {
+        var existing = existingCells.SingleOrDefault(cell => cell.Start == start && cell.Span == span);
+        if (existing is null
+            || !StringComparer.Ordinal.Equals(NativeMutationSupport.PlainText(existing.Cell), text)) return null;
+        return existing.Cell.ChildElements
+            .Where(child => child is not TableCellProperties)
+            .Select(child => child.CloneNode(true))
+            .ToArray();
+    }
+
     private static int RowOffset(TableRow row, string localName)
     {
         var value = row.TableRowProperties?.ChildElements.FirstOrDefault(child => child.LocalName == localName)
@@ -343,6 +385,14 @@ public static class NativeTableBodyMutation
         };
     }
 
+    private static void SetCantSplit(TableRow row, bool? value)
+    {
+        if (value is null) return;
+        var properties = row.TableRowProperties ?? row.PrependChild(new TableRowProperties());
+        properties.RemoveAllChildren<CantSplit>();
+        if (value.Value) properties.Append(new CantSplit());
+    }
+
     private static string? MergeValue(TableCell cell)
     {
         var merge = cell.TableCellProperties?.VerticalMerge;
@@ -362,8 +412,16 @@ public static class NativeTableBodyMutation
 
     private sealed record CellPosition(TableCell Cell, int Start, int Span);
     private sealed record ActiveVerticalCell(int Start, int Span, int Remaining);
-    private sealed record PreparedCell(int Start, int Span, string Text, string? VerticalMerge);
-    private sealed record PreparedRow(TableRow Prototype, IReadOnlyList<PreparedCell> Cells);
+    private sealed record PreparedCell(
+        int Start,
+        int Span,
+        string Text,
+        string? VerticalMerge,
+        IReadOnlyList<OpenXmlElement>? UnchangedContent);
+    private sealed record PreparedRow(
+        TableRow Prototype,
+        IReadOnlyList<PreparedCell> Cells,
+        bool? CantSplit);
     private sealed record PreparedTable(
         ResolvedDocxAddress Table,
         IReadOnlyList<string> BodyRowPaths,
@@ -375,7 +433,10 @@ public static class NativeTableBodyMutation
 public sealed record SetTableBodyRowRange(DocxObjectAddress First, DocxObjectAddress Last);
 public sealed record SetTableBodyColumn(string Id, DocxObjectAddress GridColumn);
 public sealed record SetTableBodyCell(IReadOnlyList<string> Columns, string Text, int? RowSpan = null);
-public sealed record SetTableBodyRow(DocxObjectAddress PrototypeRow, IReadOnlyList<SetTableBodyCell> Cells);
+public sealed record SetTableBodyRow(
+    DocxObjectAddress PrototypeRow,
+    IReadOnlyList<SetTableBodyCell> Cells,
+    bool? CantSplit = null);
 public sealed record SetTableBodyRequest(
     string Input,
     DocxObjectAddress Table,
@@ -385,7 +446,10 @@ public sealed record SetTableBodyRequest(
     string Output,
     string ReceiptOutput);
 public sealed record SetTableBodyCellReadback(int GridColumnStart, int GridSpan, string? VerticalMerge, string Text);
-public sealed record SetTableBodyRowReadback(DocxObjectAddress Address, IReadOnlyList<SetTableBodyCellReadback> Cells);
+public sealed record SetTableBodyRowReadback(
+    DocxObjectAddress Address,
+    bool CantSplit,
+    IReadOnlyList<SetTableBodyCellReadback> Cells);
 public sealed record SetTableBodyReceipt(
     string Schema,
     string Provider,

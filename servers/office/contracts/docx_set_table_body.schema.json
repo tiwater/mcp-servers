@@ -94,7 +94,10 @@
                   "description": "One or more contiguous request-local column IDs occupied by this cell.",
                   "items": { "type": "string", "minLength": 1, "maxLength": 80 }
                 },
-                "text": { "type": "string" },
+                "text": {
+                  "type": "string",
+                  "description": "Final plain text for this cell. If the current cell at the same row and grid span already has exactly this text, its native paragraphs and run formatting are retained while row and merge properties are updated."
+                },
                 "rowSpan": {
                   "type": "integer",
                   "minimum": 1,
@@ -105,6 +108,10 @@
               "required": ["columns", "text"],
               "additionalProperties": false
             }
+          },
+          "cantSplit": {
+            "type": "boolean",
+            "description": "Whether Word may split this physical row across pages. Omit to preserve the prototype row property."
           }
         },
         "required": ["prototypeRow", "cells"],

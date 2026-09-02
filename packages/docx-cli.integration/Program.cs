@@ -489,17 +489,19 @@ try
             new
             {
                 prototypeRow = rows[1].GetProperty("address").Clone(),
+                cantSplit = false,
                 cells = new[]
                 {
                     new { columns = new[] { "c0" }, text = "精密度", rowSpan = (int?)2 },
                     new { columns = new[] { "c1" }, text = "标准一", rowSpan = (int?)null },
-                    new { columns = new[] { "c2" }, text = "结果一", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "甲二", rowSpan = (int?)null },
                     new { columns = new[] { "c3" }, text = "通过", rowSpan = (int?)2 },
                 }
             },
             new
             {
                 prototypeRow = rows[3].GetProperty("address").Clone(),
+                cantSplit = true,
                 cells = new[]
                 {
                     new { columns = new[] { "c1" }, text = "标准二", rowSpan = (int?)null },
@@ -516,7 +518,7 @@ try
     var setRows = setBodyState.GetProperty("rows");
     Require(CellAt(setBodyState, 1, 0).GetProperty("logicalText").GetString() == "精密度"
             && CellAt(setBodyState, 1, 1).GetProperty("logicalText").GetString() == "标准一"
-            && CellAt(setBodyState, 1, 2).GetProperty("logicalText").GetString() == "结果一"
+            && CellAt(setBodyState, 1, 2).GetProperty("logicalText").GetString() == "甲二"
             && CellAt(setBodyState, 1, 3).GetProperty("logicalText").GetString() == "通过",
         "set table body shifted semantic columns");
     Require(CellAt(setBodyState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
@@ -528,6 +530,19 @@ try
             && CellAt(setBodyState, 2, 3).GetProperty("verticalMerge").GetString() == "continue"
             && CellAt(setBodyState, 2, 3).GetProperty("logicalText").GetString() == "通过",
         "set table body did not preserve the declared vertical group");
+    Require(!setRows[1].GetProperty("cantSplit").GetBoolean()
+            && setRows[2].GetProperty("cantSplit").GetBoolean(),
+        "set table body did not apply explicit row pagination properties");
+    using (var preservedFormatting = WordprocessingDocument.Open(setBodyOutput, false))
+    {
+        var matchingParagraph = preservedFormatting.MainDocumentPart!.Document
+            .Descendants<Paragraph>().Single(paragraph => paragraph.InnerText == "甲二");
+        Require(matchingParagraph.Elements<Run>().Any(run =>
+                run.InnerText == "二"
+                && run.RunProperties?.VerticalTextAlignment?.Val?.Value
+                    == VerticalPositionValues.Superscript),
+            "set table body discarded existing rich text when cell text was unchanged");
+    }
 
     var expandedBodyOutput = Path.Combine(root, "set-table-body-expanded.docx");
     Run("docx_set_table_body", new
@@ -2314,7 +2329,7 @@ void CreateDocument(string path)
         Cell("分组二", span: 2)));
     table.Append(new TableRow(
         new TableRowProperties(new CantSplit()),
-        Cell("甲", merge: MergedCellValues.Restart), Cell("甲一"), Cell("甲二"), Cell("甲三")));
+        Cell("甲", merge: MergedCellValues.Restart), Cell("甲一"), CellWithSuperscript("甲", "二"), Cell("甲三")));
     table.Append(new TableRow(
         Cell("", merge: MergedCellValues.Continue), Cell("乙一"), Cell("乙二"), Cell("乙三")));
     table.Append(new TableRow(Cell("独立"), Cell("丙一"), Cell("丙二"), Cell("丙三")));
@@ -2475,6 +2490,15 @@ TableCell Cell(string text, int span = 1, MergedCellValues? merge = null)
     if (span > 1) properties.Append(new GridSpan { Val = span });
     if (merge is not null) properties.Append(new VerticalMerge { Val = merge.Value });
     return new TableCell(properties, new Paragraph(new Run(new Text(text))));
+}
+
+TableCell CellWithSuperscript(string text, string superscript)
+{
+    var properties = new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "1200" });
+    return new TableCell(properties, new Paragraph(
+        new Run(new Text(text)),
+        new Run(new RunProperties(
+            new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }), new Text(superscript))));
 }
 
 void AssignParagraphIdentities(OpenXmlElement root)
