@@ -100,6 +100,7 @@ public static class NativePolicyMutation
             {
                 matched = TocStylePolicy.Apply(output, request.Italic, request.IndentCharactersPerLevel);
                 output.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Save();
+                output.MainDocumentPart?.Document?.Save();
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
             }
             NativeMutationSupport.Commit(temporaryPath, paths);

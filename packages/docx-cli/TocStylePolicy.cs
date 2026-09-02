@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 
@@ -12,29 +13,51 @@ public static class TocStylePolicy
             throw new InvalidOperationException("indent-characters-per-level-must-be-nonnegative");
         var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles
             ?? throw new InvalidOperationException("document-styles-not-found");
+        var entries = TocEntries(document, styles);
         var matched = 0;
-        foreach (var style in TocStyles(styles))
+        if (entries.Count == 0)
         {
-            var level = TocLevel(style);
-            var paragraph = style.StyleParagraphProperties;
-            if (paragraph is null)
+            foreach (var style in TocStyles(styles))
             {
-                paragraph = new StyleParagraphProperties();
-                style.AddChild(paragraph, true);
+                var level = TocLevel(style);
+                var paragraph = style.StyleParagraphProperties;
+                if (paragraph is null)
+                {
+                    paragraph = new StyleParagraphProperties();
+                    style.AddChild(paragraph, true);
+                }
+                paragraph.RemoveAllChildren<Indentation>();
+                paragraph.AddChild(new Indentation { LeftChars = (level - 1) * indentCharactersPerLevel * 100 }, true);
+                var run = style.StyleRunProperties;
+                if (run is null)
+                {
+                    run = new StyleRunProperties();
+                    style.AddChild(run, true);
+                }
+                run.RemoveAllChildren<Italic>();
+                run.RemoveAllChildren<ItalicComplexScript>();
+                run.AddChild(new Italic { Val = italic }, true);
+                run.AddChild(new ItalicComplexScript { Val = italic }, true);
+                matched++;
             }
-            paragraph.RemoveAllChildren<Indentation>();
-            paragraph.AddChild(new Indentation { LeftChars = (level - 1) * indentCharactersPerLevel * 100 }, true);
-            var run = style.StyleRunProperties;
-            if (run is null)
+        }
+        else
+        {
+            foreach (var entry in entries)
             {
-                run = new StyleRunProperties();
-                style.AddChild(run, true);
+                var paragraph = entry.Paragraph.ParagraphProperties ?? entry.Paragraph.PrependChild(new ParagraphProperties());
+                paragraph.RemoveAllChildren<Indentation>();
+                paragraph.AddChild(new Indentation { LeftChars = (entry.Level - 1) * indentCharactersPerLevel * 100 }, true);
+                foreach (var run in entry.Paragraph.Descendants<Run>())
+                {
+                    var properties = run.RunProperties ?? run.PrependChild(new RunProperties());
+                    properties.RemoveAllChildren<Italic>();
+                    properties.RemoveAllChildren<ItalicComplexScript>();
+                    properties.AddChild(new Italic { Val = italic }, true);
+                    properties.AddChild(new ItalicComplexScript { Val = italic }, true);
+                }
             }
-            run.RemoveAllChildren<Italic>();
-            run.RemoveAllChildren<ItalicComplexScript>();
-            run.AddChild(new Italic { Val = italic }, true);
-            run.AddChild(new ItalicComplexScript { Val = italic }, true);
-            matched++;
+            matched = entries.Select(entry => entry.Level).Distinct().Count();
         }
         if (matched == 0) throw new InvalidOperationException("toc-styles-not-found");
         return matched;
@@ -58,18 +81,42 @@ public static class TocStylePolicy
         var matched = 0;
         if (styles is not null)
         {
-            foreach (var style in TocStyles(styles))
+            var entries = TocEntries(document, styles);
+            if (entries.Count == 0)
             {
-                var id = style.StyleId?.Value ?? string.Empty;
-                var level = TocLevel(style);
-                matched += 1;
-                var expectedIndent = (level - 1) * indentCharactersPerLevel * 100;
-                var actualIndent = style.StyleParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value;
-                if (actualIndent != expectedIndent) findings.Add(new(id, level, "indent-characters", expectedIndent.ToString(), actualIndent?.ToString()));
-                var actualItalic = OnOff(style.StyleRunProperties?.GetFirstChild<Italic>());
-                if (actualItalic != italic) findings.Add(new(id, level, "italic", italic.ToString().ToLowerInvariant(), actualItalic?.ToString().ToLowerInvariant()));
-                var actualComplexItalic = OnOff(style.StyleRunProperties?.GetFirstChild<ItalicComplexScript>());
-                if (actualComplexItalic != italic) findings.Add(new(id, level, "italic-complex-script", italic.ToString().ToLowerInvariant(), actualComplexItalic?.ToString().ToLowerInvariant()));
+                foreach (var style in TocStyles(styles))
+                {
+                    var id = style.StyleId?.Value ?? string.Empty;
+                    var level = TocLevel(style);
+                    matched += 1;
+                    var expectedIndent = (level - 1) * indentCharactersPerLevel * 100;
+                    var actualIndent = style.StyleParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value;
+                    if (actualIndent != expectedIndent) findings.Add(new(id, level, "indent-characters", expectedIndent.ToString(), actualIndent?.ToString()));
+                    var actualItalic = OnOff(style.StyleRunProperties?.GetFirstChild<Italic>());
+                    if (actualItalic != italic) findings.Add(new(id, level, "italic", italic.ToString().ToLowerInvariant(), actualItalic?.ToString().ToLowerInvariant()));
+                    var actualComplexItalic = OnOff(style.StyleRunProperties?.GetFirstChild<ItalicComplexScript>());
+                    if (actualComplexItalic != italic) findings.Add(new(id, level, "italic-complex-script", italic.ToString().ToLowerInvariant(), actualComplexItalic?.ToString().ToLowerInvariant()));
+                }
+            }
+            else
+            {
+                matched = entries.Select(entry => entry.Level).Distinct().Count();
+                foreach (var entry in entries)
+                {
+                    var expectedIndent = (entry.Level - 1) * indentCharactersPerLevel * 100;
+                    var actualIndent = entry.Paragraph.ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value;
+                    if (actualIndent != expectedIndent)
+                        findings.Add(new(entry.StyleId, entry.Level, "indent-characters", expectedIndent.ToString(), actualIndent?.ToString()));
+                    foreach (var run in entry.Paragraph.Descendants<Run>().Where(run => !string.IsNullOrEmpty(run.InnerText)))
+                    {
+                        var directItalic = OnOff(run.RunProperties?.GetFirstChild<Italic>());
+                        var directComplexItalic = OnOff(run.RunProperties?.GetFirstChild<ItalicComplexScript>());
+                        if (directItalic != italic)
+                            findings.Add(new(entry.StyleId, entry.Level, "direct-italic", italic.ToString().ToLowerInvariant(), directItalic?.ToString().ToLowerInvariant()));
+                        if (directComplexItalic != italic)
+                            findings.Add(new(entry.StyleId, entry.Level, "direct-italic-complex-script", italic.ToString().ToLowerInvariant(), directComplexItalic?.ToString().ToLowerInvariant()));
+                    }
+                }
             }
         }
         if (matched == 0) findings.Add(new("", 0, "toc-styles", "at-least-one", "none"));
@@ -81,6 +128,54 @@ public static class TocStylePolicy
         => styles.Elements<Style>()
             .Where(style => style.Type?.Value == StyleValues.Paragraph && TocLevel(style) >= 1);
 
+    private static IReadOnlyList<TocEntry> TocEntries(WordprocessingDocument document, Styles styles)
+    {
+        var body = document.MainDocumentPart?.Document?.Body;
+        if (body is null) return [];
+        var bookmarks = body.Descendants<BookmarkStart>()
+            .Where(start => start.Name?.Value?.StartsWith("_Toc", StringComparison.OrdinalIgnoreCase) == true)
+            .GroupBy(start => start.Name!.Value!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        var entries = new List<TocEntry>();
+        foreach (var paragraph in body.Descendants<Paragraph>())
+        {
+            var names = paragraph.Descendants<FieldCode>()
+                .SelectMany(code => Regex.Matches(code.Text ?? string.Empty, @"\b_Toc[^\s\""\\]+", RegexOptions.IgnoreCase)
+                    .Select(match => match.Value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (names.Count == 0) continue;
+            if (names.Count != 1 || !bookmarks.TryGetValue(names[0], out var starts) || starts.Count != 1)
+                throw new InvalidOperationException("toc-entry-heading-binding-invalid");
+            var heading = starts[0].Ancestors<Paragraph>().SingleOrDefault()
+                ?? throw new InvalidOperationException("toc-entry-heading-not-found");
+            var level = OutlineLevel(heading, styles);
+            if (level < 1) continue;
+            var styleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+            if (string.IsNullOrWhiteSpace(styleId))
+                throw new InvalidOperationException("toc-entry-style-binding-invalid");
+            entries.Add(new TocEntry(paragraph, styleId, level));
+        }
+        return entries;
+    }
+
+    private static int OutlineLevel(Paragraph paragraph, Styles styles)
+    {
+        var direct = paragraph.ParagraphProperties?.OutlineLevel?.Val?.Value;
+        if (direct is not null) return direct.Value + 1;
+        var styleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        while (!string.IsNullOrWhiteSpace(styleId) && visited.Add(styleId))
+        {
+            var style = styles.Elements<Style>().SingleOrDefault(candidate => candidate.StyleId?.Value == styleId);
+            if (style is null) break;
+            var outline = style.StyleParagraphProperties?.OutlineLevel?.Val?.Value;
+            if (outline is not null) return outline.Value + 1;
+            styleId = style.BasedOn?.Val?.Value;
+        }
+        return 0;
+    }
+
     private static int TocLevel(Style style)
     {
         var id = style.StyleId?.Value ?? string.Empty;
@@ -91,6 +186,8 @@ public static class TocStylePolicy
     }
 
     private static bool? OnOff(OnOffType? value) => value is null ? null : value.Val?.Value ?? true;
+
+    private sealed record TocEntry(Paragraph Paragraph, string StyleId, int Level);
 }
 
 public sealed record DocxTocStyleValidationReport(string Schema, string ToolVersion, bool Pass, string File,
