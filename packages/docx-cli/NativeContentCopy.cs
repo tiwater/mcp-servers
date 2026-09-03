@@ -55,7 +55,6 @@ public static class NativeContentCopy
             var targets = targetRefs.Select(item =>
                 Observation.ResolveNativePath(targetDocument, item.StoryPart, item.NativePath)).ToArray();
             NativeMutationSupport.RejectOverlappingTargets(targets);
-            foreach (var target in targets) NativeMutationSupport.RequirePlainTextContainer(target);
             baselineIssues = ValidationIssueCounts(targetDocument);
             PreflightImports(targetDocument, prepared);
         }
@@ -410,7 +409,8 @@ public static class NativeContentCopy
         var template = target.Elements<Paragraph>().FirstOrDefault();
         var paragraphProperties = template?.ParagraphProperties?.CloneNode(true) as ParagraphProperties;
         var targetRunProperties = template?.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>().FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
-        target.RemoveAllChildren<Paragraph>();
+        foreach (var child in target.ChildElements.Where(child => child is not TableCellProperties).ToArray())
+            child.Remove();
         foreach (var source in sourceParagraphs)
         {
             var paragraph = (Paragraph)source.CloneNode(true);
@@ -434,12 +434,9 @@ public static class NativeContentCopy
             throw new InvalidOperationException("target-ref-must-be-main-document-paragraph-or-cell");
         var targetRunProperties = paragraph.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>()
             .FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
-        var insertionIndex = paragraph.ChildElements
-            .TakeWhile(child => child is not DocumentFormat.OpenXml.Wordprocessing.Run and not ProofError).Count();
-        foreach (var child in paragraph.ChildElements
-                     .Where(child => child is DocumentFormat.OpenXml.Wordprocessing.Run or ProofError).ToArray())
+        foreach (var child in paragraph.ChildElements.Where(child => child is not ParagraphProperties).ToArray())
             child.Remove();
-        var nextIndex = Math.Min(insertionIndex, paragraph.ChildElements.Count);
+        var nextIndex = paragraph.ChildElements.Count;
         foreach (var source in sourceParagraphs)
         {
             foreach (var child in source.ChildElements.Where(child => child is not ParagraphProperties))
