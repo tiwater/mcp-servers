@@ -25,6 +25,7 @@ import {
 import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
 import { evidenceRoleMetadata } from '../_shared/evidence-role.mjs';
 import {
+  documentCreateFileArguments,
   documentMutationFileArguments,
   effectKindMetadata,
 } from '../_shared/effect-kind.mjs';
@@ -175,6 +176,13 @@ function fixedEditOutput(tool) {
   return z.object({
     tool: z.literal(tool), runtime: runtimeIdentity, receipt: artifact, output: artifact.nullable(),
     summary: z.object({ pass: z.boolean(), operationCount: z.number().int().nonnegative(), appliedCount: z.number().int().nonnegative() }).strict(),
+  }).strict();
+}
+
+function fixedCreateOutput(tool) {
+  return z.object({
+    tool: z.literal(tool), runtime: runtimeIdentity, receipt: artifact, output: artifact,
+    summary: z.object({ pass: z.literal(true), operationCount: z.literal(1), appliedCount: z.literal(1) }).strict(),
   }).strict();
 }
 
@@ -531,6 +539,14 @@ const docxReadObjectOutput = docxObservationOutput('docx_read_object').extend({
 }).strict();
 
 const tools = [
+  {
+    name: 'docx_create',
+    effectKind: 'document-create',
+    description: 'Create one new minimal standards-valid DOCX containing one empty paragraph. The result is a current native document that can be populated incrementally with the ordinary DOCX object operations. The provider chooses no business wording, template, layout mapping, or target structure and never overwrites an existing path.',
+    inputSchema: inputContract('docx_create'),
+    outputSchema: fixedCreateOutput('docx_create'),
+    handler: (args, tool) => fixedCreate(tool, args, docxCandidates),
+  },
   {
     name: 'docx_inspect',
     evidenceRole: 'document-observation',
@@ -1351,6 +1367,36 @@ async function fixedEdit(tool, args, candidates) {
       if (result.json.summary?.pass !== true) {
         throw new Error(`${tool.name} returned output without reporting success`);
       }
+    }
+    return { ...result.json, runtime: commandRuntime(result) };
+  });
+}
+
+async function fixedCreate(tool, args, candidates) {
+  const publishedContract = {
+    name: tool.name,
+    inputSchema: inputContractSchema(tool.name),
+    annotations: tool.annotations,
+    _meta: effectKindMetadata(tool.effectKind),
+  };
+  const bindings = documentCreateFileArguments(publishedContract, args);
+  const output = path.resolve(bindings.effectiveOutput);
+  const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
+  await requireNewFile(output, 'output');
+  await requireNewFile(receiptOutput, 'receiptOutput');
+  return withTempJsonFile(args, async requestPath => {
+    const result = await runJsonCandidateChain(candidates, [tool.name, requestPath], { allowedExitCodes: [0, 1] });
+    if (result.code !== 0) {
+      const detail = result.stderr.trim() || result.stdout.trim()
+        || `${tool.name} failed with exit code ${result.code}`;
+      throw new Error(detail);
+    }
+    if (result.json?.tool !== tool.name) throw new Error(`${tool.name} returned a mismatched tool identity`);
+    await requireReturnedArtifact(result.json.receipt, receiptOutput, 'receipt');
+    await requireReturnedArtifact(result.json.output, output, 'output');
+    if (result.json.summary?.pass !== true
+        || result.json.summary?.operationCount !== 1 || result.json.summary?.appliedCount !== 1) {
+      throw new Error(`${tool.name} returned invalid creation evidence`);
     }
     return { ...result.json, runtime: commandRuntime(result) };
   });

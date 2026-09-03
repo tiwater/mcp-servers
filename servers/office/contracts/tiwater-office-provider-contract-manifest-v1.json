@@ -39,6 +39,17 @@
       }
     },
     {
+      "name": "docx_create",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_create.schema.json",
+        "sha256": "1cf22a23fc5d8b27fff6f50db2672be623696eac79ea986053e703274eab5e3e"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_create.schema.json",
+        "sha256": "1cf22a23fc5d8b27fff6f50db2672be623696eac79ea986053e703274eab5e3e"
+      }
+    },
+    {
       "name": "docx_delete_object",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_delete_object.schema.json",

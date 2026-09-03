@@ -232,6 +232,7 @@ async function checkFixedRuntimeSurface() {
   const fixedNames = new Set([
     ...[...officeSource.matchAll(/\{"name":"((?:docx|xlsx)_[^"]+)"/g)].map(match => match[1]),
     ...[...officeSource.matchAll(/fixedEdit\('((?:docx|xlsx|pptx)_[^']+)'/g)].map(match => match[1]),
+    ...[...officeSource.matchAll(/fixedCreate\('((?:docx|xlsx|pptx)_[^']+)'/g)].map(match => match[1]),
     ...[...officeSource.matchAll(/docxObservation\('([^']+)'/g)].map(match => match[1]),
   ]);
   const providerSources = (await Promise.all([
@@ -915,6 +916,7 @@ function checkEvidenceRoleMetadata(officeTools, textTools) {
 function checkEffectKindMetadata(officeTools, textTools) {
   const check = 'provider-effect-kind-metadata';
   const expectedSpecialKinds = new Map([
+    ['docx_create', 'document-create'],
     ['office_render_pdf', 'native-render'],
     ['xlsx_convert_legacy', 'source-conversion'],
   ]);
@@ -1121,6 +1123,35 @@ function checkXlsxRangeReadContract(tools) {
   note('XLSX range reads expose one bounded native cell page without business inference');
 }
 
+function checkDocxCreateContract(tools) {
+  const check = 'docx-create-contract';
+  const tool = tools.find(entry => entry?.name === 'docx_create');
+  const input = tool?.inputSchema;
+  const output = tool?.outputSchema;
+  const properties = input?.properties ?? {};
+  if (!['output', 'receiptOutput'].every(name => input?.required?.includes(name))
+      || Object.hasOwn(properties, 'input')
+      || properties.output?.[fileRoleKey] !== 'write'
+      || properties.output?.[fileEffectKey] === false
+      || properties.receiptOutput?.[fileRoleKey] !== 'write'
+      || properties.receiptOutput?.[fileEffectKey] !== false) {
+    fail(check, 'docx_create does not publish one new document and one non-effect receipt');
+  }
+  if (output?.properties?.output?.type !== 'object'
+      || output?.properties?.receipt?.type !== 'object'
+      || output?.properties?.summary?.properties?.pass?.const !== true
+      || tool?._meta?.[effectKindMetadataKey]?.kind !== 'document-create') {
+    fail(check, 'docx_create does not publish exact creation result and effect metadata');
+  }
+  const description = tool?.description || '';
+  if (!description.includes('minimal standards-valid DOCX')
+      || !description.includes('populated incrementally with the ordinary DOCX object operations')
+      || !description.includes('chooses no business wording, template, layout mapping, or target structure')) {
+    fail(check, 'docx_create does not publish its composition role and semantic non-goals');
+  }
+  note('DOCX creation supplies only a minimal current document for ordinary incremental object operations');
+}
+
 function checkPptxBoundedReadContracts(tools) {
   const check = 'pptx-bounded-read-contracts';
   const slide = tools.find(entry => entry?.name === 'pptx_read_slide');
@@ -1306,6 +1337,7 @@ async function main() {
     checkSourceBoundObservationOutputs(toolNames);
     checkLargeResultChannels(toolNames);
     checkXlsxRangeReadContract(toolNames);
+    checkDocxCreateContract(toolNames);
     checkPptxBoundedReadContracts(toolNames);
     checkDocxMergedCellDescriptions(toolNames);
     checkDocxTableStreamingContract(toolNames);
