@@ -221,7 +221,7 @@ public static class Inspector
         return details;
     }
 
-    private static CellStyleReport GetCellStyle(Cell cell, Stylesheet? stylesheet)
+    internal static CellStyleReport GetCellStyle(Cell cell, Stylesheet? stylesheet)
     {
         var styleIndex = cell.StyleIndex?.Value ?? 0U;
         var formats = stylesheet?.CellFormats?.Elements<CellFormat>().ToList() ?? [];

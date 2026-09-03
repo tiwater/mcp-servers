@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/xlsx_read_range/v1",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Current XLSX workbook. Convert legacy XLS before selecting Open XML cells.",
+      "x-tiwater-file-role": "read"
+    },
+    "sheet": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exact current worksheet name returned by workbook observation."
+    },
+    "range": {
+      "type": "string",
+      "pattern": "^[A-Za-z]{1,3}[1-9][0-9]*(?::[A-Za-z]{1,3}[1-9][0-9]*)?$",
+      "description": "Explicit native A1 cell or rectangular range. A single cell is a one-cell range."
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Zero-based cell offset in row-major order within the selected range. Continue only when another selected cell is needed."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256,
+      "description": "Maximum selected cells in this bounded page."
+    },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Return this selected technical page directly when it fits the response limit. May be combined with output."
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional immutable JSON artifact path for this selected technical page. May be combined with returnContent.",
+      "x-tiwater-file-role": "write"
+    }
+  },
+  "required": ["input", "sheet", "range", "limit", "returnContent"],
+  "additionalProperties": false
+}

@@ -423,7 +423,7 @@ internal static class WorkbookLoader
         });
     }
 
-    private static string? GetOpenXmlRawCellValue(Cell cell, SharedStringTable? sharedStringTable)
+    internal static string? GetOpenXmlRawCellValue(Cell cell, SharedStringTable? sharedStringTable)
     {
         if (cell.InlineString is not null)
         {
@@ -452,7 +452,7 @@ internal static class WorkbookLoader
         return text;
     }
 
-    private static string? GetOpenXmlFormattedCellValue(Cell cell, SharedStringTable? sharedStringTable, WorkbookStylesPart? stylesPart)
+    internal static string? GetOpenXmlFormattedCellValue(Cell cell, SharedStringTable? sharedStringTable, WorkbookStylesPart? stylesPart)
     {
         var raw = GetOpenXmlRawCellValue(cell, sharedStringTable);
         if (raw is null)

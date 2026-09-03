@@ -14,8 +14,12 @@ workflow protocol.
 tiwater-xlsx inspect input.xlsx --json
 tiwater-xlsx export-json input.xlsx output.json
 tiwater-xlsx inventory-regions input.xlsx output.json --schema v2
+tiwater-xlsx xlsx_read_range request.json
 ```
 
+`xlsx_read_range` reads one explicit native A1 cell or range as bounded row-major
+cell pages. Each page reports exact coordinates, values, formulas, styles, rich
+text, merge ownership, remaining cell count, and its continuation offset.
 Observation reports current sheets, cells, values, formulas, styles, merges,
 dimensions, and print settings. It does not infer headers, business fields, or
 record identities. Inspection accepts current `.xls` and `.xlsx` sources;
