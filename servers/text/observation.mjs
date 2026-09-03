@@ -6,6 +6,7 @@ import { fileArtifact } from '../_shared/large-json-result.mjs';
 const supportedExtensions = new Set(['.txt', '.text', '.log', '.csv', '.tsv', '.md', '.markdown']);
 const openingLineLimit = 8;
 const openingTextLimit = 160;
+const linePageLimit = 200;
 
 export async function inspectText(inputValue) {
   const observation = await observeText(inputValue);
@@ -30,17 +31,14 @@ export async function inspectText(inputValue) {
   };
 }
 
-export async function readTextLines(inputValue, requestedOffset, requestedLimit) {
+export async function readTextLines(inputValue, requestedOffset) {
   if (!Number.isSafeInteger(requestedOffset) || requestedOffset < 0) {
     throw Object.assign(new Error('offset must be a non-negative safe integer'), { code: -32602 });
-  }
-  if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200) {
-    throw Object.assign(new Error('limit must be a safe integer from 1 through 200'), { code: -32602 });
   }
   const observation = await observeText(inputValue);
   const source = await fileArtifact(observation.input);
   const offset = Math.min(requestedOffset, observation.lines.length);
-  const selected = observation.lines.slice(offset, offset + requestedLimit);
+  const selected = observation.lines.slice(offset, offset + linePageLimit);
   const nextOffset = offset + selected.length < observation.lines.length
     ? offset + selected.length
     : null;

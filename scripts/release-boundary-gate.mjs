@@ -865,11 +865,11 @@ async function checkTextPublishedSurface(packageRoot, tools, packageManifest) {
       || inspect?.inputSchema?.properties?.output?.[fileRoleKey] !== 'write') {
     fail(check, 'text_inspect does not require its explicit input, content channel, and durable artifact');
   }
-  if (!['input', 'offset', 'limit', 'returnContent'].every(name => readRequired.includes(name))
+  if (!['input', 'offset', 'returnContent'].every(name => readRequired.includes(name))
       || read?.inputSchema?.properties?.offset?.minimum !== 0
-      || read?.inputSchema?.properties?.limit?.minimum !== 1
-      || read?.inputSchema?.properties?.limit?.maximum !== 200) {
-    fail(check, 'text_read_lines does not publish bounded explicit zero-based paging');
+      || Object.hasOwn(read?.inputSchema?.properties ?? {}, 'limit')
+      || !(read?.description || '').includes('provider chooses the bounded page size')) {
+    fail(check, 'text_read_lines does not publish provider-sized zero-based paging');
   }
   const inspectOutput = inspect?.outputSchema;
   const readOutput = read?.outputSchema;
@@ -1099,12 +1099,11 @@ function checkXlsxRangeReadContract(tools) {
   const page = output?.properties?.content;
   const summary = output?.properties?.summary;
   const description = tool?.description || '';
-  if (!['input', 'sheet', 'range', 'limit', 'returnContent'].every(name => input?.required?.includes(name))
+  if (!['input', 'sheet', 'range', 'returnContent'].every(name => input?.required?.includes(name))
       || input?.properties?.range?.type !== 'string'
       || input?.properties?.offset?.minimum !== 0
-      || input?.properties?.limit?.minimum !== 1
-      || input?.properties?.limit?.maximum !== 256) {
-    fail(check, 'xlsx_read_range does not require one explicit native range and bounded cell page');
+      || Object.hasOwn(input?.properties ?? {}, 'limit')) {
+    fail(check, 'xlsx_read_range does not require one explicit native range with provider-owned page size');
   }
   if (page?.properties?.cells?.type !== 'array'
       || page?.properties?.cells?.maxItems !== 256
@@ -1115,6 +1114,7 @@ function checkXlsxRangeReadContract(tools) {
     fail(check, 'xlsx_read_range output does not expose bounded native cell facts and continuation');
   }
   if (!description.includes('row-major cell offset')
+      || !description.includes('provider chooses the bounded page size')
       || !description.includes('physical presence')
       || !description.includes('remaining cells and the next offset')
       || !description.includes('does not infer regions, headers, records, field meanings, or business mappings')) {
@@ -1160,29 +1160,29 @@ function checkPptxBoundedReadContracts(tools) {
   const shapeInput = shape?.inputSchema;
   const slideShapes = slide?.outputSchema?.properties?.content?.properties?.slide?.properties?.shapes;
   const shapeSegments = shape?.outputSchema?.properties?.content?.properties?.segments;
-  if (!['input', 'slideNumber', 'limit', 'returnContent'].every(name => slideInput?.required?.includes(name))
+  if (!['input', 'slideNumber', 'returnContent'].every(name => slideInput?.required?.includes(name))
       || slideInput?.properties?.slideNumber?.minimum !== 1
       || slideInput?.properties?.offset?.minimum !== 0
-      || slideInput?.properties?.limit?.minimum !== 1
-      || slideInput?.properties?.limit?.maximum !== 8
+      || Object.hasOwn(slideInput?.properties ?? {}, 'limit')
       || slideShapes?.maxItems !== 8
       || slideShapes?.items?.properties?.textPreview?.maxLength !== 240
       || slideShapes?.items?.properties?.textLength?.type !== 'integer') {
     fail(check, 'pptx_read_slide does not expose one compact bounded native shape index');
   }
-  if (!['input', 'slideNumber', 'shapeId', 'limit', 'returnContent'].every(name => shapeInput?.required?.includes(name))
+  if (!['input', 'slideNumber', 'shapeId', 'returnContent'].every(name => shapeInput?.required?.includes(name))
       || shapeInput?.properties?.slideNumber?.minimum !== 1
       || shapeInput?.properties?.shapeId?.minimum !== 1
       || shapeInput?.properties?.offset?.minimum !== 0
-      || shapeInput?.properties?.limit?.minimum !== 1
-      || shapeInput?.properties?.limit?.maximum !== 4
+      || Object.hasOwn(shapeInput?.properties ?? {}, 'limit')
       || shapeSegments?.maxItems !== 4
       || shapeSegments?.items?.properties?.text?.maxLength !== 160
       || shapeSegments?.items?.properties?.runIndex?.type !== 'integer'
       || shapeSegments?.items?.properties?.textOffset?.type !== 'integer') {
     fail(check, 'pptx_read_shape does not expose bounded native text and formatting segments');
   }
-  if (!(slide?.description || '').includes('does not select templates, assign business roles, infer repairs')
+  if (!(slide?.description || '').includes('provider chooses the bounded page size')
+      || !(shape?.description || '').includes('provider chooses the bounded page size')
+      || !(slide?.description || '').includes('does not select templates, assign business roles, infer repairs')
       || !(shape?.description || '').includes('does not choose formatting, derive repairs')) {
     fail(check, 'PPTX bounded reads do not publish their semantic non-goals');
   }
@@ -1250,6 +1250,45 @@ function checkDocxTableIndexContract(tools) {
     fail(check, 'docx_table_index response is not a compact native-address locator');
   }
   note('DOCX table index owns response page size and returns compact native-address locators');
+}
+
+function checkProviderOwnedReadPaging(tools) {
+  const check = 'provider-owned-read-paging';
+  const list = tools.find(entry => entry?.name === 'docx_list_objects');
+  const input = list?.inputSchema;
+  if (Object.hasOwn(input?.properties ?? {}, 'limit')
+      || input?.properties?.offset?.minimum !== 0
+      || !(list?.description || '').includes('provider chooses the bounded page size')) {
+    fail(check, 'docx_list_objects does not publish provider-owned bounded paging');
+  }
+  note('all five offset-based readers keep technical page size inside the provider');
+}
+
+function collectWriteFileNodes(schema, location = '$', found = []) {
+  if (Array.isArray(schema)) {
+    schema.forEach((entry, index) => collectWriteFileNodes(entry, `${location}[${index}]`, found));
+    return found;
+  }
+  if (!schema || typeof schema !== 'object') return found;
+  if (schema[fileRoleKey] === 'write') found.push({ location, schema });
+  for (const [key, value] of Object.entries(schema)) {
+    collectWriteFileNodes(value, `${location}.${key}`, found);
+  }
+  return found;
+}
+
+function checkReadOnlyFileEffects(officeTools, textTools) {
+  const check = 'read-only-file-effects';
+  const readOnlyTools = [...officeTools, ...textTools]
+    .filter(tool => tool?.annotations?.readOnlyHint === true);
+  for (const tool of readOnlyTools) {
+    for (const entry of collectWriteFileNodes(tool.inputSchema)) {
+      if (entry.schema[fileEffectKey] !== false) {
+        fail(check, `${tool.name} read evidence is not marked non-effect at ${entry.location}`);
+      }
+    }
+  }
+  note(`${readOnlyTools.length} read-only tools publish every evidence write as non-effect`);
 }
 
 function unboundedResponseArrays(schema, location = '$', found = []) {
@@ -1342,6 +1381,7 @@ async function main() {
     checkDocxMergedCellDescriptions(toolNames);
     checkDocxTableStreamingContract(toolNames);
     checkDocxTableIndexContract(toolNames);
+    checkProviderOwnedReadPaging(toolNames);
     checkBoundedInspectionOutputs(toolNames);
     checkCompactInspectionSummaries(toolNames);
     await checkIdempotentReadArtifacts(tempRoot);
@@ -1350,6 +1390,7 @@ async function main() {
     await checkTextPublishedSurface(packageRoot, textTools, packedPackage);
     checkEvidenceRoleMetadata(toolNames, textTools);
     checkEffectKindMetadata(toolNames, textTools);
+    checkReadOnlyFileEffects(toolNames, textTools);
   } catch (error) {
     fail('gate-runtime', error.stack || error.message);
   } finally {

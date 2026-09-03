@@ -156,9 +156,7 @@ public static partial class RangeReader
         var sheet = RequiredString(request, "sheet");
         var range = RequiredString(request, "range");
         var offset = OptionalLong(request, "offset") ?? 0;
-        var limit = OptionalInt(request, "limit")
-            ?? throw new InvalidOperationException("limit-is-required");
-        Console.WriteLine(JsonSerializer.Serialize(Read(input, sheet, range, offset, limit), Json.Options));
+        Console.WriteLine(JsonSerializer.Serialize(Read(input, sheet, range, offset, MaximumPageCells), Json.Options));
         return 0;
     }
 
@@ -168,9 +166,6 @@ public static partial class RangeReader
            && !string.IsNullOrWhiteSpace(text)
             ? text
             : throw new InvalidOperationException($"{property}-is-required");
-
-    private static int? OptionalInt(JsonObject request, string property)
-        => request[property] is JsonValue value && value.TryGetValue<int>(out var number) ? number : null;
 
     private static long? OptionalLong(JsonObject request, string property)
         => request[property] is JsonValue value && value.TryGetValue<long>(out var number) ? number : null;

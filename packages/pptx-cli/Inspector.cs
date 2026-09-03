@@ -97,12 +97,10 @@ public static class Inspector
             Slides: slides);
     }
 
-    public static SlidePageReport ReadSlide(string path, int slideNumber, int offset, int limit)
+    public static SlidePageReport ReadSlide(string path, int slideNumber, int offset)
     {
         if (slideNumber < 1) throw new InvalidOperationException("slideNumber-must-be-positive");
         if (offset < 0) throw new InvalidOperationException("offset-must-be-nonnegative");
-        if (limit is < 1 or > MaximumSlidePageShapes)
-            throw new InvalidOperationException($"limit-must-be-between-1-and-{MaximumSlidePageShapes}");
 
         var fullPath = Path.GetFullPath(path);
         if (!File.Exists(fullPath)) throw new FileNotFoundException("Presentation not found.", fullPath);
@@ -122,7 +120,7 @@ public static class Inspector
             : null;
         var shapes = ExtractShapes(slidePart);
         var startOffset = Math.Min(offset, shapes.Count);
-        var returned = shapes.Skip(startOffset).Take(limit).Select(CompactShape).ToList();
+        var returned = shapes.Skip(startOffset).Take(MaximumSlidePageShapes).Select(CompactShape).ToList();
         var nextOffset = startOffset + returned.Count < shapes.Count
             ? startOffset + returned.Count
             : (int?)null;
@@ -148,12 +146,10 @@ public static class Inspector
             receipt);
     }
 
-    public static ShapeTextPageReport ReadShape(string path, int slideNumber, uint shapeId, int offset, int limit)
+    public static ShapeTextPageReport ReadShape(string path, int slideNumber, uint shapeId, int offset)
     {
         if (slideNumber < 1) throw new InvalidOperationException("slideNumber-must-be-positive");
         if (offset < 0) throw new InvalidOperationException("offset-must-be-nonnegative");
-        if (limit is < 1 or > MaximumShapeTextPageSegments)
-            throw new InvalidOperationException($"limit-must-be-between-1-and-{MaximumShapeTextPageSegments}");
 
         var fullPath = Path.GetFullPath(path);
         if (!File.Exists(fullPath)) throw new FileNotFoundException("Presentation not found.", fullPath);
@@ -170,7 +166,7 @@ public static class Inspector
             ?? throw new InvalidOperationException($"Shape not found on slide {slideNumber}: {shapeId}");
         var segments = TextSegments(shape).ToList();
         var startOffset = Math.Min(offset, segments.Count);
-        var returned = segments.Skip(startOffset).Take(limit).ToList();
+        var returned = segments.Skip(startOffset).Take(MaximumShapeTextPageSegments).ToList();
         var nextOffset = startOffset + returned.Count < segments.Count
             ? startOffset + returned.Count
             : (int?)null;

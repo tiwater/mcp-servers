@@ -558,7 +558,7 @@ const tools = [
   },
   {
     name: 'docx_list_objects',
-    description: 'Page through mixed nearest-child OpenXML objects only when document order or paragraph relationships are required. Set returnContent true to return a byte-bounded object page. Provide output to store the complete requested page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Continue from receipt.nextOffset only when an unreturned object is needed for the current decision. Do not use this tool to locate tables or read a whole document: use docx_table_index to locate tables, then a narrow table or object read.',
+    description: 'Page through mixed nearest-child OpenXML objects only when document order or paragraph relationships are required. The provider chooses the bounded page size. Set returnContent true to return the selected object page. Provide output to store the complete requested page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Continue from receipt.nextOffset only when an unreturned object is needed for the current decision. Do not use this tool to locate tables or read a whole document: use docx_table_index to locate tables, then a narrow table or object read.',
     inputSchema: inputContract('docx_list_objects'),
     outputSchema: docxListObjectsOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -784,7 +784,7 @@ const tools = [
   },
   {
     name: 'xlsx_read_range',
-    description: 'Read one explicit native A1 cell or rectangular range from one current XLSX worksheet. Pages use a row-major cell offset and return physical presence, raw and formatted values, normalized value type, formula metadata, style, rich text, and merged-range ownership. The receipt always reports remaining cells and the next offset. Continue only when another selected cell is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not infer regions, headers, records, field meanings, or business mappings; convert legacy XLS before reading Open XML cells.',
+    description: 'Read one explicit native A1 cell or rectangular range from one current XLSX worksheet. The provider chooses the bounded page size. Pages use a row-major cell offset and return physical presence, raw and formatted values, normalized value type, formula metadata, style, rich text, and merged-range ownership. The receipt always reports remaining cells and the next offset. Continue only when another selected cell is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not infer regions, headers, records, field meanings, or business mappings; convert legacy XLS before reading Open XML cells.',
     inputSchema: inputContract('xlsx_read_range'),
     outputSchema: xlsxRangeReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -819,7 +819,7 @@ const tools = [
   },
   {
     name: 'pptx_read_slide',
-    description: 'List one selected PPTX slide as bounded pages of compact native shape identities in z-order. Each identity includes its shape id, kind, geometry, text preview, object counts, placeholder facts, media identity, and whether it contains a table. The receipt reports the selected slide, its layout and master paths, remaining shapes, and the next offset. Continue only when another shape on this slide is needed; use pptx_read_shape for bounded text and effective formatting of one selected shape. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not select templates, assign business roles, infer repairs, or inspect another slide.',
+    description: 'List one selected PPTX slide as bounded pages of compact native shape identities in z-order. The provider chooses the bounded page size. Each identity includes its shape id, kind, geometry, text preview, object counts, placeholder facts, media identity, and whether it contains a table. The receipt reports the selected slide, its layout and master paths, remaining shapes, and the next offset. Continue only when another shape on this slide is needed; use pptx_read_shape for bounded text and effective formatting of one selected shape. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not select templates, assign business roles, infer repairs, or inspect another slide.',
     inputSchema: inputContract('pptx_read_slide'),
     outputSchema: largeResultOutput('pptx_read_slide').extend({
       summary: pptxSlidePageSummary,
@@ -830,7 +830,7 @@ const tools = [
   },
   {
     name: 'pptx_read_shape',
-    description: 'Read one native PPTX shape selected from pptx_read_slide as bounded text segments. Each segment retains its run and paragraph identity, text offset, paragraph alignment, effective text formatting, direct formatting, and formatting source. Long run text is split without changing its native run identity. The receipt reports remaining segments and the next offset. Continue only when another segment of this shape is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not choose formatting, derive repairs, or inspect another shape.',
+    description: 'Read one native PPTX shape selected from pptx_read_slide as bounded text segments. The provider chooses the bounded page size. Each segment retains its run and paragraph identity, text offset, paragraph alignment, effective text formatting, direct formatting, and formatting source. Long run text is split without changing its native run identity. The receipt reports remaining segments and the next offset. Continue only when another segment of this shape is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not choose formatting, derive repairs, or inspect another shape.',
     inputSchema: inputContract('pptx_read_shape'),
     outputSchema: largeResultOutput('pptx_read_shape').extend({
       summary: pptxShapeTextPageSummary,

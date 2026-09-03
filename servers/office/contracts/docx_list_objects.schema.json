@@ -54,12 +54,6 @@
       "additionalProperties": false,
       "description": "Optional parent OpenXML address. Only nearest published children are returned."
     },
-    "limit": {
-      "default": 50,
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2147483647
-    },
     "offset": {
       "default": 0,
       "type": "integer",
@@ -70,7 +64,8 @@
       "type": "string",
       "minLength": 1,
       "description": "Optional path for retaining the complete requested page. May be combined with returnContent.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
   "required": [

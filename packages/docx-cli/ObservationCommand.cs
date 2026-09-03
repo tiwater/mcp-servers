@@ -31,7 +31,7 @@ public static class ObservationCommand
                 RequireStringArray(request, "kinds"),
                 OptionalString(request, "scope"),
                 OptionalAddress(request, "parent"),
-                OptionalInt(request, "limit") ?? Observation.DefaultPageLimit,
+                Observation.DefaultPageLimit,
                 OptionalInt(request, "offset") ?? 0),
             "docx_table_index" => Observation.TableIndex(input),
             "docx_read_table" => Observation.ReadTable(input, RequireAddress(request, "table")),

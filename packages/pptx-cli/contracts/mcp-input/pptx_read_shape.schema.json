@@ -27,12 +27,6 @@
       "maximum": 9007199254740991,
       "description": "Zero-based text-segment offset within the selected shape. Continue only when another segment is needed."
     },
-    "limit": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 4,
-      "description": "Maximum text segments in this bounded page."
-    },
     "returnContent": {
       "type": "boolean",
       "description": "Return this selected technical page directly when it fits the response limit. May be combined with output."
@@ -41,9 +35,10 @@
       "type": "string",
       "minLength": 1,
       "description": "Optional immutable JSON artifact path for this selected technical page. May be combined with returnContent.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
-  "required": ["input", "slideNumber", "shapeId", "limit", "returnContent"],
+  "required": ["input", "slideNumber", "shapeId", "returnContent"],
   "additionalProperties": false
 }
