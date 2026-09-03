@@ -113,11 +113,21 @@ public static class NativeContentCopy
             {
                 var resolved = sourceRefs[sourceIndex];
                 var element = Observation.ResolveNativePath(sourceDocument, resolved.StoryPart, resolved.NativePath);
-                AppendSelection(
-                    paragraphs,
-                    ref activeInlineSourceParagraph,
-                    element,
-                    change.SourceSelections[sourceIndex]);
+                try
+                {
+                    AppendSelection(
+                        paragraphs,
+                        ref activeInlineSourceParagraph,
+                        element,
+                        change.SourceSelections[sourceIndex]);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    throw new InvalidOperationException(
+                        $"changes[{index}].sourceSelections[{sourceIndex}] " +
+                        $"{resolved.StoryPart}#{resolved.NativePath}: {exception.Message}",
+                        exception);
+                }
             }
             if (paragraphs.Count == 0) paragraphs.Add(new Paragraph());
             result.Add(new PreparedChange(targetRefs[index], sourcePath, paragraphs));
