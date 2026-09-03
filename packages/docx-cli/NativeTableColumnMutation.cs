@@ -174,7 +174,7 @@ public static class NativeTableColumnMutation
         var temporary = paths.Output + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(paths.Input, temporary, false);
+            Tiwater.Office.WritableFileCopy.Copy(paths.Input, temporary);
             IReadOnlyList<TableColumnMutationReadback> changes;
             using (var output = WordprocessingDocument.Open(temporary, true))
             {

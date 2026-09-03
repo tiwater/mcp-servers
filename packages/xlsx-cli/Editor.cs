@@ -38,7 +38,7 @@ internal static class Editor
         var applied = new List<XlsxEditAppliedOperation>();
         try
         {
-            File.Copy(fullInput, temporaryOutput, overwrite: false);
+            Tiwater.Office.WritableFileCopy.Copy(fullInput, temporaryOutput);
             using (var spreadsheet = SpreadsheetDocument.Open(temporaryOutput, true))
             {
                 var workbookPart = spreadsheet.WorkbookPart ?? throw new InvalidOperationException("Workbook part not found.");

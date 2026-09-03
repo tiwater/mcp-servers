@@ -62,7 +62,7 @@ public static class NativeContentCopy
         var temporaryPath = outputPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(targetPath, temporaryPath, overwrite: false);
+            Tiwater.Office.WritableFileCopy.Copy(targetPath, temporaryPath);
             using (var outputDocument = WordprocessingDocument.Open(temporaryPath, true))
             {
                 ApplyChanges(outputDocument, prepared);

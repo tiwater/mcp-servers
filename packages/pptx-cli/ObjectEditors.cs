@@ -212,7 +212,7 @@ internal static class ObjectEditSupport
         var temporary = Path.Combine(Path.GetDirectoryName(output) ?? ".", $".{Path.GetFileName(output)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            File.Copy(input, temporary, overwrite: false);
+            Tiwater.Office.WritableFileCopy.Copy(input, temporary);
             using (var document = PresentationDocument.Open(temporary, true)) mutation(document);
             File.Move(temporary, output, overwrite: true);
         }
