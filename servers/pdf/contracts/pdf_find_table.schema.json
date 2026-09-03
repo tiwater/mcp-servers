@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to the current PDF revision.",
+      "x-tiwater-file-role": "read"
+    },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Return the complete result directly when it fits the published response limit."
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path for the immutable JSON observation artifact. An identical replay may reuse identical bytes; different content is never written over it.",
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "autoSpan": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "input",
+    "name",
+    "returnContent"
+  ],
+  "additionalProperties": false
+}
