@@ -6,7 +6,7 @@
       "type": "string",
       "minLength": 1,
       "description": "Path to the current PPTX.",
-      "x-tiwater-file-role": "read"
+      "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current"
     },
     "changes": {
       "minItems": 1,

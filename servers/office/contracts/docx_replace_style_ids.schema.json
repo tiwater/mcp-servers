@@ -5,7 +5,7 @@
     "input": {
       "type": "string",
       "minLength": 1,
-      "x-tiwater-file-role": "read"
+      "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current"
     },
     "output": {
       "type": "string",

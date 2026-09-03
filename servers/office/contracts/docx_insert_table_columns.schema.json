@@ -3,7 +3,7 @@
   "$id": "tiwater.office-mcp-input/docx_insert_table_columns",
   "type": "object",
   "properties": {
-    "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
+    "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current" },
     "changes": {
       "type": "array",
       "minItems": 1,

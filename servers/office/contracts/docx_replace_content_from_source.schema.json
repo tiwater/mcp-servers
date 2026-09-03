@@ -6,7 +6,7 @@
       "type": "string",
       "minLength": 1,
       "description": "Current target DOCX containing every target paragraph or table cell.",
-      "x-tiwater-file-role": "read"
+      "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current"
     },
     "changes": {
       "minItems": 1,

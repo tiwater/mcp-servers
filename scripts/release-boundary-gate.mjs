@@ -953,6 +953,14 @@ function checkEffectKindMetadata(officeTools, textTools) {
         schema: 'tiwater.provider-effect-kind/v1', kind: 'document-mutation',
       },
     } },
+    mutation && { ...mutation, inputSchema: {
+      ...mutation.inputSchema,
+      properties: Object.fromEntries(Object.entries(mutation.inputSchema.properties || {})
+        .map(([name, schema]) => [name, {
+          ...schema,
+          'x-tiwater-document-revision-role': undefined,
+        }])),
+    } },
   ].filter(Boolean);
   for (const tool of invalid) {
     let rejected = false;
