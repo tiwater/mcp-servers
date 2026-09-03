@@ -3,7 +3,7 @@
   "$id": "tiwater.office-mcp-input/docx_set_table",
   "type": "object",
   "properties": {
-    "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
+    "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current" },
     "table": {
       "type": "object",
       "description": "Current target table address returned by docx_read_table or docx_table_index.",
