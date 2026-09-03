@@ -6,7 +6,7 @@
       "type": "string",
       "minLength": 1,
       "description": "Path to the current DOCX document.",
-      "x-tiwater-file-role": "read"
+      "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current"
     },
     "output": {
       "type": "string",
