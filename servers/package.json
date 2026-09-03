@@ -1,6 +1,6 @@
 {
   "name": "@tiwater/office-mcp",
-  "version": "0.21.31",
+  "version": "0.21.32",
   "description": "Published MCP distribution for independent Tiwater Office, PDF, and Text document capabilities",
   "type": "module",
   "license": "MIT",
@@ -23,6 +23,7 @@
     "_shared/output-write-lock.mjs",
     "_shared/mcp-stdio.mjs",
     "_shared/evidence-role.mjs",
+    "_shared/effect-kind.mjs",
     "office/index.mjs",
     "office/docx-object-identity.mjs",
     "office/README.md",

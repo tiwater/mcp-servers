@@ -13,6 +13,7 @@ import {
   assertEvidenceToolContract,
   evidenceRoleMetadataKey,
 } from '../servers/_shared/evidence-role.mjs';
+import { effectKindMetadataKey } from '../servers/_shared/effect-kind.mjs';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -114,6 +115,7 @@ async function pack(tempRoot) {
     'package.json', 'office/index.mjs', 'pdf/index.mjs', 'pdf/README.md',
     '_shared/mcp-stdio.mjs', '_shared/tool-runtime.mjs', '_shared/large-json-result.mjs',
     '_shared/evidence-role.mjs',
+    '_shared/effect-kind.mjs',
     'office/contracts/tiwater-office-provider-contract-manifest-v1.json',
     'pdf/contracts/tiwater-pdf-provider-contract-manifest-v1.json',
   ];
@@ -243,6 +245,9 @@ async function isolatedSmoke(archive, tempRoot, packageJson) {
       }
     }
     for (const tool of tools || []) {
+      if (tool?._meta?.[effectKindMetadataKey] !== undefined) {
+        fail('isolated-smoke', `${tool.name} publishes an Office effect kind`);
+      }
       const hasMetadata = tool?._meta?.[evidenceRoleMetadataKey] !== undefined;
       if (tool.name !== 'pdf_inspect') {
         if (hasMetadata) fail('isolated-smoke', `${tool.name} publishes an unexpected evidence role`);
