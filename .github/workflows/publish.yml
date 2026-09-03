@@ -155,40 +155,6 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Use npm client with provenance support
-        run: npm install --global npm@11.11.0
-
-      - name: Verify package and server contract
-        run: |
-          npm --prefix servers ci
-          npm run release:boundary
-          npm pack ./servers --dry-run
-
-      - name: Publish Office MCP
-        working-directory: servers
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          package_version="$(node -p "require('./package.json').version")"
-          if npm view "@tiwater/office-mcp@${package_version}" version >/dev/null 2>&1; then
-            echo "@tiwater/office-mcp ${package_version} is already published"
-          else
-            npm publish --provenance --access public
-          fi
-
-  publish-pdf-mcp:
-    name: Publish PDF MCP
-    needs: release-gate
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -202,20 +168,21 @@ jobs:
 
       - name: Verify package and server contract
         run: |
-          npm --prefix servers/pdf ci
+          npm --prefix servers ci
           npm run generate:pdf-contracts
           git diff --exit-code -- servers/pdf/contracts
+          npm run release:boundary
           npm run release:pdf-boundary
-          npm pack ./servers/pdf --dry-run
+          npm pack ./servers --dry-run
 
-      - name: Publish PDF MCP
-        working-directory: servers/pdf
+      - name: Publish Office MCP
+        working-directory: servers
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           package_version="$(node -p "require('./package.json').version")"
-          if npm view "@tiwater/pdf-mcp@${package_version}" version >/dev/null 2>&1; then
-            echo "@tiwater/pdf-mcp ${package_version} is already published"
+          if npm view "@tiwater/office-mcp@${package_version}" version >/dev/null 2>&1; then
+            echo "@tiwater/office-mcp ${package_version} is already published"
           else
             npm publish --provenance --access public
           fi

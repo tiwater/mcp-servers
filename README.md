@@ -9,7 +9,7 @@ Shared MCP server implementations and shared runtime packages for Tiwater agent 
 - `packages/pptx-cli` — shared PPTX runtime
 - `packages/pdf-cli` — shared PDF runtime
 - `servers/office` — shared Office MCP server for DOCX, XLSX, and PPTX operations
-- `servers/pdf` — independently published `@tiwater/pdf-mcp` server for PDF inspection, table extraction, and OCR
+- `servers/pdf` — independent `tiwater-pdf-mcp` process and tool surface for PDF inspection, table extraction, and OCR
 
 ## Run locally
 

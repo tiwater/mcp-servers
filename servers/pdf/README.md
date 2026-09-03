@@ -1,7 +1,8 @@
 # Tiwater PDF MCP
 
 Published, Agent-facing stdio MCP server for PDF inspection, table extraction,
-and OCR. It is a separate package and tool surface from `@tiwater/office-mcp`.
+and OCR. It is a separate executable, process, and tool surface from the Office
+MCP, distributed in the same npm package so both use one trusted release path.
 
 ## Tools
 
@@ -19,7 +20,7 @@ traversing page content.
 ## Install and run
 
 ```bash
-npm install --global @tiwater/pdf-mcp
+npm install --global @tiwater/office-mcp
 tiwater-pdf-mcp
 ```
 
