@@ -90,6 +90,7 @@ try
     RunNativeInlineSelectionComposition();
     RunRichTargetContentReplacement();
     RunBookmarkedParagraphInsertion();
+    RunLegacyQualifiedTableLookInsertion();
 
     var replacementSource = Path.Combine(root, "content-replacement-source.docx");
     var replacementTarget = Path.Combine(root, "content-replacement-target.docx");
@@ -1142,6 +1143,68 @@ void RunBookmarkedParagraphInsertion()
     RequireUniqueWordIdentities(output);
     RunInput("validate-openxml", output);
     Console.WriteLine("PASS bookmarked paragraph insertion");
+}
+
+void RunLegacyQualifiedTableLookInsertion()
+{
+    const string wordprocessingNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    var source = Path.Combine(root, "legacy-table-look-source.docx");
+    using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        var look = new TableLook { Val = "04A0" };
+        foreach (var (name, value) in new[]
+        {
+            ("firstRow", "1"), ("lastRow", "0"), ("firstColumn", "1"),
+            ("lastColumn", "0"), ("noHBand", "0"), ("noVBand", "1"),
+        })
+            look.SetAttribute(new OpenXmlAttribute("w", name, wordprocessingNamespace, value));
+        main.Document = new Document(new Body(
+            new Table(
+                new TableProperties(look),
+                new TableGrid(new GridColumn()),
+                new TableRow(new TableCell(new Paragraph(new Run(new Text("legacy table"))))))));
+        main.Document.Save();
+    }
+
+    var target = Path.Combine(root, "legacy-table-look-target.docx");
+    using (var document = WordprocessingDocument.Create(target, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(new Paragraph(new Run(new Text("boundary")))));
+        main.Document.Save();
+    }
+
+    var output = Path.Combine(root, "legacy-table-look-output.docx");
+    Run("docx_insert_objects", new
+    {
+        input = target,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = source,
+                sources = new[] { new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:tbl[1]" } },
+                targetParent = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]" },
+                before = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" },
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, "legacy-table-look-receipt.json")
+    });
+
+    using (var document = WordprocessingDocument.Open(output, false))
+    {
+        var look = document.MainDocumentPart!.Document.Body!.GetFirstChild<Table>()!
+            .GetFirstChild<TableProperties>()!.GetFirstChild<TableLook>()!;
+        Require(look.Val?.Value == "04A0", "table look value changed while normalizing copied markup");
+        Require(!look.GetAttributes().Any(attribute => attribute.NamespaceUri == wordprocessingNamespace
+                && new[] { "firstRow", "lastRow", "firstColumn", "lastColumn", "noHBand", "noVBand" }
+                    .Contains(attribute.LocalName, StringComparer.Ordinal)),
+            "redundant qualified table look flags survived object insertion");
+    }
+    RunInput("validate-openxml", output);
+    Console.WriteLine("PASS legacy qualified table look insertion");
 }
 
 void RunRichTargetContentReplacement()

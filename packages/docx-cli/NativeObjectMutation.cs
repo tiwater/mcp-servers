@@ -14,7 +14,10 @@ public static class NativeObjectMutation
     public const string InsertCommand = "docx_insert_objects";
     public const string DeleteCommand = "docx_delete_object";
     private const string MainStory = "/word/document.xml";
+    private const string WordprocessingNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private const string Word2010Namespace = "http://schemas.microsoft.com/office/word/2010/wordml";
+    private static readonly string[] RedundantQualifiedTableLookFlags =
+        ["firstRow", "lastRow", "firstColumn", "lastColumn", "noHBand", "noVBand"];
 
     public static int Run(string command, string[] args)
     {
@@ -255,6 +258,10 @@ public static class NativeObjectMutation
             item.RemoveAttribute("paraId", Word2010Namespace);
             item.RemoveAttribute("textId", Word2010Namespace);
             if (item is BookmarkStart or BookmarkEnd) item.Remove();
+            if (item is TableLook
+                && !string.IsNullOrWhiteSpace(item.GetAttribute("val", WordprocessingNamespace).Value))
+                foreach (var flag in RedundantQualifiedTableLookFlags)
+                    item.RemoveAttribute(flag, WordprocessingNamespace);
         }
     }
 
