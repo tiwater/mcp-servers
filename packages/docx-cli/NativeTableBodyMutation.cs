@@ -39,7 +39,7 @@ public static class NativeTableBodyMutation
         var temporaryPath = paths.Output + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(paths.Input, temporaryPath, false);
+            Tiwater.Office.WritableFileCopy.Copy(paths.Input, temporaryPath);
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {
                 ApplyPrepared(output, prepared);

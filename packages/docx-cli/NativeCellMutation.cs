@@ -50,7 +50,7 @@ public static class NativeCellMutation
         var temporaryPath = outputPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(targetPath, temporaryPath, false);
+            Tiwater.Office.WritableFileCopy.Copy(targetPath, temporaryPath);
             var changedPaths = new List<string>();
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {

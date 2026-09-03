@@ -48,7 +48,7 @@ public static class NativePolicyMutation
         {
             var bodyCount = 0;
             var tableCount = 0;
-            File.Copy(paths.Input, temporaryPath, false);
+            Tiwater.Office.WritableFileCopy.Copy(paths.Input, temporaryPath);
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {
                 var body = output.MainDocumentPart?.Document?.Body
@@ -94,7 +94,7 @@ public static class NativePolicyMutation
         var temporaryPath = paths.Output + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(paths.Input, temporaryPath, false);
+            Tiwater.Office.WritableFileCopy.Copy(paths.Input, temporaryPath);
             int matched;
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {

@@ -19,7 +19,7 @@ public static class TemplateApplicator
     {
         var sourceEvidence = Inspector.InspectDetail(inputPath);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
-        File.Copy(inputPath, outputPath, true);
+        Tiwater.Office.WritableFileCopy.Copy(inputPath, outputPath, overwrite: true);
         var issues = new List<TemplateApplicationIssue>();
         var materializedLayoutShapes = new List<MaterializedLayoutShape>();
         var removedSystemPlaceholders = new List<RemovedSystemPlaceholder>();

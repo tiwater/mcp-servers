@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-pptx</ToolCommandName>
     <PackageId>tiwater.pptx.cli</PackageId>
-    <Version>0.5.0</Version>
+    <Version>0.5.1</Version>
     <Authors>Tiwater</Authors>
     <Description>Inspect PowerPoint structure and formatting, apply evidence-addressed formatting and object edits, and apply approved template masters and layouts.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -22,6 +22,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../shared/WritableFileCopy.cs" Link="WritableFileCopy.cs" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.2.0" />
   </ItemGroup>
 

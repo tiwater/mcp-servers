@@ -16,7 +16,7 @@ public static class Transforms
 
         var input = Path.GetFullPath(args[0]);
         var output = Path.GetFullPath(args[1]);
-        File.Copy(input, output, overwrite: true);
+        Tiwater.Office.WritableFileCopy.Copy(input, output, overwrite: true);
 
         using var doc = WordprocessingDocument.Open(output, true);
         var body = doc.MainDocumentPart?.Document?.Body
@@ -45,7 +45,7 @@ public static class Transforms
         var styleMap = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(mapPath))
             ?? throw new InvalidOperationException("Could not parse style map JSON.");
 
-        File.Copy(input, output, overwrite: true);
+        Tiwater.Office.WritableFileCopy.Copy(input, output, overwrite: true);
 
         using var doc = WordprocessingDocument.Open(output, true);
         var body = doc.MainDocumentPart?.Document?.Body

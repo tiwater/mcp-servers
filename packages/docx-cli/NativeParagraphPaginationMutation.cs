@@ -48,7 +48,7 @@ public static class NativeParagraphPaginationMutation
         var temporaryPath = paths.Output + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(paths.Input, temporaryPath, false);
+            Tiwater.Office.WritableFileCopy.Copy(paths.Input, temporaryPath);
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {
                 for (var index = 0; index < resolved.Count; index++)

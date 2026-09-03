@@ -22,7 +22,7 @@ public static class FormatEditor
             Directory.CreateDirectory(outputDirectory);
         }
 
-        File.Copy(inputPath, outputPath, overwrite: true);
+        Tiwater.Office.WritableFileCopy.Copy(inputPath, outputPath, overwrite: true);
 
         var changes = new List<FormatEditChange>();
         var issues = new List<FormatEditIssue>();

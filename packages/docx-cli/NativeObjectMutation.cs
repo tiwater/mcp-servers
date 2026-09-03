@@ -72,7 +72,7 @@ public static class NativeObjectMutation
         var temporaryPath = outputPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(targetPath, temporaryPath, false);
+            Tiwater.Office.WritableFileCopy.Copy(targetPath, temporaryPath);
             var inserted = new List<OpenXmlElement>();
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {
@@ -131,7 +131,7 @@ public static class NativeObjectMutation
         var temporaryPath = outputPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(targetPath, temporaryPath, false);
+            Tiwater.Office.WritableFileCopy.Copy(targetPath, temporaryPath);
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {
                 var elements = resolved.Select(item => Observation.ResolveNativePath(output, item.StoryPart, item.NativePath)).ToArray();

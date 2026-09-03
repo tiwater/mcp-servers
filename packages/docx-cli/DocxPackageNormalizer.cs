@@ -142,7 +142,7 @@ public static class DocxPackageNormalizer
         var outputPath = Path.GetFullPath(output);
         if (!string.Equals(inputPath, outputPath, StringComparison.Ordinal))
         {
-            File.Copy(inputPath, outputPath, overwrite: true);
+            Tiwater.Office.WritableFileCopy.Copy(inputPath, outputPath, overwrite: true);
         }
 
         using var archive = ZipFile.Open(outputPath, ZipArchiveMode.Update);
