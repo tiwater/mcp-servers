@@ -1,0 +1,47 @@
+{
+  "schema": "tiwater.pdf-provider-contract-manifest/v1",
+  "provider": {
+    "id": "@tiwater/pdf-mcp",
+    "version": "0.1.0"
+  },
+  "runtime": {
+    "command": "tiwater-pdf"
+  },
+  "tools": [
+    {
+      "name": "pdf_inspect",
+      "inputContract": {
+        "path": "contracts/pdf_inspect.schema.json",
+        "sha256": "0b397cca1351bfe79af8bb2b81e107c9d566f7772f3c6f7eea54d26048116eeb"
+      }
+    },
+    {
+      "name": "pdf_extract_tables",
+      "inputContract": {
+        "path": "contracts/pdf_extract_tables.schema.json",
+        "sha256": "2ff2d609964e0d2c6cc84c8f8caf6002de3ce8ce4b78e28a99a9e0430502d3b4"
+      }
+    },
+    {
+      "name": "pdf_find_table",
+      "inputContract": {
+        "path": "contracts/pdf_find_table.schema.json",
+        "sha256": "1bb441cedaeb78a3776096718d1ce51f29e7832e19ed0a43f9138c45a400bd18"
+      }
+    },
+    {
+      "name": "pdf_ocr",
+      "inputContract": {
+        "path": "contracts/pdf_ocr.schema.json",
+        "sha256": "8910ece3646ca0154ab8d18bd602d2fc9666067543d4cdc2b999a8d8543aada2"
+      }
+    },
+    {
+      "name": "pdf_extract_table_details",
+      "inputContract": {
+        "path": "contracts/pdf_extract_table_details.schema.json",
+        "sha256": "8910ece3646ca0154ab8d18bd602d2fc9666067543d4cdc2b999a8d8543aada2"
+      }
+    }
+  ]
+}

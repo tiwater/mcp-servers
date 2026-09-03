@@ -1,0 +1,27 @@
+{
+  "name": "@tiwater/pdf-mcp",
+  "version": "0.1.0",
+  "description": "Published MCP server for Tiwater PDF document capabilities",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tiwater/mcp-servers",
+    "directory": "servers/pdf"
+  },
+  "bin": {
+    "tiwater-pdf-mcp": "index.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "index.mjs",
+    "lib/*.mjs",
+    "README.md",
+    "contracts/*.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

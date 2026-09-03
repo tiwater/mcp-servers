@@ -17,7 +17,7 @@ The merge commit on `main` is the release source authority.
 ## Prohibited release paths
 
 - Do not publish from a feature branch, pull-request ref, dirty worktree, local package directory, or manually modified deployment checkout.
-- Do not manually upload NuGet or PyPI artifacts.
+- Do not manually upload NuGet, PyPI, or npm artifacts.
 - Do not use `workflow_dispatch` on a non-`main` ref.
 - Do not update a consumer's pinned version before the `main` workflow and clean installation proof both succeed.
 - Do not create a second version bump merely to recover from registry indexing delay.
