@@ -288,6 +288,102 @@ const pptxInspectionSummary = z.object({
   }).strict()).max(6),
 }).strict();
 
+const pptxSlidePageSummary = z.object({
+  schema: z.literal('tiwater.pptx-slide-page-receipt/v1'),
+  slideNumber: z.number().int().positive(),
+  slidePath: z.string().min(1),
+  masterPath: z.string().min(1).nullable(),
+  layoutPath: z.string().min(1).nullable(),
+  totalShapeCount: z.number().int().nonnegative(),
+  returnedShapeCount: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+  nextOffset: z.number().int().nonnegative().nullable(),
+}).strict();
+
+const pptxShapeTextPageSummary = z.object({
+  schema: z.literal('tiwater.pptx-shape-text-page-receipt/v1'),
+  slideNumber: z.number().int().positive(),
+  shapeId: z.number().int().positive(),
+  totalSegmentCount: z.number().int().nonnegative(),
+  returnedSegmentCount: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+  nextOffset: z.number().int().nonnegative().nullable(),
+}).strict();
+
+const pptxTransform = z.object({
+  x: z.number().int(),
+  y: z.number().int(),
+  cx: z.number().int(),
+  cy: z.number().int(),
+}).strict();
+
+const pptxSlideShapeIdentity = z.object({
+  shapeId: z.number().int().positive(),
+  name: z.string().max(120),
+  kind: z.string().min(1).max(40),
+  zOrder: z.number().int().nonnegative(),
+  placeholderType: z.string().max(120).nullable(),
+  placeholderPresent: z.boolean(),
+  placeholderIndex: z.number().int().nonnegative().nullable(),
+  mediaPartPath: z.string().max(240).nullable(),
+  mediaSha256: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  textPreview: z.string().max(240),
+  textLength: z.number().int().nonnegative(),
+  transform: pptxTransform.nullable(),
+  paragraphCount: z.number().int().nonnegative(),
+  runCount: z.number().int().nonnegative(),
+  hasTable: z.boolean(),
+}).strict();
+
+const pptxSlidePage = z.object({
+  schema: z.literal('tiwater.pptx-slide-page/v1'),
+  file: z.string(),
+  inputSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  slideCount: z.number().int().nonnegative(),
+  slideSize: z.object({ cx: z.number().int().nonnegative(), cy: z.number().int().nonnegative() }).strict(),
+  slide: z.object({
+    slideNumber: z.number().int().positive(),
+    path: z.string().min(1),
+    masterPath: z.string().min(1).nullable(),
+    layoutPath: z.string().min(1).nullable(),
+    shapes: z.array(pptxSlideShapeIdentity).max(8),
+  }).strict(),
+  receipt: pptxSlidePageSummary,
+}).strict();
+
+const boundedPptxString = z.string().max(120).nullable();
+const pptxShapeTextSegment = z.object({
+  segmentIndex: z.number().int().nonnegative(),
+  runIndex: z.number().int().nonnegative(),
+  paragraphIndex: z.number().int().nonnegative(),
+  text: z.string().max(160),
+  textOffset: z.number().int().nonnegative(),
+  runTextLength: z.number().int().nonnegative(),
+  textContinues: z.boolean(),
+  paragraphAlignment: boundedPptxString,
+  fontFamily: boundedPptxString,
+  fontSize: z.number().positive().nullable(),
+  color: boundedPptxString,
+  bold: z.boolean().nullable(),
+  directFontFamily: boundedPptxString,
+  directFontSize: z.number().positive().nullable(),
+  directColor: boundedPptxString,
+  directBold: z.boolean().nullable(),
+  fontFamilySource: boundedPptxString,
+  fontSizeSource: boundedPptxString,
+  colorSource: boundedPptxString,
+  boldSource: boundedPptxString,
+}).strict();
+
+const pptxShapeTextPage = z.object({
+  schema: z.literal('tiwater.pptx-shape-text-page/v1'),
+  file: z.string(),
+  inputSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  shape: pptxSlideShapeIdentity,
+  receipt: pptxShapeTextPageSummary,
+  segments: z.array(pptxShapeTextSegment).max(4),
+}).strict();
+
 function docxObservationOutput(tool) {
   return z.object({
     tool: z.literal(tool),
@@ -704,6 +800,28 @@ const tools = [
     outputSchema: largeResultOutput('pptx_export_json'),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: pptxExportJson,
+  },
+  {
+    name: 'pptx_read_slide',
+    description: 'List one selected PPTX slide as bounded pages of compact native shape identities in z-order. Each identity includes its shape id, kind, geometry, text preview, object counts, placeholder facts, media identity, and whether it contains a table. The receipt reports the selected slide, its layout and master paths, remaining shapes, and the next offset. Continue only when another shape on this slide is needed; use pptx_read_shape for bounded text and effective formatting of one selected shape. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not select templates, assign business roles, infer repairs, or inspect another slide.',
+    inputSchema: inputContract('pptx_read_slide'),
+    outputSchema: largeResultOutput('pptx_read_slide').extend({
+      summary: pptxSlidePageSummary,
+      content: pptxSlidePage.optional(),
+    }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+    handler: pptxReadSlide,
+  },
+  {
+    name: 'pptx_read_shape',
+    description: 'Read one native PPTX shape selected from pptx_read_slide as bounded text segments. Each segment retains its run and paragraph identity, text offset, paragraph alignment, effective text formatting, direct formatting, and formatting source. Long run text is split without changing its native run identity. The receipt reports remaining segments and the next offset. Continue only when another segment of this shape is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not choose formatting, derive repairs, or inspect another shape.',
+    inputSchema: inputContract('pptx_read_shape'),
+    outputSchema: largeResultOutput('pptx_read_shape').extend({
+      summary: pptxShapeTextPageSummary,
+      content: pptxShapeTextPage.optional(),
+    }).strict(),
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+    handler: pptxReadShape,
   },
   {
     name: 'pptx_apply_template',
@@ -1394,6 +1512,36 @@ async function pptxExportJson(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const result = await runJsonCandidateChain(pptxCandidates, ['export-json', input]);
   return deliverLargeJsonResult({ tool: 'pptx_export_json', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
+}
+
+async function pptxReadSlide(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  return withTempJsonFile(args, async requestPath => {
+    const result = await runJsonCandidateChain(pptxCandidates, ['pptx_read_slide', requestPath]);
+    return deliverLargeJsonResult({
+      tool: 'pptx_read_slide',
+      args,
+      runtime: commandRuntime(result),
+      payload: result.json,
+      sourcePaths: [input],
+      summary: result.json.receipt,
+    });
+  });
+}
+
+async function pptxReadShape(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  return withTempJsonFile(args, async requestPath => {
+    const result = await runJsonCandidateChain(pptxCandidates, ['pptx_read_shape', requestPath]);
+    return deliverLargeJsonResult({
+      tool: 'pptx_read_shape',
+      args,
+      runtime: commandRuntime(result),
+      payload: result.json,
+      sourcePaths: [input],
+      summary: result.json.receipt,
+    });
+  });
 }
 
 async function pptxValidate(args) {

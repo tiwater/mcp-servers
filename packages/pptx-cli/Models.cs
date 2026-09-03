@@ -74,6 +74,96 @@ public sealed record SlideDetailReport(
     IReadOnlyList<ShapeDetail> Shapes
 );
 
+public sealed record SlidePageReceipt(
+    string Schema,
+    int SlideNumber,
+    string SlidePath,
+    string? MasterPath,
+    string? LayoutPath,
+    int TotalShapeCount,
+    int ReturnedShapeCount,
+    int Remaining,
+    int? NextOffset
+);
+
+public sealed record SlideShapeIdentity(
+    uint ShapeId,
+    string Name,
+    string Kind,
+    int ZOrder,
+    string? PlaceholderType,
+    bool PlaceholderPresent,
+    uint? PlaceholderIndex,
+    string? MediaPartPath,
+    string? MediaSha256,
+    string TextPreview,
+    int TextLength,
+    TransformInfo? Transform,
+    int ParagraphCount,
+    int RunCount,
+    bool HasTable
+);
+
+public sealed record SlideShapePage(
+    int SlideNumber,
+    string Path,
+    string? MasterPath,
+    string? LayoutPath,
+    IReadOnlyList<SlideShapeIdentity> Shapes
+);
+
+public sealed record SlidePageReport(
+    string Schema,
+    string File,
+    string InputSha256,
+    int SlideCount,
+    SlideSizeInfo SlideSize,
+    SlideShapePage Slide,
+    SlidePageReceipt Receipt
+);
+
+public sealed record ShapeTextSegment(
+    int SegmentIndex,
+    int RunIndex,
+    int ParagraphIndex,
+    string Text,
+    int TextOffset,
+    int RunTextLength,
+    bool TextContinues,
+    string? ParagraphAlignment,
+    string? FontFamily,
+    double? FontSize,
+    string? Color,
+    bool? Bold,
+    string? DirectFontFamily,
+    double? DirectFontSize,
+    string? DirectColor,
+    bool? DirectBold,
+    string? FontFamilySource,
+    string? FontSizeSource,
+    string? ColorSource,
+    string? BoldSource
+);
+
+public sealed record ShapeTextPageReceipt(
+    string Schema,
+    int SlideNumber,
+    uint ShapeId,
+    int TotalSegmentCount,
+    int ReturnedSegmentCount,
+    int Remaining,
+    int? NextOffset
+);
+
+public sealed record ShapeTextPageReport(
+    string Schema,
+    string File,
+    string InputSha256,
+    SlideShapeIdentity Shape,
+    ShapeTextPageReceipt Receipt,
+    IReadOnlyList<ShapeTextSegment> Segments
+);
+
 public sealed record ShapeDetail(
     uint ShapeId,
     string Name,

@@ -9,6 +9,9 @@ namespace Dockit.Pptx;
 
 public static class Inspector
 {
+    public const int MaximumSlidePageShapes = 8;
+    public const int MaximumShapeTextPageSegments = 4;
+    private const int MaximumTextSegmentCharacters = 160;
     private static readonly Regex PlaceholderRegex = new(@"{{\s*([^{}]+?)\s*}}", RegexOptions.Compiled);
 
     public static PresentationReport Inspect(string path)
@@ -93,6 +96,158 @@ public static class Inspector
             Masters: masters,
             Slides: slides);
     }
+
+    public static SlidePageReport ReadSlide(string path, int slideNumber, int offset, int limit)
+    {
+        if (slideNumber < 1) throw new InvalidOperationException("slideNumber-must-be-positive");
+        if (offset < 0) throw new InvalidOperationException("offset-must-be-nonnegative");
+        if (limit is < 1 or > MaximumSlidePageShapes)
+            throw new InvalidOperationException($"limit-must-be-between-1-and-{MaximumSlidePageShapes}");
+
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath)) throw new FileNotFoundException("Presentation not found.", fullPath);
+        if (!string.Equals(Path.GetExtension(fullPath), ".pptx", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("pptx_read_slide requires a current PPTX presentation");
+
+        using var presentation = PresentationDocument.Open(fullPath, false);
+        var presentationPart = presentation.PresentationPart
+            ?? throw new InvalidOperationException("Presentation part not found.");
+        var slides = EnumerateSlides(presentationPart).ToList();
+        if (slideNumber > slides.Count) throw new InvalidOperationException($"Slide not found: {slideNumber}");
+
+        var slidePart = slides[slideNumber - 1];
+        var layoutPath = slidePart.SlideLayoutPart is { } layout ? NormalizePartPath(layout.Uri) : null;
+        var masterPath = slidePart.SlideLayoutPart?.SlideMasterPart is { } master
+            ? NormalizePartPath(master.Uri)
+            : null;
+        var shapes = ExtractShapes(slidePart);
+        var startOffset = Math.Min(offset, shapes.Count);
+        var returned = shapes.Skip(startOffset).Take(limit).Select(CompactShape).ToList();
+        var nextOffset = startOffset + returned.Count < shapes.Count
+            ? startOffset + returned.Count
+            : (int?)null;
+        var slideSize = presentationPart.Presentation.SlideSize;
+        var slidePath = NormalizePartPath(slidePart.Uri);
+        var receipt = new SlidePageReceipt(
+            "tiwater.pptx-slide-page-receipt/v1",
+            slideNumber,
+            slidePath,
+            masterPath,
+            layoutPath,
+            shapes.Count,
+            returned.Count,
+            shapes.Count - startOffset - returned.Count,
+            nextOffset);
+        return new SlidePageReport(
+            "tiwater.pptx-slide-page/v1",
+            fullPath,
+            HashFile(fullPath),
+            slides.Count,
+            new SlideSizeInfo(slideSize?.Cx ?? 0L, slideSize?.Cy ?? 0L),
+            new SlideShapePage(slideNumber, slidePath, masterPath, layoutPath, returned),
+            receipt);
+    }
+
+    public static ShapeTextPageReport ReadShape(string path, int slideNumber, uint shapeId, int offset, int limit)
+    {
+        if (slideNumber < 1) throw new InvalidOperationException("slideNumber-must-be-positive");
+        if (offset < 0) throw new InvalidOperationException("offset-must-be-nonnegative");
+        if (limit is < 1 or > MaximumShapeTextPageSegments)
+            throw new InvalidOperationException($"limit-must-be-between-1-and-{MaximumShapeTextPageSegments}");
+
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath)) throw new FileNotFoundException("Presentation not found.", fullPath);
+        if (!string.Equals(Path.GetExtension(fullPath), ".pptx", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("pptx_read_shape requires a current PPTX presentation");
+
+        using var presentation = PresentationDocument.Open(fullPath, false);
+        var presentationPart = presentation.PresentationPart
+            ?? throw new InvalidOperationException("Presentation part not found.");
+        var slides = EnumerateSlides(presentationPart).ToList();
+        if (slideNumber > slides.Count) throw new InvalidOperationException($"Slide not found: {slideNumber}");
+        var shapes = ExtractShapes(slides[slideNumber - 1]);
+        var shape = shapes.SingleOrDefault(candidate => candidate.ShapeId == shapeId)
+            ?? throw new InvalidOperationException($"Shape not found on slide {slideNumber}: {shapeId}");
+        var segments = TextSegments(shape).ToList();
+        var startOffset = Math.Min(offset, segments.Count);
+        var returned = segments.Skip(startOffset).Take(limit).ToList();
+        var nextOffset = startOffset + returned.Count < segments.Count
+            ? startOffset + returned.Count
+            : (int?)null;
+        return new ShapeTextPageReport(
+            "tiwater.pptx-shape-text-page/v1",
+            fullPath,
+            HashFile(fullPath),
+            CompactShape(shape),
+            new ShapeTextPageReceipt(
+                "tiwater.pptx-shape-text-page-receipt/v1",
+                slideNumber,
+                shapeId,
+                segments.Count,
+                returned.Count,
+                segments.Count - startOffset - returned.Count,
+                nextOffset),
+            returned);
+    }
+
+    private static SlideShapeIdentity CompactShape(ShapeDetail shape) => new(
+        shape.ShapeId,
+        Compact(shape.Name, 120),
+        shape.Kind,
+        shape.ZOrder,
+        shape.PlaceholderType,
+        shape.PlaceholderPresent,
+        shape.PlaceholderIndex,
+        shape.MediaPartPath,
+        shape.MediaSha256,
+        Compact(shape.Text, 240),
+        shape.Text.Length,
+        shape.Transform,
+        shape.Paragraphs.Count,
+        shape.Runs.Count,
+        shape.Table is not null);
+
+    private static IEnumerable<ShapeTextSegment> TextSegments(ShapeDetail shape)
+    {
+        var segmentIndex = 0;
+        foreach (var run in shape.Runs)
+        {
+            var text = run.Text ?? string.Empty;
+            var alignment = shape.Paragraphs.FirstOrDefault(value => value.ParagraphIndex == run.ParagraphIndex)?.Alignment;
+            if (text.Length == 0)
+            {
+                yield return Segment(run, alignment, segmentIndex++, 0, string.Empty, false);
+                continue;
+            }
+            for (var textOffset = 0; textOffset < text.Length;)
+            {
+                var length = Math.Min(MaximumTextSegmentCharacters, text.Length - textOffset);
+                if (textOffset + length < text.Length && char.IsHighSurrogate(text[textOffset + length - 1])) length--;
+                var value = text.Substring(textOffset, length);
+                yield return Segment(run, alignment, segmentIndex++, textOffset, value, textOffset + length < text.Length);
+                textOffset += length;
+            }
+        }
+    }
+
+    private static ShapeTextSegment Segment(TextRunDetail run, string? alignment, int segmentIndex, int textOffset, string text, bool continues) => new(
+        segmentIndex, run.RunIndex, run.ParagraphIndex, text, textOffset, run.Text?.Length ?? 0, continues,
+        CompactNullable(alignment, 120), CompactNullable(run.FontFamily, 120), run.FontSize,
+        CompactNullable(run.Color, 120), run.Bold,
+        CompactNullable(run.DirectFontFamily, 120), run.DirectFontSize,
+        CompactNullable(run.DirectColor, 120), run.DirectBold,
+        CompactNullable(run.FontFamilySource, 120), CompactNullable(run.FontSizeSource, 120),
+        CompactNullable(run.ColorSource, 120), CompactNullable(run.BoldSource, 120));
+
+    private static string Compact(string? value, int maximum)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        var compact = Regex.Replace(value.Trim(), @"\s+", " ");
+        return compact.Length <= maximum ? compact : compact[..maximum];
+    }
+
+    private static string? CompactNullable(string? value, int maximum)
+        => value is null ? null : Compact(value, maximum);
 
     private static string HashText(string value) => Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static string HashFile(string path) { using var stream = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant(); }

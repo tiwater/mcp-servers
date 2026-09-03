@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/pptx_read_shape/v1",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Current PPTX presentation.",
+      "x-tiwater-file-role": "read"
+    },
+    "slideNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "Exact one-based slide number returned by presentation observation."
+    },
+    "shapeId": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295,
+      "description": "Exact native shape id returned by pptx_read_slide."
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Zero-based text-segment offset within the selected shape. Continue only when another segment is needed."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "description": "Maximum text segments in this bounded page."
+    },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Return this selected technical page directly when it fits the response limit. May be combined with output."
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional immutable JSON artifact path for this selected technical page. May be combined with returnContent.",
+      "x-tiwater-file-role": "write"
+    }
+  },
+  "required": ["input", "slideNumber", "shapeId", "limit", "returnContent"],
+  "additionalProperties": false
+}

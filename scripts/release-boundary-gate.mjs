@@ -991,7 +991,7 @@ function checkSourceBoundObservationOutputs(tools) {
   const largeResultNames = [
     'docx_compare', 'docx_export_json', 'docx_validate', 'docx_validate_font_policy',
     'docx_validate_toc_style_policy', 'xlsx_inspect', 'xlsx_export_json', 'xlsx_read_range', 'xlsx_validate',
-    'pptx_inspect', 'pptx_export_json', 'pptx_validate',
+    'pptx_inspect', 'pptx_export_json', 'pptx_read_slide', 'pptx_read_shape', 'pptx_validate',
   ];
   for (const name of largeResultNames) {
     const sources = tools.find(tool => tool?.name === name)?.outputSchema?.properties?.sources;
@@ -1012,7 +1012,7 @@ function checkLargeResultChannels(tools) {
   const names = [
     'docx_compare', 'docx_export_json', 'docx_validate', 'docx_validate_font_policy',
     'docx_validate_toc_style_policy', 'xlsx_inspect', 'xlsx_export_json', 'xlsx_read_range', 'xlsx_validate',
-    'pptx_inspect', 'pptx_export_json', 'pptx_validate',
+    'pptx_inspect', 'pptx_export_json', 'pptx_read_slide', 'pptx_read_shape', 'pptx_validate',
   ];
   for (const name of names) {
     const tool = tools.find(entry => entry?.name === name);
@@ -1119,6 +1119,43 @@ function checkXlsxRangeReadContract(tools) {
     fail(check, 'xlsx_read_range does not publish its native paging semantics and semantic non-goals');
   }
   note('XLSX range reads expose one bounded native cell page without business inference');
+}
+
+function checkPptxBoundedReadContracts(tools) {
+  const check = 'pptx-bounded-read-contracts';
+  const slide = tools.find(entry => entry?.name === 'pptx_read_slide');
+  const shape = tools.find(entry => entry?.name === 'pptx_read_shape');
+  const slideInput = slide?.inputSchema;
+  const shapeInput = shape?.inputSchema;
+  const slideShapes = slide?.outputSchema?.properties?.content?.properties?.slide?.properties?.shapes;
+  const shapeSegments = shape?.outputSchema?.properties?.content?.properties?.segments;
+  if (!['input', 'slideNumber', 'limit', 'returnContent'].every(name => slideInput?.required?.includes(name))
+      || slideInput?.properties?.slideNumber?.minimum !== 1
+      || slideInput?.properties?.offset?.minimum !== 0
+      || slideInput?.properties?.limit?.minimum !== 1
+      || slideInput?.properties?.limit?.maximum !== 8
+      || slideShapes?.maxItems !== 8
+      || slideShapes?.items?.properties?.textPreview?.maxLength !== 240
+      || slideShapes?.items?.properties?.textLength?.type !== 'integer') {
+    fail(check, 'pptx_read_slide does not expose one compact bounded native shape index');
+  }
+  if (!['input', 'slideNumber', 'shapeId', 'limit', 'returnContent'].every(name => shapeInput?.required?.includes(name))
+      || shapeInput?.properties?.slideNumber?.minimum !== 1
+      || shapeInput?.properties?.shapeId?.minimum !== 1
+      || shapeInput?.properties?.offset?.minimum !== 0
+      || shapeInput?.properties?.limit?.minimum !== 1
+      || shapeInput?.properties?.limit?.maximum !== 4
+      || shapeSegments?.maxItems !== 4
+      || shapeSegments?.items?.properties?.text?.maxLength !== 160
+      || shapeSegments?.items?.properties?.runIndex?.type !== 'integer'
+      || shapeSegments?.items?.properties?.textOffset?.type !== 'integer') {
+    fail(check, 'pptx_read_shape does not expose bounded native text and formatting segments');
+  }
+  if (!(slide?.description || '').includes('does not select templates, assign business roles, infer repairs')
+      || !(shape?.description || '').includes('does not choose formatting, derive repairs')) {
+    fail(check, 'PPTX bounded reads do not publish their semantic non-goals');
+  }
+  note('PPTX slide and shape reads expose compact native paging without business inference');
 }
 
 function checkDocxTableStreamingContract(tools) {
@@ -1269,6 +1306,7 @@ async function main() {
     checkSourceBoundObservationOutputs(toolNames);
     checkLargeResultChannels(toolNames);
     checkXlsxRangeReadContract(toolNames);
+    checkPptxBoundedReadContracts(toolNames);
     checkDocxMergedCellDescriptions(toolNames);
     checkDocxTableStreamingContract(toolNames);
     checkDocxTableIndexContract(toolNames);

@@ -336,6 +336,28 @@
       }
     },
     {
+      "name": "pptx_read_shape",
+      "providerContract": {
+        "source": "packages/pptx-cli/contracts/mcp-input/pptx_read_shape.schema.json",
+        "sha256": "63bf1819f95514dad3d6f43a58795aa8b57bf9d1f7075edcfb11ddd3253b83e4"
+      },
+      "inputContract": {
+        "path": "office/contracts/pptx_read_shape.schema.json",
+        "sha256": "63bf1819f95514dad3d6f43a58795aa8b57bf9d1f7075edcfb11ddd3253b83e4"
+      }
+    },
+    {
+      "name": "pptx_read_slide",
+      "providerContract": {
+        "source": "packages/pptx-cli/contracts/mcp-input/pptx_read_slide.schema.json",
+        "sha256": "3a2aaca3fd11da490863e1a2d60bf2f120e4e24991b457e316de04b5c9cc889a"
+      },
+      "inputContract": {
+        "path": "office/contracts/pptx_read_slide.schema.json",
+        "sha256": "3a2aaca3fd11da490863e1a2d60bf2f120e4e24991b457e316de04b5c9cc889a"
+      }
+    },
+    {
       "name": "pptx_replace_picture_image",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_replace_picture_image.schema.json",
