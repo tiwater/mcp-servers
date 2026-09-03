@@ -1115,6 +1115,7 @@ function checkXlsxRangeReadContract(tools) {
   }
   if (!description.includes('row-major cell offset')
       || !description.includes('provider chooses the bounded page size')
+      || !description.includes('largest leading cell page that fits the response limit')
       || !description.includes('physical presence')
       || !description.includes('remaining cells and the next offset')
       || !description.includes('does not infer regions, headers, records, field meanings, or business mappings')) {

@@ -784,7 +784,7 @@ const tools = [
   },
   {
     name: 'xlsx_read_range',
-    description: 'Read one explicit native A1 cell or rectangular range from one current XLSX worksheet. The provider chooses the bounded page size. Pages use a row-major cell offset and return physical presence, raw and formatted values, normalized value type, formula metadata, style, rich text, and merged-range ownership. The receipt always reports remaining cells and the next offset. Continue only when another selected cell is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not infer regions, headers, records, field meanings, or business mappings; convert legacy XLS before reading Open XML cells.',
+    description: 'Read one explicit native A1 cell or rectangular range from one current XLSX worksheet. The provider chooses the bounded page size. Pages use a row-major cell offset and return physical presence, raw and formatted values, normalized value type, formula metadata, style, rich text, and merged-range ownership. The receipt always reports remaining cells and the next offset. Continue only when another selected cell is needed. Set returnContent true to return the largest leading cell page that fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not infer regions, headers, records, field meanings, or business mappings; convert legacy XLS before reading Open XML cells.',
     inputSchema: inputContract('xlsx_read_range'),
     outputSchema: xlsxRangeReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -1520,17 +1520,52 @@ async function xlsxExportJson(args) {
   return deliverLargeJsonResult({ tool: 'xlsx_export_json', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
 }
 
+function xlsxRangeDeliveryPage(page, returnContent) {
+  if (!returnContent || page.cells.length === 0) return page;
+  const startOffset = page.receipt.totalCellCount
+    - page.receipt.remaining
+    - page.receipt.returnedCellCount;
+  for (let count = page.cells.length; count > 0; count -= 1) {
+    const remaining = page.receipt.totalCellCount - startOffset - count;
+    const candidate = {
+      ...page,
+      receipt: {
+        ...page.receipt,
+        returnedCellCount: count,
+        remaining,
+        nextOffset: remaining > 0 ? startOffset + count : null,
+      },
+      cells: page.cells.slice(0, count),
+    };
+    if (Buffer.byteLength(JSON.stringify(candidate), 'utf8') <= returnedContentBudgetBytes) {
+      return candidate;
+    }
+  }
+  const remaining = page.receipt.totalCellCount - startOffset - 1;
+  return {
+    ...page,
+    receipt: {
+      ...page.receipt,
+      returnedCellCount: 1,
+      remaining,
+      nextOffset: remaining > 0 ? startOffset + 1 : null,
+    },
+    cells: page.cells.slice(0, 1),
+  };
+}
+
 async function xlsxReadRange(args) {
   const input = path.resolve(requireString(args.input, 'input'));
   return withTempJsonFile(args, async requestPath => {
     const result = await runJsonCandidateChain(xlsxCandidates, ['xlsx_read_range', requestPath]);
+    const page = xlsxRangeDeliveryPage(result.json, args.returnContent === true);
     return deliverLargeJsonResult({
       tool: 'xlsx_read_range',
       args,
       runtime: commandRuntime(result),
-      payload: result.json,
+      payload: page,
       sourcePaths: [input],
-      summary: result.json.receipt,
+      summary: page.receipt,
     });
   });
 }
