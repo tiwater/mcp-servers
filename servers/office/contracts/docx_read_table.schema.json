@@ -21,10 +21,11 @@
       "required": ["part", "path"],
       "additionalProperties": false
     },
-    "continuation": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Opaque continuation returned by the preceding page. Pass it back unchanged; omit it for the first page."
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Zero-based row offset. Continue from receipt.nextOffset only when a later row is needed."
     },
     "output": {
       "type": "string",
