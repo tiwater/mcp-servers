@@ -195,20 +195,14 @@ try
                     new
                     {
                         columns = new[] { "c0" }, rowSpan = (int?)null, text = (string?)null,
-                        sourceContent = new
-                        {
-                            input = replacementSource,
-                            selections = new[] { new { address = chineseItem } },
-                        },
+                        sourceInput = replacementSource,
+                        sourceSelections = new[] { new { address = chineseItem } },
                     },
                     new
                     {
                         columns = new[] { "c1" }, rowSpan = (int?)null, text = (string?)null,
-                        sourceContent = new
-                        {
-                            input = replacementSource,
-                            selections = new[] { new { address = chineseResult } },
-                        },
+                        sourceInput = replacementSource,
+                        sourceSelections = new[] { new { address = chineseResult } },
                     },
                 },
             },

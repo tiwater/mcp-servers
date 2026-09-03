@@ -610,12 +610,14 @@ async function checkGeneratedManifest(packageRoot, toolNames, packageManifest) {
 
 function checkFileArgumentRoles(schema, toolName, check) {
   let count = 0;
-  function visit(node, location, propertyName = '') {
+  function visit(node, location, propertyName = '', insideComposition = false) {
     if (!node || typeof node !== 'object' || Array.isArray(node)) return;
     const declaredRole = node[fileRoleKey];
     const declaredEffect = node[fileEffectKey];
     if (declaredRole !== undefined) {
-      if (node.type !== 'string' || !['read', 'write'].includes(declaredRole)) {
+      if (insideComposition) {
+        fail(check, `tool ${toolName} hides ${fileRoleKey} inside a schema composition at ${location}`);
+      } else if (node.type !== 'string' || !['read', 'write'].includes(declaredRole)) {
         fail(check, `tool ${toolName} has invalid ${fileRoleKey} at ${location}`);
       } else {
         count += 1;
@@ -634,12 +636,12 @@ function checkFileArgumentRoles(schema, toolName, check) {
       fail(check, `tool ${toolName} must declare ${location} ${fileEffectKey} as ${expectedEffect}`);
     }
     for (const [name, child] of Object.entries(node.properties || {})) {
-      visit(child, `${location}.properties.${name}`, name);
+      visit(child, `${location}.properties.${name}`, name, insideComposition);
     }
-    if (node.items) visit(node.items, `${location}.items`);
+    if (node.items) visit(node.items, `${location}.items`, propertyName, insideComposition);
     for (const keyword of ['allOf', 'anyOf', 'oneOf']) {
       for (const [index, child] of (node[keyword] || []).entries()) {
-        visit(child, `${location}.${keyword}[${index}]`, propertyName);
+        visit(child, `${location}.${keyword}[${index}]`, propertyName, true);
       }
     }
   }
@@ -1073,13 +1075,14 @@ function checkDocxMergedCellDescriptions(tools) {
   }
   if (!setTableDescription.includes('Each explicit cell occupies contiguous columns')
       || !setTableDescription.includes('may span logical rows')
-      || !setTableDescription.includes('exact native source selections')
+      || !setTableDescription.includes('exact native sourceSelections')
       || !setTableDescription.includes('exposes no intermediate document')
       || !setTableDescription.includes('does not select source rows')
       || setTableCell?.properties?.rowSpan?.type !== 'integer'
       || setTableCell?.properties?.rowSpan?.minimum !== 1
       || !setTableCell?.required?.includes('text')
-      || !setTableCell?.required?.includes('sourceContent')
+      || setTableCell?.properties?.sourceInput?.['x-tiwater-file-role'] !== 'read'
+      || setTableCell?.properties?.sourceSelections?.type !== 'array'
       || Object.hasOwn(setTableCell?.properties ?? {}, 'verticalMerge')) {
     fail(check, 'docx_set_table does not expose one atomic explicit table input');
   }

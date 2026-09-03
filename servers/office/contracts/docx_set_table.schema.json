@@ -63,36 +63,29 @@
               "type": "object", "properties": {
                 "columns": { "type": "array", "minItems": 1, "description": "One or more contiguous request-local column IDs occupied by this cell.", "items": { "type": "string", "minLength": 1, "maxLength": 80 } },
                 "rowSpan": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
-                "text": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Final derived plain text, or null when sourceContent is used." },
-                "sourceContent": {
-                  "anyOf": [{
-                    "type": "object",
-                    "properties": {
-                      "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
-                      "selections": {
-                        "type": "array", "minItems": 1,
-                        "items": {
-                          "type": "object", "properties": {
-                            "address": {
-                              "type": "object", "properties": {
-                                "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
-                                "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
-                              }, "required": ["part", "path"], "additionalProperties": false
-                            },
-                            "range": {
-                              "type": "object", "properties": {
-                                "start": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-                                "length": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
-                              }, "required": ["start", "length"], "additionalProperties": false
-                            }
-                          }, "required": ["address"], "additionalProperties": false
-                        }
+                "text": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Final derived plain text, or null when sourceInput and sourceSelections are used." },
+                "sourceInput": { "type": "string", "minLength": 1, "description": "Current source DOCX containing sourceSelections. Omit when text is used.", "x-tiwater-file-role": "read" },
+                "sourceSelections": {
+                  "type": "array", "minItems": 1,
+                  "description": "Exact ordered native source selections. Omit when text is used.",
+                  "items": {
+                    "type": "object", "properties": {
+                      "address": {
+                        "type": "object", "properties": {
+                          "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+                          "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+                        }, "required": ["part", "path"], "additionalProperties": false
+                      },
+                      "range": {
+                        "type": "object", "properties": {
+                          "start": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                          "length": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+                        }, "required": ["start", "length"], "additionalProperties": false
                       }
-                    }, "required": ["input", "selections"], "additionalProperties": false
-                  }, { "type": "null" }],
-                  "description": "Exact ordered native source selections, or null when text is used."
+                    }, "required": ["address"], "additionalProperties": false
+                  }
                 }
-              }, "required": ["columns", "text", "sourceContent"], "additionalProperties": false
+              }, "required": ["columns", "text"], "additionalProperties": false
             }
           },
           "cantSplit": { "type": "boolean" }
