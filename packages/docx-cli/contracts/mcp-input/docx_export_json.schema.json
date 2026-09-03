@@ -15,7 +15,8 @@
       "type": "string",
       "minLength": 1,
       "description": "Absolute path for a new JSON artifact inside the caller-authorized output directory. Existing files are never overwritten.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
   "required": [

@@ -9,6 +9,10 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  assertEvidenceToolContract,
+  evidenceRoleMetadataKey,
+} from '../servers/_shared/evidence-role.mjs';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -109,6 +113,7 @@ async function pack(tempRoot) {
   const required = [
     'package.json', 'office/index.mjs', 'pdf/index.mjs', 'pdf/README.md',
     '_shared/mcp-stdio.mjs', '_shared/tool-runtime.mjs', '_shared/large-json-result.mjs',
+    '_shared/evidence-role.mjs',
     'office/contracts/tiwater-office-provider-contract-manifest-v1.json',
     'pdf/contracts/tiwater-pdf-provider-contract-manifest-v1.json',
   ];
@@ -235,6 +240,18 @@ async function isolatedSmoke(archive, tempRoot, packageJson) {
         || tool.annotations?.destructiveHint !== false
         || tool.annotations?.openWorldHint !== false) {
         fail('isolated-smoke', `${tool.name} annotations are incomplete`);
+      }
+    }
+    for (const tool of tools || []) {
+      const hasMetadata = tool?._meta?.[evidenceRoleMetadataKey] !== undefined;
+      if (tool.name !== 'pdf_inspect') {
+        if (hasMetadata) fail('isolated-smoke', `${tool.name} publishes an unexpected evidence role`);
+        continue;
+      }
+      try {
+        assertEvidenceToolContract(tool, 'document-observation');
+      } catch (error) {
+        fail('isolated-smoke', error.message);
       }
     }
     const inspectTool = (tools || []).find(tool => tool.name === 'pdf_inspect');

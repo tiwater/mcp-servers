@@ -2,18 +2,18 @@
   "schema": "tiwater.text-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.21.30"
+    "version": "0.21.31"
   },
   "tools": [
     {
       "name": "text_inspect",
       "providerContract": {
         "source": "servers/text/provider-contracts/text_inspect.schema.json",
-        "sha256": "41d463771e4cf5d0c9377ba70a139ca043ca9542f074c7d6425f0b711cfa50b8"
+        "sha256": "7a4af90303d2a0abce66a2e77f83838dbb2ea925edf98b04a80723b92b7f5ec0"
       },
       "inputContract": {
         "path": "text/contracts/text_inspect.schema.json",
-        "sha256": "41d463771e4cf5d0c9377ba70a139ca043ca9542f074c7d6425f0b711cfa50b8"
+        "sha256": "7a4af90303d2a0abce66a2e77f83838dbb2ea925edf98b04a80723b92b7f5ec0"
       }
     },
     {
