@@ -28,8 +28,10 @@ public static class FixedCommandRunner
             throw new InvalidOperationException($"{command} requires <request.json>");
 
         string? output = null;
+        string? workingOutput = null;
         string? receiptOutput = null;
         Artifact? inputArtifact = null;
+        var inPlace = false;
 
         try
         {
@@ -38,25 +40,35 @@ public static class FixedCommandRunner
             var input = RequirePath(request, "input");
             output = RequirePath(request, "output");
             receiptOutput = RequirePath(request, "receiptOutput");
-            RequireNewPath(output, "output");
+            inPlace = PathsEqual(output, input);
+            if (!inPlace) RequireNewPath(output, "output");
             RequireNewPath(receiptOutput, "receiptOutput");
             if (PathsEqual(output, receiptOutput))
                 throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
-            if (PathsEqual(output, input))
-                throw new InvalidOperationException("output-must-not-overwrite-input");
+
+            var outputDirectory = Path.GetDirectoryName(output)
+                ?? throw new InvalidOperationException("output-directory-not-found");
+            Directory.CreateDirectory(outputDirectory);
+            workingOutput = Path.Combine(outputDirectory,
+                $".{Path.GetFileNameWithoutExtension(output)}.{Guid.NewGuid():N}.tmp{Path.GetExtension(output)}");
 
             inputArtifact = Describe(input);
             var result = command switch
             {
-                "pptx_apply_template" => RunTemplate(request, input, output),
-                "pptx_apply_format" => RunFormat(request, input, output),
-                "pptx_set_shape_geometry" => RunShapeGeometry(request, input, output),
-                "pptx_replace_picture_image" => RunPictureImage(request, input, output),
+                "pptx_apply_template" => RunTemplate(request, input, workingOutput),
+                "pptx_apply_format" => RunFormat(request, input, workingOutput),
+                "pptx_set_shape_geometry" => RunShapeGeometry(request, input, workingOutput),
+                "pptx_replace_picture_image" => RunPictureImage(request, input, workingOutput),
                 _ => throw new InvalidOperationException($"Unknown fixed PPTX command: {command}"),
             };
-            var pass = result.Pass && File.Exists(output);
+            var pass = result.Pass && File.Exists(workingOutput);
+            if (pass)
+            {
+                File.Move(workingOutput, output, overwrite: inPlace);
+                workingOutput = null;
+            }
             var outputArtifact = pass ? Describe(output) : null;
-            if (!pass && File.Exists(output)) File.Delete(output);
+            if (!pass && workingOutput is not null && File.Exists(workingOutput)) File.Delete(workingOutput);
 
             var receiptPayload = new
             {
@@ -88,7 +100,8 @@ public static class FixedCommandRunner
         }
         catch (Exception error)
         {
-            if (output is not null && File.Exists(output)) File.Delete(output);
+            if (workingOutput is not null && File.Exists(workingOutput)) File.Delete(workingOutput);
+            if (!inPlace && output is not null && File.Exists(output)) File.Delete(output);
 
             if (receiptOutput is not null && !File.Exists(receiptOutput))
             {
