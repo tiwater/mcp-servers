@@ -5,6 +5,7 @@ export const effectKindSchema = 'tiwater.provider-effect-kind/v1';
 export const documentRevisionRoleKey = 'x-tiwater-document-revision-role';
 
 const effectKinds = new Set([
+  'document-create',
   'document-mutation',
   'source-conversion',
   'native-render',
@@ -46,10 +47,15 @@ export function assertEffectKindToolContract(tool, expectedKind = undefined) {
   if (expectedKind !== undefined && metadata.kind !== expectedKind) {
     throw new Error(`effect-kind-mismatch:${tool?.name || 'unnamed'}:${metadata.kind}`);
   }
-  if (!bindings.some(binding => binding.role === 'read')) {
+  if (metadata.kind !== 'document-create' && !bindings.some(binding => binding.role === 'read')) {
     throw new Error(`effect-kind-source-binding-missing:${tool?.name || 'unnamed'}`);
   }
-  if (metadata.kind === 'document-mutation') {
+  if (metadata.kind === 'document-create') {
+    if (bindings.some(binding => binding.role === 'read')
+        || currentDocumentBindings.length !== 0 || effectiveWrites.length !== 1) {
+      throw new Error(`document-create-bindings-invalid:${tool?.name || 'unnamed'}`);
+    }
+  } else if (metadata.kind === 'document-mutation') {
     if (currentDocumentBindings.length !== 1) {
       throw new Error(`document-mutation-current-binding-invalid:${tool?.name || 'unnamed'}`);
     }
@@ -68,6 +74,16 @@ export function assertEffectKindToolContract(tool, expectedKind = undefined) {
     throw new Error(`effect-kind-evidence-role-conflict:${tool?.name || 'unnamed'}`);
   }
   return metadata.kind;
+}
+
+export function documentCreateFileArguments(tool, args) {
+  assertEffectKindToolContract(tool, 'document-create');
+  const bindings = boundFileArguments(tool?.inputSchema, args);
+  const effectiveOutput = bindings.filter(binding => binding.role === 'write' && binding.effect);
+  if (bindings.some(binding => binding.role === 'read') || effectiveOutput.length !== 1) {
+    throw new Error(`document-create-file-arguments-invalid:${tool?.name || 'unnamed'}`);
+  }
+  return { effectiveOutput: effectiveOutput[0].value };
 }
 
 export function documentMutationFileArguments(tool, args) {

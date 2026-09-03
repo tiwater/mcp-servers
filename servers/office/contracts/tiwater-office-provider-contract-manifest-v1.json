@@ -2,7 +2,7 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.21.38"
+    "version": "0.21.39"
   },
   "tools": [
     {
@@ -36,6 +36,17 @@
       "inputContract": {
         "path": "office/contracts/docx_compare.schema.json",
         "sha256": "a6d59ee785d8ab3994eb6f539b48411b272565ac136219de58d39a449b3112f3"
+      }
+    },
+    {
+      "name": "docx_create",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_create.schema.json",
+        "sha256": "1cf22a23fc5d8b27fff6f50db2672be623696eac79ea986053e703274eab5e3e"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_create.schema.json",
+        "sha256": "1cf22a23fc5d8b27fff6f50db2672be623696eac79ea986053e703274eab5e3e"
       }
     },
     {
@@ -333,6 +344,28 @@
       "inputContract": {
         "path": "office/contracts/pptx_inspect.schema.json",
         "sha256": "9cde8fdda335f379d44e60819367b305a2c97c6c0c8fdf2141bf460335e5da84"
+      }
+    },
+    {
+      "name": "pptx_read_shape",
+      "providerContract": {
+        "source": "packages/pptx-cli/contracts/mcp-input/pptx_read_shape.schema.json",
+        "sha256": "63bf1819f95514dad3d6f43a58795aa8b57bf9d1f7075edcfb11ddd3253b83e4"
+      },
+      "inputContract": {
+        "path": "office/contracts/pptx_read_shape.schema.json",
+        "sha256": "63bf1819f95514dad3d6f43a58795aa8b57bf9d1f7075edcfb11ddd3253b83e4"
+      }
+    },
+    {
+      "name": "pptx_read_slide",
+      "providerContract": {
+        "source": "packages/pptx-cli/contracts/mcp-input/pptx_read_slide.schema.json",
+        "sha256": "3a2aaca3fd11da490863e1a2d60bf2f120e4e24991b457e316de04b5c9cc889a"
+      },
+      "inputContract": {
+        "path": "office/contracts/pptx_read_slide.schema.json",
+        "sha256": "3a2aaca3fd11da490863e1a2d60bf2f120e4e24991b457e316de04b5c9cc889a"
       }
     },
     {

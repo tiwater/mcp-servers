@@ -19,6 +19,7 @@ public static class Cli
         "replace-style-ids",
         "export-json",
         "normalize-openxml",
+        NativeDocumentCreate.Command,
         "validate-font-policy",
         "validate-toc-style-policy",
         .. ObservationCommand.Commands,
@@ -78,6 +79,7 @@ public static class Cli
                 "replace-style-ids" => Task.FromResult(Transforms.RunReplaceStyleIds(args[1..])),
                 "export-json" => Task.FromResult(Transforms.RunExportJson(args[1..])),
                 "normalize-openxml" => Task.FromResult(DocxPackageNormalizer.RunNormalize(args[1..])),
+                _ when args[0] == NativeDocumentCreate.Command => Task.FromResult(NativeDocumentCreate.Run(args[1..])),
                 "validate-font-policy" => Task.FromResult(FontPolicy.RunValidate(args[1..])),
                 "validate-toc-style-policy" => Task.FromResult(TocStylePolicy.RunValidate(args[1..])),
                 _ when ObservationCommand.IsCommand(args[0]) => Task.FromResult(ObservationCommand.Run(args[0], args[1..])),
@@ -169,6 +171,7 @@ public static class Cli
         Console.WriteLine("  replace-style-ids <input.docx> <output.docx> <style-map.json>");
         Console.WriteLine("  export-json <input.docx> [<output.json>]");
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
+        Console.WriteLine("  docx_create <request.json>");
         Console.WriteLine("  validate-font-policy <input.docx> <policy.json>");
         Console.WriteLine("  validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level>");
         Console.WriteLine("  docx_* <request.json>  (fixed published mutation commands)");
@@ -191,6 +194,7 @@ public static class Cli
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
             _ when ObservationCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
             _ when command is NativeContentCopy.Command or NativeTextMutation.Command or NativeParagraphPaginationMutation.Command
+                or NativeDocumentCreate.Command
                 or NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                 or NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
                 or NativeSetTableMutation.Command

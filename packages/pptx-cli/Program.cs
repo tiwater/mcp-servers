@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Dockit.Pptx;
 
 namespace Dockit.Pptx.Cli;
@@ -13,6 +14,8 @@ internal static class Cli
     private static readonly string[] DiscoverableCommands =
     [
         "inspect",
+        "pptx_read_slide",
+        "pptx_read_shape",
         "export-json",
         "validate",
         "map-render-findings",
@@ -48,6 +51,8 @@ internal static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
+                "pptx_read_slide" => Task.FromResult(RunReadSlide(args[1..])),
+                "pptx_read_shape" => Task.FromResult(RunReadShape(args[1..])),
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "validate" => Task.FromResult(Validator.Run(args[1..])),
                 "map-render-findings" => RunMapRenderFindingsAsync(args[1..]),
@@ -87,6 +92,33 @@ internal static class Cli
         return Task.FromResult(0);
     }
 
+    private static int RunReadSlide(string[] args)
+    {
+        if (args.Length != 1) throw new InvalidOperationException("pptx_read_slide requires <request.json>");
+        var request = JsonNode.Parse(File.ReadAllText(args[0])) as JsonObject
+            ?? throw new InvalidOperationException("pptx-read-slide-request-invalid");
+        var input = RequiredString(request, "input");
+        var slideNumber = RequiredInt(request, "slideNumber");
+        var offset = OptionalInt(request, "offset") ?? 0;
+        var limit = RequiredInt(request, "limit");
+        WriteJson(Inspector.ReadSlide(input, slideNumber, offset, limit));
+        return 0;
+    }
+
+    private static int RunReadShape(string[] args)
+    {
+        if (args.Length != 1) throw new InvalidOperationException("pptx_read_shape requires <request.json>");
+        var request = JsonNode.Parse(File.ReadAllText(args[0])) as JsonObject
+            ?? throw new InvalidOperationException("pptx-read-shape-request-invalid");
+        var input = RequiredString(request, "input");
+        var slideNumber = RequiredInt(request, "slideNumber");
+        var shapeId = RequiredUInt(request, "shapeId");
+        var offset = OptionalInt(request, "offset") ?? 0;
+        var limit = RequiredInt(request, "limit");
+        WriteJson(Inspector.ReadShape(input, slideNumber, shapeId, offset, limit));
+        return 0;
+    }
+
     private static Task<int> RunMapRenderFindingsAsync(string[] args)
     {
         if (args.Length != 4) throw new InvalidOperationException("map-render-findings requires <inspect.json> <render-manifest.json> <findings.json> <output.json>");
@@ -107,6 +139,8 @@ internal static class Cli
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  inspect <input.pptx> [--json]");
+        Console.WriteLine("  pptx_read_slide <request.json>");
+        Console.WriteLine("  pptx_read_shape <request.json>");
         Console.WriteLine("  export-json <input.pptx> [<output.json>]");
         Console.WriteLine("  validate <input.pptx>");
         Console.WriteLine("  map-render-findings <inspect.json> <render-manifest.json> <findings.json> <output.json>");
@@ -137,6 +171,25 @@ internal static class Cli
     {
         Console.WriteLine(JsonSerializer.Serialize(value, Json.Options));
     }
+
+    private static string RequiredString(JsonObject request, string property)
+        => request[property] is JsonValue value
+           && value.TryGetValue<string>(out var text)
+           && !string.IsNullOrWhiteSpace(text)
+            ? text
+            : throw new InvalidOperationException($"{property}-is-required");
+
+    private static int RequiredInt(JsonObject request, string property)
+        => OptionalInt(request, property)
+            ?? throw new InvalidOperationException($"{property}-is-required");
+
+    private static int? OptionalInt(JsonObject request, string property)
+        => request[property] is JsonValue value && value.TryGetValue<int>(out var number) ? number : null;
+
+    private static uint RequiredUInt(JsonObject request, string property)
+        => request[property] is JsonValue value && value.TryGetValue<uint>(out var number)
+            ? number
+            : throw new InvalidOperationException($"{property}-is-required");
 
     private static void WriteNewJson<T>(string path, T value)
     {
