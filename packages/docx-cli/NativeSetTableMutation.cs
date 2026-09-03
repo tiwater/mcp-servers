@@ -91,10 +91,12 @@ public static class NativeSetTableMutation
         for (var cellIndex = 0; cellIndex < rows[rowIndex].Cells.Count; cellIndex++)
         {
             var cell = rows[rowIndex].Cells[cellIndex];
-            if ((cell.Text is null) == (cell.SourceContent is null))
+            var hasSource = cell.SourceInput is not null || cell.SourceSelections is not null;
+            if ((cell.Text is null) == !hasSource)
                 throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}]-requires-exactly-one-content-mode");
-            if (cell.SourceContent is { Selections.Count: 0 })
-                throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}].sourceContent.selections-must-not-be-empty");
+            if (hasSource && (string.IsNullOrWhiteSpace(cell.SourceInput)
+                || cell.SourceSelections is null || cell.SourceSelections.Count == 0))
+                throw new InvalidOperationException($"rows[{rowIndex}].cells[{cellIndex}]-source-content-incomplete");
         }
     }
 
@@ -112,7 +114,7 @@ public static class NativeSetTableMutation
         {
             if (!rowsByAddress.TryGetValue(shaped.Rows[rowIndex].Address, out var observedRow))
                 throw new InvalidOperationException("set-table-shaped-row-not-found");
-            foreach (var cell in request.Rows[rowIndex].Cells.Where(cell => cell.SourceContent is not null))
+            foreach (var cell in request.Rows[rowIndex].Cells.Where(cell => cell.SourceInput is not null))
             {
                 int start;
                 try { start = cell.Columns.Select(id => columnStarts[id]).Min(); }
@@ -121,8 +123,8 @@ public static class NativeSetTableMutation
                     ?? throw new InvalidOperationException("set-table-shaped-cell-not-found");
                 result.Add(new CopyContentChange(
                     target.Address,
-                    cell.SourceContent!.Input,
-                    cell.SourceContent.Selections));
+                    cell.SourceInput!,
+                    cell.SourceSelections!));
             }
         }
         return result;
@@ -150,13 +152,11 @@ public static class NativeSetTableMutation
     }
 }
 
-public sealed record SetTableSourceContent(
-    string Input,
-    IReadOnlyList<CopyContentSelection> Selections);
 public sealed record SetTableCell(
     IReadOnlyList<string> Columns,
     string? Text,
-    SetTableSourceContent? SourceContent,
+    string? SourceInput,
+    IReadOnlyList<CopyContentSelection>? SourceSelections,
     int? RowSpan = null);
 public sealed record SetTableRow(
     DocxObjectAddress PrototypeRow,
