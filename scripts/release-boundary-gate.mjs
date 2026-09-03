@@ -14,6 +14,10 @@ import {
   assertEvidenceToolContract,
   evidenceRoleMetadataKey,
 } from '../servers/_shared/evidence-role.mjs';
+import {
+  assertEffectKindToolContract,
+  effectKindMetadataKey,
+} from '../servers/_shared/effect-kind.mjs';
 
 const execFileAsync = promisify(execFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +49,7 @@ const requiredPackageFiles = [
   'package.json',
   '_shared/tool-runtime.mjs',
   '_shared/evidence-role.mjs',
+  '_shared/effect-kind.mjs',
   'office/index.mjs',
   'office/README.md',
   generatedManifestRelativePath,
@@ -898,6 +903,65 @@ function checkEvidenceRoleMetadata(officeTools, textTools) {
   note('Office and Text publish exact versioned evidence roles derived from annotations, file bindings, and output schemas');
 }
 
+function checkEffectKindMetadata(officeTools, textTools) {
+  const check = 'provider-effect-kind-metadata';
+  const expectedSpecialKinds = new Map([
+    ['office_render_pdf', 'native-render'],
+    ['xlsx_convert_legacy', 'source-conversion'],
+  ]);
+  let effectfulCount = 0;
+  for (const tool of officeTools) {
+    const expectedKind = expectedSpecialKinds.get(tool.name);
+    try {
+      const kind = assertEffectKindToolContract(tool, expectedKind);
+      if (kind) effectfulCount += 1;
+      if (kind && !expectedKind && kind !== 'document-mutation') {
+        fail(check, `${tool.name} publishes unexpected effect kind ${kind}`);
+      }
+    } catch (error) {
+      fail(check, error.message);
+    }
+    expectedSpecialKinds.delete(tool.name);
+  }
+  if (expectedSpecialKinds.size > 0) {
+    fail(check, `missing special effect tools: ${[...expectedSpecialKinds.keys()].join(', ')}`);
+  }
+  for (const tool of textTools) {
+    if (tool?._meta?.[effectKindMetadataKey] !== undefined) {
+      fail(check, `${tool.name} publishes an Office effect kind`);
+    }
+  }
+  if (effectfulCount === 0) fail(check, 'Office surface publishes no effect-bearing tools');
+
+  const mutation = officeTools.find(tool =>
+    tool?._meta?.[effectKindMetadataKey]?.kind === 'document-mutation');
+  const read = officeTools.find(tool => tool?.annotations?.readOnlyHint === true);
+  const render = officeTools.find(tool =>
+    tool?._meta?.[effectKindMetadataKey]?.kind === 'native-render');
+  const invalid = [
+    mutation && { ...mutation, _meta: Object.fromEntries(Object.entries(mutation._meta)
+      .filter(([key]) => key !== effectKindMetadataKey)) },
+    read && { ...read, _meta: {
+      ...(read._meta || {}),
+      [effectKindMetadataKey]: {
+        schema: 'tiwater.provider-effect-kind/v1', kind: 'document-mutation',
+      },
+    } },
+    render && { ...render, _meta: {
+      ...render._meta,
+      [effectKindMetadataKey]: {
+        schema: 'tiwater.provider-effect-kind/v1', kind: 'document-mutation',
+      },
+    } },
+  ].filter(Boolean);
+  for (const tool of invalid) {
+    let rejected = false;
+    try { assertEffectKindToolContract(tool); } catch { rejected = true; }
+    if (!rejected) fail(check, `known-bad effect metadata did not fail closed for ${tool.name}`);
+  }
+  note(`${effectfulCount} Office effect-bearing tools publish one exact versioned kind; Text remains read-only and orthogonal`);
+}
+
 function checkSourceBoundObservationOutputs(tools) {
   const check = 'source-bound-observation-output';
   const inspectSchema = tools.find(tool => tool?.name === 'docx_inspect')?.outputSchema;
@@ -1192,6 +1256,7 @@ async function main() {
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);
     await checkTextPublishedSurface(packageRoot, textTools, packedPackage);
     checkEvidenceRoleMetadata(toolNames, textTools);
+    checkEffectKindMetadata(toolNames, textTools);
   } catch (error) {
     fail('gate-runtime', error.stack || error.message);
   } finally {

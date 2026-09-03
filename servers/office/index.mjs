@@ -24,6 +24,7 @@ import {
 } from '../_shared/large-json-result.mjs';
 import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
 import { evidenceRoleMetadata } from '../_shared/evidence-role.mjs';
+import { effectKindMetadata } from '../_shared/effect-kind.mjs';
 import { compactDocxObjectIdentity } from './docx-object-identity.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -153,6 +154,7 @@ const xlsxFixedTools = [
 function fixedToolDefinitions(definitions) {
   return definitions.map(definition => ({
     name: definition.name,
+    effectKind: 'document-mutation',
     description: definition.description,
     inputSchema: inputContract(definition.name),
     outputSchema: fixedEditOutput(definition.name),
@@ -466,6 +468,7 @@ const tools = [
   },
   {
     name: 'docx_replace_content_from_source',
+    effectKind: 'document-mutation',
     description: 'Replace existing target paragraph or table-cell content from explicitly selected native source cells, paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. For a source cell already returned by docx_read_table, select a Unicode-scalar range directly against its returned text; the provider retains every crossed native run, including superscript and subscript, without another descendant read. Consecutive run or text selections from one source paragraph form one target paragraph, and source paragraph boundaries remain paragraph boundaries. Use it after docx_fill_table_from_tables when the target needs selected source content instead of the whole source cell; pass returned addresses unchanged and never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
     inputSchema: inputContract('docx_replace_content_from_source'),
     outputSchema: fixedEditOutput('docx_replace_content_from_source'),
@@ -473,6 +476,7 @@ const tools = [
   },
   {
     name: 'docx_set_text',
+    effectKind: 'document-mutation',
     description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. Use this only for newly derived text. Content copied or selected from a source DOCX uses docx_replace_content_from_source so native runs such as superscript and subscript are retained. This does not insert objects, change table structure, copy source formatting, or decide business wording.',
     inputSchema: inputContract('docx_set_text'),
     outputSchema: fixedEditOutput('docx_set_text'),
@@ -480,6 +484,7 @@ const tools = [
   },
   {
     name: 'docx_set_paragraph_pagination',
+    effectKind: 'document-mutation',
     description: 'Set native pagination properties on explicitly selected current DOCX paragraphs. Each change sets at least one pagination property. keepWithNext keeps a paragraph with the immediately following paragraph or table but does not guarantee that a table header remains with its first body row. keepLinesTogether keeps one paragraph on one page; pageBreakBefore starts it on a new page; preventWidowOrphanLines controls isolated first or last lines. Omitted properties remain unchanged. The caller chooses paragraphs from current native addresses; the provider does not decide document layout or business meaning.',
     inputSchema: inputContract('docx_set_paragraph_pagination'),
     outputSchema: fixedEditOutput('docx_set_paragraph_pagination'),
@@ -487,6 +492,7 @@ const tools = [
   },
   {
     name: 'docx_set_table_body',
+    effectKind: 'document-mutation',
     description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Set cantSplit on a final physical row when it must remain whole across page boundaries; omit it to preserve the prototype row property. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
     inputSchema: inputContract('docx_set_table_body'),
     outputSchema: fixedEditOutput('docx_set_table_body'),
@@ -494,6 +500,7 @@ const tools = [
   },
   {
     name: 'docx_fill_table_from_tables',
+    effectKind: 'document-mutation',
     description: 'Fill one current target-table body from one or more explicitly ordered current source-table row ranges. For each source, select an unmerged record column when every physical source row must remain an output row; mapped columns still retain their native vertical merges. Select a merged record column only when every mapping into one target cell has one equal scalar value throughout that merge group. Map source grid columns onto every target prototype cell. The provider concatenates source records in declared order, copies each mapped source cell in full, preserves horizontal spans, rebuilds vertical merges only within each source range, validates the complete target grid, commits once, and returns structural readback. It does not discover source tables, choose source or target business meaning, filter records, translate or rewrite text, or apply business-specific rules. A single source uses the same sources array with one item. If a target needs only selected source descendants, such as one language from a bilingual cell, immediately use the returned target-cell addresses with docx_replace_content_from_source before releasing that source or reading back the completed target.',
     inputSchema: inputContract('docx_fill_table_from_tables'),
     outputSchema: fixedEditOutput('docx_fill_table_from_tables'),
@@ -501,6 +508,7 @@ const tools = [
   },
   {
     name: 'docx_insert_objects',
+    effectKind: 'document-mutation',
     description: 'Insert selected current DOCX objects under an existing parent. Table rows are objects: expand a target table by copying one contiguous observed row range and use repeat for count; sourceInput may equal input. A row range beginning with vertical-merge continuations may be inserted only inside a target boundary with the same active grid spans, which extends those merges. Individual table cells are not raw insertion targets because that would bypass the table grid.',
     inputSchema: inputContract('docx_insert_objects'),
     outputSchema: fixedEditOutput('docx_insert_objects'),
@@ -508,6 +516,7 @@ const tools = [
   },
   {
     name: 'docx_delete_object',
+    effectKind: 'document-mutation',
     description: 'Delete selected current DOCX objects directly from the current target document. Selected table rows must close every vertical merge and cannot remove the whole table. Individual table cells are not raw deletion targets; use column or merge operations for table structure.',
     inputSchema: inputContract('docx_delete_object'),
     outputSchema: fixedEditOutput('docx_delete_object'),
@@ -515,6 +524,7 @@ const tools = [
   },
   {
     name: 'docx_merge_cells',
+    effectKind: 'document-mutation',
     description: 'Merge selected current DOCX cells when they form one closed rectangle. A one-column, multi-row rectangle creates a vertical merge whose first cell is the restart owner and whose later cells are continuations. All selected cell content moves into the top-left owner, so the selected content must already be correct for that one logical cell.',
     inputSchema: inputContract('docx_merge_cells'),
     outputSchema: fixedEditOutput('docx_merge_cells'),
@@ -522,6 +532,7 @@ const tools = [
   },
   {
     name: 'docx_split_cells',
+    effectKind: 'document-mutation',
     description: 'Split selected current DOCX merged cells.',
     inputSchema: inputContract('docx_split_cells'),
     outputSchema: fixedEditOutput('docx_split_cells'),
@@ -529,6 +540,7 @@ const tools = [
   },
   {
     name: 'docx_insert_table_columns',
+    effectKind: 'document-mutation',
     description: 'Insert empty template-shaped grid columns into one current main-document table. Select an observed source grid column for width and per-row cell formatting, and optionally a before grid-column address; cells spanning the insertion boundary expand instead of being split. It does not copy business values or decide column meaning.',
     inputSchema: inputContract('docx_insert_table_columns'),
     outputSchema: fixedEditOutput('docx_insert_table_columns'),
@@ -536,6 +548,7 @@ const tools = [
   },
   {
     name: 'docx_delete_table_columns',
+    effectKind: 'document-mutation',
     description: 'Delete selected observed grid columns from one current main-document table while shrinking spanning cells and preserving the remaining table grid. It cannot remove every column and does not decide whether a business column is unused.',
     inputSchema: inputContract('docx_delete_table_columns'),
     outputSchema: fixedEditOutput('docx_delete_table_columns'),
@@ -576,6 +589,7 @@ const tools = [
   },
   {
     name: 'docx_apply_font_policy',
+    effectKind: 'document-mutation',
     description: 'Apply one explicit font family and size policy to current main-document body and table text. It does not derive a policy or alter other run semantics.',
     inputSchema: inputContract('docx_apply_font_policy'),
     outputSchema: fixedEditOutput('docx_apply_font_policy'),
@@ -591,6 +605,7 @@ const tools = [
   },
   {
     name: 'docx_apply_toc_style_policy',
+    effectKind: 'document-mutation',
     description: 'Apply explicit italic and per-level indentation values to current built-in table-of-contents paragraph styles. It does not change heading text or refresh fields.',
     inputSchema: inputContract('docx_apply_toc_style_policy'),
     outputSchema: fixedEditOutput('docx_apply_toc_style_policy'),
@@ -598,6 +613,7 @@ const tools = [
   },
   {
     name: 'docx_refresh_fields',
+    effectKind: 'document-mutation',
     description: 'Refresh table-of-contents and table-of-figures field results in a current DOCX through native WPS Writer. It does not change headings, captions, or field definitions.',
     inputSchema: inputContract('docx_refresh_fields'),
     outputSchema: docxFieldRefreshOutput,
@@ -605,12 +621,14 @@ const tools = [
   },
   {
     name: 'docx_strip_direct_formatting',
+    effectKind: 'document-mutation',
     description: 'Remove direct paragraph and run formatting while preserving styles.',
     inputSchema: inputContract('docx_strip_direct_formatting'),
     handler: docxStripDirectFormatting,
   },
   {
     name: 'docx_replace_style_ids',
+    effectKind: 'document-mutation',
     description: 'Replace current DOCX style IDs from an explicit style map.',
     inputSchema: inputContract('docx_replace_style_ids'),
     handler: docxReplaceStyleIds,
@@ -618,6 +636,7 @@ const tools = [
   {
     name: 'office_render_pdf',
     evidenceRole: 'native-render',
+    effectKind: 'native-render',
     description: 'Render a current Office document to PDF with its required native WPS backend and write the complete provider receipt as evidence. The input extension selects Writer, Spreadsheets, or Presentation; fallback rendering is rejected.',
     inputSchema: inputContract('office_render_pdf'),
     outputSchema: nativeRenderOutput,
@@ -626,6 +645,7 @@ const tools = [
   },
   {
     name: 'xlsx_convert_legacy',
+    effectKind: 'source-conversion',
     description: 'Convert a current legacy XLS workbook to XLSX using the published native ET backend.',
     inputSchema: inputContract('xlsx_convert_legacy'),
     handler: xlsxConvertLegacy,
@@ -685,6 +705,7 @@ const tools = [
   },
   {
     name: 'pptx_apply_template',
+    effectKind: 'document-mutation',
     description: 'Apply one deterministic PPTX template-application plan to a current presentation. This tool executes the published plan; it does not select a template or derive business content, slide mappings, geometry, or formatting decisions.',
     inputSchema: inputContract('pptx_apply_template'),
     outputSchema: fixedEditOutput('pptx_apply_template'),
@@ -692,6 +713,7 @@ const tools = [
   },
   {
     name: 'pptx_apply_format',
+    effectKind: 'document-mutation',
     description: 'Apply one deterministic PPTX formatting plan to a current presentation. This tool executes published formatting operations; it does not derive values, coordinates, or business decisions.',
     inputSchema: inputContract('pptx_apply_format'),
     outputSchema: fixedEditOutput('pptx_apply_format'),
@@ -699,6 +721,7 @@ const tools = [
   },
   {
     name: 'pptx_set_shape_geometry',
+    effectKind: 'document-mutation',
     description: 'Set exact native EMU bounds for uniquely identified current-slide PPTX objects. One call batches only this fixed geometry action and does not infer repair coordinates.',
     inputSchema: inputContract('pptx_set_shape_geometry'),
     outputSchema: fixedEditOutput('pptx_set_shape_geometry'),
@@ -706,6 +729,7 @@ const tools = [
   },
   {
     name: 'pptx_replace_picture_image',
+    effectKind: 'document-mutation',
     description: 'Replace embedded PNG or JPEG media for uniquely identified current-slide PPTX pictures while preserving the picture object, geometry, crop, and unrelated media. One call batches only this fixed replacement action.',
     inputSchema: inputContract('pptx_replace_picture_image'),
     outputSchema: fixedEditOutput('pptx_replace_picture_image'),
@@ -736,7 +760,12 @@ function buildServer() {
         inputSchema: tool.inputSchema,
         ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
         ...(tool.annotations ? { annotations: tool.annotations } : {}),
-        ...(tool.evidenceRole ? { _meta: evidenceRoleMetadata(tool.evidenceRole) } : {}),
+        ...((tool.evidenceRole || tool.effectKind) ? {
+          _meta: {
+            ...(tool.evidenceRole ? evidenceRoleMetadata(tool.evidenceRole) : {}),
+            ...(tool.effectKind ? effectKindMetadata(tool.effectKind) : {}),
+          },
+        } : {}),
       },
       async args => {
         const payload = typeof args.output === 'string'
