@@ -152,11 +152,11 @@
       "name": "docx_read_table",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_read_table.schema.json",
-        "sha256": "a0d13fb70cc43d7ee7f3be9730f98df9a5e988d33fb7454b44f5e455d068b950"
+        "sha256": "c5f9f628494a11e0377248c256b3c047471f897c92a81b6fa1a01f408e478962"
       },
       "inputContract": {
         "path": "office/contracts/docx_read_table.schema.json",
-        "sha256": "a0d13fb70cc43d7ee7f3be9730f98df9a5e988d33fb7454b44f5e455d068b950"
+        "sha256": "c5f9f628494a11e0377248c256b3c047471f897c92a81b6fa1a01f408e478962"
       }
     },
     {

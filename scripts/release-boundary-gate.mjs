@@ -1199,21 +1199,21 @@ function checkDocxTableStreamingContract(tools) {
   const receipt = tool?.outputSchema?.properties?.receipt;
   if (!description.includes('retain every remaining row')
       || !description.includes('largest compact inline page')
-      || !description.includes('passing receipt.nextContinuation unchanged')
-      || !description.includes('cannot be predicted or read in parallel')
+      || !description.includes('continue from receipt.nextOffset')
       || !description.includes('Match columns by gridColumnStart')) {
-    fail(check, 'docx_read_table does not describe retained rows, continuation, and logical columns');
+    fail(check, 'docx_read_table does not describe retained rows, row offsets, and logical columns');
   }
   if (Object.hasOwn(input?.properties ?? {}, 'limit')
-      || Object.hasOwn(input?.properties ?? {}, 'offset')
-      || input?.properties?.continuation?.type !== 'string'
+      || Object.hasOwn(input?.properties ?? {}, 'continuation')
+      || input?.properties?.offset?.type !== 'integer'
+      || input?.properties?.offset?.minimum !== 0
       || cell?.properties?.gridColumnStart?.type !== 'integer'
       || cell?.properties?.gridColumnStart?.minimum !== 0
       || cell?.properties?.text?.type !== 'string'
       || cell?.properties?.logicalText?.type !== 'string'
       || Object.hasOwn(cell?.properties ?? {}, 'paragraphs')
-      || receipt?.properties?.nextContinuation?.type !== 'string'
-      || receipt?.required?.includes('nextContinuation')
+      || receipt?.properties?.nextOffset?.anyOf?.length !== 2
+      || !receipt?.required?.includes('nextOffset')
       || receipt?.properties?.retainedRowCount?.type !== 'integer'
       || receipt?.properties?.detailPageRetained?.type !== 'boolean') {
     fail(check, 'docx_read_table response is not a compact page backed by one detailed page');

@@ -488,7 +488,7 @@ const docxTableReadOutput = docxObservationOutput('docx_read_table').extend({
     retainedRowCount: z.number().int().nonnegative(),
     returnedRowCount: z.number().int().nonnegative(),
     remaining: z.number().int().nonnegative(),
-    nextContinuation: z.string().min(1).optional(),
+    nextOffset: z.number().int().nonnegative().nullable(),
     detailPageRetained: z.boolean(),
     narrowingRequired: z.boolean(),
   }).strict(),
@@ -582,7 +582,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read one explicit native DOCX table. Provide output to retain every remaining row with full paragraph and text-node detail. Set returnContent true to also receive the largest compact inline page within the response limit; these channels are independent and at least one is required. retainedRowCount counts artifact rows and returnedRowCount counts inline rows. When remaining is nonzero, continue only by passing receipt.nextContinuation unchanged in the next call; a continuation page depends on the preceding receipt and cannot be predicted or read in parallel. Match columns by gridColumnStart, not tc position. A vertical-merge restart owns one logical value; a continue cell points to verticalMergeOwner and does not repeat that value inline.',
+    description: 'Read one explicit native DOCX table. Provide output to retain every remaining row with full paragraph and text-node detail. Set returnContent true to also receive the largest compact inline page within the response limit; these channels are independent and at least one is required. retainedRowCount counts artifact rows and returnedRowCount counts inline rows. When remaining is nonzero, continue from receipt.nextOffset only when a later row is needed. Match columns by gridColumnStart, not tc position. A vertical-merge restart owns one logical value; a continue cell points to verticalMergeOwner and does not repeat that value inline.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -989,34 +989,6 @@ async function docxInspect(args) {
   };
 }
 
-function encodeTableContinuation(input, table, offset) {
-  return Buffer.from(JSON.stringify({
-    schema: 'tiwater.docx-table-continuation/v1',
-    input,
-    table,
-    offset,
-  })).toString('base64url');
-}
-
-function decodeTableContinuation(continuation, input, table) {
-  if (continuation === undefined) return 0;
-  let decoded;
-  try {
-    decoded = JSON.parse(Buffer.from(continuation, 'base64url').toString('utf8'));
-  } catch {
-    throw new Error('invalid-docx-table-continuation');
-  }
-  if (decoded?.schema !== 'tiwater.docx-table-continuation/v1'
-      || decoded.input !== input
-      || decoded.table?.part !== table?.part
-      || decoded.table?.path !== table?.path
-      || !Number.isSafeInteger(decoded.offset)
-      || decoded.offset < 0) {
-    throw new Error('invalid-docx-table-continuation');
-  }
-  return decoded.offset;
-}
-
 async function docxObservation(tool, args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const delivery = resultChannels(args);
@@ -1111,7 +1083,7 @@ async function docxObservation(tool, args) {
     }
     if (tool === 'docx_read_table') {
       const totalRowCount = payload.rows.length;
-      const offset = Math.min(decodeTableContinuation(args.continuation, input, args.table), totalRowCount);
+      const offset = Math.min(args.offset ?? 0, totalRowCount);
       const selectedRows = payload.rows.slice(offset);
       const selectedNextOffset = offset + selectedRows.length < totalRowCount
         ? offset + selectedRows.length
@@ -1122,9 +1094,7 @@ async function docxObservation(tool, args) {
         retainedRowCount: selectedRows.length,
         returnedRowCount: selectedRows.length,
         remaining: totalRowCount - offset - selectedRows.length,
-        ...(selectedNextOffset === null ? {} : {
-          nextContinuation: encodeTableContinuation(input, args.table, selectedNextOffset),
-        }),
+        nextOffset: selectedNextOffset,
       };
       const detailPage = {
         schema: 'tiwater.docx-table-detail-page/v1',
@@ -1195,9 +1165,7 @@ async function docxObservation(tool, args) {
         retainedRowCount,
         returnedRowCount: rows.length,
         remaining: totalRowCount - offset - rows.length,
-        ...(inlineNextOffset === null ? {} : {
-          nextContinuation: encodeTableContinuation(input, args.table, inlineNextOffset),
-        }),
+        nextOffset: inlineNextOffset,
       };
       return {
         ...withArtifact,
