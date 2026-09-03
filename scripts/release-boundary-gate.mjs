@@ -18,7 +18,9 @@ const serverRoot = path.join(repoRoot, 'servers');
 const serverPackagePath = path.join(serverRoot, 'package.json');
 const serverLockPath = path.join(serverRoot, 'package-lock.json');
 const generatedManifestRelativePath = 'office/contracts/tiwater-office-provider-contract-manifest-v1.json';
+const textManifestRelativePath = 'text/contracts/tiwater-text-provider-contract-manifest-v1.json';
 const generatedContractDeclaration = 'office/contracts/*.schema.json';
+const textContractDeclaration = 'text/contracts/*.schema.json';
 const fileRoleKey = 'x-tiwater-file-role';
 const fileEffectKey = 'x-tiwater-file-effect';
 const nativeDocxPathPattern = '^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$';
@@ -41,16 +43,23 @@ const requiredPackageFiles = [
   'office/index.mjs',
   'office/README.md',
   generatedManifestRelativePath,
+  'text/index.mjs',
+  'text/observation.mjs',
+  'text/README.md',
+  textManifestRelativePath,
 ];
 const requiredPackageDeclarations = [
   generatedManifestRelativePath,
   generatedContractDeclaration,
+  textManifestRelativePath,
+  textContractDeclaration,
 ];
 const providerContractRoots = [
   'packages/convert-cli/schemas',
   'packages/docx-cli/contracts',
   'packages/pptx-cli/contracts',
   'packages/xlsx-cli/contracts',
+  'servers/text/provider-contracts',
 ];
 const forbiddenDependencyTerms = /(?:^|[^a-z0-9])(lucid|scenario|workitem)(?:$|[^a-z0-9])/i;
 const forbiddenProviderOwnershipTerms = /(?:^|[^a-z0-9])(lucid|scenario|work[ -]?items?|review-required|waiting[ -]?review)(?:$|[^a-z0-9])/i;
@@ -186,6 +195,27 @@ async function checkOfficeSourceOwnership() {
   note('Office MCP source owns routing only; provider contracts own request shapes and fixed runtimes consume them directly');
 }
 
+async function checkTextSourceOwnership() {
+  const check = 'text-source-ownership';
+  const textSource = await readFile(path.join(serverRoot, 'text', 'index.mjs'), 'utf8');
+  const providerSource = await readFile(path.join(serverRoot, 'text', 'observation.mjs'), 'utf8');
+  if (forbiddenProviderOwnershipTerms.test(`${textSource}\n${providerSource}`)) {
+    fail(check, 'Text MCP source contains Lucid/scenario/work-item ownership terms');
+  }
+  if (/inputSchema\s*:\s*z\./.test(textSource)) {
+    fail(check, 'Text MCP source hand-defines an MCP input schema instead of loading a provider contract');
+  }
+  if (!textSource.includes('z.fromJSONSchema(JSON.parse(bytes.toString')
+      || !textSource.includes('tiwater-text-provider-contract-manifest-v1.json')) {
+    fail(check, 'Text MCP source does not register provider-owned input contracts from the generated manifest');
+  }
+  if (!textSource.includes("from '../_shared/large-json-result.mjs'")
+      || !textSource.includes("from '../_shared/output-write-lock.mjs'")) {
+    fail(check, 'Text MCP does not reuse distribution-owned artifact and output-lock helpers');
+  }
+  note('Text MCP owns lossless byte/line observation only and reuses the shared distribution runtime');
+}
+
 async function checkFixedRuntimeSurface() {
   const check = 'fixed-runtime-surface';
   const officeSource = await readFile(path.join(serverRoot, 'office', 'index.mjs'), 'utf8');
@@ -303,6 +333,9 @@ async function checkPackedPackage(manifest, packageRoot) {
   const contractPaths = manifest.files
     .map(file => file.path)
     .filter(file => file.startsWith('office/contracts/') && file.endsWith('.schema.json'));
+  const textContractPaths = manifest.files
+    .map(file => file.path)
+    .filter(file => file.startsWith('text/contracts/') && file.endsWith('.schema.json'));
   if (!packedPaths.has(generatedManifestRelativePath)) {
     fail(check, `generated provider contract manifest is absent from pack: ${generatedManifestRelativePath}`);
   }
@@ -310,6 +343,14 @@ async function checkPackedPackage(manifest, packageRoot) {
     fail(check, 'Office MCP pack must contain at least one generated public contract schema');
   } else {
     note(`Office MCP pack contains ${contractPaths.length} public contract schemas`);
+  }
+  if (!packedPaths.has(textManifestRelativePath)) {
+    fail(check, `generated Text provider contract manifest is absent from pack: ${textManifestRelativePath}`);
+  }
+  if (textContractPaths.length !== 2) {
+    fail(check, `Text MCP pack must contain exactly two generated public contract schemas, found ${textContractPaths.length}`);
+  } else {
+    note('Text MCP pack contains 2 public contract schemas');
   }
 
   for (const file of await collectFiles(packageRoot)) {
@@ -623,25 +664,8 @@ function readLines(buffer) {
   return buffer.toString('utf8').split(/\r?\n/).filter(Boolean);
 }
 
-async function smokeInstalledPackage(archive, tempRoot) {
-  const check = 'isolated-smoke';
-  const installRoot = path.join(tempRoot, 'unrelated-install');
-  await mkdirIfMissing(installRoot);
-  if (!path.relative(repoRoot, installRoot).startsWith('..')) {
-    fail(check, `smoke directory is inside the Lucid/provider repository: ${installRoot}`);
-    return;
-  }
-  await execFileAsync('npm', [
-    'install', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', '--prefix', installRoot, archive,
-  ], { cwd: installRoot, maxBuffer: 8 * 1024 * 1024 });
-
-  const executable = path.join(installRoot, 'node_modules', '.bin', 'tiwater-office-mcp');
-  if (!(await exists(executable))) {
-    fail(check, 'installed package did not expose tiwater-office-mcp executable');
-    return;
-  }
-
-  const response = await new Promise((resolve, reject) => {
+async function initializeInstalledMcp(executable, installRoot) {
+  return new Promise((resolve, reject) => {
     const child = spawn(executable, [], {
       cwd: installRoot,
       env: { ...process.env, PATH: `${path.join(installRoot, 'node_modules', '.bin')}${path.delimiter}${process.env.PATH || ''}` },
@@ -712,6 +736,27 @@ async function smokeInstalledPackage(archive, tempRoot) {
       },
     }) + '\n');
   });
+}
+
+async function smokeInstalledPackage(archive, tempRoot) {
+  const check = 'isolated-smoke';
+  const installRoot = path.join(tempRoot, 'unrelated-install');
+  await mkdirIfMissing(installRoot);
+  if (!path.relative(repoRoot, installRoot).startsWith('..')) {
+    fail(check, `smoke directory is inside the Lucid/provider repository: ${installRoot}`);
+    return { officeTools: [], textTools: [] };
+  }
+  await execFileAsync('npm', [
+    'install', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', '--prefix', installRoot, archive,
+  ], { cwd: installRoot, maxBuffer: 8 * 1024 * 1024 });
+
+  const executable = path.join(installRoot, 'node_modules', '.bin', 'tiwater-office-mcp');
+  if (!(await exists(executable))) {
+    fail(check, 'installed package did not expose tiwater-office-mcp executable');
+    return { officeTools: [], textTools: [] };
+  }
+
+  const response = await initializeInstalledMcp(executable, installRoot);
   if (!response.initialized) fail(check, 'MCP initialize did not complete');
   if (!response.serverInstructions.includes('A read-only output path is an immutable artifact identity')
       || !response.serverInstructions.includes('an identical request may replay it')
@@ -726,8 +771,95 @@ async function smokeInstalledPackage(archive, tempRoot) {
       || !response.serverInstructions.includes('must not be reused with another DOCX')) {
     fail(check, 'MCP instructions do not publish native DOCX address scope');
   }
-  note(`isolated MCP initialize and tools/list completed (${response.tools?.length || 0} tools)${response.stderr.trim() ? ' with stderr output' : ''}`);
-  return response.tools || [];
+  const textExecutable = path.join(installRoot, 'node_modules', '.bin', 'tiwater-text-mcp');
+  if (!(await exists(textExecutable))) {
+    fail(check, 'installed package did not expose tiwater-text-mcp executable');
+    return { officeTools: response.tools || [], textTools: [] };
+  }
+  const textResponse = await initializeInstalledMcp(textExecutable, installRoot);
+  if (!textResponse.serverInstructions.includes('exact supported plain-text bytes')
+      || !textResponse.serverInstructions.includes('Callers own all interpretation and business meaning')) {
+    fail(check, 'Text MCP instructions do not publish technical-only plain-text observation ownership');
+  }
+  note(`isolated Office and Text MCP initialize/tools-list completed (${response.tools?.length || 0} Office, ${textResponse.tools?.length || 0} Text)${response.stderr.trim() || textResponse.stderr.trim() ? ' with stderr output' : ''}`);
+  return { officeTools: response.tools || [], textTools: textResponse.tools || [] };
+}
+
+async function checkTextPublishedSurface(packageRoot, tools, packageManifest) {
+  const check = 'text-published-surface';
+  const manifestPath = path.join(packageRoot, textManifestRelativePath);
+  const manifest = await readJson(manifestPath);
+  if (!exactKeys(manifest, ['schema', 'provider', 'tools'])
+      || manifest.schema !== 'tiwater.text-provider-contract-manifest/v1') {
+    fail(check, 'Text manifest has an unexpected envelope or schema identity');
+    return;
+  }
+  if (!exactKeys(manifest.provider, ['id', 'version'])
+      || manifest.provider.id !== packageManifest.name
+      || manifest.provider.version !== packageManifest.version) {
+    fail(check, 'Text manifest provider identity does not match the packed distribution');
+  }
+  const expectedNames = ['text_inspect', 'text_read_lines'];
+  const manifestNames = manifest.tools.map(entry => entry?.name).sort();
+  const toolNames = tools.map(tool => tool?.name).sort();
+  if (manifestNames.join('\0') !== expectedNames.join('\0')
+      || toolNames.join('\0') !== expectedNames.join('\0')) {
+    fail(check, 'Text manifest and MCP tools/list must expose exactly text_inspect and text_read_lines');
+  }
+  for (const entry of manifest.tools) {
+    if (!exactKeys(entry, ['name', 'providerContract', 'inputContract'])
+        || !exactKeys(entry.providerContract, ['source', 'sha256'])
+        || !exactKeys(entry.inputContract, ['path', 'sha256'])) {
+      fail(check, `Text tool ${entry?.name || '(unnamed)'} has an incomplete hash binding`);
+      continue;
+    }
+    const sourcePath = path.join(repoRoot, ...entry.providerContract.source.split('/'));
+    const packedPath = path.join(packageRoot, ...entry.inputContract.path.split('/'));
+    if (!entry.providerContract.source.startsWith('servers/text/provider-contracts/')
+        || entry.inputContract.path !== `text/contracts/${entry.name}.schema.json`
+        || !(await exists(sourcePath))
+        || !(await exists(packedPath))) {
+      fail(check, `Text tool ${entry.name} is not bound to its provider-owned and packed schema`);
+      continue;
+    }
+    const [sourceHash, packedHash] = await Promise.all([sha256(sourcePath), sha256(packedPath)]);
+    if (sourceHash !== entry.providerContract.sha256
+        || packedHash !== entry.inputContract.sha256
+        || sourceHash !== packedHash) {
+      fail(check, `Text tool ${entry.name} contract hashes do not bind identical source and packed bytes`);
+    }
+  }
+  for (const tool of tools) {
+    const annotations = tool.annotations || {};
+    if (annotations.readOnlyHint !== true || annotations.idempotentHint !== true
+        || annotations.destructiveHint !== false || annotations.openWorldHint !== false) {
+      fail(check, `${tool.name} does not publish closed-world read-only annotations`);
+    }
+  }
+  const inspect = tools.find(tool => tool.name === 'text_inspect');
+  const read = tools.find(tool => tool.name === 'text_read_lines');
+  const inspectRequired = inspect?.inputSchema?.required || [];
+  const readRequired = read?.inputSchema?.required || [];
+  if (!['input', 'returnContent', 'output'].every(name => inspectRequired.includes(name))
+      || inspect?.inputSchema?.properties?.input?.[fileRoleKey] !== 'read'
+      || inspect?.inputSchema?.properties?.output?.[fileRoleKey] !== 'write') {
+    fail(check, 'text_inspect does not require its explicit input, content channel, and durable artifact');
+  }
+  if (!['input', 'offset', 'limit', 'returnContent'].every(name => readRequired.includes(name))
+      || read?.inputSchema?.properties?.offset?.minimum !== 0
+      || read?.inputSchema?.properties?.limit?.minimum !== 1
+      || read?.inputSchema?.properties?.limit?.maximum !== 200) {
+    fail(check, 'text_read_lines does not publish bounded explicit zero-based paging');
+  }
+  const inspectOutput = inspect?.outputSchema;
+  const readOutput = read?.outputSchema;
+  if (inspectOutput?.properties?.identity?.properties?.openingLines?.maxItems !== 8
+      || !inspectOutput?.properties?.identity?.required?.includes('lineCount')
+      || readOutput?.properties?.content?.properties?.lines?.maxItems !== 200
+      || !['remaining', 'nextOffset'].every(name => readOutput?.properties?.summary?.required?.includes(name))) {
+    fail(check, 'Text outputs do not publish bounded opening identity and explicit continuation facts');
+  }
+  note('Text manifest, schemas, annotations, bounded outputs, and MCP surface are hash-bound and orthogonal');
 }
 
 function checkSourceBoundObservationOutputs(tools) {
@@ -1003,13 +1135,14 @@ async function main() {
   try {
     await checkDependencyGraph();
     await checkOfficeSourceOwnership();
+    await checkTextSourceOwnership();
     await checkFixedRuntimeSurface();
     await checkPackageFiles();
     const { archive, manifest } = await packOfficePackage(tempRoot);
     const packageRoot = await extractArchive(archive, path.join(tempRoot, 'extracted'));
     await checkPackedPackage(manifest, packageRoot);
     await checkPublicSchemas(packageRoot);
-    const toolNames = await smokeInstalledPackage(archive, tempRoot);
+    const { officeTools: toolNames, textTools } = await smokeInstalledPackage(archive, tempRoot);
     checkSourceBoundObservationOutputs(toolNames);
     checkLargeResultChannels(toolNames);
     checkXlsxRangeReadContract(toolNames);
@@ -1021,6 +1154,7 @@ async function main() {
     await checkIdempotentReadArtifacts(tempRoot);
     const packedPackage = await readJson(path.join(packageRoot, 'package.json'));
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);
+    await checkTextPublishedSurface(packageRoot, textTools, packedPackage);
   } catch (error) {
     fail('gate-runtime', error.stack || error.message);
   } finally {
