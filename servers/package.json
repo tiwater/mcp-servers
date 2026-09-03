@@ -1,6 +1,6 @@
 {
   "name": "@tiwater/office-mcp",
-  "version": "0.21.41",
+  "version": "0.21.42",
   "description": "Published MCP distribution for independent Tiwater Office, PDF, and Text document capabilities",
   "type": "module",
   "license": "MIT",
