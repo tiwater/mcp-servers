@@ -416,6 +416,13 @@ const tools = [
     handler: args => fixedEdit('docx_set_text', args),
   },
   {
+    name: 'docx_set_paragraph_pagination',
+    description: 'Set native pagination properties on explicitly selected current DOCX paragraphs. keepWithNext keeps a paragraph with the immediately following paragraph or table but does not guarantee that a table header remains with its first body row. keepLinesTogether keeps one paragraph on one page; pageBreakBefore starts it on a new page; preventWidowOrphanLines controls isolated first or last lines. Omitted properties remain unchanged. The caller chooses paragraphs from current native addresses; the provider does not decide document layout or business meaning.',
+    inputSchema: inputContract('docx_set_paragraph_pagination'),
+    outputSchema: fixedEditOutput('docx_set_paragraph_pagination'),
+    handler: args => fixedEdit('docx_set_paragraph_pagination', args),
+  },
+  {
     name: 'docx_set_table_body',
     description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Set cantSplit on a final physical row when it must remain whole across page boundaries; omit it to preserve the prototype row property. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
     inputSchema: inputContract('docx_set_table_body'),

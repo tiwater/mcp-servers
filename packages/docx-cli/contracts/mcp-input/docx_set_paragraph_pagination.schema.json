@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_set_paragraph_pagination",
+  "type": "object",
+  "properties": {
+    "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "paragraph": {
+            "type": "object",
+            "properties": {
+              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+              "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+            },
+            "required": ["part", "path"],
+            "additionalProperties": false
+          },
+          "keepWithNext": { "type": "boolean", "description": "Keep this paragraph on the same page as the immediately following paragraph or table. This does not guarantee that a table header remains with its first body row." },
+          "keepLinesTogether": { "type": "boolean", "description": "Keep all lines of this paragraph on one page." },
+          "pageBreakBefore": { "type": "boolean", "description": "Start this paragraph on a new page." },
+          "preventWidowOrphanLines": { "type": "boolean", "description": "Prevent a single first or last line from being isolated across pages." }
+        },
+        "required": ["paragraph"],
+        "anyOf": [
+          { "required": ["keepWithNext"] },
+          { "required": ["keepLinesTogether"] },
+          { "required": ["pageBreakBefore"] },
+          { "required": ["preventWidowOrphanLines"] }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "output": { "type": "string", "minLength": 1, "description": "Output DOCX path; may equal input for one atomic in-place update.", "x-tiwater-file-role": "write" },
+    "receiptOutput": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write", "x-tiwater-file-effect": false }
+  },
+  "required": ["input", "changes", "output", "receiptOutput"],
+  "additionalProperties": false
+}

@@ -44,6 +44,48 @@ try
             == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
         "narrow cell read did not resolve the restart cell text");
 
+    var paginationOutput = Path.Combine(root, "paragraph-pagination.docx");
+    var paginationReceipt = Path.Combine(root, "paragraph-pagination-receipt.json");
+    var captionParagraph = rows[0].GetProperty("cells")[0].GetProperty("paragraphs")[0]
+        .GetProperty("address").Clone();
+    var bodyParagraph = rows[1].GetProperty("cells")[1].GetProperty("paragraphs")[0]
+        .GetProperty("address").Clone();
+    var pagination = Run("docx_set_paragraph_pagination", new
+    {
+        input = original,
+        changes = new object[]
+        {
+            new { paragraph = captionParagraph, keepWithNext = true, keepLinesTogether = true },
+            new { paragraph = bodyParagraph, pageBreakBefore = false, preventWidowOrphanLines = false },
+        },
+        output = paginationOutput,
+        receiptOutput = paginationReceipt,
+    });
+    Require(pagination.GetProperty("summary").GetProperty("appliedCount").GetInt32() == 2,
+        "paragraph pagination did not apply every requested paragraph");
+    using (var paginationDocument = WordprocessingDocument.Open(paginationOutput, false))
+    {
+        var paragraphs = paginationDocument.MainDocumentPart!.Document.Body!.Descendants<Paragraph>().ToArray();
+        Require(paragraphs[0].ParagraphProperties?.KeepNext?.Val?.Value == true
+                && paragraphs[0].ParagraphProperties?.KeepLines?.Val?.Value == true,
+            "paragraph pagination did not set positive properties");
+        var explicitFalseParagraph = paragraphs.Single(paragraph => paragraph.InnerText == "甲一");
+        Require(explicitFalseParagraph.ParagraphProperties?.PageBreakBefore?.Val?.Value == false
+                && explicitFalseParagraph.ParagraphProperties?.WidowControl?.Val?.Value == false,
+            "paragraph pagination did not preserve explicit false properties");
+    }
+    var missingPaginationReceipt = Path.Combine(root, "paragraph-pagination-missing-receipt.json");
+    var missingPagination = RunExpectAtomicFailure(
+        "docx_set_paragraph_pagination", original, missingPaginationReceipt, new
+        {
+            input = original,
+            changes = new[] { new { paragraph = captionParagraph } },
+            output = original,
+            receiptOutput = missingPaginationReceipt,
+        });
+    Require(missingPagination.Contains("paragraph-pagination-change-must-set-a-property", StringComparison.Ordinal),
+        "paragraph pagination accepted a change without properties");
+
     RunVerticalTextAlignmentObservation();
     RunNativeInlineSelectionComposition();
     RunBookmarkedParagraphInsertion();

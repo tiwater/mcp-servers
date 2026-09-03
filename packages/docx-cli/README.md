@@ -31,6 +31,7 @@ to an artifact path by the Office MCP.
 ```bash
 tiwater-docx docx_replace_content_from_source request.json
 tiwater-docx docx_set_text request.json
+tiwater-docx docx_set_paragraph_pagination request.json
 tiwater-docx docx_set_table_body request.json
 tiwater-docx docx_insert_objects request.json
 tiwater-docx docx_delete_object request.json
