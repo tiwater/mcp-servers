@@ -14,12 +14,6 @@
       "maximum": 9007199254740991,
       "description": "Zero-based line offset in the exact current source revision."
     },
-    "limit": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 200,
-      "description": "Maximum number of lines in this bounded page."
-    },
     "returnContent": {
       "type": "boolean",
       "description": "Return this selected line page directly when it fits the response limit. May be combined with output."
@@ -28,9 +22,10 @@
       "type": "string",
       "minLength": 1,
       "description": "Optional immutable JSON artifact path for this selected line page. May be combined with returnContent.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
-  "required": ["input", "offset", "limit", "returnContent"],
+  "required": ["input", "offset", "returnContent"],
   "additionalProperties": false
 }

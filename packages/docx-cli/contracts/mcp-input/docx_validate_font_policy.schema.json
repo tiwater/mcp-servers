@@ -48,7 +48,8 @@
       "type": "string",
       "minLength": 1,
       "description": "Absolute path for a new JSON file containing the complete result. Existing files are never overwritten.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
   "required": [

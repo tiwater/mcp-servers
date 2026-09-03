@@ -57,7 +57,8 @@
       "type": "string",
       "minLength": 1,
       "description": "Optional path for retaining the complete selected observation. May be combined with returnContent.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
   "required": [

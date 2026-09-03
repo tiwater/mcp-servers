@@ -113,7 +113,7 @@ const definitions = [
   },
   {
     name: 'text_read_lines',
-    description: 'Read one explicit zero-based line page from one exact supported plain-text revision. The receipt reports remaining lines and nextOffset; continue only when another line is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to retain the same complete page. These channels are independent and may be used together; at least one is required. Lines retain their exact decoded text and terminator; the provider does not interpret fields, records, key-value pairs, sections, Markdown, or business meaning.',
+    description: 'Read one explicit zero-based line page from one exact supported plain-text revision. The provider chooses the bounded page size. The receipt reports remaining lines and nextOffset; continue only when another line is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to retain the same complete page. These channels are independent and may be used together; at least one is required. Lines retain their exact decoded text and terminator; the provider does not interpret fields, records, key-value pairs, sections, Markdown, or business meaning.',
     outputSchema: largeResultOutput(linePage).extend({ summary: linePageReceipt }).strict(),
     handler: textReadLines,
   },
@@ -165,7 +165,7 @@ async function textInspect(args) {
 }
 
 async function textReadLines(args) {
-  const observation = await readTextLines(args.input, args.offset, args.limit);
+  const observation = await readTextLines(args.input, args.offset);
   const delivered = await deliverLargeJsonResult({
     tool: 'text_read_lines',
     args,

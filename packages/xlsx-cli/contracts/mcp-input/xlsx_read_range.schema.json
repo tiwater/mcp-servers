@@ -25,12 +25,6 @@
       "maximum": 9007199254740991,
       "description": "Zero-based cell offset in row-major order within the selected range. Continue only when another selected cell is needed."
     },
-    "limit": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 256,
-      "description": "Maximum selected cells in this bounded page."
-    },
     "returnContent": {
       "type": "boolean",
       "description": "Return this selected technical page directly when it fits the response limit. May be combined with output."
@@ -39,9 +33,10 @@
       "type": "string",
       "minLength": 1,
       "description": "Optional immutable JSON artifact path for this selected technical page. May be combined with returnContent.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
-  "required": ["input", "sheet", "range", "limit", "returnContent"],
+  "required": ["input", "sheet", "range", "returnContent"],
   "additionalProperties": false
 }

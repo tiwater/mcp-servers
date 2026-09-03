@@ -100,8 +100,7 @@ internal static class Cli
         var input = RequiredString(request, "input");
         var slideNumber = RequiredInt(request, "slideNumber");
         var offset = OptionalInt(request, "offset") ?? 0;
-        var limit = RequiredInt(request, "limit");
-        WriteJson(Inspector.ReadSlide(input, slideNumber, offset, limit));
+        WriteJson(Inspector.ReadSlide(input, slideNumber, offset));
         return 0;
     }
 
@@ -114,8 +113,7 @@ internal static class Cli
         var slideNumber = RequiredInt(request, "slideNumber");
         var shapeId = RequiredUInt(request, "shapeId");
         var offset = OptionalInt(request, "offset") ?? 0;
-        var limit = RequiredInt(request, "limit");
-        WriteJson(Inspector.ReadShape(input, slideNumber, shapeId, offset, limit));
+        WriteJson(Inspector.ReadShape(input, slideNumber, shapeId, offset));
         return 0;
     }
 

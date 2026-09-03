@@ -30,7 +30,8 @@
       "type": "string",
       "minLength": 1,
       "description": "Optional path for retaining the selected detailed row page. May be combined with returnContent.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
   "required": ["input", "table", "returnContent"],
