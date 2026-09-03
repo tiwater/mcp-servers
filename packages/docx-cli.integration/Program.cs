@@ -44,6 +44,52 @@ try
             == rows[1].GetProperty("cells")[0].GetProperty("logicalText").GetString(),
         "narrow cell read did not resolve the restart cell text");
 
+    var paginationOutput = Path.Combine(root, "paragraph-pagination.docx");
+    var paginationReceipt = Path.Combine(root, "paragraph-pagination-receipt.json");
+    var captionParagraph = rows[0].GetProperty("cells")[0].GetProperty("paragraphs")[0]
+        .GetProperty("address").Clone();
+    var bodyParagraph = rows[1].GetProperty("cells")[1].GetProperty("paragraphs")[0]
+        .GetProperty("address").Clone();
+    var pagination = Run("docx_set_paragraph_pagination", new
+    {
+        input = original,
+        changes = new object[]
+        {
+            new { paragraph = captionParagraph, keepWithNext = true, keepLinesTogether = true },
+            new { paragraph = bodyParagraph, pageBreakBefore = false, preventWidowOrphanLines = false },
+        },
+        output = paginationOutput,
+        receiptOutput = paginationReceipt,
+    });
+    Require(pagination.GetProperty("summary").GetProperty("appliedCount").GetInt32() == 2,
+        "paragraph pagination did not apply every requested paragraph");
+    using (var paginationDocument = WordprocessingDocument.Open(paginationOutput, false))
+    {
+        var paragraphs = paginationDocument.MainDocumentPart!.Document.Body!.Descendants<Paragraph>().ToArray();
+        Require(paragraphs[0].ParagraphProperties?.KeepNext?.Val?.Value == true
+                && paragraphs[0].ParagraphProperties?.KeepLines?.Val?.Value == true,
+            "paragraph pagination did not set positive properties");
+        var explicitFalseParagraph = paragraphs.Single(paragraph => paragraph.InnerText == "甲一");
+        Require(explicitFalseParagraph.ParagraphProperties?.PageBreakBefore?.Val?.Value == false
+                && explicitFalseParagraph.ParagraphProperties?.WidowControl?.Val?.Value == false,
+            "paragraph pagination did not preserve explicit false properties");
+    }
+    var missingPaginationReceipt = Path.Combine(root, "paragraph-pagination-missing-receipt.json");
+    var missingPagination = RunExpectAtomicFailure(
+        "docx_set_paragraph_pagination", original, missingPaginationReceipt, new
+        {
+            input = original,
+            changes = new[] { new { paragraph = captionParagraph } },
+            output = original,
+            receiptOutput = missingPaginationReceipt,
+        });
+    Require(missingPagination.Contains("paragraph-pagination-change-must-set-a-property", StringComparison.Ordinal),
+        "paragraph pagination accepted a change without properties");
+
+    RunVerticalTextAlignmentObservation();
+    RunNativeInlineSelectionComposition();
+    RunBookmarkedParagraphInsertion();
+
     var replacementSource = Path.Combine(root, "content-replacement-source.docx");
     var replacementTarget = Path.Combine(root, "content-replacement-target.docx");
     CreateContentReplacementSourceDocument(replacementSource);
@@ -485,17 +531,19 @@ try
             new
             {
                 prototypeRow = rows[1].GetProperty("address").Clone(),
+                cantSplit = false,
                 cells = new[]
                 {
                     new { columns = new[] { "c0" }, text = "精密度", rowSpan = (int?)2 },
                     new { columns = new[] { "c1" }, text = "标准一", rowSpan = (int?)null },
-                    new { columns = new[] { "c2" }, text = "结果一", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "甲二", rowSpan = (int?)null },
                     new { columns = new[] { "c3" }, text = "通过", rowSpan = (int?)2 },
                 }
             },
             new
             {
                 prototypeRow = rows[3].GetProperty("address").Clone(),
+                cantSplit = true,
                 cells = new[]
                 {
                     new { columns = new[] { "c1" }, text = "标准二", rowSpan = (int?)null },
@@ -512,7 +560,7 @@ try
     var setRows = setBodyState.GetProperty("rows");
     Require(CellAt(setBodyState, 1, 0).GetProperty("logicalText").GetString() == "精密度"
             && CellAt(setBodyState, 1, 1).GetProperty("logicalText").GetString() == "标准一"
-            && CellAt(setBodyState, 1, 2).GetProperty("logicalText").GetString() == "结果一"
+            && CellAt(setBodyState, 1, 2).GetProperty("logicalText").GetString() == "甲二"
             && CellAt(setBodyState, 1, 3).GetProperty("logicalText").GetString() == "通过",
         "set table body shifted semantic columns");
     Require(CellAt(setBodyState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
@@ -524,6 +572,19 @@ try
             && CellAt(setBodyState, 2, 3).GetProperty("verticalMerge").GetString() == "continue"
             && CellAt(setBodyState, 2, 3).GetProperty("logicalText").GetString() == "通过",
         "set table body did not preserve the declared vertical group");
+    Require(!setRows[1].GetProperty("cantSplit").GetBoolean()
+            && setRows[2].GetProperty("cantSplit").GetBoolean(),
+        "set table body did not apply explicit row pagination properties");
+    using (var preservedFormatting = WordprocessingDocument.Open(setBodyOutput, false))
+    {
+        var matchingParagraph = preservedFormatting.MainDocumentPart!.Document
+            .Descendants<Paragraph>().Single(paragraph => paragraph.InnerText == "甲二");
+        Require(matchingParagraph.Elements<Run>().Any(run =>
+                run.InnerText == "二"
+                && run.RunProperties?.VerticalTextAlignment?.Val?.Value
+                    == VerticalPositionValues.Superscript),
+            "set table body discarded existing rich text when cell text was unchanged");
+    }
 
     var expandedBodyOutput = Path.Combine(root, "set-table-body-expanded.docx");
     Run("docx_set_table_body", new
@@ -977,6 +1038,7 @@ try
     RunInput("validate-openxml", merged);
 
     RunTocStylePolicyMatrix();
+    RunMergedHeaderSetBodyMatrix();
     foreach (var shape in new[] { "flat", "horizontal", "vertical", "mixed", "rectangle", "irregular", "multi-paragraph" })
         RunTableOperationMatrix(shape, path => CreateMatrixDocument(path, shape));
     RunTableOperationMatrix("nested", CreateNestedMatrixDocument, tableIndex: 1);
@@ -1029,6 +1091,232 @@ void RunTocStylePolicyMatrix()
     }
 }
 
+void RunMergedHeaderSetBodyMatrix()
+{
+    var input = Path.Combine(root, "set-body-merged-header-input.docx");
+    var output = Path.Combine(root, "set-body-merged-header-output.docx");
+    CreateMergedHeaderSetBodyDocument(input);
+    var before = ReadTable(input, "set-body-merged-header-before");
+    var rows = before.GetProperty("rows");
+    var columns = before.GetProperty("gridColumns").EnumerateArray()
+        .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+        .ToArray();
+
+    Run("docx_set_table_body", new
+    {
+        input,
+        table = before.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = rows[2].GetProperty("address").Clone(),
+            last = rows[3].GetProperty("address").Clone(),
+        },
+        columns,
+        rows = new object[]
+        {
+            new
+            {
+                prototypeRow = rows[2].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "c0" }, text = "group", rowSpan = (int?)2 },
+                    new { columns = new[] { "c1" }, text = "item-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "method-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "v3-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c4" }, text = "v4-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c5" }, text = "v5-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c6" }, text = "v6-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c7" }, text = "v7-a", rowSpan = (int?)null },
+                    new { columns = new[] { "c8" }, text = "v8-a", rowSpan = (int?)null },
+                }
+            },
+            new
+            {
+                prototypeRow = rows[3].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "c1" }, text = "item-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c2" }, text = "method-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c3" }, text = "v3-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c4" }, text = "v4-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c5" }, text = "v5-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c6" }, text = "v6-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c7" }, text = "v7-b", rowSpan = (int?)null },
+                    new { columns = new[] { "c8" }, text = "v8-b", rowSpan = (int?)null },
+                }
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, "set-body-merged-header-receipt.json")
+    });
+
+    var after = ReadTable(output, "set-body-merged-header-after");
+    Require(after.GetProperty("columnCount").GetInt32() == 9,
+        "set table body changed the nine-column grid under a merged header");
+    Require(CellAt(after, 0, 0).GetProperty("gridSpan").GetInt32() == 2
+            && CellAt(after, 0, 3).GetProperty("gridSpan").GetInt32() == 6,
+        "set table body changed the merged header geometry");
+    Require(CellAt(after, 2, 0).GetProperty("logicalText").GetString() == "group"
+            && CellAt(after, 2, 1).GetProperty("logicalText").GetString() == "item-a"
+            && CellAt(after, 2, 2).GetProperty("logicalText").GetString() == "method-a"
+            && CellAt(after, 2, 8).GetProperty("logicalText").GetString() == "v8-a",
+        "set table body shifted a value under the merged header");
+    Require(CellAt(after, 3, 0).GetProperty("verticalMerge").GetString() == "continue"
+            && CellAt(after, 3, 0).GetProperty("logicalText").GetString() == "group"
+            && CellAt(after, 3, 1).GetProperty("logicalText").GetString() == "item-b"
+            && CellAt(after, 3, 2).GetProperty("logicalText").GetString() == "method-b"
+            && CellAt(after, 3, 8).GetProperty("logicalText").GetString() == "v8-b",
+        "set table body shifted the second row or lost its vertical merge owner");
+    RequireTableInvariants(after, "set-body-merged-header");
+    RunInput("validate-openxml", output);
+    Console.WriteLine("PASS set table body under merged two-row header");
+}
+
+void RunVerticalTextAlignmentObservation()
+{
+    var input = Path.Combine(root, "vertical-text-observation.docx");
+    CreateVerticalTextObservationDocument(input);
+    var table = ReadTable(input, "vertical-text-observation-table");
+    var paragraph = table.GetProperty("rows")[0].GetProperty("cells")[0]
+        .GetProperty("paragraphs")[0];
+    var textNodes = paragraph.GetProperty("textNodes");
+    Require(textNodes[1].GetProperty("verticalTextAlignment").GetString() == "superscript"
+            && textNodes[3].GetProperty("verticalTextAlignment").GetString() == "subscript",
+        "table detail did not expose native superscript and subscript text");
+
+    var observation = Run("docx_read_object", new
+    {
+        input,
+        addresses = new[] { paragraph.GetProperty("address").Clone() },
+        kinds = new[] { "run", "text" },
+        output = Path.Combine(root, "vertical-text-observation-object.json")
+    }).GetProperty("observations")[0];
+    var verticalRuns = ObservationObjects(observation)
+        .Where(item => item.GetProperty("kind").GetString() == "run"
+            && item.GetProperty("verticalTextAlignment").ValueKind == JsonValueKind.String)
+        .Select(item => item.GetProperty("verticalTextAlignment").GetString())
+        .ToArray();
+    Require(verticalRuns.SequenceEqual(new[] { "superscript", "subscript" }),
+        "narrow object read did not expose native superscript and subscript runs");
+    Console.WriteLine("PASS vertical text alignment observation");
+}
+
+void RunNativeInlineSelectionComposition()
+{
+    var source = Path.Combine(root, "native-inline-selection-source.docx");
+    var target = Path.Combine(root, "native-inline-selection-target.docx");
+    CreateNativeInlineSelectionSourceDocument(source);
+    CreateNativeInlineSelectionTargetDocument(target);
+
+    var sourceTable = ReadTable(source, "native-inline-selection-source");
+    var targetTable = ReadTable(target, "native-inline-selection-target");
+    var sourceCell = CellAt(sourceTable, 0, 0);
+    var sourceParagraphs = sourceCell.GetProperty("paragraphs");
+    var sourceObjects = Run("docx_read_object", new
+    {
+        input = source,
+        addresses = new[] { sourceCell.GetProperty("address").Clone() },
+        kinds = new[] { "run", "text" },
+        output = Path.Combine(root, "native-inline-selection-objects.json")
+    }).GetProperty("observations")[0];
+    var objects = ObservationObjects(sourceObjects).ToArray();
+    const string expectedInline = "alpha xy middle pq omega";
+    var firstParagraphPath = sourceParagraphs[0].GetProperty("address").GetProperty("path").GetString();
+    var runAddresses = objects
+        .Where(item => item.GetProperty("kind").GetString() == "run"
+            && item.GetProperty("address").GetProperty("path").GetString()!.StartsWith(firstParagraphPath!, StringComparison.Ordinal))
+        .Select(item => item.GetProperty("address").Clone())
+        .ToArray();
+    var textAddresses = objects
+        .Where(item => item.GetProperty("kind").GetString() == "text"
+            && item.GetProperty("address").GetProperty("path").GetString()!.StartsWith(firstParagraphPath!, StringComparison.Ordinal))
+        .Select(item => item.GetProperty("address").Clone())
+        .ToArray();
+
+    Run("docx_replace_content_from_source", new
+    {
+        input = target,
+        changes = new object[]
+        {
+            new
+            {
+                target = CellAt(targetTable, 0, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = runAddresses.Select(address => new { address }).ToArray(),
+            },
+            new
+            {
+                target = CellAt(targetTable, 1, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = textAddresses.Select(address => new { address }).ToArray(),
+            },
+            new
+            {
+                target = CellAt(targetTable, 2, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = new[] { new { address = textAddresses[1], range = new { start = 1, length = 1 } } },
+            },
+            new
+            {
+                target = CellAt(targetTable, 3, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = sourceParagraphs.EnumerateArray()
+                    .Select(paragraph => new { address = paragraph.GetProperty("address").Clone() }).ToArray(),
+            },
+            new
+            {
+                target = CellAt(targetTable, 4, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = new[]
+                {
+                    new
+                    {
+                        address = sourceCell.GetProperty("address").Clone(),
+                        range = new { start = 0, length = expectedInline.Length },
+                    },
+                },
+            },
+        },
+        output = target,
+        receiptOutput = Path.Combine(root, "native-inline-selection-receipt.json")
+    });
+
+    var result = ReadTable(target, "native-inline-selection-result");
+    foreach (var rowIndex in new[] { 0, 1, 4 })
+    {
+        var cell = CellAt(result, rowIndex, 0);
+        var paragraphs = cell.GetProperty("paragraphs");
+        var textNodes = paragraphs[0].GetProperty("textNodes");
+        Require(cell.GetProperty("logicalText").GetString() == expectedInline
+                && paragraphs.GetArrayLength() == 1,
+            $"inline selections did not remain in one source paragraph for target row {rowIndex}");
+        Require(textNodes[1].GetProperty("verticalTextAlignment").GetString() == "superscript"
+                && textNodes[3].GetProperty("verticalTextAlignment").GetString() == "subscript",
+            $"inline selections lost vertical text alignment for target row {rowIndex}");
+    }
+    var rangeCell = CellAt(result, 2, 0);
+    Require(rangeCell.GetProperty("logicalText").GetString() == "y"
+            && rangeCell.GetProperty("paragraphs")[0].GetProperty("textNodes")[0]
+                .GetProperty("verticalTextAlignment").GetString() == "superscript",
+        "text range did not inherit its source run formatting");
+    var multiParagraphCell = CellAt(result, 3, 0);
+    Require(multiParagraphCell.GetProperty("paragraphs").GetArrayLength() == 2
+            && multiParagraphCell.GetProperty("paragraphs")[0].GetProperty("text").GetString() == expectedInline
+            && multiParagraphCell.GetProperty("paragraphs")[1].GetProperty("text").GetString() == "second paragraph",
+        "selections from distinct source paragraphs lost their paragraph boundary");
+    RunInput("validate-openxml", target);
+    Console.WriteLine("PASS native inline selection composition");
+}
+
+IEnumerable<JsonElement> ObservationObjects(JsonElement node)
+{
+    if (node.TryGetProperty("object", out var item)) yield return item;
+    if (!node.TryGetProperty("children", out var children)) yield break;
+    foreach (var child in children.EnumerateArray())
+    foreach (var descendant in ObservationObjects(child))
+        yield return descendant;
+}
+
 void CreateTocPolicyDocument(string path)
 {
     using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
@@ -1049,6 +1337,135 @@ void CreateTocPolicyDocument(string path)
         Heading("Heading3", "_TocPolicyTwo", "Heading two", "2"),
         TocEntry("TemplateTocTop", "_TocPolicyOne", "Entry one", true),
         TocEntry("7", "_TocPolicyTwo", "Entry two", true)));
+    main.Document.Save();
+}
+
+void RunBookmarkedParagraphInsertion()
+{
+    var input = Path.Combine(root, "bookmarked-paragraph-insertion.docx");
+    using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+        stylesPart.Styles = new Styles(HeadingStyle("Heading1", 0));
+        stylesPart.Styles.Save();
+        main.Document = new Document(new Body(
+            Heading("Heading1", "_TocInsertionSource", "Reusable heading", "14"),
+            new Paragraph(new Run(new Text("Insertion boundary")))));
+        AssignParagraphIdentities(main.Document);
+        main.Document.Save();
+    }
+
+    var output = Path.Combine(root, "bookmarked-paragraph-insertion-output.docx");
+    Run("docx_insert_objects", new
+    {
+        input,
+        changes = new[]
+        {
+            new
+            {
+                sourceInput = input,
+                sources = new[] { new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" } },
+                targetParent = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]" },
+                before = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[2]" },
+            }
+        },
+        output,
+        receiptOutput = Path.Combine(root, "bookmarked-paragraph-insertion-receipt.json")
+    });
+
+    using var result = WordprocessingDocument.Open(output, false);
+    var body = result.MainDocumentPart?.Document?.Body
+        ?? throw new InvalidOperationException("bookmarked paragraph output body missing");
+    Require(body.Elements<Paragraph>().Count(paragraph => paragraph.InnerText == "Reusable heading") == 2,
+        "bookmarked paragraph was not inserted");
+    Require(body.Descendants<BookmarkStart>().Count() == 1
+            && body.Descendants<BookmarkEnd>().Count() == 1,
+        "inserted paragraph retained source bookmark identity");
+    RequireUniqueWordIdentities(output);
+    RunInput("validate-openxml", output);
+    Console.WriteLine("PASS bookmarked paragraph insertion");
+}
+
+void CreateMergedHeaderSetBodyDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(Enumerable.Range(0, 9).Select(_ => new GridColumn { Width = "1000" })),
+        new TableRow(
+            new TableRowProperties(new TableHeader()),
+            Cell("items", span: 2, merge: MergedCellValues.Restart),
+            Cell("method", merge: MergedCellValues.Restart),
+            Cell("validation", span: 6)),
+        new TableRow(
+            new TableRowProperties(new TableHeader()),
+            Cell("", span: 2, merge: MergedCellValues.Continue),
+            Cell("", merge: MergedCellValues.Continue),
+            Cell("v3"), Cell("v4"), Cell("v5"), Cell("v6"), Cell("v7"), Cell("v8")),
+        new TableRow(Cell("placeholder"), Cell("placeholder"), Cell("placeholder"),
+            Cell(""), Cell(""), Cell(""), Cell(""), Cell(""), Cell("")),
+        new TableRow(Cell("placeholder"), Cell("placeholder"), Cell("placeholder"),
+            Cell(""), Cell(""), Cell(""), Cell(""), Cell(""), Cell("")));
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateVerticalTextObservationDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var paragraph = new Paragraph(
+        new Run(new Text("R")),
+        new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }),
+            new Text("2")),
+        new Run(new Text(" and H")),
+        new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Subscript }),
+            new Text("2")),
+        new Run(new Text("O")));
+    main.Document = new Document(new Body(new Table(
+        new TableGrid(new GridColumn { Width = "4000" }),
+        new TableRow(new TableCell(paragraph)))));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateNativeInlineSelectionSourceDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var first = new Paragraph(
+        new Run(new Text("alpha ") { Space = SpaceProcessingModeValues.Preserve }),
+        new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }),
+            new Text("xy")),
+        new Run(new Text(" middle ") { Space = SpaceProcessingModeValues.Preserve }),
+        new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Subscript }),
+            new Text("pq")),
+        new Run(new Text(" omega") { Space = SpaceProcessingModeValues.Preserve }));
+    var second = new Paragraph(new Run(new Text("second paragraph")));
+    main.Document = new Document(new Body(new Table(
+        new TableProperties(),
+        new TableGrid(new GridColumn { Width = "5000" }),
+        new TableRow(new TableCell(first, second)))));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateNativeInlineSelectionTargetDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    main.Document = new Document(new Body(new Table(
+        new TableProperties(),
+        new TableGrid(new GridColumn { Width = "5000" }),
+        new TableRow(Cell("run target")),
+        new TableRow(Cell("text target")),
+        new TableRow(Cell("range target")),
+        new TableRow(Cell("paragraph target")),
+        new TableRow(Cell("cell range target")))));
+    AssignParagraphIdentities(main.Document);
     main.Document.Save();
 }
 
@@ -1968,7 +2385,7 @@ void CreateDocument(string path)
         Cell("分组二", span: 2)));
     table.Append(new TableRow(
         new TableRowProperties(new CantSplit()),
-        Cell("甲", merge: MergedCellValues.Restart), Cell("甲一"), Cell("甲二"), Cell("甲三")));
+        Cell("甲", merge: MergedCellValues.Restart), Cell("甲一"), CellWithSuperscript("甲", "二"), Cell("甲三")));
     table.Append(new TableRow(
         Cell("", merge: MergedCellValues.Continue), Cell("乙一"), Cell("乙二"), Cell("乙三")));
     table.Append(new TableRow(Cell("独立"), Cell("丙一"), Cell("丙二"), Cell("丙三")));
@@ -2129,6 +2546,15 @@ TableCell Cell(string text, int span = 1, MergedCellValues? merge = null)
     if (span > 1) properties.Append(new GridSpan { Val = span });
     if (merge is not null) properties.Append(new VerticalMerge { Val = merge.Value });
     return new TableCell(properties, new Paragraph(new Run(new Text(text))));
+}
+
+TableCell CellWithSuperscript(string text, string superscript)
+{
+    var properties = new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "1200" });
+    return new TableCell(properties, new Paragraph(
+        new Run(new Text(text)),
+        new Run(new RunProperties(
+            new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }), new Text(superscript))));
 }
 
 void AssignParagraphIdentities(OpenXmlElement root)

@@ -160,8 +160,10 @@ public static class Inspector
                 var numbering = paragraph.ParagraphProperties?.NumberingProperties;
                 var numberingId = numbering?.NumberingId?.Val?.Value;
                 var numberingLevel = numbering?.NumberingLevelReference?.Val?.Value;
-                var keepNext = paragraph.ParagraphProperties?.GetFirstChild<KeepNext>() is not null;
-                var keepLines = paragraph.ParagraphProperties?.GetFirstChild<KeepLines>() is not null;
+                var keepNextProperty = paragraph.ParagraphProperties?.GetFirstChild<KeepNext>();
+                var keepLinesProperty = paragraph.ParagraphProperties?.GetFirstChild<KeepLines>();
+                var keepNext = keepNextProperty is not null && (keepNextProperty.Val?.Value ?? true);
+                var keepLines = keepLinesProperty is not null && (keepLinesProperty.Val?.Value ?? true);
                 var drawingCount = paragraph.Descendants<Drawing>().Count();
                 if (drawingCount > 0)
                     nodes.Add(new

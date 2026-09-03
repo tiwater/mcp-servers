@@ -107,11 +107,16 @@ public static class NativeContentCopy
                 throw new InvalidOperationException("source-address-must-be-main-document-object");
             using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
             var paragraphs = new List<Paragraph>();
+            Paragraph? activeInlineSourceParagraph = null;
             for (var sourceIndex = 0; sourceIndex < sourceRefs.Count; sourceIndex++)
             {
                 var resolved = sourceRefs[sourceIndex];
                 var element = Observation.ResolveNativePath(sourceDocument, resolved.StoryPart, resolved.NativePath);
-                paragraphs.AddRange(CopySelection(element, change.SourceSelections[sourceIndex]));
+                AppendSelection(
+                    paragraphs,
+                    ref activeInlineSourceParagraph,
+                    element,
+                    change.SourceSelections[sourceIndex]);
             }
             if (paragraphs.Count == 0) paragraphs.Add(new Paragraph());
             result.Add(new PreparedChange(targetRefs[index], sourcePath, paragraphs));
@@ -166,18 +171,156 @@ public static class NativeContentCopy
         }
     }
 
-    internal static IReadOnlyList<Paragraph> CopySelection(OpenXmlElement element, CopyContentSelection selection)
+    private static void AppendSelection(
+        List<Paragraph> output,
+        ref Paragraph? activeInlineSourceParagraph,
+        OpenXmlElement element,
+        CopyContentSelection selection)
     {
         if (selection.Range is not null)
-            return [ParagraphForTextRange(element, selection.Range.Start, selection.Range.Length)];
-        return element switch
         {
-            TableCell cell => cell.Elements<Paragraph>().Select(CloneParagraph).ToArray(),
-            Paragraph paragraph => [CloneParagraph(paragraph)],
-            DocumentFormat.OpenXml.Wordprocessing.Run run => [new Paragraph((DocumentFormat.OpenXml.Wordprocessing.Run)run.CloneNode(true))],
-            Text text => [new Paragraph(new DocumentFormat.OpenXml.Wordprocessing.Run((Text)text.CloneNode(true)))],
-            _ => throw new InvalidOperationException($"source-ref-kind-not-supported-for-content-copy: {element.LocalName}"),
+            if (element is TableCell or Paragraph)
+            {
+                output.AddRange(ParagraphsForTextRange(
+                    element,
+                    selection.Range.Start,
+                    selection.Range.Length));
+                activeInlineSourceParagraph = null;
+                return;
+            }
+            AppendInlineSelection(
+                output,
+                ref activeInlineSourceParagraph,
+                SourceParagraph(element),
+                RunForTextRange(element, selection.Range.Start, selection.Range.Length));
+            return;
+        }
+
+        switch (element)
+        {
+            case TableCell cell:
+                output.AddRange(cell.Elements<Paragraph>().Select(CloneParagraph));
+                activeInlineSourceParagraph = null;
+                return;
+            case Paragraph paragraph:
+                output.Add(CloneParagraph(paragraph));
+                activeInlineSourceParagraph = null;
+                return;
+            case DocumentFormat.OpenXml.Wordprocessing.Run run:
+                AppendInlineSelection(
+                    output,
+                    ref activeInlineSourceParagraph,
+                    SourceParagraph(run),
+                    (DocumentFormat.OpenXml.Wordprocessing.Run)run.CloneNode(true));
+                return;
+            case Text text:
+                AppendInlineSelection(
+                    output,
+                    ref activeInlineSourceParagraph,
+                    SourceParagraph(text),
+                    RunForText(text));
+                return;
+            default:
+                throw new InvalidOperationException($"source-ref-kind-not-supported-for-content-copy: {element.LocalName}");
+        }
+    }
+
+    private static IReadOnlyList<Paragraph> ParagraphsForTextRange(
+        OpenXmlElement element,
+        int start,
+        int length)
+    {
+        var paragraphs = element switch
+        {
+            TableCell cell => cell.Elements<Paragraph>().ToArray(),
+            Paragraph paragraph => new[] { paragraph },
+            _ => throw new InvalidOperationException("text-range-block-must-be-cell-or-paragraph"),
         };
+        var lengths = paragraphs.Select(paragraph => ScalarLength(paragraph.InnerText)).ToArray();
+        var totalLength = lengths.Sum() + Math.Max(0, paragraphs.Length - 1);
+        if (start < 0 || length <= 0 || start > totalLength - length)
+            throw new InvalidOperationException("text-range-out-of-bounds");
+
+        var end = start + length;
+        var cursor = 0;
+        var selected = new List<Paragraph>();
+        for (var index = 0; index < paragraphs.Length; index++)
+        {
+            var paragraphEnd = cursor + lengths[index];
+            var overlapStart = Math.Max(start, cursor);
+            var overlapEnd = Math.Min(end, paragraphEnd);
+            if (overlapStart < overlapEnd)
+                selected.Add(ParagraphForTextRange(
+                    paragraphs[index],
+                    overlapStart - cursor,
+                    overlapEnd - overlapStart));
+            cursor = paragraphEnd + 1;
+        }
+        if (selected.Count == 0)
+            throw new InvalidOperationException("text-range-must-select-text");
+        return selected;
+    }
+
+    private static Paragraph ParagraphForTextRange(Paragraph source, int start, int length)
+    {
+        var sourceText = string.Concat(source.Descendants<Text>().Select(text => text.Text));
+        if (!StringComparer.Ordinal.Equals(source.InnerText, sourceText))
+            throw new InvalidOperationException("text-range-source-must-be-plain-text");
+        var output = CloneParagraph(source);
+        var cursor = 0;
+        var end = start + length;
+        foreach (var text in output.Descendants<Text>().ToArray())
+        {
+            var textLength = ScalarLength(text.Text);
+            var overlapStart = Math.Max(start, cursor);
+            var overlapEnd = Math.Min(end, cursor + textLength);
+            if (overlapStart >= overlapEnd)
+            {
+                text.Remove();
+            }
+            else
+            {
+                text.Text = SliceScalars(text.Text, overlapStart - cursor, overlapEnd - overlapStart);
+                text.Space = SpaceProcessingModeValues.Preserve;
+            }
+            cursor += textLength;
+        }
+        foreach (var run in output.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>()
+                     .Where(run => !run.Descendants<Text>().Any()).ToArray())
+            run.Remove();
+        if (!output.Descendants<Text>().Any())
+            throw new InvalidOperationException("text-range-must-select-text");
+        return output;
+    }
+
+    private static void AppendInlineSelection(
+        List<Paragraph> output,
+        ref Paragraph? activeSourceParagraph,
+        Paragraph sourceParagraph,
+        DocumentFormat.OpenXml.Wordprocessing.Run run)
+    {
+        if (!ReferenceEquals(activeSourceParagraph, sourceParagraph))
+        {
+            output.Add(new Paragraph());
+            activeSourceParagraph = sourceParagraph;
+        }
+        output[^1].Append(run);
+    }
+
+    private static Paragraph SourceParagraph(OpenXmlElement element)
+        => element as Paragraph
+            ?? element.Ancestors<Paragraph>().FirstOrDefault()
+            ?? throw new InvalidOperationException("source-inline-ref-must-have-paragraph-parent");
+
+    private static DocumentFormat.OpenXml.Wordprocessing.Run RunForText(Text text)
+    {
+        var sourceRun = text.Ancestors<DocumentFormat.OpenXml.Wordprocessing.Run>().FirstOrDefault()
+            ?? throw new InvalidOperationException("source-text-ref-must-have-run-parent");
+        var output = new DocumentFormat.OpenXml.Wordprocessing.Run();
+        if (sourceRun.RunProperties is not null)
+            output.RunProperties = (RunProperties)sourceRun.RunProperties.CloneNode(true);
+        output.Append((Text)text.CloneNode(true));
+        return output;
     }
 
     internal static Paragraph CloneParagraph(Paragraph paragraph)
@@ -193,7 +336,10 @@ public static class NativeContentCopy
         return clone;
     }
 
-    private static Paragraph ParagraphForTextRange(OpenXmlElement element, int start, int length)
+    private static DocumentFormat.OpenXml.Wordprocessing.Run RunForTextRange(
+        OpenXmlElement element,
+        int start,
+        int length)
     {
         if (element is not DocumentFormat.OpenXml.Wordprocessing.Run and not Text)
             throw new InvalidOperationException("text-range-requires-run-or-text-ref");
@@ -201,12 +347,15 @@ public static class NativeContentCopy
             throw new InvalidOperationException("text-range-run-must-contain-only-text");
         var value = element is Text text ? text.Text : string.Concat(element.Descendants<Text>().Select(item => item.Text));
         var selected = SliceScalars(value, start, length);
-        var outputRun = element is DocumentFormat.OpenXml.Wordprocessing.Run sourceRun
-            ? (DocumentFormat.OpenXml.Wordprocessing.Run)sourceRun.CloneNode(true)
-            : new DocumentFormat.OpenXml.Wordprocessing.Run();
+        var sourceRun = element as DocumentFormat.OpenXml.Wordprocessing.Run
+            ?? element.Ancestors<DocumentFormat.OpenXml.Wordprocessing.Run>().FirstOrDefault()
+            ?? throw new InvalidOperationException("source-text-ref-must-have-run-parent");
+        if (sourceRun.ChildElements.Any(child => child is not RunProperties and not Text))
+            throw new InvalidOperationException("text-range-run-must-contain-only-text");
+        var outputRun = (DocumentFormat.OpenXml.Wordprocessing.Run)sourceRun.CloneNode(true);
         outputRun.RemoveAllChildren<Text>();
         outputRun.Append(new Text(selected) { Space = SpaceProcessingModeValues.Preserve });
-        return new Paragraph(outputRun);
+        return outputRun;
     }
 
     private static string SliceScalars(string value, int start, int length)
@@ -218,6 +367,8 @@ public static class NativeContentCopy
         foreach (var rune in runes.Skip(start).Take(length)) builder.Append(rune.ToString());
         return builder.ToString();
     }
+
+    private static int ScalarLength(string value) => value.EnumerateRunes().Count();
 
     internal static void ReplaceCellContent(TableCell target, IReadOnlyList<Paragraph> sourceParagraphs)
     {

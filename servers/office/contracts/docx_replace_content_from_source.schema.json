@@ -44,13 +44,13 @@
           "sourceSelections": {
             "minItems": 1,
             "type": "array",
-            "description": "Ordered native source paragraphs, runs, or text nodes. Their selected inline content becomes the target content without Agent transcription.",
+            "description": "Ordered native source cells, paragraphs, runs, or text nodes. Consecutive run or text selections from one source paragraph form one target paragraph; a range retains the native runs it crosses. A source paragraph boundary remains a target paragraph boundary. Selected content becomes the target content without Agent transcription.",
             "items": {
               "type": "object",
               "properties": {
                 "address": {
                   "type": "object",
-                  "description": "Native source object address returned by docx_read_object or docx_read_table. Selecting a paragraph copies that paragraph's inline content; selecting a cell copies its direct paragraphs.",
+                  "description": "Native source object address returned by docx_read_object or docx_read_table. Selecting a paragraph copies that paragraph's inline content; selecting a cell copies its direct paragraphs; selecting a run or text copies native inline content and formatting.",
                   "properties": {
                     "part": {
                       "type": "string",
@@ -70,7 +70,7 @@
                 },
                 "range": {
                   "type": "object",
-                  "description": "Optional Unicode-scalar substring of a selected run or text node. Omit it to copy the complete selected object.",
+                  "description": "Optional Unicode-scalar substring of the selected object's observed text. For a cell, offsets use its docx_read_table text with one newline between direct paragraphs. The selected native runs and paragraph boundaries are retained. Omit it to copy the complete selected object.",
                   "properties": {
                     "start": {
                       "type": "integer",

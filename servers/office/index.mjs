@@ -23,6 +23,7 @@ import {
   writeJsonArtifact,
 } from '../_shared/large-json-result.mjs';
 import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
+import { compactDocxObjectIdentity } from './docx-object-identity.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const inputContractManifest = JSON.parse(await readFile(
@@ -237,7 +238,7 @@ function docxInspectionOutput(tool) {
         address: docxAddress,
         textPreview: z.string().min(1).max(240),
       }).strict()).max(6),
-    }).strict().optional(),
+    }).strict(),
   }).strict();
 }
 
@@ -248,6 +249,7 @@ const docxObjectIdentity = z.object({
   textPreview: z.string().nullable(),
   gridSpan: z.number().int().positive().nullable(),
   verticalMerge: z.string().nullable(),
+  verticalTextAlignment: z.enum(['baseline', 'superscript', 'subscript']).nullable(),
 }).strict();
 
 const docxNestedObjectIdentity = docxObjectIdentity.pick({
@@ -259,6 +261,7 @@ const docxNestedObjectIdentity = docxObjectIdentity.pick({
   verticalMerge: z.string().optional(),
   verticalMergeOwner: docxAddress.optional(),
   logicalText: z.string().optional(),
+  verticalTextAlignment: z.enum(['baseline', 'superscript', 'subscript']).optional(),
 }).strict();
 const docxObservationNode = z.lazy(() => z.object({
   object: docxNestedObjectIdentity,
@@ -292,21 +295,11 @@ const docxTableIndexOutput = docxObservationOutput('docx_table_index').extend({
   }).strict(),
   tables: z.array(z.object({
     address: docxAddress,
-    parentAddress: docxAddress.nullable(),
     rowCount: z.number().int().nonnegative(),
     columnCount: z.number().int().nonnegative(),
     textPreview: z.string(),
-    textLength: z.number().int().nonnegative(),
-    precedingParagraph: z.object({
-      address: docxAddress,
-      textPreview: z.string(),
-      textLength: z.number().int().nonnegative(),
-    }).strict().nullable(),
-    followingParagraph: z.object({
-      address: docxAddress,
-      textPreview: z.string(),
-      textLength: z.number().int().nonnegative(),
-    }).strict().nullable(),
+    precedingText: z.string().nullable(),
+    followingText: z.string().nullable(),
   }).strict()).optional(),
 }).strict();
 
@@ -370,7 +363,7 @@ const docxReadObjectOutput = docxObservationOutput('docx_read_object').extend({
 const tools = [
   {
     name: 'docx_inspect',
-    description: 'Inspect one current DOCX. Set returnContent true to return the compact identity summary. Provide output to retain the complete machine observation and return its artifact receipt. These channels are independent and may be used together. At least one channel is required. Use list and read operations to traverse selected document objects in native structure order.',
+    description: 'Inspect one current DOCX for identity and package overview. The response always includes a bounded identity summary. Set returnContent true when that summary is the requested direct result. Provide output to retain the complete machine observation and return its artifact receipt. These channels are independent and may be used together. At least one channel is required. Use list and read operations to traverse selected document objects in native structure order. This overview is not a complete final-document readback; use docx_export_json when a downstream consumer requires the complete body projection.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -386,7 +379,7 @@ const tools = [
   },
   {
     name: 'docx_table_index',
-    description: 'Locate tables in one current DOCX without returning full cell content or deciding table semantics. Set returnContent true to return a bounded page of addresses, shapes, short previews, and nearest non-empty paragraphs. Provide output to store the complete index and return its artifact receipt. These channels are independent and may be used together; at least one is required. Continue from receipt.nextOffset only when an unreturned table is needed for the current decision, then read one selected native address.',
+    description: 'Locate tables in one current DOCX without returning full cell content or deciding table semantics. Set returnContent true to return as many compact native addresses, shapes, and short text clues as fit the bounded response; the provider chooses page size. Provide output to store the complete index and return its artifact receipt. These channels are independent and may be used together; at least one is required. Continue from receipt.nextOffset only when an unreturned table is needed for the current decision, then pass one returned address unchanged to a narrow table or object read.',
     inputSchema: inputContract('docx_table_index'),
     outputSchema: docxTableIndexOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -394,7 +387,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read explicitly selected rows, cells, or paragraphs from one native DOCX. Set returnContent true to return compact requested descendants; if receipt.narrowingRequired is true, request fewer addresses or descendant kinds. Provide output to store the complete selected observation and return its artifact receipt. These channels are independent and may be used together; at least one is required. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. Use docx_read_table for a table range.',
+    description: 'Read explicitly selected rows, cells, or paragraphs from one native DOCX. Set returnContent true to return compact requested descendants; if receipt.narrowingRequired is true, request fewer addresses or descendant kinds. Provide output to store the complete selected observation and return its artifact receipt. These channels are independent and may be used together; at least one is required. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. Run and text descendants expose their native verticalTextAlignment when it is baseline, superscript, or subscript. Use docx_read_table for a table range.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -402,7 +395,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read an explicit row range from exactly one table selected by native OpenXML address; it never builds another whole-table data object. Set returnContent true to return a byte-bounded compact row page. Provide output to store full paragraph and text-node detail for the selected row page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Request only rows needed for the current decision; receipt.remaining is navigation information, not an obligation to read unused rows, and blank template rows need not be paged through. receipt.nextOffset is present only when another row page exists. Each returned row and cell keeps its reusable native address, zero-based logical gridColumnStart, gridSpan, vertical-merge owner, physical text, and logical text. Match columns across rows by gridColumnStart; a tc[n] path or array position is only that row\'s physical cell ordinal and is not a column identity when gridSpan or gridBefore is present. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Use docx_read_object when one exact object needs a narrower descendant view. The provider reports physical structure only; the Agent decides template and business meaning.',
+    description: 'Read an explicit row range from exactly one table selected by native OpenXML address; it never builds another whole-table data object. Set returnContent true to return a byte-bounded compact row page. Provide output to store full paragraph and text-node detail, including native verticalTextAlignment, for the selected row page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Request only rows needed for the current decision; receipt.remaining is navigation information, not an obligation to read unused rows, and blank template rows need not be paged through. receipt.nextOffset is present only when another row page exists. Each returned row and cell keeps its reusable native address, zero-based logical gridColumnStart, gridSpan, vertical-merge owner, physical text, and logical text. Match columns across rows by gridColumnStart; a tc[n] path or array position is only that row\'s physical cell ordinal and is not a column identity when gridSpan or gridBefore is present. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Use docx_read_object when one exact object needs a narrower descendant view. The provider reports physical structure only; the Agent decides template and business meaning.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -410,28 +403,35 @@ const tools = [
   },
   {
     name: 'docx_replace_content_from_source',
-    description: 'Replace existing target paragraph or table-cell content from explicitly selected native source paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. Use it after docx_fill_table_from_tables when the target needs selected source child content instead of the whole source cell; supply returned target-cell addresses and observed source descendant addresses, never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
+    description: 'Replace existing target paragraph or table-cell content from explicitly selected native source cells, paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. For a source cell already returned by docx_read_table, select a Unicode-scalar range directly against its returned text; the provider retains every crossed native run, including superscript and subscript, without another descendant read. Consecutive run or text selections from one source paragraph form one target paragraph, and source paragraph boundaries remain paragraph boundaries. Use it after docx_fill_table_from_tables when the target needs selected source content instead of the whole source cell; pass returned addresses unchanged and never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
     inputSchema: inputContract('docx_replace_content_from_source'),
     outputSchema: fixedEditOutput('docx_replace_content_from_source'),
     handler: args => fixedEdit('docx_replace_content_from_source', args),
   },
   {
     name: 'docx_set_text',
-    description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. This sets already-derived text; it does not insert objects, change table structure, copy source formatting, or decide business wording.',
+    description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. Use this only for newly derived text. Content copied or selected from a source DOCX uses docx_replace_content_from_source so native runs such as superscript and subscript are retained. This does not insert objects, change table structure, copy source formatting, or decide business wording.',
     inputSchema: inputContract('docx_set_text'),
     outputSchema: fixedEditOutput('docx_set_text'),
     handler: args => fixedEdit('docx_set_text', args),
   },
   {
+    name: 'docx_set_paragraph_pagination',
+    description: 'Set native pagination properties on explicitly selected current DOCX paragraphs. keepWithNext keeps a paragraph with the immediately following paragraph or table but does not guarantee that a table header remains with its first body row. keepLinesTogether keeps one paragraph on one page; pageBreakBefore starts it on a new page; preventWidowOrphanLines controls isolated first or last lines. Omitted properties remain unchanged. The caller chooses paragraphs from current native addresses; the provider does not decide document layout or business meaning.',
+    inputSchema: inputContract('docx_set_paragraph_pagination'),
+    outputSchema: fixedEditOutput('docx_set_paragraph_pagination'),
+    handler: args => fixedEdit('docx_set_paragraph_pagination', args),
+  },
+  {
     name: 'docx_set_table_body',
-    description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
+    description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Set cantSplit on a final physical row when it must remain whole across page boundaries; omit it to preserve the prototype row property. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
     inputSchema: inputContract('docx_set_table_body'),
     outputSchema: fixedEditOutput('docx_set_table_body'),
     handler: args => fixedEdit('docx_set_table_body', args),
   },
   {
     name: 'docx_fill_table_from_tables',
-    description: 'Fill one current target-table body from one or more explicitly ordered current source-table row ranges. For each source, select the grid column whose native vertical merges define logical records and map its grid columns onto every target prototype cell. The provider concatenates source records in declared order, preserves horizontal spans, rebuilds vertical merges only within each source range, validates the complete target grid, commits once, and returns structural readback. It does not discover source tables, choose source or target business meaning, filter records, translate or rewrite text, or apply business-specific rules. A single source uses the same sources array with one item. When only selected source paragraphs belong in the target, use its returned target-cell addresses with docx_replace_content_from_source before readback.',
+    description: 'Fill one current target-table body from one or more explicitly ordered current source-table row ranges. For each source, select an unmerged record column when every physical source row must remain an output row; mapped columns still retain their native vertical merges. Select a merged record column only when every mapping into one target cell has one equal scalar value throughout that merge group. Map source grid columns onto every target prototype cell. The provider concatenates source records in declared order, copies each mapped source cell in full, preserves horizontal spans, rebuilds vertical merges only within each source range, validates the complete target grid, commits once, and returns structural readback. It does not discover source tables, choose source or target business meaning, filter records, translate or rewrite text, or apply business-specific rules. A single source uses the same sources array with one item. If a target needs only selected source descendants, such as one language from a bilingual cell, immediately use the returned target-cell addresses with docx_replace_content_from_source before releasing that source or reading back the completed target.',
     inputSchema: inputContract('docx_fill_table_from_tables'),
     outputSchema: fixedEditOutput('docx_fill_table_from_tables'),
     handler: args => fixedEdit('docx_fill_table_from_tables', args),
@@ -488,7 +488,7 @@ const tools = [
   },
   {
     name: 'docx_export_json',
-    description: 'Produce a body-only DOCX JSON projection only when a downstream consumer explicitly requires that format. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required. This does not replace bounded list and read operations.',
+    description: 'Produce the complete body-only DOCX JSON projection required for final-document readback or another downstream consumer of that format. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required. This does not replace bounded list and read operations during document processing.',
     inputSchema: inputContract('docx_export_json'),
     outputSchema: largeResultOutput('docx_export_json'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -692,32 +692,17 @@ function compactDocxInspection(report) {
   };
 }
 
-function compactDocxObjectIdentity(object) {
-  return {
-    address: object.address,
-    parentAddress: object.parentAddress,
-    kind: object.kind,
-    textPreview: object.textPreview,
-    gridSpan: object.gridSpan,
-    verticalMerge: object.verticalMerge,
-  };
-}
-
 function compactTableIndexEntry(table) {
-  const paragraph = value => value === null ? null : {
-    address: value.address,
-    textPreview: value.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 160),
-    textLength: value.textLength,
-  };
+  const paragraphText = value => value === null
+    ? null
+    : value.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 32);
   return {
     address: table.address,
-    parentAddress: table.parentAddress,
     rowCount: table.rowCount,
     columnCount: table.columnCount,
-    textPreview: table.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 240),
-    textLength: table.textLength,
-    precedingParagraph: paragraph(table.precedingParagraph),
-    followingParagraph: paragraph(table.followingParagraph),
+    textPreview: table.textPreview.trim().replace(/\s+/gu, ' ').slice(0, 64),
+    precedingText: paragraphText(table.precedingParagraph),
+    followingText: paragraphText(table.followingParagraph),
   };
 }
 
@@ -734,6 +719,7 @@ function compactDocxObservation(observation) {
       ...(identity.verticalMerge === null ? {} : { verticalMerge: identity.verticalMerge }),
       ...(node.object.verticalMergeOwner === null ? {} : { verticalMergeOwner: node.object.verticalMergeOwner }),
       ...(node.object.logicalText === null ? {} : { logicalText: node.object.logicalText }),
+      ...(identity.verticalTextAlignment === null ? {} : { verticalTextAlignment: identity.verticalTextAlignment }),
     };
     return {
       object,
@@ -755,7 +741,7 @@ async function docxInspect(args) {
     artifact: delivery.output === null
       ? null
       : await writeIdempotentJsonArtifact(delivery.output, result.json),
-    ...(delivery.returnContent ? compactDocxInspection(result.json) : {}),
+    ...compactDocxInspection(result.json),
   };
 }
 
@@ -829,9 +815,8 @@ async function docxObservation(tool, args) {
         };
       }
       const offset = Math.min(args.offset ?? 0, totalCount);
-      const requestedLimit = args.limit ?? totalCount;
       const tables = [];
-      for (const sourceTable of payload.tables.slice(offset, offset + requestedLimit)) {
+      for (const sourceTable of payload.tables.slice(offset)) {
         const table = compactTableIndexEntry(sourceTable);
         const candidate = [...tables, table];
         if (tables.length > 0
