@@ -258,6 +258,13 @@ async function checkFixedRuntimeSurface() {
   if (programSources.some(source => genericPublicCommands.test(source))) {
     fail(check, 'provider CLI still publishes a second generic edit/plan command');
   }
+  const fixedEditSource = officeSource.slice(officeSource.indexOf('async function fixedEdit('));
+  if (!fixedEditSource.includes('documentMutationFileArguments(publishedContract, args)')
+      || fixedEditSource.includes("tool.startsWith('docx_')")
+      || fixedEditSource.includes("tool.startsWith('xlsx_')")
+      || fixedEditSource.includes("tool.startsWith('pptx_')")) {
+    fail(check, 'Office MCP fixed edits do not derive current/effective paths from the published mutation contract');
+  }
   note(`fixed provider runtime surface checked: ${fixedNames.size} same-name commands and no generic edit route`);
 }
 

@@ -24,7 +24,10 @@ import {
 } from '../_shared/large-json-result.mjs';
 import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
 import { evidenceRoleMetadata } from '../_shared/evidence-role.mjs';
-import { effectKindMetadata } from '../_shared/effect-kind.mjs';
+import {
+  documentMutationFileArguments,
+  effectKindMetadata,
+} from '../_shared/effect-kind.mjs';
 import { compactDocxObjectIdentity } from './docx-object-identity.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -38,14 +41,20 @@ if (inputContractManifest.provider?.id !== packageMetadata.name
 }
 const inputContracts = new Map(await Promise.all(inputContractManifest.tools.map(async entry => {
   const schema = JSON.parse(await readFile(new URL(`./contracts/${entry.name}.schema.json`, import.meta.url), 'utf8'));
-  return [entry.name, z.fromJSONSchema(schema)];
+  return [entry.name, { schema, validator: z.fromJSONSchema(schema) }];
 })));
 const invocationCwd = process.cwd();
 
 function inputContract(toolName) {
   const contract = inputContracts.get(toolName);
   if (!contract) throw new Error(`Missing provider-owned MCP input contract: ${toolName}`);
-  return contract;
+  return contract.validator;
+}
+
+function inputContractSchema(toolName) {
+  const contract = inputContracts.get(toolName);
+  if (!contract) throw new Error(`Missing provider-owned MCP input contract: ${toolName}`);
+  return contract.schema;
 }
 
 const docxCandidates = [
@@ -151,14 +160,14 @@ const xlsxFixedTools = [
   {"name":"xlsx_set_column_width","description":"Set current worksheet column widths."},
 ];
 
-function fixedToolDefinitions(definitions) {
+function fixedToolDefinitions(definitions, candidates) {
   return definitions.map(definition => ({
     name: definition.name,
     effectKind: 'document-mutation',
     description: definition.description,
     inputSchema: inputContract(definition.name),
     outputSchema: fixedEditOutput(definition.name),
-    handler: args => fixedEdit(definition.name, args),
+    handler: (args, tool) => fixedEdit(tool, args, candidates),
   }));
 }
 
@@ -472,7 +481,7 @@ const tools = [
     description: 'Replace existing target paragraph or table-cell content from explicitly selected native source cells, paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. For a source cell already returned by docx_read_table, select a Unicode-scalar range directly against its returned text; the provider retains every crossed native run, including superscript and subscript, without another descendant read. Consecutive run or text selections from one source paragraph form one target paragraph, and source paragraph boundaries remain paragraph boundaries. Use it after docx_fill_table_from_tables when the target needs selected source content instead of the whole source cell; pass returned addresses unchanged and never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
     inputSchema: inputContract('docx_replace_content_from_source'),
     outputSchema: fixedEditOutput('docx_replace_content_from_source'),
-    handler: args => fixedEdit('docx_replace_content_from_source', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_set_text',
@@ -480,7 +489,7 @@ const tools = [
     description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. Use this only for newly derived text. Content copied or selected from a source DOCX uses docx_replace_content_from_source so native runs such as superscript and subscript are retained. This does not insert objects, change table structure, copy source formatting, or decide business wording.',
     inputSchema: inputContract('docx_set_text'),
     outputSchema: fixedEditOutput('docx_set_text'),
-    handler: args => fixedEdit('docx_set_text', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_set_paragraph_pagination',
@@ -488,7 +497,7 @@ const tools = [
     description: 'Set native pagination properties on explicitly selected current DOCX paragraphs. Each change sets at least one pagination property. keepWithNext keeps a paragraph with the immediately following paragraph or table but does not guarantee that a table header remains with its first body row. keepLinesTogether keeps one paragraph on one page; pageBreakBefore starts it on a new page; preventWidowOrphanLines controls isolated first or last lines. Omitted properties remain unchanged. The caller chooses paragraphs from current native addresses; the provider does not decide document layout or business meaning.',
     inputSchema: inputContract('docx_set_paragraph_pagination'),
     outputSchema: fixedEditOutput('docx_set_paragraph_pagination'),
-    handler: args => fixedEdit('docx_set_paragraph_pagination', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_set_table_body',
@@ -496,7 +505,7 @@ const tools = [
     description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Set cantSplit on a final physical row when it must remain whole across page boundaries; omit it to preserve the prototype row property. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
     inputSchema: inputContract('docx_set_table_body'),
     outputSchema: fixedEditOutput('docx_set_table_body'),
-    handler: args => fixedEdit('docx_set_table_body', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_fill_table_from_tables',
@@ -504,7 +513,7 @@ const tools = [
     description: 'Fill one current target-table body from one or more explicitly ordered current source-table row ranges. For each source, select an unmerged record column when every physical source row must remain an output row; mapped columns still retain their native vertical merges. Select a merged record column only when every mapping into one target cell has one equal scalar value throughout that merge group. Map source grid columns onto every target prototype cell. The provider concatenates source records in declared order, copies each mapped source cell in full, preserves horizontal spans, rebuilds vertical merges only within each source range, validates the complete target grid, commits once, and returns structural readback. It does not discover source tables, choose source or target business meaning, filter records, translate or rewrite text, or apply business-specific rules. A single source uses the same sources array with one item. If a target needs only selected source descendants, such as one language from a bilingual cell, immediately use the returned target-cell addresses with docx_replace_content_from_source before releasing that source or reading back the completed target.',
     inputSchema: inputContract('docx_fill_table_from_tables'),
     outputSchema: fixedEditOutput('docx_fill_table_from_tables'),
-    handler: args => fixedEdit('docx_fill_table_from_tables', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_insert_objects',
@@ -512,7 +521,7 @@ const tools = [
     description: 'Insert selected current DOCX objects under an existing parent. Table rows are objects: expand a target table by copying one contiguous observed row range and use repeat for count; sourceInput may equal input. A row range beginning with vertical-merge continuations may be inserted only inside a target boundary with the same active grid spans, which extends those merges. Individual table cells are not raw insertion targets because that would bypass the table grid.',
     inputSchema: inputContract('docx_insert_objects'),
     outputSchema: fixedEditOutput('docx_insert_objects'),
-    handler: args => fixedEdit('docx_insert_objects', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_delete_object',
@@ -520,7 +529,7 @@ const tools = [
     description: 'Delete selected current DOCX objects directly from the current target document. Selected table rows must close every vertical merge and cannot remove the whole table. Individual table cells are not raw deletion targets; use column or merge operations for table structure.',
     inputSchema: inputContract('docx_delete_object'),
     outputSchema: fixedEditOutput('docx_delete_object'),
-    handler: args => fixedEdit('docx_delete_object', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_merge_cells',
@@ -528,7 +537,7 @@ const tools = [
     description: 'Merge selected current DOCX cells when they form one closed rectangle. A one-column, multi-row rectangle creates a vertical merge whose first cell is the restart owner and whose later cells are continuations. All selected cell content moves into the top-left owner, so the selected content must already be correct for that one logical cell.',
     inputSchema: inputContract('docx_merge_cells'),
     outputSchema: fixedEditOutput('docx_merge_cells'),
-    handler: args => fixedEdit('docx_merge_cells', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_split_cells',
@@ -536,7 +545,7 @@ const tools = [
     description: 'Split selected current DOCX merged cells.',
     inputSchema: inputContract('docx_split_cells'),
     outputSchema: fixedEditOutput('docx_split_cells'),
-    handler: args => fixedEdit('docx_split_cells', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_insert_table_columns',
@@ -544,7 +553,7 @@ const tools = [
     description: 'Insert empty template-shaped grid columns into one current main-document table. Select an observed source grid column for width and per-row cell formatting, and optionally a before grid-column address; cells spanning the insertion boundary expand instead of being split. It does not copy business values or decide column meaning.',
     inputSchema: inputContract('docx_insert_table_columns'),
     outputSchema: fixedEditOutput('docx_insert_table_columns'),
-    handler: args => fixedEdit('docx_insert_table_columns', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_delete_table_columns',
@@ -552,7 +561,7 @@ const tools = [
     description: 'Delete selected observed grid columns from one current main-document table while shrinking spanning cells and preserving the remaining table grid. It cannot remove every column and does not decide whether a business column is unused.',
     inputSchema: inputContract('docx_delete_table_columns'),
     outputSchema: fixedEditOutput('docx_delete_table_columns'),
-    handler: args => fixedEdit('docx_delete_table_columns', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_compare',
@@ -593,7 +602,7 @@ const tools = [
     description: 'Apply one explicit font family and size policy to current main-document body and table text. It does not derive a policy or alter other run semantics.',
     inputSchema: inputContract('docx_apply_font_policy'),
     outputSchema: fixedEditOutput('docx_apply_font_policy'),
-    handler: args => fixedEdit('docx_apply_font_policy', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_validate_toc_style_policy',
@@ -609,7 +618,7 @@ const tools = [
     description: 'Apply explicit italic and per-level indentation values to current built-in table-of-contents paragraph styles. It does not change heading text or refresh fields.',
     inputSchema: inputContract('docx_apply_toc_style_policy'),
     outputSchema: fixedEditOutput('docx_apply_toc_style_policy'),
-    handler: args => fixedEdit('docx_apply_toc_style_policy', args),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
     name: 'docx_refresh_fields',
@@ -676,7 +685,7 @@ const tools = [
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxReadRange,
   },
-  ...fixedToolDefinitions(xlsxFixedTools),
+  ...fixedToolDefinitions(xlsxFixedTools, xlsxCandidates),
   {
     name: 'xlsx_validate',
     description: 'Validate an XLSX workbook package and produce OpenXML validation evidence. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
@@ -709,7 +718,7 @@ const tools = [
     description: 'Apply one deterministic PPTX template-application plan to a current presentation. This tool executes the published plan; it does not select a template or derive business content, slide mappings, geometry, or formatting decisions.',
     inputSchema: inputContract('pptx_apply_template'),
     outputSchema: fixedEditOutput('pptx_apply_template'),
-    handler: args => fixedEdit('pptx_apply_template', args),
+    handler: (args, tool) => fixedEdit(tool, args, pptxCandidates),
   },
   {
     name: 'pptx_apply_format',
@@ -717,7 +726,7 @@ const tools = [
     description: 'Apply one deterministic PPTX formatting plan to a current presentation. This tool executes published formatting operations; it does not derive values, coordinates, or business decisions.',
     inputSchema: inputContract('pptx_apply_format'),
     outputSchema: fixedEditOutput('pptx_apply_format'),
-    handler: args => fixedEdit('pptx_apply_format', args),
+    handler: (args, tool) => fixedEdit(tool, args, pptxCandidates),
   },
   {
     name: 'pptx_set_shape_geometry',
@@ -725,7 +734,7 @@ const tools = [
     description: 'Set exact native EMU bounds for uniquely identified current-slide PPTX objects. One call batches only this fixed geometry action and does not infer repair coordinates.',
     inputSchema: inputContract('pptx_set_shape_geometry'),
     outputSchema: fixedEditOutput('pptx_set_shape_geometry'),
-    handler: args => fixedEdit('pptx_set_shape_geometry', args),
+    handler: (args, tool) => fixedEdit(tool, args, pptxCandidates),
   },
   {
     name: 'pptx_replace_picture_image',
@@ -733,7 +742,7 @@ const tools = [
     description: 'Replace embedded PNG or JPEG media for uniquely identified current-slide PPTX pictures while preserving the picture object, geometry, crop, and unrelated media. One call batches only this fixed replacement action.',
     inputSchema: inputContract('pptx_replace_picture_image'),
     outputSchema: fixedEditOutput('pptx_replace_picture_image'),
-    handler: args => fixedEdit('pptx_replace_picture_image', args),
+    handler: (args, tool) => fixedEdit(tool, args, pptxCandidates),
   },
   {
     name: 'pptx_validate',
@@ -769,8 +778,8 @@ function buildServer() {
       },
       async args => {
         const payload = typeof args.output === 'string'
-          ? await withOutputWriteLock(args.output, () => tool.handler(args))
-          : await tool.handler(args);
+          ? await withOutputWriteLock(args.output, () => tool.handler(args, tool))
+          : await tool.handler(args, tool);
         return createToolResult(payload, { isError: payload?.summary?.pass === false });
       },
     );
@@ -1165,28 +1174,37 @@ async function copyTransform(tool, candidates, command, args, suffix = []) {
   }
 }
 
-async function fixedEdit(tool, args) {
-  const input = path.resolve(requireString(args.input, 'input'));
-  const output = path.resolve(requireString(args.output, 'output'));
+async function fixedEdit(tool, args, candidates) {
+  const publishedContract = {
+    name: tool.name,
+    inputSchema: inputContractSchema(tool.name),
+    annotations: tool.annotations,
+    _meta: effectKindMetadata(tool.effectKind),
+  };
+  const bindings = documentMutationFileArguments(publishedContract, args);
+  const input = path.resolve(bindings.current);
+  const output = path.resolve(bindings.effectiveOutput);
   const receiptOutput = path.resolve(requireString(args.receiptOutput, 'receiptOutput'));
-  if (!(tool.startsWith('docx_') && input === output)) await requireNewFile(output, 'output');
+  if (input !== output) await requireNewFile(output, 'output');
   await requireNewFile(receiptOutput, 'receiptOutput');
-  const candidates = tool.startsWith('docx_') ? docxCandidates
-    : tool.startsWith('xlsx_') ? xlsxCandidates
-    : pptxCandidates;
   return withTempJsonFile(args, async requestPath => {
-    const result = await runJsonCandidateChain(candidates, [tool, requestPath], { allowedExitCodes: [0, 1] });
+    const result = await runJsonCandidateChain(candidates, [tool.name, requestPath], { allowedExitCodes: [0, 1] });
     if (result.code !== 0) {
-      const detail = result.stderr.trim() || result.stdout.trim() || `${tool} failed with exit code ${result.code}`;
+      const detail = result.stderr.trim() || result.stdout.trim()
+        || `${tool.name} failed with exit code ${result.code}`;
       throw new Error(detail);
     }
-    if (result.json?.tool !== tool) throw new Error(`${tool} returned a mismatched tool identity`);
+    if (result.json?.tool !== tool.name) throw new Error(`${tool.name} returned a mismatched tool identity`);
     await requireReturnedArtifact(result.json.receipt, receiptOutput, 'receipt');
     if (result.json.output === null) {
-      if (result.json.summary?.pass !== false) throw new Error(`${tool} omitted output without reporting failure`);
+      if (result.json.summary?.pass !== false) {
+        throw new Error(`${tool.name} omitted output without reporting failure`);
+      }
     } else {
       await requireReturnedArtifact(result.json.output, output, 'output');
-      if (result.json.summary?.pass !== true) throw new Error(`${tool} returned output without reporting success`);
+      if (result.json.summary?.pass !== true) {
+        throw new Error(`${tool.name} returned output without reporting success`);
+      }
     }
     return { ...result.json, runtime: commandRuntime(result) };
   });
