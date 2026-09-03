@@ -1049,12 +1049,12 @@ function checkDocxMergedCellDescriptions(tools) {
   const narrowObject = narrowRead?.outputSchema?.$defs?.__schema0?.properties?.object;
   const setDescription = tools.find(tool => tool?.name === 'docx_set_text')?.description || '';
   const mergeDescription = tools.find(tool => tool?.name === 'docx_merge_cells')?.description || '';
-  const setBody = tools.find(tool => tool?.name === 'docx_set_table_body');
-  const setBodyDescription = setBody?.description || '';
-  const setBodyCell = setBody?.inputSchema?.properties?.rows?.items?.properties?.cells?.items;
-  if (!readDescription.includes('restart')
-      || !readDescription.includes('continue cell is not an independent row value')
-      || !readDescription.includes('logicalText resolves the restart cell value')) {
+  const setTable = tools.find(tool => tool?.name === 'docx_set_table');
+  const setTableDescription = setTable?.description || '';
+  const setTableCell = setTable?.inputSchema?.properties?.rows?.items?.properties?.cells?.items;
+  if (!readDescription.includes('vertical-merge restart owns one logical value')
+      || !readDescription.includes('continue cell points to verticalMergeOwner')
+      || !readDescription.includes('does not repeat that value inline')) {
     fail(check, 'docx_read_table does not explain vertical-merge logical-cell identity');
   }
   if (!narrowDescription.includes('vertical-merge owner')
@@ -1071,16 +1071,19 @@ function checkDocxMergedCellDescriptions(tools) {
       || !mergeDescription.includes('All selected cell content moves into the top-left owner')) {
     fail(check, 'docx_merge_cells does not explain vertical grouping and content ownership');
   }
-  if (!setBodyDescription.includes('Set rowSpan')
-      || !setBodyDescription.includes('provider writes native vertical merge cells')
-      || !setBodyDescription.includes('existingRows starts after all of them')
-      || !setBodyDescription.includes('never at a verticalMerge=continue row')
-      || setBodyCell?.properties?.rowSpan?.type !== 'integer'
-      || setBodyCell?.properties?.rowSpan?.minimum !== 1
-      || Object.hasOwn(setBodyCell?.properties ?? {}, 'verticalMerge')) {
-    fail(check, 'docx_set_table_body does not expose one logical row-span input');
+  if (!setTableDescription.includes('Each explicit cell occupies contiguous columns')
+      || !setTableDescription.includes('may span logical rows')
+      || !setTableDescription.includes('exact native source selections')
+      || !setTableDescription.includes('exposes no intermediate document')
+      || !setTableDescription.includes('does not select source rows')
+      || setTableCell?.properties?.rowSpan?.type !== 'integer'
+      || setTableCell?.properties?.rowSpan?.minimum !== 1
+      || !setTableCell?.required?.includes('text')
+      || !setTableCell?.required?.includes('sourceContent')
+      || Object.hasOwn(setTableCell?.properties ?? {}, 'verticalMerge')) {
+    fail(check, 'docx_set_table does not expose one atomic explicit table input');
   }
-  note('DOCX table reads expose native merges while the body helper accepts logical row spans');
+  note('DOCX table reads expose native merges while docx_set_table accepts one explicit atomic result');
 }
 
 function checkXlsxRangeReadContract(tools) {
@@ -1119,26 +1122,28 @@ function checkDocxTableStreamingContract(tools) {
   const check = 'docx-table-streaming-contract';
   const tool = tools.find(entry => entry?.name === 'docx_read_table');
   const description = tool?.description || '';
+  const input = tool?.inputSchema;
   const row = tool?.outputSchema?.properties?.rows?.items;
   const cell = row?.properties?.cells?.items;
   const receipt = tool?.outputSchema?.properties?.receipt;
-  if (!description.includes('selected row page')
-      || !description.includes('never builds another whole-table data object')
-      || !description.includes('zero-based logical gridColumnStart')
-      || !description.includes('Match columns across rows by gridColumnStart')
-      || !description.includes('physical cell ordinal and is not a column identity')
-      || !description.includes('receipt.remaining is navigation information, not an obligation')
-      || !description.includes('receipt.nextOffset is present only when another row page exists')
-      || !description.includes('blank template rows need not be paged through')) {
-    fail(check, 'docx_read_table does not describe logical columns and current-decision page consumption');
+  if (!description.includes('retain every remaining row')
+      || !description.includes('largest compact inline page')
+      || !description.includes('passing receipt.nextContinuation unchanged')
+      || !description.includes('cannot be predicted or read in parallel')
+      || !description.includes('Match columns by gridColumnStart')) {
+    fail(check, 'docx_read_table does not describe retained rows, continuation, and logical columns');
   }
-  if (cell?.properties?.gridColumnStart?.type !== 'integer'
+  if (Object.hasOwn(input?.properties ?? {}, 'limit')
+      || Object.hasOwn(input?.properties ?? {}, 'offset')
+      || input?.properties?.continuation?.type !== 'string'
+      || cell?.properties?.gridColumnStart?.type !== 'integer'
       || cell?.properties?.gridColumnStart?.minimum !== 0
       || cell?.properties?.text?.type !== 'string'
       || cell?.properties?.logicalText?.type !== 'string'
       || Object.hasOwn(cell?.properties ?? {}, 'paragraphs')
-      || receipt?.properties?.nextOffset?.type !== 'integer'
-      || receipt?.required?.includes('nextOffset')
+      || receipt?.properties?.nextContinuation?.type !== 'string'
+      || receipt?.required?.includes('nextContinuation')
+      || receipt?.properties?.retainedRowCount?.type !== 'integer'
       || receipt?.properties?.detailPageRetained?.type !== 'boolean') {
     fail(check, 'docx_read_table response is not a compact page backed by one detailed page');
   }

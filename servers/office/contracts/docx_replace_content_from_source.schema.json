@@ -6,12 +6,13 @@
       "type": "string",
       "minLength": 1,
       "description": "Current target DOCX containing every target paragraph or table cell.",
-      "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current"
+      "x-tiwater-file-role": "read",
+      "x-tiwater-document-revision-role": "current"
     },
     "changes": {
       "minItems": 1,
       "type": "array",
-      "description": "Atomic source-to-target content replacements. Every source selection is resolved and validated before the target document is changed.",
+      "description": "Replace one or more existing target paragraphs or cells with explicit native source selections in one atomic commit. This preserves selected native runs but does not change rows, spans, or merges.",
       "items": {
         "type": "object",
         "properties": {
@@ -44,7 +45,7 @@
           "sourceSelections": {
             "minItems": 1,
             "type": "array",
-            "description": "Ordered native source cells, paragraphs, runs, or text nodes. Consecutive run or text selections from one source paragraph form one target paragraph; a range retains the native runs it crosses. A source paragraph boundary remains a target paragraph boundary. Selected content becomes the target content without Agent transcription.",
+            "description": "Ordered native source cells, paragraphs, runs, or text nodes. The target becomes exactly these selections; omitted source content is omitted. When excluding parallel-language text, explicitly include every required language-neutral formula, number, unit, and symbol in source order. Consecutive selections from one source paragraph form one target paragraph; a range retains the native runs it crosses. A source paragraph boundary remains a target paragraph boundary. Selected content becomes the target content without Agent transcription.",
             "items": {
               "type": "object",
               "properties": {
