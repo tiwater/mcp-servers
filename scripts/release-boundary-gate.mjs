@@ -478,7 +478,8 @@ async function checkGeneratedManifest(packageRoot, toolNames, packageManifest) {
   }
 
   const packedContractFiles = new Set((await collectFiles(packageRoot))
-    .filter(file => file.endsWith('.schema.json') && file.includes(`${path.sep}contracts${path.sep}`))
+    .filter(file => file.endsWith('.schema.json')
+      && file.includes(`${path.sep}office${path.sep}contracts${path.sep}`))
     .map(file => path.relative(packageRoot, file).split(path.sep).join('/')));
   const referencedContractFiles = new Set();
   let fileRoleCount = 0;

@@ -6,9 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const packageRoot = path.join(repoRoot, 'servers', 'pdf');
-const contractsRoot = path.join(packageRoot, 'contracts');
-const packageJson = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'));
+const distributionRoot = path.join(repoRoot, 'servers');
+const contractsRoot = path.join(distributionRoot, 'pdf', 'contracts');
+const packageJson = JSON.parse(await readFile(path.join(distributionRoot, 'package.json'), 'utf8'));
 
 const commonProperties = {
   input: {

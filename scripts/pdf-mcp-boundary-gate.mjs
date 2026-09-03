@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -12,7 +12,8 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const packageRoot = path.join(repoRoot, 'servers', 'pdf');
+const packageRoot = path.join(repoRoot, 'servers');
+const pdfRoot = path.join(packageRoot, 'pdf');
 const expectedTools = [
   'pdf_extract_table_details',
   'pdf_extract_tables',
@@ -48,24 +49,22 @@ async function packageIdentity() {
     json(path.join(packageRoot, 'package.json')),
     json(path.join(packageRoot, 'package-lock.json')),
   ]);
-  if (packageJson.name !== '@tiwater/pdf-mcp' || packageJson.private === true
-    || packageJson.bin?.['tiwater-pdf-mcp'] !== 'index.mjs') {
-    fail('package-identity', 'PDF package name, visibility, or executable is invalid');
+  if (packageJson.name !== '@tiwater/office-mcp' || packageJson.private === true
+    || packageJson.bin?.['tiwater-office-mcp'] !== 'office/index.mjs'
+    || packageJson.bin?.['tiwater-pdf-mcp'] !== 'pdf/index.mjs') {
+    fail('package-identity', 'shared distribution identity or independent executable bindings are invalid');
   }
   if (lock.packages?.['']?.name !== packageJson.name
     || lock.packages?.['']?.version !== packageJson.version) {
     fail('package-identity', 'package-lock root identity does not match package.json');
   }
-  if (Object.keys(packageJson.dependencies || {}).length !== 0) {
-    fail('package-identity', 'PDF MCP must not acquire orchestration or Office dependencies');
-  }
-  note(`PDF MCP package identity ${packageJson.name}@${packageJson.version}`);
+  note(`shared MCP distribution identity ${packageJson.name}@${packageJson.version}`);
   return packageJson;
 }
 
 async function contractIdentity(packageJson) {
   const manifestPath = path.join(
-    packageRoot, 'contracts', 'tiwater-pdf-provider-contract-manifest-v1.json',
+    pdfRoot, 'contracts', 'tiwater-pdf-provider-contract-manifest-v1.json',
   );
   const manifest = await json(manifestPath);
   if (manifest.schema !== 'tiwater.pdf-provider-contract-manifest/v1'
@@ -79,8 +78,8 @@ async function contractIdentity(packageJson) {
     fail('provider-contracts', `unexpected contract tool set: ${names.join(',')}`);
   }
   for (const entry of manifest.tools || []) {
-    const contractPath = path.join(packageRoot, entry.inputContract?.path || '');
-    if (!contractPath.startsWith(path.join(packageRoot, 'contracts') + path.sep)
+    const contractPath = path.join(pdfRoot, entry.inputContract?.path || '');
+    if (!contractPath.startsWith(path.join(pdfRoot, 'contracts') + path.sep)
       || !await exists(contractPath)
       || await sha256(contractPath) !== entry.inputContract?.sha256) {
       fail('provider-contracts', `invalid input contract binding for ${entry.name}`);
@@ -108,16 +107,15 @@ async function pack(tempRoot) {
   const manifest = values[0];
   const paths = new Set(manifest.files.map(entry => entry.path));
   const required = [
-    'package.json', 'index.mjs', 'README.md', 'lib/mcp-stdio.mjs',
-    'lib/tool-runtime.mjs', 'lib/large-json-result.mjs',
-    'contracts/tiwater-pdf-provider-contract-manifest-v1.json',
+    'package.json', 'office/index.mjs', 'pdf/index.mjs', 'pdf/README.md',
+    '_shared/mcp-stdio.mjs', '_shared/tool-runtime.mjs', '_shared/large-json-result.mjs',
+    'office/contracts/tiwater-office-provider-contract-manifest-v1.json',
+    'pdf/contracts/tiwater-pdf-provider-contract-manifest-v1.json',
   ];
-  if (manifest.name !== '@tiwater/pdf-mcp'
-    || required.some(file => !paths.has(file))
-    || [...paths].some(file => file.startsWith('office/'))) {
-    fail('pack-manifest', 'packed PDF package is incomplete or contains Office surface');
+  if (manifest.name !== '@tiwater/office-mcp' || required.some(file => !paths.has(file))) {
+    fail('pack-manifest', 'packed shared distribution is missing an MCP executable or contract');
   }
-  note(`npm pack contains ${manifest.entryCount} PDF-only entries`);
+  note(`npm pack contains ${manifest.entryCount} entries and both independent MCP surfaces`);
   return path.join(destination, manifest.filename);
 }
 
@@ -152,7 +150,7 @@ function startClient(executable, cwd, environment) {
   child.on('exit', (code, signal) => {
     for (const request of pending.values()) {
       clearTimeout(request.timer);
-      request.reject(new Error(`PDF MCP exited code=${code} signal=${signal}: ${stderr}`));
+      request.reject(new Error(`MCP exited code=${code} signal=${signal}: ${stderr}`));
     }
     pending.clear();
   });
@@ -162,7 +160,7 @@ function startClient(executable, cwd, environment) {
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(id);
-          reject(new Error(`PDF MCP request timeout: ${method}`));
+          reject(new Error(`MCP request timeout: ${method}`));
         }, 30_000);
         pending.set(id, { resolve, reject, timer });
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
@@ -179,16 +177,41 @@ async function isolatedSmoke(archive, tempRoot, packageJson) {
     'install', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false',
     '--prefix', installRoot, archive,
   ], { cwd: installRoot, maxBuffer: 8 * 1024 * 1024 });
-  const executable = path.join(installRoot, 'node_modules', '.bin', 'tiwater-pdf-mcp');
-  if (!await exists(executable)) throw new Error('clean-install-executable-missing');
+  const binRoot = path.join(installRoot, 'node_modules', '.bin');
+  const pdfExecutable = path.join(binRoot, 'tiwater-pdf-mcp');
+  const officeExecutable = path.join(binRoot, 'tiwater-office-mcp');
+  if (!await exists(pdfExecutable) || !await exists(officeExecutable)) {
+    throw new Error('clean-install-executable-missing');
+  }
+
+  const environment = {
+    ...process.env,
+    PATH: `${binRoot}${path.delimiter}${process.env.PATH || ''}`,
+  };
+  const officeClient = startClient(officeExecutable, installRoot, environment);
+  try {
+    const initialized = await officeClient.request(101, 'initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'pdf-release-boundary-gate', version: '1.0.0' },
+    });
+    const listed = await officeClient.request(102, 'tools/list');
+    const officeTools = listed.result?.tools;
+    if (initialized.error
+      || initialized.result?.serverInfo?.name !== 'tiwater-office'
+      || initialized.result?.serverInfo?.version !== packageJson.version
+      || !Array.isArray(officeTools) || officeTools.length === 0
+      || officeTools.some(tool => tool?.name?.startsWith('pdf_'))) {
+      fail('isolated-smoke', 'Office executable identity or Office-only tool surface is invalid');
+    }
+  } finally {
+    officeClient.child.kill('SIGTERM');
+  }
 
   const input = path.join(tempRoot, 'current.pdf');
   const output = path.join(tempRoot, 'pdf-inspection.json');
   await createPdf(input);
-  const client = startClient(executable, installRoot, {
-    ...process.env,
-    PATH: `${path.dirname(executable)}${path.delimiter}${process.env.PATH || ''}`,
-  });
+  const client = startClient(pdfExecutable, installRoot, environment);
   try {
     const initialized = await client.request(1, 'initialize', {
       protocolVersion: '2025-06-18',
@@ -254,7 +277,7 @@ async function isolatedSmoke(archive, tempRoot, packageJson) {
       fail('isolated-smoke', 'identical pdf_inspect replay did not retain identical artifact identity');
     }
     if (failures.length === initialFailureCount) {
-      note('clean npm install completed initialize, tools/list, real pdf_inspect, and idempotent replay');
+      note('clean npm install kept Office/PDF tools isolated and completed real pdf_inspect with idempotent replay');
     }
   } finally {
     client.child.kill('SIGTERM');

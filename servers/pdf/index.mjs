@@ -5,19 +5,20 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { deliverLargeJsonResult } from './lib/large-json-result.mjs';
-import { McpStdioServer } from './lib/mcp-stdio.mjs';
+import { deliverLargeJsonResult } from '../_shared/large-json-result.mjs';
+import { McpStdioServer } from '../_shared/mcp-stdio.mjs';
 import {
   commandCandidate,
   createToolResult,
   requireString,
   runJsonCandidateChain,
-} from './lib/tool-runtime.mjs';
+} from '../_shared/tool-runtime.mjs';
 
-const packageRoot = path.dirname(fileURLToPath(import.meta.url));
-const packageJson = readJson(path.join(packageRoot, 'package.json'));
+const pdfRoot = path.dirname(fileURLToPath(import.meta.url));
+const distributionRoot = path.resolve(pdfRoot, '..');
+const packageJson = readJson(path.join(distributionRoot, 'package.json'));
 const manifest = readJson(path.join(
-  packageRoot, 'contracts', 'tiwater-pdf-provider-contract-manifest-v1.json',
+  pdfRoot, 'contracts', 'tiwater-pdf-provider-contract-manifest-v1.json',
 ));
 if (manifest.schema !== 'tiwater.pdf-provider-contract-manifest/v1'
   || manifest.provider?.id !== packageJson.name
@@ -131,7 +132,7 @@ const definitions = new Map([
 const tools = manifest.tools.map((entry) => {
   const definition = definitions.get(entry.name);
   if (!definition) throw new Error(`pdf-provider-tool-definition-missing:${entry.name}`);
-  const contractPath = path.join(packageRoot, entry.inputContract.path);
+  const contractPath = path.join(pdfRoot, entry.inputContract.path);
   const bytes = readFileSync(contractPath);
   if (createHash('sha256').update(bytes).digest('hex') !== entry.inputContract.sha256) {
     throw new Error(`pdf-provider-input-contract-hash-invalid:${entry.name}`);
