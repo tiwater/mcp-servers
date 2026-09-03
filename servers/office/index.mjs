@@ -417,7 +417,7 @@ const tools = [
   },
   {
     name: 'docx_set_paragraph_pagination',
-    description: 'Set native pagination properties on explicitly selected current DOCX paragraphs. keepWithNext keeps a paragraph with the immediately following paragraph or table but does not guarantee that a table header remains with its first body row. keepLinesTogether keeps one paragraph on one page; pageBreakBefore starts it on a new page; preventWidowOrphanLines controls isolated first or last lines. Omitted properties remain unchanged. The caller chooses paragraphs from current native addresses; the provider does not decide document layout or business meaning.',
+    description: 'Set native pagination properties on explicitly selected current DOCX paragraphs. Each change sets at least one pagination property. keepWithNext keeps a paragraph with the immediately following paragraph or table but does not guarantee that a table header remains with its first body row. keepLinesTogether keeps one paragraph on one page; pageBreakBefore starts it on a new page; preventWidowOrphanLines controls isolated first or last lines. Omitted properties remain unchanged. The caller chooses paragraphs from current native addresses; the provider does not decide document layout or business meaning.',
     inputSchema: inputContract('docx_set_paragraph_pagination'),
     outputSchema: fixedEditOutput('docx_set_paragraph_pagination'),
     handler: args => fixedEdit('docx_set_paragraph_pagination', args),

@@ -25,12 +25,6 @@
           "preventWidowOrphanLines": { "type": "boolean", "description": "Prevent a single first or last line from being isolated across pages." }
         },
         "required": ["paragraph"],
-        "anyOf": [
-          { "required": ["keepWithNext"] },
-          { "required": ["keepLinesTogether"] },
-          { "required": ["pageBreakBefore"] },
-          { "required": ["preventWidowOrphanLines"] }
-        ],
         "additionalProperties": false
       }
     },

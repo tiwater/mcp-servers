@@ -196,11 +196,11 @@
       "name": "docx_set_paragraph_pagination",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_paragraph_pagination.schema.json",
-        "sha256": "b4be558e7ea2b6748aa24b4fc670f9315bc511a5670b2df65bad28a27b0ce14d"
+        "sha256": "ccb90bb5b811cfc82985050094637b1afe4c9daf51d7243c0d81b2d63d875825"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_paragraph_pagination.schema.json",
-        "sha256": "b4be558e7ea2b6748aa24b4fc670f9315bc511a5670b2df65bad28a27b0ce14d"
+        "sha256": "ccb90bb5b811cfc82985050094637b1afe4c9daf51d7243c0d81b2d63d875825"
       }
     },
     {
