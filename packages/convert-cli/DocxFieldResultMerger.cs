@@ -122,7 +122,7 @@ internal static class DocxFieldResultMerger
                     var type = (string?)element.Attribute(W + "fldCharType");
                     if (type == "begin")
                     {
-                        stack.Push(new FieldFrame(blockIndex));
+                        stack.Push(new FieldFrame(blockIndex, element));
                     }
                     else if (type == "separate")
                     {
@@ -135,7 +135,7 @@ internal static class DocxFieldResultMerger
                         var field = stack.Pop();
                         var kind = IndexKind(field.Instruction.ToString());
                         if (kind is not null)
-                            regions.Add(new IndexRegion(field.StartBlock, blockIndex, kind));
+                            regions.Add(new IndexRegion(field.StartBlock, blockIndex, kind, field.Start, element));
                     }
                 }
                 else if (element.Name == W + "instrText" && stack.Count > 0 && !stack.Peek().InstructionComplete)
@@ -168,17 +168,154 @@ internal static class DocxFieldResultMerger
         {
             var sourceRegion = sourceRegions[regionIndex];
             var refreshedRegion = refreshedRegions[regionIndex];
-            var replacements = refreshedBlocks
-                .Skip(refreshedRegion.StartBlock)
-                .Take(refreshedRegion.EndBlock - refreshedRegion.StartBlock + 1)
-                .Select(element => new XElement(element))
-                .ToList();
             if (bodyFontPolicy is not null)
-                foreach (var replacement in replacements) ApplyFontPolicy(replacement, bodyFontPolicy);
+                foreach (var refreshedBlock in refreshedBlocks
+                             .Skip(refreshedRegion.StartBlock)
+                             .Take(refreshedRegion.EndBlock - refreshedRegion.StartBlock + 1))
+                    ApplyFontPolicy(refreshedBlock, bodyFontPolicy);
+            var replacements = InlineRegionReplacement(sourceBlocks, refreshedBlocks, sourceRegion, refreshedRegion);
             sourceBlocks[sourceRegion.StartBlock].AddBeforeSelf(replacements);
             for (var block = sourceRegion.EndBlock; block >= sourceRegion.StartBlock; block--)
                 sourceBlocks[block].Remove();
         }
+    }
+
+    private static List<XElement> InlineRegionReplacement(
+        IReadOnlyList<XElement> sourceBlocks,
+        IReadOnlyList<XElement> refreshedBlocks,
+        IndexRegion sourceRegion,
+        IndexRegion refreshedRegion)
+    {
+        var sourceStart = BoundaryParagraph(sourceBlocks, sourceRegion.StartBlock, sourceRegion.Start);
+        var sourceEnd = BoundaryParagraph(sourceBlocks, sourceRegion.EndBlock, sourceRegion.End);
+        var refreshedStart = BoundaryParagraph(refreshedBlocks, refreshedRegion.StartBlock, refreshedRegion.Start);
+        var refreshedEnd = BoundaryParagraph(refreshedBlocks, refreshedRegion.EndBlock, refreshedRegion.End);
+
+        var sourcePrefix = SliceBefore(sourceStart, sourceRegion.Start);
+        var sourceSuffix = SliceAfter(sourceEnd, sourceRegion.End);
+        if (ReferenceEquals(refreshedStart, refreshedEnd))
+        {
+            if (!ReferenceEquals(sourceStart, sourceEnd))
+                throw new InvalidOperationException("WPS field refresh collapsed a multi-paragraph DOCX index field boundary.");
+            AppendParagraphContent(sourcePrefix, SliceRange(refreshedStart, refreshedRegion.Start, refreshedRegion.End));
+            AppendParagraphContent(sourcePrefix, sourceSuffix);
+            return [sourcePrefix];
+        }
+
+        var replacements = refreshedBlocks
+            .Skip(refreshedRegion.StartBlock)
+            .Take(refreshedRegion.EndBlock - refreshedRegion.StartBlock + 1)
+            .Select(element => new XElement(element))
+            .ToList();
+        replacements[0] = sourcePrefix;
+        AppendParagraphContent(replacements[0], SliceFrom(refreshedStart, refreshedRegion.Start));
+
+        var last = sourceSuffix;
+        PrependParagraphContent(last, SliceThrough(refreshedEnd, refreshedRegion.End));
+        replacements[^1] = last;
+        return replacements;
+    }
+
+    private static XElement BoundaryParagraph(
+        IReadOnlyList<XElement> blocks,
+        int blockIndex,
+        XElement boundary)
+    {
+        var paragraph = boundary.Ancestors(W + "p").FirstOrDefault()
+            ?? throw new InvalidOperationException("DOCX index field boundary is not inside a paragraph.");
+        if (!ReferenceEquals(paragraph, blocks[blockIndex]))
+            throw new InvalidOperationException("DOCX index field boundary paragraph is not a body-level block.");
+        return paragraph;
+    }
+
+    private static void AppendParagraphContent(XElement target, XElement fragment)
+        => target.Add(fragment.Elements().Where(element => element.Name != W + "pPr").Select(element => new XElement(element)));
+
+    private static void PrependParagraphContent(XElement target, XElement fragment)
+    {
+        var content = fragment.Elements().Where(element => element.Name != W + "pPr")
+            .Select(element => new XElement(element)).ToList();
+        var properties = target.Element(W + "pPr");
+        if (properties is null) target.AddFirst(content); else properties.AddAfterSelf(content);
+    }
+
+    private static XElement SliceBefore(XElement paragraph, XElement boundary)
+    {
+        var reached = false;
+        return Slice(paragraph, element =>
+        {
+            if (ReferenceEquals(element, boundary)) { reached = true; return false; }
+            return !reached;
+        }, boundary) ?? new XElement(paragraph.Name, paragraph.Attributes());
+    }
+
+    private static XElement SliceAfter(XElement paragraph, XElement boundary)
+    {
+        var reached = false;
+        var result = Slice(paragraph, element =>
+        {
+            if (ReferenceEquals(element, boundary)) { reached = true; return false; }
+            return reached;
+        }, boundary) ?? new XElement(paragraph.Name, paragraph.Attributes());
+        var properties = paragraph.Element(W + "pPr");
+        if (properties is not null && result.Element(W + "pPr") is null)
+            result.AddFirst(new XElement(properties));
+        return result;
+    }
+
+    private static XElement SliceFrom(XElement paragraph, XElement boundary)
+    {
+        var reached = false;
+        return Slice(paragraph, element =>
+        {
+            if (ReferenceEquals(element, boundary)) reached = true;
+            return reached;
+        }, boundary) ?? throw new InvalidOperationException("Refreshed DOCX index field start boundary could not be sliced.");
+    }
+
+    private static XElement SliceThrough(XElement paragraph, XElement boundary)
+    {
+        var reached = false;
+        return Slice(paragraph, element =>
+        {
+            if (reached) return false;
+            if (ReferenceEquals(element, boundary)) reached = true;
+            return true;
+        }, boundary) ?? throw new InvalidOperationException("Refreshed DOCX index field end boundary could not be sliced.");
+    }
+
+    private static XElement SliceRange(XElement paragraph, XElement start, XElement end)
+    {
+        var inside = false;
+        return Slice(paragraph, element =>
+        {
+            if (ReferenceEquals(element, start)) inside = true;
+            var include = inside;
+            if (ReferenceEquals(element, end)) inside = false;
+            return include;
+        }, start, end) ?? throw new InvalidOperationException("Refreshed DOCX index field boundary could not be sliced.");
+    }
+
+    private static XElement? Slice(XElement element, Func<XElement, bool> include, params XElement[] boundaries)
+    {
+        if (boundaries.Contains(element)) return include(element) ? new XElement(element) : null;
+        if (!boundaries.Any(boundary => element.Descendants().Contains(boundary)))
+            return include(element) ? new XElement(element) : null;
+
+        var result = new XElement(element.Name, element.Attributes());
+        foreach (var child in element.Elements())
+        {
+            var sliced = Slice(child, include, boundaries);
+            if (sliced is not null) result.Add(sliced);
+        }
+        var propertiesName = element.Name == W + "p" ? W + "pPr"
+            : element.Name == W + "r" ? W + "rPr" : null;
+        if (!result.Elements().Any(child => propertiesName is null || child.Name != propertiesName))
+            return element.Name == W + "p" ? result : null;
+        var properties = propertiesName is null ? null : element.Element(propertiesName);
+        if (properties is not null && result.Element(propertiesName!) is null)
+            result.AddFirst(new XElement(properties));
+        return result;
     }
 
     private static void NormalizeTocResultStyles(
@@ -460,14 +597,15 @@ internal static class DocxFieldResultMerger
     private static bool IsTocBookmark(XElement element)
         => ((string?)element.Attribute(W + "name"))?.StartsWith("_Toc", StringComparison.OrdinalIgnoreCase) == true;
 
-    private sealed class FieldFrame(int startBlock)
+    private sealed class FieldFrame(int startBlock, XElement start)
     {
         internal int StartBlock { get; } = startBlock;
+        internal XElement Start { get; } = start;
         internal System.Text.StringBuilder Instruction { get; } = new();
         internal bool InstructionComplete { get; set; }
     }
 
-    private sealed record IndexRegion(int StartBlock, int EndBlock, string Kind);
+    private sealed record IndexRegion(int StartBlock, int EndBlock, string Kind, XElement Start, XElement End);
     private sealed record RunFontPolicy(string? Ascii, string? HighAnsi, string? EastAsia, string? ComplexScript, string? Size, string? ComplexSize)
     {
         internal IEnumerable<string?> Values => [Ascii, HighAnsi, EastAsia, ComplexScript, Size, ComplexSize];
