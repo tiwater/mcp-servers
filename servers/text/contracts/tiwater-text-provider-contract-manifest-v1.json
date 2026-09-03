@@ -2,7 +2,7 @@
   "schema": "tiwater.text-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.21.32"
+    "version": "0.21.33"
   },
   "tools": [
     {
