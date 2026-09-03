@@ -88,6 +88,7 @@ try
 
     RunVerticalTextAlignmentObservation();
     RunNativeInlineSelectionComposition();
+    RunRichTargetContentReplacement();
     RunBookmarkedParagraphInsertion();
 
     var replacementSource = Path.Combine(root, "content-replacement-source.docx");
@@ -1141,6 +1142,97 @@ void RunBookmarkedParagraphInsertion()
     RequireUniqueWordIdentities(output);
     RunInput("validate-openxml", output);
     Console.WriteLine("PASS bookmarked paragraph insertion");
+}
+
+void RunRichTargetContentReplacement()
+{
+    var source = Path.Combine(root, "rich-target-content-source.docx");
+    using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(
+            new Paragraph(new Run(new Text("plain replacement"))),
+            new Paragraph(
+                new Run(new Text("rich replacement ")),
+                new Run(
+                    new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }),
+                    new Text("2")))));
+        AssignParagraphIdentities(main.Document);
+        main.Document.Save();
+    }
+
+    var target = Path.Combine(root, "rich-target-content-target.docx");
+    using (var document = WordprocessingDocument.Create(target, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        var hyperlink = main.AddHyperlinkRelationship(new Uri("https://example.com/old"), true);
+        main.Document = new Document(new Body(
+            new Paragraph(
+                new ParagraphProperties(new Justification { Val = JustificationValues.Center }),
+                new Run(new RunProperties(new Color { Val = "336699" }), new Text("plain old content"))),
+            new Paragraph(
+                new ParagraphProperties(new Indentation { Left = "720" }),
+                new BookmarkStart { Name = "OldBookmark", Id = "41" },
+                new Run(new RunProperties(new Color { Val = "993366" }), new Text("rich old content ")),
+                new Hyperlink(new Run(new Text("old link"))) { Id = hyperlink.Id },
+                new SimpleField(new Run(new Text("7"))) { Instruction = " PAGE " },
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+                new Run(new FieldCode(" NUMPAGES ")),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+                new Run(new Text("9")),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.End }),
+                new BookmarkEnd { Id = "41" })));
+        AssignParagraphIdentities(main.Document);
+        main.Document.Save();
+    }
+
+    Run("docx_replace_content_from_source", new
+    {
+        input = target,
+        changes = new[]
+        {
+            new
+            {
+                target = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" },
+                sourceInput = source,
+                sourceSelections = new[]
+                {
+                    new { address = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" } }
+                }
+            },
+            new
+            {
+                target = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[2]" },
+                sourceInput = source,
+                sourceSelections = new[]
+                {
+                    new { address = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[2]" } }
+                }
+            }
+        },
+        output = target,
+        receiptOutput = Path.Combine(root, "rich-target-content-receipt.json")
+    });
+
+    using var result = WordprocessingDocument.Open(target, false);
+    var paragraphs = result.MainDocumentPart!.Document.Body!.Elements<Paragraph>().ToArray();
+    Require(paragraphs.Length == 2
+            && paragraphs[0].InnerText == "plain replacement"
+            && paragraphs[1].InnerText == "rich replacement 2",
+        "plain and rich target paragraphs did not receive exact source content");
+    Require(paragraphs[0].ParagraphProperties?.Justification?.Val?.Value == JustificationValues.Center
+            && paragraphs[1].ParagraphProperties?.Indentation?.Left?.Value == "720",
+        "content replacement did not preserve target paragraph formatting");
+    Require(paragraphs[0].Descendants<Run>().Single().RunProperties?.Color?.Val?.Value == "336699"
+            && paragraphs[1].Descendants<Run>().First().RunProperties?.Color?.Val?.Value == "993366"
+            && paragraphs[1].Descendants<Run>().Last().RunProperties?.VerticalTextAlignment?.Val?.Value
+                == VerticalPositionValues.Superscript,
+        "content replacement did not preserve target run formatting and selected source semantics");
+    Require(!paragraphs.SelectMany(paragraph => paragraph.Descendants<OpenXmlElement>()).Any(element =>
+            element is BookmarkStart or BookmarkEnd or Hyperlink or SimpleField or FieldChar or FieldCode),
+        "content replacement retained non-plain target content");
+    RunInput("validate-openxml", target);
+    Console.WriteLine("PASS rich target content replacement");
 }
 
 void CreateMergedHeaderSetBodyDocument(string path)
