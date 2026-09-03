@@ -70,6 +70,17 @@ export function assertEffectKindToolContract(tool, expectedKind = undefined) {
   return metadata.kind;
 }
 
+export function documentMutationFileArguments(tool, args) {
+  assertEffectKindToolContract(tool, 'document-mutation');
+  const bindings = boundFileArguments(tool?.inputSchema, args);
+  const current = bindings.filter(binding => binding.revisionRole === 'current');
+  const effectiveOutput = bindings.filter(binding => binding.role === 'write' && binding.effect);
+  if (current.length !== 1 || effectiveOutput.length !== 1) {
+    throw new Error(`document-mutation-file-arguments-invalid:${tool?.name || 'unnamed'}`);
+  }
+  return { current: current[0].value, effectiveOutput: effectiveOutput[0].value };
+}
+
 function fileBindings(schema) {
   const bindings = [];
   function visit(node) {
@@ -89,5 +100,37 @@ function fileBindings(schema) {
     }
   }
   visit(schema);
+  return bindings;
+}
+
+function boundFileArguments(schema, value) {
+  const bindings = [];
+  function visit(node, currentValue) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+    if (node['x-tiwater-file-role'] === 'read' || node['x-tiwater-file-role'] === 'write') {
+      if (typeof currentValue !== 'string' || currentValue.length === 0) {
+        throw new Error('provider-file-argument-invalid');
+      }
+      bindings.push({
+        role: node['x-tiwater-file-role'],
+        effect: node['x-tiwater-file-role'] === 'write'
+          && node['x-tiwater-file-effect'] !== false,
+        revisionRole: node[documentRevisionRoleKey],
+        value: currentValue,
+      });
+      return;
+    }
+    if (Array.isArray(currentValue)) {
+      for (const entry of currentValue) visit(node.items, entry);
+    } else if (currentValue && typeof currentValue === 'object') {
+      for (const [name, child] of Object.entries(node.properties || {})) {
+        if (Object.hasOwn(currentValue, name)) visit(child, currentValue[name]);
+      }
+    }
+    for (const keyword of ['allOf', 'anyOf', 'oneOf']) {
+      for (const child of node[keyword] || []) visit(child, currentValue);
+    }
+  }
+  visit(schema, value);
   return bindings;
 }
