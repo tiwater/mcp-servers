@@ -6,6 +6,7 @@
     "input": {
       "type": "string",
       "minLength": 1,
+      "pattern": "\\.[xX][lL][sS][xX]$",
       "description": "Current XLSX workbook. Convert legacy XLS before selecting Open XML cells.",
       "x-tiwater-file-role": "read"
     },

@@ -5,11 +5,13 @@
     "input": {
       "type": "string",
       "minLength": 1,
+      "pattern": "\\.[xX][lL][sS][xX]$",
       "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current"
     },
     "output": {
       "type": "string",
       "minLength": 1,
+      "pattern": "\\.[xX][lL][sS][xX]$",
       "description": "Output document path; may equal input for an atomic in-place update.",
       "x-tiwater-file-role": "write"
     },
