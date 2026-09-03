@@ -23,6 +23,7 @@ import {
   writeJsonArtifact,
 } from '../_shared/large-json-result.mjs';
 import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
+import { evidenceRoleMetadata } from '../_shared/evidence-role.mjs';
 import { compactDocxObjectIdentity } from './docx-object-identity.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -424,10 +425,11 @@ const docxReadObjectOutput = docxObservationOutput('docx_read_object').extend({
 const tools = [
   {
     name: 'docx_inspect',
+    evidenceRole: 'document-observation',
     description: 'Inspect one current DOCX for identity and package overview. The response always includes a bounded identity summary. Set returnContent true when that summary is the requested direct result. Provide output to retain the complete machine observation and return its artifact receipt. These channels are independent and may be used together. At least one channel is required. Use list and read operations to traverse selected document objects in native structure order. This overview is not a complete final-document readback; use docx_export_json when a downstream consumer requires the complete body projection.',
     inputSchema: inputContract('docx_inspect'),
     outputSchema: docxInspectionOutput('docx_inspect'),
-    annotations: { readOnlyHint: true, idempotentHint: true },
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: docxInspect,
   },
   {
@@ -549,10 +551,11 @@ const tools = [
   },
   {
     name: 'docx_export_json',
+    evidenceRole: 'final-readback',
     description: 'Produce the complete body-only DOCX JSON projection required for final-document readback or another downstream consumer of that format. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required. This does not replace bounded list and read operations during document processing.',
     inputSchema: inputContract('docx_export_json'),
     outputSchema: largeResultOutput('docx_export_json'),
-    annotations: { readOnlyHint: true, idempotentHint: true },
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: docxExportJson,
   },
   {
@@ -614,9 +617,11 @@ const tools = [
   },
   {
     name: 'office_render_pdf',
+    evidenceRole: 'native-render',
     description: 'Render a current Office document to PDF with its required native WPS backend and write the complete provider receipt as evidence. The input extension selects Writer, Spreadsheets, or Presentation; fallback rendering is rejected.',
     inputSchema: inputContract('office_render_pdf'),
     outputSchema: nativeRenderOutput,
+    annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false },
     handler: officeRenderPdf,
   },
   {
@@ -627,18 +632,20 @@ const tools = [
   },
   {
     name: 'xlsx_inspect',
+    evidenceRole: 'document-observation',
     description: 'Inspect a current XLSX workbook or legacy XLS workbook, including workbook structure, exported values, formulas, styles, merged ranges, and published legacy-format conversion evidence. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('xlsx_inspect'),
     outputSchema: largeInspectionOutput('xlsx_inspect', xlsxInspectionSummary),
-    annotations: { readOnlyHint: true, idempotentHint: true },
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: xlsxInspect,
   },
   {
     name: 'xlsx_export_json',
+    evidenceRole: 'final-readback',
     description: 'Export workbook sheet data from XLSX as structured JSON. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('xlsx_export_json'),
     outputSchema: largeResultOutput('xlsx_export_json'),
-    annotations: { readOnlyHint: true, idempotentHint: true },
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: xlsxExportJson,
   },
   {
@@ -660,18 +667,20 @@ const tools = [
   },
   {
     name: 'pptx_inspect',
+    evidenceRole: 'document-observation',
     description: 'Inspect a PPTX file, including slides, masters, layouts, shapes, transforms, paragraphs, runs, and placeholders. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('pptx_inspect'),
     outputSchema: largeInspectionOutput('pptx_inspect', pptxInspectionSummary),
-    annotations: { readOnlyHint: true, idempotentHint: true },
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: pptxInspect,
   },
   {
     name: 'pptx_export_json',
+    evidenceRole: 'final-readback',
     description: 'Export PPTX slide text, notes, and placeholder hints as structured JSON. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('pptx_export_json'),
     outputSchema: largeResultOutput('pptx_export_json'),
-    annotations: { readOnlyHint: true, idempotentHint: true },
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: pptxExportJson,
   },
   {
@@ -727,6 +736,7 @@ function buildServer() {
         inputSchema: tool.inputSchema,
         ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
         ...(tool.annotations ? { annotations: tool.annotations } : {}),
+        ...(tool.evidenceRole ? { _meta: evidenceRoleMetadata(tool.evidenceRole) } : {}),
       },
       async args => {
         const payload = typeof args.output === 'string'

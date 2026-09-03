@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import { deliverLargeJsonResult } from '../_shared/large-json-result.mjs';
 import { McpStdioServer } from '../_shared/mcp-stdio.mjs';
+import { evidenceRoleMetadata } from '../_shared/evidence-role.mjs';
 import {
   commandCandidate,
   createToolResult,
@@ -110,6 +111,7 @@ const definitions = new Map([
   ['pdf_inspect', {
     description: 'Inspect one current PDF revision. Always retain the complete observation at output and return a bounded identity containing page and document metadata without traversing document content.',
     outputSchema: inspectOutputSchema,
+    evidenceRole: 'document-observation',
   }],
   ['pdf_extract_tables', {
     description: 'Extract tables from selected current PDF pages with deterministic published extraction. Set returnContent true to return complete bounded content; provide output to retain the complete immutable result. At least one result channel is required.',
@@ -142,6 +144,7 @@ const tools = manifest.tools.map((entry) => {
     description: definition.description,
     inputSchema: JSON.parse(bytes.toString('utf8')),
     outputSchema: definition.outputSchema,
+    ...(definition.evidenceRole ? { _meta: evidenceRoleMetadata(definition.evidenceRole) } : {}),
     annotations: {
       readOnlyHint: true,
       idempotentHint: true,

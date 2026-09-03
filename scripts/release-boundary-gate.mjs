@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { writeIdempotentJsonArtifact } from '../servers/_shared/large-json-result.mjs';
+import {
+  assertEvidenceToolContract,
+  evidenceRoleMetadataKey,
+} from '../servers/_shared/evidence-role.mjs';
 
 const execFileAsync = promisify(execFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -40,6 +44,7 @@ const expectedFileEffectsByProperty = new Map([
 const requiredPackageFiles = [
   'package.json',
   '_shared/tool-runtime.mjs',
+  '_shared/evidence-role.mjs',
   'office/index.mjs',
   'office/README.md',
   generatedManifestRelativePath,
@@ -862,6 +867,37 @@ async function checkTextPublishedSurface(packageRoot, tools, packageManifest) {
   note('Text manifest, schemas, annotations, bounded outputs, and MCP surface are hash-bound and orthogonal');
 }
 
+function checkEvidenceRoleMetadata(officeTools, textTools) {
+  const check = 'provider-evidence-role-metadata';
+  const expected = new Map([
+    ['docx_inspect', 'document-observation'],
+    ['xlsx_inspect', 'document-observation'],
+    ['pptx_inspect', 'document-observation'],
+    ['text_inspect', 'document-observation'],
+    ['docx_export_json', 'final-readback'],
+    ['xlsx_export_json', 'final-readback'],
+    ['pptx_export_json', 'final-readback'],
+    ['office_render_pdf', 'native-render'],
+  ]);
+  const tools = [...officeTools, ...textTools];
+  for (const tool of tools) {
+    const expectedRole = expected.get(tool.name);
+    const hasMetadata = tool?._meta?.[evidenceRoleMetadataKey] !== undefined;
+    if (!expectedRole) {
+      if (hasMetadata) fail(check, `${tool.name} publishes an unexpected evidence role`);
+      continue;
+    }
+    try {
+      assertEvidenceToolContract(tool, expectedRole);
+    } catch (error) {
+      fail(check, error.message);
+    }
+    expected.delete(tool.name);
+  }
+  if (expected.size > 0) fail(check, `missing role-bearing tools: ${[...expected.keys()].join(', ')}`);
+  note('Office and Text publish exact versioned evidence roles derived from annotations, file bindings, and output schemas');
+}
+
 function checkSourceBoundObservationOutputs(tools) {
   const check = 'source-bound-observation-output';
   const inspectSchema = tools.find(tool => tool?.name === 'docx_inspect')?.outputSchema;
@@ -1155,6 +1191,7 @@ async function main() {
     const packedPackage = await readJson(path.join(packageRoot, 'package.json'));
     await checkGeneratedManifest(packageRoot, toolNames, packedPackage);
     await checkTextPublishedSurface(packageRoot, textTools, packedPackage);
+    checkEvidenceRoleMetadata(toolNames, textTools);
   } catch (error) {
     fail('gate-runtime', error.stack || error.message);
   } finally {

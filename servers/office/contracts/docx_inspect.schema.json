@@ -15,7 +15,8 @@
       "type": "string",
       "minLength": 1,
       "description": "Optional absolute path for retaining the complete observation inside the caller-authorized output directory; existing files are never overwritten. May be combined with returnContent.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
   "required": [

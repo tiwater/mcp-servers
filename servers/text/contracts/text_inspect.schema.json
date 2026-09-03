@@ -16,7 +16,8 @@
       "type": "string",
       "minLength": 1,
       "description": "New immutable JSON artifact path for the complete inspection.",
-      "x-tiwater-file-role": "write"
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
     }
   },
   "required": ["input", "returnContent", "output"],

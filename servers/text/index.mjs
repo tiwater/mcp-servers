@@ -9,6 +9,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { createToolResult } from '../_shared/tool-runtime.mjs';
 import { deliverLargeJsonResult } from '../_shared/large-json-result.mjs';
 import { withOutputWriteLock } from '../_shared/output-write-lock.mjs';
+import { evidenceRoleMetadata } from '../_shared/evidence-role.mjs';
 import { inspectText, readTextLines } from './observation.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -105,6 +106,7 @@ function largeResultOutput(contentSchema) {
 const definitions = [
   {
     name: 'text_inspect',
+    evidenceRole: 'document-observation',
     description: 'Inspect one exact supported plain-text revision. Return its byte identity, lossless encoding and BOM facts, line count, and at most eight opening line identities while retaining the complete bounded inspection at output. It does not parse fields, records, key-value pairs, sections, or markup.',
     outputSchema: largeResultOutput(inspectContent).extend({ identity: inspectIdentity }).strict(),
     handler: textInspect,
@@ -137,6 +139,7 @@ function buildServer() {
           destructiveHint: false,
           openWorldHint: false,
         },
+        ...(definition.evidenceRole ? { _meta: evidenceRoleMetadata(definition.evidenceRole) } : {}),
       },
       async args => {
         const payload = typeof args.output === 'string'
