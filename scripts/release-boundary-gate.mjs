@@ -1099,6 +1099,18 @@ function checkXlsxRangeReadContract(tools) {
   const page = output?.properties?.content;
   const summary = output?.properties?.summary;
   const description = tool?.description || '';
+  const nativePattern = '\\.[xX][lL][sS][xX]$';
+  const legacyPattern = '\\.[xX][lL][sS]$';
+  const inspectPattern = '\\.[xX][lL][sS][xX]?$';
+  const nativeTools = [
+    'xlsx_copy_row', 'xlsx_delete_rows', 'xlsx_expand_section_rows', 'xlsx_export_json',
+    'xlsx_insert_rows', 'xlsx_read_range', 'xlsx_set_cell_number_format',
+    'xlsx_set_cell_value', 'xlsx_set_column_width', 'xlsx_set_page_setup',
+    'xlsx_set_print_area', 'xlsx_set_range_values', 'xlsx_set_rich_text_cell_value',
+    'xlsx_set_row_page_breaks', 'xlsx_validate',
+  ];
+  const mutationTools = nativeTools.filter(name =>
+    !['xlsx_export_json', 'xlsx_read_range', 'xlsx_validate'].includes(name));
   if (!['input', 'sheet', 'range', 'returnContent'].every(name => input?.required?.includes(name))
       || input?.properties?.range?.type !== 'string'
       || input?.properties?.offset?.minimum !== 0
@@ -1112,6 +1124,20 @@ function checkXlsxRangeReadContract(tools) {
       || summary?.properties?.remaining?.type !== 'integer'
       || summary?.properties?.nextOffset?.anyOf?.length !== 2) {
     fail(check, 'xlsx_read_range output does not expose bounded native cell facts and continuation');
+  }
+  if (nativeTools.some(name =>
+    tools.find(entry => entry?.name === name)?.inputSchema?.properties?.input?.pattern
+      !== nativePattern)
+      || mutationTools.some(name =>
+        tools.find(entry => entry?.name === name)?.inputSchema?.properties?.output?.pattern
+          !== nativePattern)
+      || tools.find(entry => entry?.name === 'xlsx_inspect')
+        ?.inputSchema?.properties?.input?.pattern !== inspectPattern
+      || tools.find(entry => entry?.name === 'xlsx_convert_legacy')
+        ?.inputSchema?.properties?.input?.pattern !== legacyPattern
+      || tools.find(entry => entry?.name === 'xlsx_convert_legacy')
+        ?.inputSchema?.properties?.output?.pattern !== nativePattern) {
+    fail(check, 'XLSX contracts do not distinguish legacy input from native workbook revisions');
   }
   if (!description.includes('row-major cell offset')
       || !description.includes('provider chooses the bounded page size')
