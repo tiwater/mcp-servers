@@ -13,6 +13,7 @@ public static class NativeContentCopy
 {
     public const string Command = "docx_replace_content_from_source";
     private const string MainStory = "/word/document.xml";
+    private const string Word2010Namespace = "http://schemas.microsoft.com/office/word/2010/wordml";
 
     public static int Run(string[] args)
     {
@@ -326,6 +327,8 @@ public static class NativeContentCopy
     internal static Paragraph CloneParagraph(Paragraph paragraph)
     {
         var clone = (Paragraph)paragraph.CloneNode(true);
+        clone.RemoveAttribute("paraId", Word2010Namespace);
+        clone.RemoveAttribute("textId", Word2010Namespace);
         clone.ParagraphProperties?.Remove();
         foreach (var bookmark in clone.Descendants<BookmarkStart>().Cast<OpenXmlElement>()
                      .Concat(clone.Descendants<BookmarkEnd>()).ToArray())

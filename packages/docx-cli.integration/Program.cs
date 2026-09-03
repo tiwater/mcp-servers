@@ -166,316 +166,63 @@ try
         "content replacement changed the target vertical merge");
     RunInput("validate-openxml", replacementTarget);
 
-    var fillSource = Path.Combine(root, "fill-source.docx");
-    var fillTarget = Path.Combine(root, "fill-target.docx");
-    CreateFillSourceDocument(fillSource);
-    CreateFillTargetDocument(fillTarget);
-    var fillSourceState = ReadTable(fillSource, "fill-source");
-    var fillTargetState = ReadTable(fillTarget, "fill-target");
-    var fillSourceRows = fillSourceState.GetProperty("rows");
-    var fillTargetRows = fillTargetState.GetProperty("rows");
-    var fillSourceColumns = fillSourceState.GetProperty("gridColumns");
-    var fillTargetColumns = fillTargetState.GetProperty("gridColumns");
-    var fillOutput = Path.Combine(root, "fill-output.docx");
-    Run("docx_fill_table_from_tables", new
+    var atomicTableTarget = Path.Combine(root, "set-table-native-content-target.docx");
+    var atomicTableOutput = Path.Combine(root, "set-table-native-content-output.docx");
+    CreateContentReplacementTargetDocument(atomicTableTarget);
+    var atomicTargetState = ReadTable(atomicTableTarget, "set-table-native-content-target");
+    var atomicTargetRows = atomicTargetState.GetProperty("rows");
+    var atomicTargetColumns = atomicTargetState.GetProperty("gridColumns");
+    Run("docx_set_table", new
     {
-        input = fillTarget,
-        table = fillTargetState.GetProperty("address").Clone(),
+        input = atomicTableTarget,
+        table = atomicTargetState.GetProperty("address").Clone(),
         existingRows = new
         {
-            first = fillTargetRows[1].GetProperty("address").Clone(),
-            last = fillTargetRows[2].GetProperty("address").Clone(),
+            first = atomicTargetRows[1].GetProperty("address").Clone(),
+            last = atomicTargetRows[2].GetProperty("address").Clone(),
         },
-        prototypeRow = fillTargetRows[1].GetProperty("address").Clone(),
-        sources = new[] { new
+        columns = atomicTargetColumns.EnumerateArray()
+            .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+            .ToArray(),
+        rows = new[]
         {
-            input = fillSource,
-            table = fillSourceState.GetProperty("address").Clone(),
-            rows = new
+            new
             {
-                first = fillSourceRows[1].GetProperty("address").Clone(),
-                last = fillSourceRows[5].GetProperty("address").Clone(),
-            },
-            recordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
-            columnMappings = new object[]
-            {
-                new { sourceColumns = new[] { fillSourceColumns[0].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[0].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[1].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[1].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[2].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[2].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[3].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[3].GetProperty("address").Clone(), fillTargetColumns[4].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[4].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[5].GetProperty("address").Clone() } },
-            },
-        } },
-        output = fillOutput,
-        receiptOutput = Path.Combine(root, "fill-output-receipt.json"),
-    });
-    var fillState = ReadTable(fillOutput, "fill-output");
-    Require(fillState.GetProperty("rowCount").GetInt32() == 4,
-        "table fill did not derive one target row per logical source record");
-    Require(CellAt(fillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
-            && CellAt(fillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
-            && CellAt(fillState, 2, 0).GetProperty("logicalText").GetString() == "组甲",
-        "table fill did not preserve a source group merge across target records");
-    Require(CellAt(fillState, 1, 2).GetProperty("logicalText").GetString() == "记录一"
-            && CellAt(fillState, 1, 3).GetProperty("logicalText").GetString() == "值一"
-            && CellAt(fillState, 1, 4).GetProperty("logicalText").GetString() == "值二",
-        "table fill did not spread a multi-row source record into target columns");
-    Require(CellAt(fillState, 3, 2).GetProperty("logicalText").GetString() == "控制"
-            && CellAt(fillState, 3, 3).GetProperty("logicalText").GetString() == "单值"
-            && CellAt(fillState, 3, 4).GetProperty("logicalText").GetString() == "",
-        "table fill did not handle a one-row source record or blank trailing target");
-
-    var horizontalFillTarget = Path.Combine(root, "fill-target-horizontal.docx");
-    CreateFillTargetDocument(horizontalFillTarget, horizontalFirstCell: true);
-    var horizontalTargetState = ReadTable(horizontalFillTarget, "fill-target-horizontal");
-    var horizontalTargetRows = horizontalTargetState.GetProperty("rows");
-    var horizontalTargetColumns = horizontalTargetState.GetProperty("gridColumns");
-    var horizontalFillOutput = Path.Combine(root, "fill-output-horizontal.docx");
-    Run("docx_fill_table_from_tables", new
-    {
-        input = horizontalFillTarget,
-        table = horizontalTargetState.GetProperty("address").Clone(),
-        existingRows = new
-        {
-            first = horizontalTargetRows[1].GetProperty("address").Clone(),
-            last = horizontalTargetRows[2].GetProperty("address").Clone(),
-        },
-        prototypeRow = horizontalTargetRows[1].GetProperty("address").Clone(),
-        sources = new[] { new
-        {
-            input = fillSource,
-            table = fillSourceState.GetProperty("address").Clone(),
-            rows = new
-            {
-                first = fillSourceRows[1].GetProperty("address").Clone(),
-                last = fillSourceRows[5].GetProperty("address").Clone(),
-            },
-            recordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
-            columnMappings = new object[]
-            {
-                new { sourceColumns = new[] { fillSourceColumns[0].GetProperty("address").Clone() }, targetColumns = new[] { horizontalTargetColumns[0].GetProperty("address").Clone(), horizontalTargetColumns[1].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[2].GetProperty("address").Clone() }, targetColumns = new[] { horizontalTargetColumns[2].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[3].GetProperty("address").Clone() }, targetColumns = new[] { horizontalTargetColumns[3].GetProperty("address").Clone(), horizontalTargetColumns[4].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[4].GetProperty("address").Clone() }, targetColumns = new[] { horizontalTargetColumns[5].GetProperty("address").Clone() } },
-            },
-        } },
-        output = horizontalFillOutput,
-        receiptOutput = Path.Combine(root, "fill-output-horizontal-receipt.json"),
-    });
-    var horizontalFillState = ReadTable(horizontalFillOutput, "fill-output-horizontal");
-    Require(CellAt(horizontalFillState, 1, 0).GetProperty("gridSpan").GetInt32() == 2
-            && CellAt(horizontalFillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
-            && CellAt(horizontalFillState, 2, 0).GetProperty("gridSpan").GetInt32() == 2
-            && CellAt(horizontalFillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue",
-        "table fill did not retain a prototype horizontal span while deriving a vertical group");
-
-    var composedFillTarget = Path.Combine(root, "fill-target-composed.docx");
-    CreateComposedFillTargetDocument(composedFillTarget);
-    var composedTargetState = ReadTable(composedFillTarget, "fill-target-composed");
-    var composedTargetRows = composedTargetState.GetProperty("rows");
-    var composedTargetColumns = composedTargetState.GetProperty("gridColumns");
-    var composedFillOutput = Path.Combine(root, "fill-output-composed.docx");
-    var composedFillReceipt = Path.Combine(root, "fill-output-composed-receipt.json");
-    Run("docx_fill_table_from_tables", new
-    {
-        input = composedFillTarget,
-        table = composedTargetState.GetProperty("address").Clone(),
-        existingRows = new
-        {
-            first = composedTargetRows[1].GetProperty("address").Clone(),
-            last = composedTargetRows[2].GetProperty("address").Clone(),
-        },
-        prototypeRow = composedTargetRows[1].GetProperty("address").Clone(),
-        sources = new[] { new
-        {
-            input = fillSource,
-            table = fillSourceState.GetProperty("address").Clone(),
-            rows = new
-            {
-                first = fillSourceRows[1].GetProperty("address").Clone(),
-                last = fillSourceRows[5].GetProperty("address").Clone(),
-            },
-            recordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
-            columnMappings = new object[]
-            {
-                new
+                prototypeRow = atomicTargetRows[1].GetProperty("address").Clone(),
+                cantSplit = true,
+                cells = new object[]
                 {
-                    sourceColumns = new[]
+                    new
                     {
-                        fillSourceColumns[0].GetProperty("address").Clone(),
-                        fillSourceColumns[1].GetProperty("address").Clone(),
+                        columns = new[] { "c0" }, rowSpan = (int?)null, text = (string?)null,
+                        sourceContent = new
+                        {
+                            input = replacementSource,
+                            selections = new[] { new { address = chineseItem } },
+                        },
                     },
-                    targetColumns = new[] { composedTargetColumns[0].GetProperty("address").Clone() },
-                    joinWith = "\n",
+                    new
+                    {
+                        columns = new[] { "c1" }, rowSpan = (int?)null, text = (string?)null,
+                        sourceContent = new
+                        {
+                            input = replacementSource,
+                            selections = new[] { new { address = chineseResult } },
+                        },
+                    },
                 },
-                new { sourceColumns = new[] { fillSourceColumns[2].GetProperty("address").Clone() }, targetColumns = new[] { composedTargetColumns[1].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[3].GetProperty("address").Clone() }, targetColumns = new[] { composedTargetColumns[2].GetProperty("address").Clone(), composedTargetColumns[3].GetProperty("address").Clone() } },
-                new { sourceColumns = new[] { fillSourceColumns[4].GetProperty("address").Clone() }, targetColumns = new[] { composedTargetColumns[4].GetProperty("address").Clone() } },
-            },
-        } },
-        output = composedFillOutput,
-        receiptOutput = composedFillReceipt,
-    });
-    var composedFillState = ReadTable(composedFillOutput, "fill-output-composed");
-    var composedReceiptState = JsonDocument.Parse(File.ReadAllText(composedFillReceipt)).RootElement;
-    Require(composedFillState.GetProperty("rowCount").GetInt32() == 4,
-        "composed table fill did not derive one row per logical record");
-    var composedOwner = CellAt(composedFillState, 1, 0);
-    var composedContinuation = CellAt(composedFillState, 2, 0);
-    Require(composedOwner.GetProperty("logicalText").GetString() == "组甲标准甲"
-            && composedReceiptState.GetProperty("rows")[0].GetProperty("cells")[0]
-                .GetProperty("text").GetString() == "组甲\n标准甲"
-            && composedOwner.GetProperty("verticalMerge").GetString() == "restart"
-            && composedContinuation.GetProperty("verticalMerge").GetString() == "continue",
-        $"composed table fill mismatch: text={composedOwner.GetProperty("logicalText").GetString()}; "
-        + $"owner={composedOwner.GetProperty("verticalMerge")}; continuation={composedContinuation.GetProperty("verticalMerge")}");
-
-    var clippedFillSource = Path.Combine(root, "fill-source-clipped.docx");
-    var clippedFillTarget = Path.Combine(root, "fill-target-clipped.docx");
-    CreateClippedFillSourceDocument(clippedFillSource);
-    CreateComposedFillTargetDocument(clippedFillTarget);
-    var clippedSourceState = ReadTable(clippedFillSource, "fill-source-clipped");
-    var clippedTargetState = ReadTable(clippedFillTarget, "fill-target-clipped");
-    var clippedSourceRows = clippedSourceState.GetProperty("rows");
-    var clippedTargetRows = clippedTargetState.GetProperty("rows");
-    var clippedSourceColumns = clippedSourceState.GetProperty("gridColumns");
-    var clippedTargetColumns = clippedTargetState.GetProperty("gridColumns");
-    var clippedFillOutput = Path.Combine(root, "fill-output-clipped.docx");
-    Run("docx_fill_table_from_tables", new
-    {
-        input = clippedFillTarget,
-        table = clippedTargetState.GetProperty("address").Clone(),
-        existingRows = new
-        {
-            first = clippedTargetRows[1].GetProperty("address").Clone(),
-            last = clippedTargetRows[2].GetProperty("address").Clone(),
-        },
-        prototypeRow = clippedTargetRows[1].GetProperty("address").Clone(),
-        sources = new[] { new
-        {
-            input = clippedFillSource,
-            table = clippedSourceState.GetProperty("address").Clone(),
-            rows = new
-            {
-                first = clippedSourceRows[2].GetProperty("address").Clone(),
-                last = clippedSourceRows[3].GetProperty("address").Clone(),
-            },
-            recordColumn = clippedSourceColumns[2].GetProperty("address").Clone(),
-            columnMappings = Enumerable.Range(0, 5).Select(index => new
-            {
-                sourceColumns = new[] { clippedSourceColumns[index].GetProperty("address").Clone() },
-                targetColumns = new[] { clippedTargetColumns[index].GetProperty("address").Clone() },
-            }).ToArray(),
-        } },
-        output = clippedFillOutput,
-        receiptOutput = Path.Combine(root, "fill-output-clipped-receipt.json"),
-    });
-    var clippedFillState = ReadTable(clippedFillOutput, "fill-output-clipped");
-    Require(clippedFillState.GetProperty("rowCount").GetInt32() == 3,
-        "clipped table fill did not retain exactly the selected source records");
-    Require(CellAt(clippedFillState, 1, 0).GetProperty("logicalText").GetString() == "共享项目"
-            && CellAt(clippedFillState, 1, 0).GetProperty("verticalMerge").GetString() == "restart"
-            && CellAt(clippedFillState, 2, 0).GetProperty("verticalMerge").GetString() == "continue"
-            && CellAt(clippedFillState, 1, 4).GetProperty("logicalText").GetString() == "通过"
-            && CellAt(clippedFillState, 1, 4).GetProperty("verticalMerge").GetString() == "restart"
-            && CellAt(clippedFillState, 2, 4).GetProperty("verticalMerge").GetString() == "continue",
-        "table fill did not clip intersecting source vertical merges to the selected row range");
-    Require(CellAt(clippedFillState, 1, 2).GetProperty("logicalText").GetString() == "记录乙"
-            && CellAt(clippedFillState, 2, 2).GetProperty("logicalText").GetString() == "记录丙",
-        "clipped table fill changed the selected record order or values");
-
-    var multiSourceTarget = Path.Combine(root, "fill-target-multiple-sources.docx");
-    CreateComposedFillTargetDocument(multiSourceTarget);
-    var multiSourceTargetState = ReadTable(multiSourceTarget, "fill-target-multiple-sources");
-    var multiSourceTargetRows = multiSourceTargetState.GetProperty("rows");
-    var multiSourceTargetColumns = multiSourceTargetState.GetProperty("gridColumns");
-    var multiSourceOutput = Path.Combine(root, "fill-output-multiple-sources.docx");
-    object[] MultiSourceMappings() => Enumerable.Range(0, 5).Select(index => (object)new
-    {
-        sourceColumns = new[] { clippedSourceColumns[index].GetProperty("address").Clone() },
-        targetColumns = new[] { multiSourceTargetColumns[index].GetProperty("address").Clone() },
-    }).ToArray();
-    Run("docx_fill_table_from_tables", new
-    {
-        input = multiSourceTarget,
-        table = multiSourceTargetState.GetProperty("address").Clone(),
-        existingRows = new
-        {
-            first = multiSourceTargetRows[1].GetProperty("address").Clone(),
-            last = multiSourceTargetRows[2].GetProperty("address").Clone(),
-        },
-        prototypeRow = multiSourceTargetRows[1].GetProperty("address").Clone(),
-        sources = new[]
-        {
-            new
-            {
-                input = clippedFillSource,
-                table = clippedSourceState.GetProperty("address").Clone(),
-                rows = new
-                {
-                    first = clippedSourceRows[2].GetProperty("address").Clone(),
-                    last = clippedSourceRows[2].GetProperty("address").Clone(),
-                },
-                recordColumn = clippedSourceColumns[2].GetProperty("address").Clone(),
-                columnMappings = MultiSourceMappings(),
-            },
-            new
-            {
-                input = clippedFillSource,
-                table = clippedSourceState.GetProperty("address").Clone(),
-                rows = new
-                {
-                    first = clippedSourceRows[3].GetProperty("address").Clone(),
-                    last = clippedSourceRows[3].GetProperty("address").Clone(),
-                },
-                recordColumn = clippedSourceColumns[2].GetProperty("address").Clone(),
-                columnMappings = MultiSourceMappings(),
             },
         },
-        output = multiSourceOutput,
-        receiptOutput = Path.Combine(root, "fill-output-multiple-sources-receipt.json"),
+        output = atomicTableOutput,
+        receiptOutput = Path.Combine(root, "set-table-native-content-receipt.json"),
     });
-    var multiSourceState = ReadTable(multiSourceOutput, "fill-output-multiple-sources");
-    Require(multiSourceState.GetProperty("rowCount").GetInt32() == 3
-            && CellAt(multiSourceState, 1, 0).GetProperty("logicalText").GetString() == "共享项目"
-            && CellAt(multiSourceState, 2, 0).GetProperty("logicalText").GetString() == "共享项目"
-            && CellAt(multiSourceState, 1, 0).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
-            && CellAt(multiSourceState, 2, 0).GetProperty("verticalMerge").ValueKind == JsonValueKind.Null
-            && CellAt(multiSourceState, 1, 2).GetProperty("logicalText").GetString() == "记录乙"
-            && CellAt(multiSourceState, 2, 2).GetProperty("logicalText").GetString() == "记录丙",
-        "multiple source ranges were not concatenated in order or merged across an explicit source boundary");
-
-    var invalidFillReceipt = Path.Combine(root, "invalid-fill-receipt.json");
-    var invalidFill = RunExpectAtomicFailure("docx_fill_table_from_tables", fillTarget, invalidFillReceipt, new
-    {
-        input = fillTarget,
-        table = fillTargetState.GetProperty("address").Clone(),
-        existingRows = new
-        {
-            first = fillTargetRows[1].GetProperty("address").Clone(),
-            last = fillTargetRows[2].GetProperty("address").Clone(),
-        },
-        prototypeRow = fillTargetRows[1].GetProperty("address").Clone(),
-        sources = new[] { new
-        {
-            input = fillSource,
-            table = fillSourceState.GetProperty("address").Clone(),
-            rows = new
-            {
-                first = fillSourceRows[1].GetProperty("address").Clone(),
-                last = fillSourceRows[5].GetProperty("address").Clone(),
-            },
-            recordColumn = fillSourceColumns[2].GetProperty("address").Clone(),
-            columnMappings = new[]
-            {
-                new { sourceColumns = new[] { fillSourceColumns[0].GetProperty("address").Clone() }, targetColumns = new[] { fillTargetColumns[0].GetProperty("address").Clone() } },
-            },
-        } },
-        output = fillTarget,
-        receiptOutput = invalidFillReceipt,
-    });
-    Require(invalidFill.Contains("target-columns-must-cover-table-grid", StringComparison.Ordinal),
-        "incomplete table fill mapping did not fail explicitly");
+    var atomicTableState = ReadTable(atomicTableOutput, "set-table-native-content-output");
+    Require(atomicTableState.GetProperty("rowCount").GetInt32() == 2
+            && CellAt(atomicTableState, 1, 0).GetProperty("logicalText").GetString() == "中文项目"
+            && CellAt(atomicTableState, 1, 1).GetProperty("logicalText").GetString() == "中文结果"
+            && atomicTableState.GetProperty("rows")[1].GetProperty("cantSplit").GetBoolean(),
+        "docx_set_table did not atomically apply shape and native source content");
+    RunInput("validate-openxml", atomicTableOutput);
 
     var validAddress = rows[1].GetProperty("address");
     var malformedAddress = new
@@ -516,7 +263,7 @@ try
     var bodyColumns = initial.GetProperty("gridColumns").EnumerateArray()
         .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
         .ToArray();
-    Run("docx_set_table_body", new
+    Run("docx_set_table", new
     {
         input = original,
         table = initial.GetProperty("address").Clone(),
@@ -587,7 +334,7 @@ try
     }
 
     var expandedBodyOutput = Path.Combine(root, "set-table-body-expanded.docx");
-    Run("docx_set_table_body", new
+    Run("docx_set_table", new
     {
         input = original,
         table = initial.GetProperty("address").Clone(),
@@ -617,7 +364,7 @@ try
         "set table body did not expand rows with horizontal spans");
 
     var emptyBodyOutput = Path.Combine(root, "set-table-body-empty.docx");
-    Run("docx_set_table_body", new
+    Run("docx_set_table", new
     {
         input = original,
         table = initial.GetProperty("address").Clone(),
@@ -637,7 +384,7 @@ try
         "empty table body did not retain the row outside the replaced range");
 
     var emptyTableReceipt = Path.Combine(root, "set-table-body-empty-table-receipt.json");
-    var emptyTable = RunExpectAtomicFailure("docx_set_table_body", original, emptyTableReceipt, new
+    var emptyTable = RunExpectAtomicFailure("docx_set_table", original, emptyTableReceipt, new
     {
         input = original,
         table = initial.GetProperty("address").Clone(),
@@ -655,7 +402,7 @@ try
         "removing every table row did not fail explicitly");
 
     var failedBodyReceipt = Path.Combine(root, "set-table-body-failure-receipt.json");
-    var failedBody = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, failedBodyReceipt, new
+    var failedBody = RunExpectAtomicFailure("docx_set_table", setBodyOutput, failedBodyReceipt, new
     {
         input = setBodyOutput,
         table = setBodyState.GetProperty("address").Clone(),
@@ -687,7 +434,7 @@ try
         "incomplete table body did not fail explicitly");
 
     var invalidRowSpanReceipt = Path.Combine(root, "set-table-body-invalid-row-span-receipt.json");
-    var invalidRowSpan = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, invalidRowSpanReceipt, new
+    var invalidRowSpan = RunExpectAtomicFailure("docx_set_table", setBodyOutput, invalidRowSpanReceipt, new
     {
         input = setBodyOutput,
         table = setBodyState.GetProperty("address").Clone(),
@@ -731,7 +478,7 @@ try
         "row span beyond the final row did not fail explicitly");
 
     var overlappingRowSpanReceipt = Path.Combine(root, "set-table-body-overlapping-row-span-receipt.json");
-    var overlappingRowSpan = RunExpectAtomicFailure("docx_set_table_body", setBodyOutput, overlappingRowSpanReceipt, new
+    var overlappingRowSpan = RunExpectAtomicFailure("docx_set_table", setBodyOutput, overlappingRowSpanReceipt, new
     {
         input = setBodyOutput,
         table = setBodyState.GetProperty("address").Clone(),
@@ -775,7 +522,7 @@ try
         "a cell overlapping an active row span did not fail explicitly");
 
     var splitBodyReceipt = Path.Combine(root, "set-table-body-split-merge-receipt.json");
-    var splitBody = RunExpectAtomicFailure("docx_set_table_body", original, splitBodyReceipt, new
+    var splitBody = RunExpectAtomicFailure("docx_set_table", original, splitBodyReceipt, new
     {
         input = original,
         table = initial.GetProperty("address").Clone(),
@@ -1102,7 +849,7 @@ void RunMergedHeaderSetBodyMatrix()
         .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
         .ToArray();
 
-    Run("docx_set_table_body", new
+    Run("docx_set_table", new
     {
         input,
         table = before.GetProperty("address").Clone(),
@@ -2394,57 +2141,6 @@ void CreateDocument(string path)
     main.Document.Save();
 }
 
-void CreateFillSourceDocument(string path)
-{
-    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
-    var main = document.AddMainDocumentPart();
-    var table = new Table(
-        new TableProperties(),
-        new TableGrid(Enumerable.Range(0, 5).Select(_ => new GridColumn { Width = "1200" })),
-        new TableRow(Cell("分组"), Cell("标准"), Cell("记录"), Cell("结果"), Cell("结论")),
-        new TableRow(
-            Cell("组甲", merge: MergedCellValues.Restart), Cell("标准甲", merge: MergedCellValues.Restart),
-            Cell("记录一", merge: MergedCellValues.Restart), Cell("值一"), Cell("通过")),
-        new TableRow(
-            Cell("", merge: MergedCellValues.Continue), Cell("", merge: MergedCellValues.Continue),
-            Cell("", merge: MergedCellValues.Continue), Cell("值二"), Cell("通过")),
-        new TableRow(
-            Cell("", merge: MergedCellValues.Continue), Cell("", merge: MergedCellValues.Continue),
-            Cell("记录二", merge: MergedCellValues.Restart), Cell("值三"), Cell("通过")),
-        new TableRow(
-            Cell("", merge: MergedCellValues.Continue), Cell("", merge: MergedCellValues.Continue),
-            Cell("", merge: MergedCellValues.Continue), Cell("值四"), Cell("通过")),
-        new TableRow(Cell("组乙"), Cell("标准乙"), Cell("控制"), Cell("单值"), Cell("通过")));
-    main.Document = new Document(new Body(table));
-    AssignParagraphIdentities(main.Document);
-    main.Document.Save();
-}
-
-void CreateClippedFillSourceDocument(string path)
-{
-    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
-    var main = document.AddMainDocumentPart();
-    var table = new Table(
-        new TableProperties(),
-        new TableGrid(Enumerable.Range(0, 5).Select(_ => new GridColumn { Width = "1200" })),
-        new TableRow(Cell("项目"), Cell("标准"), Cell("记录"), Cell("结果"), Cell("结论")),
-        new TableRow(
-            Cell("共享项目", merge: MergedCellValues.Restart), Cell("标准甲"), Cell("记录甲"), Cell("结果甲"),
-            Cell("通过", merge: MergedCellValues.Restart)),
-        new TableRow(
-            Cell("", merge: MergedCellValues.Continue), Cell("标准乙"), Cell("记录乙"), Cell("结果乙"),
-            Cell("", merge: MergedCellValues.Continue)),
-        new TableRow(
-            Cell("", merge: MergedCellValues.Continue), Cell("标准丙"), Cell("记录丙"), Cell("结果丙"),
-            Cell("", merge: MergedCellValues.Continue)),
-        new TableRow(
-            Cell("", merge: MergedCellValues.Continue), Cell("标准丁"), Cell("记录丁"), Cell("结果丁"),
-            Cell("", merge: MergedCellValues.Continue)));
-    main.Document = new Document(new Body(table));
-    AssignParagraphIdentities(main.Document);
-    main.Document.Save();
-}
-
 void CreateContentReplacementSourceDocument(string path)
 {
     using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
@@ -2471,42 +2167,6 @@ void CreateContentReplacementTargetDocument(string path)
         new TableRow(Cell("项目"), Cell("结果")),
         new TableRow(Cell("占位", merge: MergedCellValues.Restart), Cell("占位结果")),
         new TableRow(Cell("", merge: MergedCellValues.Continue), Cell("保留")));
-    main.Document = new Document(new Body(table));
-    AssignParagraphIdentities(main.Document);
-    main.Document.Save();
-}
-
-void CreateFillTargetDocument(string path, bool horizontalFirstCell = false)
-{
-    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
-    var main = document.AddMainDocumentPart();
-    var firstBody = horizontalFirstCell
-        ? new TableRow(Cell("", span: 2), Cell(""), Cell(""), Cell(""), Cell(""))
-        : new TableRow(Cell(""), Cell(""), Cell(""), Cell(""), Cell(""), Cell(""));
-    var secondBody = horizontalFirstCell
-        ? new TableRow(Cell("", span: 2), Cell(""), Cell(""), Cell(""), Cell(""))
-        : new TableRow(Cell(""), Cell(""), Cell(""), Cell(""), Cell(""), Cell(""));
-    var table = new Table(
-        new TableProperties(),
-        new TableGrid(Enumerable.Range(0, 6).Select(_ => new GridColumn { Width = "1000" })),
-        new TableRow(Cell("分组"), Cell("标准"), Cell("记录"), Cell("结果一"), Cell("结果二"), Cell("结论")),
-        firstBody,
-        secondBody);
-    main.Document = new Document(new Body(table));
-    AssignParagraphIdentities(main.Document);
-    main.Document.Save();
-}
-
-void CreateComposedFillTargetDocument(string path)
-{
-    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
-    var main = document.AddMainDocumentPart();
-    var table = new Table(
-        new TableProperties(),
-        new TableGrid(Enumerable.Range(0, 5).Select(_ => new GridColumn { Width = "1000" })),
-        new TableRow(Cell("项目"), Cell("记录"), Cell("结果一"), Cell("结果二"), Cell("结论")),
-        new TableRow(Cell(""), Cell(""), Cell(""), Cell(""), Cell("")),
-        new TableRow(Cell(""), Cell(""), Cell(""), Cell(""), Cell("")));
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();

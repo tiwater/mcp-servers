@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_set_table",
+  "type": "object",
+  "properties": {
+    "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
+    "table": {
+      "type": "object",
+      "description": "Current target table address returned by docx_read_table or docx_table_index.",
+      "properties": {
+        "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+        "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+      },
+      "required": ["part", "path"], "additionalProperties": false
+    },
+    "existingRows": {
+      "type": "object",
+      "description": "Exact contiguous current row range to replace. Rows outside this range stay unchanged, and the range must enclose every vertical merge it intersects.",
+      "properties": {
+        "first": {
+          "type": "object", "properties": {
+            "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+            "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+          }, "required": ["part", "path"], "additionalProperties": false
+        },
+        "last": {
+          "type": "object", "properties": {
+            "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+            "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+          }, "required": ["part", "path"], "additionalProperties": false
+        }
+      }, "required": ["first", "last"], "additionalProperties": false
+    },
+    "columns": {
+      "type": "array", "minItems": 1,
+      "description": "Complete target table grid in native order. IDs are request-local names used only by rows below.",
+      "items": {
+        "type": "object", "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "gridColumn": {
+            "type": "object", "properties": {
+              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+              "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+            }, "required": ["part", "path"], "additionalProperties": false
+          }
+        }, "required": ["id", "gridColumn"], "additionalProperties": false
+      }
+    },
+    "rows": {
+      "type": "array", "minItems": 0,
+      "description": "Final logical rows. Explicit cells plus active row spans cover the target grid exactly once.",
+      "items": {
+        "type": "object", "properties": {
+          "prototypeRow": {
+            "type": "object", "properties": {
+              "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+              "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+            }, "required": ["part", "path"], "additionalProperties": false
+          },
+          "cells": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "properties": {
+                "columns": { "type": "array", "minItems": 1, "description": "One or more contiguous request-local column IDs occupied by this cell.", "items": { "type": "string", "minLength": 1, "maxLength": 80 } },
+                "rowSpan": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+                "text": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Final derived plain text, or null when sourceContent is used." },
+                "sourceContent": {
+                  "anyOf": [{
+                    "type": "object",
+                    "properties": {
+                      "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read" },
+                      "selections": {
+                        "type": "array", "minItems": 1,
+                        "items": {
+                          "type": "object", "properties": {
+                            "address": {
+                              "type": "object", "properties": {
+                                "part": { "type": "string", "minLength": 1, "pattern": "^\\/" },
+                                "path": { "type": "string", "pattern": "^\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\](?:\\/[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*\\[[1-9][0-9]*\\])*$" }
+                              }, "required": ["part", "path"], "additionalProperties": false
+                            },
+                            "range": {
+                              "type": "object", "properties": {
+                                "start": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                                "length": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+                              }, "required": ["start", "length"], "additionalProperties": false
+                            }
+                          }, "required": ["address"], "additionalProperties": false
+                        }
+                      }
+                    }, "required": ["input", "selections"], "additionalProperties": false
+                  }, { "type": "null" }],
+                  "description": "Exact ordered native source selections, or null when text is used."
+                }
+              }, "required": ["columns", "text", "sourceContent"], "additionalProperties": false
+            }
+          },
+          "cantSplit": { "type": "boolean" }
+        }, "required": ["prototypeRow", "cells"], "additionalProperties": false
+      }
+    },
+    "output": { "type": "string", "minLength": 1, "description": "Output DOCX path; may equal input for one atomic in-place update.", "x-tiwater-file-role": "write" },
+    "receiptOutput": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write", "x-tiwater-file-effect": false }
+  },
+  "required": ["input", "table", "existingRows", "columns", "rows", "output", "receiptOutput"],
+  "additionalProperties": false
+}

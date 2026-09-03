@@ -381,9 +381,10 @@ const docxTableReadOutput = docxObservationOutput('docx_read_table').extend({
   receipt: z.object({
     schema: z.literal('tiwater.docx-table-page-receipt/v1'),
     totalRowCount: z.number().int().nonnegative(),
+    retainedRowCount: z.number().int().nonnegative(),
     returnedRowCount: z.number().int().nonnegative(),
     remaining: z.number().int().nonnegative(),
-    nextOffset: z.number().int().nonnegative().optional(),
+    nextContinuation: z.string().min(1).optional(),
     detailPageRetained: z.boolean(),
     narrowingRequired: z.boolean(),
   }).strict(),
@@ -469,7 +470,7 @@ const tools = [
   },
   {
     name: 'docx_read_table',
-    description: 'Read an explicit row range from exactly one table selected by native OpenXML address; it never builds another whole-table data object. Set returnContent true to return a byte-bounded compact row page. Provide output to store full paragraph and text-node detail, including native verticalTextAlignment, for the selected row page and return its artifact receipt. These channels are independent and may be used together; at least one is required. Request only rows needed for the current decision; receipt.remaining is navigation information, not an obligation to read unused rows, and blank template rows need not be paged through. receipt.nextOffset is present only when another row page exists. Each returned row and cell keeps its reusable native address, zero-based logical gridColumnStart, gridSpan, vertical-merge owner, physical text, and logical text. Match columns across rows by gridColumnStart; a tc[n] path or array position is only that row\'s physical cell ordinal and is not a column identity when gridSpan or gridBefore is present. In a vertical merge, restart begins one logical cell and a continue cell is not an independent row value: logicalText resolves the restart cell value while text remains the physical cell value. Use docx_read_object when one exact object needs a narrower descendant view. The provider reports physical structure only; the Agent decides template and business meaning.',
+    description: 'Read one explicit native DOCX table. Provide output to retain every remaining row with full paragraph and text-node detail. Set returnContent true to also receive the largest compact inline page within the response limit; these channels are independent and at least one is required. retainedRowCount counts artifact rows and returnedRowCount counts inline rows. When remaining is nonzero, continue only by passing receipt.nextContinuation unchanged in the next call; a continuation page depends on the preceding receipt and cannot be predicted or read in parallel. Match columns by gridColumnStart, not tc position. A vertical-merge restart owns one logical value; a continue cell points to verticalMergeOwner and does not repeat that value inline.',
     inputSchema: inputContract('docx_read_table'),
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -478,7 +479,7 @@ const tools = [
   {
     name: 'docx_replace_content_from_source',
     effectKind: 'document-mutation',
-    description: 'Replace existing target paragraph or table-cell content from explicitly selected native source cells, paragraphs, runs, text nodes, or exact text ranges while retaining target container formatting and table structure. For a source cell already returned by docx_read_table, select a Unicode-scalar range directly against its returned text; the provider retains every crossed native run, including superscript and subscript, without another descendant read. Consecutive run or text selections from one source paragraph form one target paragraph, and source paragraph boundaries remain paragraph boundaries. Use it after docx_fill_table_from_tables when the target needs selected source content instead of the whole source cell; pass returned addresses unchanged and never retype source-owned text. It does not copy source rows, cells, spans, or merges.',
+    description: 'Atomically replace one or more existing target paragraphs or cells with exactly the selected native source content. Select source cells, paragraphs, runs, text nodes, or Unicode-scalar text ranges; omitted content is omitted, while selected runs retain superscript, subscript, formulas, numbers, units, and symbols. This tool does not change table rows, spans, or merges.',
     inputSchema: inputContract('docx_replace_content_from_source'),
     outputSchema: fixedEditOutput('docx_replace_content_from_source'),
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
@@ -500,19 +501,11 @@ const tools = [
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
-    name: 'docx_set_table_body',
+    name: 'docx_set_table',
     effectKind: 'document-mutation',
-    description: 'Atomically replace one exact current target-table row range while retaining the table, target styles, grid widths, and all rows and surrounding content outside the range. When retaining leading rows reported with repeatHeader=true, existingRows starts after all of them and never at a verticalMerge=continue row. Name every target grid column in native order and choose one current row inside existingRows as the style prototype for each final row. Horizontal spans use contiguous column IDs. Set rowSpan on one logical cell to occupy multiple rows and omit those columns from the covered rows; the provider writes native vertical merge cells. Set cantSplit on a final physical row when it must remain whole across page boundaries; omit it to preserve the prototype row property. Every other grid column remains explicit. Every explicit cell includes an already-derived value; source-owned content is not retyped here. An empty final row array removes the range when another table row remains. The provider commits once and returns structural readback. It does not read source tables, map source to target, derive text, choose business columns, identify headers, or accept non-text cell content; use docx_fill_table_from_tables and docx_replace_content_from_source for source-owned table content.',
-    inputSchema: inputContract('docx_set_table_body'),
-    outputSchema: fixedEditOutput('docx_set_table_body'),
-    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
-  },
-  {
-    name: 'docx_fill_table_from_tables',
-    effectKind: 'document-mutation',
-    description: 'Fill one current target-table body from one or more explicitly ordered current source-table row ranges. For each source, select an unmerged record column when every physical source row must remain an output row; mapped columns still retain their native vertical merges. Select a merged record column only when every mapping into one target cell has one equal scalar value throughout that merge group. Map source grid columns onto every target prototype cell. The provider concatenates source records in declared order, copies each mapped source cell in full, preserves horizontal spans, rebuilds vertical merges only within each source range, validates the complete target grid, commits once, and returns structural readback. It does not discover source tables, choose source or target business meaning, filter records, translate or rewrite text, or apply business-specific rules. A single source uses the same sources array with one item. If a target needs only selected source descendants, such as one language from a bilingual cell, immediately use the returned target-cell addresses with docx_replace_content_from_source before releasing that source or reading back the completed target.',
-    inputSchema: inputContract('docx_fill_table_from_tables'),
-    outputSchema: fixedEditOutput('docx_fill_table_from_tables'),
+    description: 'Atomically replace one exact current target-table row range with a fully specified table body. Name every target grid column in native order. Each explicit cell occupies contiguous columns and may span logical rows; covered columns are omitted from following rows. Set each cell from either derived text or exact native source selections, never both. Native source selections retain run formatting such as superscript and subscript. The provider retains the target table, target cell styles, grid widths, and all content outside the replaced range, and exposes no intermediate document. It does not select source rows, map business columns, infer target shape, derive wording, or copy a source table wholesale.',
+    inputSchema: inputContract('docx_set_table'),
+    outputSchema: fixedEditOutput('docx_set_table'),
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
@@ -862,6 +855,34 @@ async function docxInspect(args) {
   };
 }
 
+function encodeTableContinuation(input, table, offset) {
+  return Buffer.from(JSON.stringify({
+    schema: 'tiwater.docx-table-continuation/v1',
+    input,
+    table,
+    offset,
+  })).toString('base64url');
+}
+
+function decodeTableContinuation(continuation, input, table) {
+  if (continuation === undefined) return 0;
+  let decoded;
+  try {
+    decoded = JSON.parse(Buffer.from(continuation, 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('invalid-docx-table-continuation');
+  }
+  if (decoded?.schema !== 'tiwater.docx-table-continuation/v1'
+      || decoded.input !== input
+      || decoded.table?.part !== table?.part
+      || decoded.table?.path !== table?.path
+      || !Number.isSafeInteger(decoded.offset)
+      || decoded.offset < 0) {
+    throw new Error('invalid-docx-table-continuation');
+  }
+  return decoded.offset;
+}
+
 async function docxObservation(tool, args) {
   const input = path.resolve(requireString(args.input, 'input'));
   const delivery = resultChannels(args);
@@ -956,18 +977,20 @@ async function docxObservation(tool, args) {
     }
     if (tool === 'docx_read_table') {
       const totalRowCount = payload.rows.length;
-      const offset = Math.min(args.offset ?? 0, totalRowCount);
-      const requestedLimit = args.limit ?? totalRowCount;
-      const selectedRows = payload.rows.slice(offset, offset + requestedLimit);
+      const offset = Math.min(decodeTableContinuation(args.continuation, input, args.table), totalRowCount);
+      const selectedRows = payload.rows.slice(offset);
       const selectedNextOffset = offset + selectedRows.length < totalRowCount
         ? offset + selectedRows.length
         : null;
       const selectedPageReceipt = {
         schema: 'tiwater.docx-table-page-receipt/v1',
         totalRowCount,
+        retainedRowCount: selectedRows.length,
         returnedRowCount: selectedRows.length,
         remaining: totalRowCount - offset - selectedRows.length,
-        ...(selectedNextOffset === null ? {} : { nextOffset: selectedNextOffset }),
+        ...(selectedNextOffset === null ? {} : {
+          nextContinuation: encodeTableContinuation(input, args.table, selectedNextOffset),
+        }),
       };
       const detailPage = {
         schema: 'tiwater.docx-table-detail-page/v1',
@@ -996,6 +1019,7 @@ async function docxObservation(tool, args) {
           followingParagraph: payload.followingParagraph,
           receipt: {
             ...selectedPageReceipt,
+            returnedRowCount: 0,
             detailPageRetained: true,
             narrowingRequired: false,
           },
@@ -1017,7 +1041,7 @@ async function docxObservation(tool, args) {
             verticalMerge: cell.verticalMerge,
             verticalMergeOwner: cell.verticalMergeOwner,
             text: cell.paragraphs.map(paragraph => paragraph.text).join('\n'),
-            logicalText: cell.logicalText,
+            logicalText: cell.verticalMerge === 'continue' ? '' : cell.logicalText,
           })),
         };
         const candidate = [...rows, row];
@@ -1027,15 +1051,19 @@ async function docxObservation(tool, args) {
         }
         rows.push(row);
       }
-      const nextOffset = !narrowingRequired && offset + rows.length < totalRowCount
+      const retainedRowCount = delivery.output === null ? rows.length : selectedRows.length;
+      const inlineNextOffset = offset + rows.length < totalRowCount
         ? offset + rows.length
         : null;
       const pageReceipt = {
         schema: 'tiwater.docx-table-page-receipt/v1',
         totalRowCount,
+        retainedRowCount,
         returnedRowCount: rows.length,
         remaining: totalRowCount - offset - rows.length,
-        ...(nextOffset === null ? {} : { nextOffset }),
+        ...(inlineNextOffset === null ? {} : {
+          nextContinuation: encodeTableContinuation(input, args.table, inlineNextOffset),
+        }),
       };
       return {
         ...withArtifact,
@@ -1049,7 +1077,7 @@ async function docxObservation(tool, args) {
         receipt: {
           ...pageReceipt,
           detailPageRetained: delivery.output !== null,
-          narrowingRequired,
+          narrowingRequired: delivery.output === null && narrowingRequired,
         },
         rows,
       };

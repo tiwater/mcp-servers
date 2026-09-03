@@ -5,27 +5,10 @@ using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace Dockit.Docx;
 
-public static class NativeTableBodyMutation
+internal static class NativeTableBodyMutation
 {
-    public const string Command = "docx_set_table_body";
     private const string MainStory = "/word/document.xml";
     private const string Word2010Namespace = "http://schemas.microsoft.com/office/word/2010/wordml";
-
-    public static int Run(string[] args)
-    {
-        if (args.Length != 1) throw new InvalidOperationException($"{Command} requires <request.json>");
-        var request = JsonSerializer.Deserialize<SetTableBodyRequest>(File.ReadAllText(args[0]), Json.Options)
-            ?? throw new InvalidOperationException("set-table-body-request-invalid");
-        var receipt = Apply(request);
-        Console.WriteLine(JsonSerializer.Serialize(new
-        {
-            tool = Command,
-            receipt = NativeMutationSupport.Describe(request.ReceiptOutput),
-            output = NativeMutationSupport.Describe(receipt.Output),
-            summary = new { pass = true, operationCount = 1, appliedCount = 1 },
-        }, Json.CamelCaseOptions));
-        return 0;
-    }
 
     public static SetTableBodyReceipt Apply(SetTableBodyRequest request)
     {
