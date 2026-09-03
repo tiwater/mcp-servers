@@ -174,11 +174,11 @@
       "name": "docx_replace_content_from_source",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_replace_content_from_source.schema.json",
-        "sha256": "04740981ad30190be4625ce3a2640b48abec02a9bc0eccc3e0e7d4fe40dbc6e0"
+        "sha256": "9e739afeeda64a6014f180f97667402e98a4b0c8a79a182d6a6ef7a1c5f31cff"
       },
       "inputContract": {
         "path": "office/contracts/docx_replace_content_from_source.schema.json",
-        "sha256": "04740981ad30190be4625ce3a2640b48abec02a9bc0eccc3e0e7d4fe40dbc6e0"
+        "sha256": "9e739afeeda64a6014f180f97667402e98a4b0c8a79a182d6a6ef7a1c5f31cff"
       }
     },
     {
@@ -207,11 +207,11 @@
       "name": "docx_set_table",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table.schema.json",
-        "sha256": "a99576434d3358b18bf006efa6f05ae5657aaf4bfc5f828fa6edc87306e98b8b"
+        "sha256": "d9a9f09ee3ca13764120bcf58e501a3edc508333b01aa4e6d299db8ba7bf2834"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table.schema.json",
-        "sha256": "a99576434d3358b18bf006efa6f05ae5657aaf4bfc5f828fa6edc87306e98b8b"
+        "sha256": "d9a9f09ee3ca13764120bcf58e501a3edc508333b01aa4e6d299db8ba7bf2834"
       }
     },
     {

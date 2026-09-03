@@ -71,7 +71,7 @@
                 },
                 "range": {
                   "type": "object",
-                  "description": "Optional Unicode-scalar substring of the selected object's observed text. For a cell, offsets use its docx_read_table text with one newline between direct paragraphs. The selected native runs and paragraph boundaries are retained. Omit it to copy the complete selected object.",
+                  "description": "Optional Unicode-scalar substring of the selected object's observed text. For a cell, offsets use its docx_read_table text with one newline between direct paragraphs. Length zero selects empty content and clears the target. The selected native runs and paragraph boundaries are retained. Omit it to copy the complete selected object.",
                   "properties": {
                     "start": {
                       "type": "integer",
@@ -80,7 +80,7 @@
                     },
                     "length": {
                       "type": "integer",
-                      "exclusiveMinimum": 0,
+                      "minimum": 0,
                       "maximum": 9007199254740991
                     }
                   },

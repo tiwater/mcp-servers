@@ -180,6 +180,12 @@ public static class NativeContentCopy
     {
         if (selection.Range is not null)
         {
+            if (selection.Range.Length == 0)
+            {
+                ValidateEmptyRange(element, selection.Range.Start);
+                activeInlineSourceParagraph = null;
+                return;
+            }
             if (element is TableCell or Paragraph)
             {
                 output.AddRange(ParagraphsForTextRange(
@@ -226,6 +232,21 @@ public static class NativeContentCopy
         }
     }
 
+    private static void ValidateEmptyRange(OpenXmlElement element, int start)
+    {
+        var length = element switch
+        {
+            TableCell cell => cell.Elements<Paragraph>().Sum(paragraph => ScalarLength(paragraph.InnerText))
+                + Math.Max(0, cell.Elements<Paragraph>().Count() - 1),
+            Paragraph paragraph => ScalarLength(paragraph.InnerText),
+            DocumentFormat.OpenXml.Wordprocessing.Run run => ScalarLength(run.InnerText),
+            Text text => ScalarLength(text.Text),
+            _ => throw new InvalidOperationException($"source-ref-kind-not-supported-for-content-copy: {element.LocalName}"),
+        };
+        if (start < 0 || start > length)
+            throw new InvalidOperationException("text-range-out-of-bounds");
+    }
+
     private static IReadOnlyList<Paragraph> ParagraphsForTextRange(
         OpenXmlElement element,
         int start,
@@ -239,8 +260,9 @@ public static class NativeContentCopy
         };
         var lengths = paragraphs.Select(paragraph => ScalarLength(paragraph.InnerText)).ToArray();
         var totalLength = lengths.Sum() + Math.Max(0, paragraphs.Length - 1);
-        if (start < 0 || length <= 0 || start > totalLength - length)
+        if (start < 0 || length < 0 || start > totalLength - length)
             throw new InvalidOperationException("text-range-out-of-bounds");
+        if (length == 0) return Array.Empty<Paragraph>();
 
         var end = start + length;
         var cursor = 0;
@@ -364,7 +386,7 @@ public static class NativeContentCopy
     private static string SliceScalars(string value, int start, int length)
     {
         var runes = value.EnumerateRunes().ToArray();
-        if (start < 0 || length <= 0 || start > runes.Length - length)
+        if (start < 0 || length < 0 || start > runes.Length - length)
             throw new InvalidOperationException("text-range-out-of-bounds");
         var builder = new StringBuilder();
         foreach (var rune in runes.Skip(start).Take(length)) builder.Append(rune.ToString());

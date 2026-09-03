@@ -1017,6 +1017,19 @@ void RunNativeInlineSelectionComposition()
                     },
                 },
             },
+            new
+            {
+                target = CellAt(targetTable, 5, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = new[]
+                {
+                    new
+                    {
+                        address = sourceCell.GetProperty("address").Clone(),
+                        range = new { start = 0, length = 0 },
+                    },
+                },
+            },
         },
         output = target,
         receiptOutput = Path.Combine(root, "native-inline-selection-receipt.json")
@@ -1045,6 +1058,8 @@ void RunNativeInlineSelectionComposition()
             && multiParagraphCell.GetProperty("paragraphs")[0].GetProperty("text").GetString() == expectedInline
             && multiParagraphCell.GetProperty("paragraphs")[1].GetProperty("text").GetString() == "second paragraph",
         "selections from distinct source paragraphs lost their paragraph boundary");
+    Require(CellAt(result, 5, 0).GetProperty("logicalText").GetString() == string.Empty,
+        "zero-length native selection did not clear the target");
     RunInput("validate-openxml", target);
     Console.WriteLine("PASS native inline selection composition");
 }
@@ -1205,7 +1220,8 @@ void CreateNativeInlineSelectionTargetDocument(string path)
         new TableRow(Cell("text target")),
         new TableRow(Cell("range target")),
         new TableRow(Cell("paragraph target")),
-        new TableRow(Cell("cell range target")))));
+        new TableRow(Cell("cell range target")),
+        new TableRow(Cell("empty range target")))));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();
 }
