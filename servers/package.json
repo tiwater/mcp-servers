@@ -1,7 +1,7 @@
 {
   "name": "@tiwater/office-mcp",
-  "version": "0.21.29",
-  "description": "Published MCP distribution for independent Tiwater Office and PDF document capabilities",
+  "version": "0.21.30",
+  "description": "Published MCP distribution for independent Tiwater Office, PDF, and Text document capabilities",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -11,7 +11,8 @@
   },
   "bin": {
     "tiwater-office-mcp": "office/index.mjs",
-    "tiwater-pdf-mcp": "pdf/index.mjs"
+    "tiwater-pdf-mcp": "pdf/index.mjs",
+    "tiwater-text-mcp": "text/index.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -28,7 +29,12 @@
     "office/contracts/*.schema.json",
     "pdf/index.mjs",
     "pdf/README.md",
-    "pdf/contracts/*.json"
+    "pdf/contracts/*.json",
+    "text/index.mjs",
+    "text/observation.mjs",
+    "text/README.md",
+    "text/contracts/tiwater-text-provider-contract-manifest-v1.json",
+    "text/contracts/*.schema.json"
   ],
   "publishConfig": {
     "access": "public"

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.text-mcp-input/text_inspect/v1",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "read"
+    },
+    "returnContent": {
+      "type": "boolean",
+      "description": "Return the complete bounded inspection directly."
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New immutable JSON artifact path for the complete inspection.",
+      "x-tiwater-file-role": "write"
+    }
+  },
+  "required": ["input", "returnContent", "output"],
+  "additionalProperties": false
+}

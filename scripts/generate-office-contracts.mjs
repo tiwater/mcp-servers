@@ -61,3 +61,43 @@ const manifest = {
 };
 await writeFile(path.join(outputRoot, manifestName), `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`Generated ${contracts.length} Office MCP input contracts from provider-owned schemas.`);
+
+const textSourceRoot = path.join(repoRoot, 'servers', 'text', 'provider-contracts');
+const textOutputRoot = path.join(repoRoot, 'servers', 'text', 'contracts');
+await mkdir(textOutputRoot, { recursive: true });
+const textContracts = [];
+for (const name of (await readdir(textSourceRoot)).filter(name => name.endsWith('.schema.json')).sort()) {
+  const source = path.join(textSourceRoot, name);
+  const bytes = await readFile(source);
+  JSON.parse(bytes.toString('utf8'));
+  textContracts.push({ name, toolName: name.slice(0, -'.schema.json'.length), bytes, hash: sha256(bytes) });
+}
+const expectedTextFiles = new Set(textContracts.map(contract => contract.name));
+for (const name of await readdir(textOutputRoot)) {
+  if (name.endsWith('.schema.json') && !expectedTextFiles.has(name)) {
+    await unlink(path.join(textOutputRoot, name));
+  }
+}
+for (const contract of textContracts) {
+  await writeFile(path.join(textOutputRoot, contract.name), contract.bytes);
+}
+const textManifest = {
+  schema: 'tiwater.text-provider-contract-manifest/v1',
+  provider: { id: packageJson.name, version: packageJson.version },
+  tools: textContracts.map(contract => ({
+    name: contract.toolName,
+    providerContract: {
+      source: `servers/text/provider-contracts/${contract.name}`,
+      sha256: contract.hash,
+    },
+    inputContract: {
+      path: `text/contracts/${contract.name}`,
+      sha256: contract.hash,
+    },
+  })),
+};
+await writeFile(
+  path.join(textOutputRoot, 'tiwater-text-provider-contract-manifest-v1.json'),
+  `${JSON.stringify(textManifest, null, 2)}\n`,
+);
+console.log(`Generated ${textContracts.length} Text MCP input contracts from provider-owned schemas.`);
