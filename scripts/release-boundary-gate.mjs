@@ -740,7 +740,7 @@ function checkSourceBoundObservationOutputs(tools) {
   }
   const largeResultNames = [
     'docx_compare', 'docx_export_json', 'docx_validate', 'docx_validate_font_policy',
-    'docx_validate_toc_style_policy', 'xlsx_inspect', 'xlsx_export_json', 'xlsx_validate',
+    'docx_validate_toc_style_policy', 'xlsx_inspect', 'xlsx_export_json', 'xlsx_read_range', 'xlsx_validate',
     'pptx_inspect', 'pptx_export_json', 'pptx_validate',
   ];
   for (const name of largeResultNames) {
@@ -761,7 +761,7 @@ function checkLargeResultChannels(tools) {
   const check = 'large-result-channels';
   const names = [
     'docx_compare', 'docx_export_json', 'docx_validate', 'docx_validate_font_policy',
-    'docx_validate_toc_style_policy', 'xlsx_inspect', 'xlsx_export_json', 'xlsx_validate',
+    'docx_validate_toc_style_policy', 'xlsx_inspect', 'xlsx_export_json', 'xlsx_read_range', 'xlsx_validate',
     'pptx_inspect', 'pptx_export_json', 'pptx_validate',
   ];
   for (const name of names) {
@@ -833,6 +833,38 @@ function checkDocxMergedCellDescriptions(tools) {
     fail(check, 'docx_set_table_body does not expose one logical row-span input');
   }
   note('DOCX table reads expose native merges while the body helper accepts logical row spans');
+}
+
+function checkXlsxRangeReadContract(tools) {
+  const check = 'xlsx-range-read-contract';
+  const tool = tools.find(entry => entry?.name === 'xlsx_read_range');
+  const input = tool?.inputSchema;
+  const output = tool?.outputSchema;
+  const page = output?.properties?.content;
+  const summary = output?.properties?.summary;
+  const description = tool?.description || '';
+  if (!['input', 'sheet', 'range', 'limit', 'returnContent'].every(name => input?.required?.includes(name))
+      || input?.properties?.range?.type !== 'string'
+      || input?.properties?.offset?.minimum !== 0
+      || input?.properties?.limit?.minimum !== 1
+      || input?.properties?.limit?.maximum !== 256) {
+    fail(check, 'xlsx_read_range does not require one explicit native range and bounded cell page');
+  }
+  if (page?.properties?.cells?.type !== 'array'
+      || page?.properties?.cells?.maxItems !== 256
+      || page?.properties?.cells?.items?.properties?.physical?.type !== 'boolean'
+      || page?.properties?.cells?.items?.properties?.mergeOwner?.anyOf?.length !== 2
+      || summary?.properties?.remaining?.type !== 'integer'
+      || summary?.properties?.nextOffset?.anyOf?.length !== 2) {
+    fail(check, 'xlsx_read_range output does not expose bounded native cell facts and continuation');
+  }
+  if (!description.includes('row-major cell offset')
+      || !description.includes('physical presence')
+      || !description.includes('remaining cells and the next offset')
+      || !description.includes('does not infer regions, headers, records, field meanings, or business mappings')) {
+    fail(check, 'xlsx_read_range does not publish its native paging semantics and semantic non-goals');
+  }
+  note('XLSX range reads expose one bounded native cell page without business inference');
 }
 
 function checkDocxTableStreamingContract(tools) {
@@ -979,6 +1011,7 @@ async function main() {
     const toolNames = await smokeInstalledPackage(archive, tempRoot);
     checkSourceBoundObservationOutputs(toolNames);
     checkLargeResultChannels(toolNames);
+    checkXlsxRangeReadContract(toolNames);
     checkDocxMergedCellDescriptions(toolNames);
     checkDocxTableStreamingContract(toolNames);
     checkDocxTableIndexContract(toolNames);

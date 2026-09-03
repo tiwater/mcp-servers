@@ -202,6 +202,67 @@ const xlsxInspectionSummary = z.object({
   }).strict()).max(6),
 }).strict();
 
+const xlsxRangePageSummary = z.object({
+  schema: z.literal('tiwater.xlsx-range-page-receipt/v1'),
+  totalCellCount: z.number().int().nonnegative(),
+  returnedCellCount: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+  nextOffset: z.number().int().nonnegative().nullable(),
+}).strict();
+
+const xlsxRangePage = z.object({
+  schema: z.literal('tiwater.xlsx-range-page/v1'),
+  toolVersion: z.string(),
+  file: z.string(),
+  inputSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  sheet: z.string(),
+  range: z.string(),
+  receipt: xlsxRangePageSummary,
+  cells: z.array(z.object({
+    reference: z.string(),
+    row: z.number().int().positive(),
+    column: z.number().int().positive(),
+    physical: z.boolean(),
+    rawValue: z.string().nullable(),
+    formattedValue: z.string().nullable(),
+    valueType: z.string().nullable(),
+    normalizedValue: z.object({ kind: z.string(), iso8601: z.string().nullable() }).strict().nullable(),
+    formula: z.object({
+      text: z.string(),
+      type: z.string().nullable(),
+      sharedIndex: z.number().int().nonnegative().nullable(),
+      reference: z.string().nullable(),
+    }).strict().nullable(),
+    style: z.object({
+      styleIndex: z.number().int().nonnegative(),
+      numberFormatId: z.number().int().nonnegative(),
+      numberFormatCode: z.string().nullable(),
+      fontId: z.number().int().nonnegative(),
+      fillId: z.number().int().nonnegative(),
+      borderId: z.number().int().nonnegative(),
+      horizontalAlignment: z.string().nullable(),
+      verticalAlignment: z.string().nullable(),
+      wrapText: z.boolean(),
+      bold: z.boolean(),
+    }).strict().nullable(),
+    richTextRuns: z.array(z.object({
+      text: z.string(),
+      fontName: z.string().nullable(),
+      color: z.string().nullable(),
+      underline: z.string().nullable(),
+      bold: z.boolean(),
+      italic: z.boolean(),
+    }).strict()).nullable(),
+    mergedRange: z.string().nullable(),
+    mergeOwner: z.string().nullable(),
+  }).strict()).max(256),
+}).strict();
+
+const xlsxRangeReadOutput = largeResultOutput('xlsx_read_range').extend({
+  summary: xlsxRangePageSummary,
+  content: xlsxRangePage.optional(),
+}).strict();
+
 const pptxInspectionSummary = z.object({
   slideCount: z.number().int().nonnegative(),
   masterCount: z.number().int().nonnegative(),
@@ -579,6 +640,14 @@ const tools = [
     outputSchema: largeResultOutput('xlsx_export_json'),
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: xlsxExportJson,
+  },
+  {
+    name: 'xlsx_read_range',
+    description: 'Read one explicit native A1 cell or rectangular range from one current XLSX worksheet. Pages use a row-major cell offset and return physical presence, raw and formatted values, normalized value type, formula metadata, style, rich text, and merged-range ownership. The receipt always reports remaining cells and the next offset. Continue only when another selected cell is needed. Set returnContent true to return the selected page when it fits the response limit. Provide output to store the same complete selected page as an immutable artifact. These channels are independent and may be used together; at least one is required. This tool does not infer regions, headers, records, field meanings, or business mappings; convert legacy XLS before reading Open XML cells.',
+    inputSchema: inputContract('xlsx_read_range'),
+    outputSchema: xlsxRangeReadOutput,
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: xlsxReadRange,
   },
   ...fixedToolDefinitions(xlsxFixedTools),
   {
@@ -1200,6 +1269,21 @@ async function xlsxExportJson(args) {
   }
   const result = await runJsonCandidateChain(xlsxCandidates, cmdArgs);
   return deliverLargeJsonResult({ tool: 'xlsx_export_json', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
+}
+
+async function xlsxReadRange(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  return withTempJsonFile(args, async requestPath => {
+    const result = await runJsonCandidateChain(xlsxCandidates, ['xlsx_read_range', requestPath]);
+    return deliverLargeJsonResult({
+      tool: 'xlsx_read_range',
+      args,
+      runtime: commandRuntime(result),
+      payload: result.json,
+      sourcePaths: [input],
+      summary: result.json.receipt,
+    });
+  });
 }
 
 async function xlsxValidate(args) {
