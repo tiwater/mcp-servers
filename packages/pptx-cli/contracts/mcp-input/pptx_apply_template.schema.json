@@ -93,7 +93,7 @@
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "New PPTX output path. Existing files are never overwritten.",
+      "description": "Output PPTX path; may equal input for an atomic in-place update.",
       "x-tiwater-file-role": "write"
     },
     "receiptOutput": {

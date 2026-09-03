@@ -10,7 +10,7 @@
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "New document output path. Existing files are never overwritten.",
+      "description": "Output document path; may equal input for an atomic in-place update.",
       "x-tiwater-file-role": "write"
     },
     "receiptOutput": {

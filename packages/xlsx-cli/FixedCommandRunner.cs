@@ -40,6 +40,7 @@ public static class FixedCommandRunner
         string? output = null;
         string? receiptOutput = null;
         Artifact? inputArtifact = null;
+        var inPlace = false;
 
         try
         {
@@ -48,12 +49,11 @@ public static class FixedCommandRunner
             var input = RequirePath(root, "input");
             output = RequirePath(root, "output");
             receiptOutput = RequirePath(root, "receiptOutput");
-            RequireNewPath(output, "output");
+            inPlace = PathsEqual(output, input);
+            if (!inPlace) RequireNewPath(output, "output");
             RequireNewPath(receiptOutput, "receiptOutput");
             if (PathsEqual(output, receiptOutput))
                 throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
-            if (PathsEqual(output, input))
-                throw new InvalidOperationException("output-must-not-overwrite-input");
 
             var changes = RequireChanges(root);
             if (changes.Count == 0)
@@ -73,7 +73,7 @@ public static class FixedCommandRunner
                 && editResult.AppliedOperations.All(operation => operation.Applied)
                 && File.Exists(output);
             var outputArtifact = pass ? Describe(output) : null;
-            if (!pass && File.Exists(output)) File.Delete(output);
+            if (!pass && !inPlace && File.Exists(output)) File.Delete(output);
 
             var receiptPayload = new
             {
@@ -103,7 +103,7 @@ public static class FixedCommandRunner
         }
         catch (Exception error)
         {
-            if (output is not null && File.Exists(output)) File.Delete(output);
+            if (!inPlace && output is not null && File.Exists(output)) File.Delete(output);
 
             if (receiptOutput is not null && !File.Exists(receiptOutput))
             {
