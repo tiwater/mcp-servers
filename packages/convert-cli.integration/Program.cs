@@ -9,6 +9,20 @@ if (args is ["--merge-probe", var sourcePath, var refreshedPath, var outputPath]
     return 0;
 }
 
+if (args is ["--inline-boundary-probe", var probeRoot])
+{
+    Directory.CreateDirectory(probeRoot);
+    var inlineSourcePath = Path.Combine(probeRoot, "inline-source.docx");
+    var inlineRefreshedPath = Path.Combine(probeRoot, "inline-refreshed.docx");
+    var inlineOutputPath = Path.Combine(probeRoot, "inline-output.docx");
+    CreateDocxPackage(inlineSourcePath, InlineBoundarySource(), TocStyles());
+    CreateDocxPackage(inlineRefreshedPath, InlineBoundaryRefreshed(), TocStyles());
+    DocxFieldResultMerger.Merge(inlineSourcePath, inlineRefreshedPath, inlineOutputPath);
+    VerifyInlineBoundary(inlineOutputPath);
+    Console.WriteLine("inline field boundary integration passed");
+    return 0;
+}
+
 var root = Path.Combine(Path.GetTempPath(), "tiwater-convert-integration-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
@@ -131,6 +145,45 @@ static string RefreshedTocDocument() => """
   <w:p w14:paraId="HEAD0003"><w:pPr><w:pStyle w:val="HeadingThree"/></w:pPr><w:bookmarkStart w:id="42" w:name="_TocFresh3"/><w:r><w:t>Nested heading</w:t></w:r><w:bookmarkEnd w:id="42"/></w:p>
 </w:body></w:document>
 """;
+
+static string InlineBoundarySource() => """
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="SourceBoundary"/></w:pPr><w:bookmarkStart w:id="90" w:name="_TocOutsideBefore"/><w:bookmarkEnd w:id="90"/><w:r><w:rPr><w:b/></w:rPr><w:t>BEFORE</w:t><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> TOC \c "Figure" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>OLD RESULT</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/><w:t>AFTER</w:t></w:r><w:bookmarkStart w:id="91" w:name="_TocOutsideAfter"/><w:bookmarkEnd w:id="91"/></w:p>
+</w:body></w:document>
+""";
+
+static string InlineBoundaryRefreshed() => """
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="RefreshedBoundary"/></w:pPr><w:r><w:rPr><w:i/></w:rPr><w:t>WPS BEFORE</w:t><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> TOC \c "Figure" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>NEW RESULT</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/><w:t>WPS AFTER</w:t></w:r></w:p>
+</w:body></w:document>
+""";
+
+static void VerifyInlineBoundary(string path)
+{
+    XNamespace w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    var document = XDocument.Parse(ReadPart(path, "word/document.xml"));
+    var paragraph = document.Descendants(w + "p").Single();
+    var text = string.Concat(paragraph.Descendants(w + "t").Select(element => element.Value));
+    Require(text == "BEFORENEW RESULTAFTER", "field merge did not replace only the inline result boundary");
+    Require((string?)paragraph.Element(w + "pPr")?.Element(w + "pStyle")?.Attribute(w + "val") == "SourceBoundary",
+        "field merge replaced the source boundary paragraph properties");
+    Require(paragraph.Elements(w + "r").Single(run => run.Elements(w + "t").Any(text => text.Value == "BEFORE"))
+            .Element(w + "rPr")?.Element(w + "b") is not null,
+        "field merge lost source run formatting before an inline field boundary");
+    Require(paragraph.Descendants(w + "fldChar")
+            .Single(element => (string?)element.Attribute(w + "fldCharType") == "begin")
+            .Parent?.Element(w + "rPr")?.Element(w + "i") is not null,
+        "field merge lost refreshed run formatting at an inline field boundary");
+    Require(paragraph.Elements(w + "bookmarkStart").Select(element => (string?)element.Attribute(w + "name"))
+            .SequenceEqual(["_TocOutsideBefore", "_TocOutsideAfter"]),
+        "field merge removed source bookmarks outside the field boundary");
+    Require(paragraph.Elements(w + "bookmarkEnd").Count() == 2,
+        "field merge removed source bookmark ends outside the field boundary");
+    Require(!text.Contains("OLD RESULT", StringComparison.Ordinal)
+            && !text.Contains("WPS BEFORE", StringComparison.Ordinal)
+            && !text.Contains("WPS AFTER", StringComparison.Ordinal),
+        "field merge retained content outside the selected refreshed field boundary");
+}
 
 static void VerifyTemplateTocStyles(string path)
 {
