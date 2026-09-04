@@ -30,6 +30,7 @@ import {
   effectKindMetadata,
 } from '../_shared/effect-kind.mjs';
 import { compactDocxObjectIdentity } from './docx-object-identity.mjs';
+import { resolveFileBackedChanges } from './file-backed-changes.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const inputContractManifest = JSON.parse(await readFile(
@@ -591,10 +592,10 @@ const tools = [
   {
     name: 'docx_replace_content_from_source',
     effectKind: 'document-mutation',
-    description: 'Atomically replace one or more existing target paragraphs or cells with exactly the selected native source content. Select source cells, paragraphs, runs, text nodes, or Unicode-scalar text ranges; omitted content is omitted, while selected runs retain superscript, subscript, formulas, numbers, units, and symbols. This tool does not change table rows, spans, or merges.',
+    description: 'Atomically replace one or more existing target paragraphs or cells with exactly the selected native source content. Pass small batches in changes or keep a large batch out of the tool call by putting the same changes array in changesInput. Select source cells, paragraphs, runs, text nodes, or Unicode-scalar text ranges; omitted content is omitted, while selected runs retain superscript, subscript, formulas, numbers, units, and symbols. This tool does not change table rows, spans, or merges.',
     inputSchema: inputContract('docx_replace_content_from_source'),
     outputSchema: fixedEditOutput('docx_replace_content_from_source'),
-    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
+    handler: async (args, tool) => fixedEdit(tool, await resolveFileBackedChanges(args), docxCandidates),
   },
   {
     name: 'docx_set_text',
