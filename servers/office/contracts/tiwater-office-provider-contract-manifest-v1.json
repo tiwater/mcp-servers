@@ -218,11 +218,11 @@
       "name": "docx_set_table",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_table.schema.json",
-        "sha256": "d04c40174ce3427689c970b26dd3a282f9d9f6889e4c5ac737eca5926ef709b9"
+        "sha256": "578f549f5f331631d77b904eb60a24a4f5c89841ddd013c19629c07af3748a8b"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_table.schema.json",
-        "sha256": "d04c40174ce3427689c970b26dd3a282f9d9f6889e4c5ac737eca5926ef709b9"
+        "sha256": "578f549f5f331631d77b904eb60a24a4f5c89841ddd013c19629c07af3748a8b"
       }
     },
     {
