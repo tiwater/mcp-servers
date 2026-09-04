@@ -2406,7 +2406,7 @@ void CreateContentReplacementTargetDocument(string path)
         new TableProperties(),
         new TableGrid(new GridColumn { Width = "2000" }, new GridColumn { Width = "2000" }),
         new TableRow(Cell("项目"), Cell("结果")),
-        new TableRow(Cell("占位", merge: MergedCellValues.Restart), Cell("占位结果")),
+        new TableRow(CellWithSimpleField("占位", merge: MergedCellValues.Restart), Cell("占位结果")),
         new TableRow(Cell("", merge: MergedCellValues.Continue), Cell("保留")));
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
@@ -2447,6 +2447,15 @@ TableCell Cell(string text, int span = 1, MergedCellValues? merge = null)
     if (span > 1) properties.Append(new GridSpan { Val = span });
     if (merge is not null) properties.Append(new VerticalMerge { Val = merge.Value });
     return new TableCell(properties, new Paragraph(new Run(new Text(text))));
+}
+
+TableCell CellWithSimpleField(string text, int span = 1, MergedCellValues? merge = null)
+{
+    var properties = new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "1200" });
+    if (span > 1) properties.Append(new GridSpan { Val = span });
+    if (merge is not null) properties.Append(new VerticalMerge { Val = merge.Value });
+    return new TableCell(properties, new Paragraph(
+        new SimpleField(new Run(new Text(text))) { Instruction = " PAGE " }));
 }
 
 TableCell CellWithSuperscript(string text, string superscript)

@@ -90,9 +90,6 @@ internal static class NativeTableBodyMutation
         var prototypeRows = prototypeRefs.Select(item => Resolve<TableRow>(document, item, "rows.prototypeRow")).ToArray();
         if (prototypeRows.Any(row => !selectedRows.Contains(row)))
             throw new InvalidOperationException("prototypeRow-must-be-within-existingRows");
-        foreach (var prototype in prototypeRows)
-        foreach (var cell in prototype.Elements<TableCell>())
-            NativeMutationSupport.RequirePlainTextContainer(cell);
 
         var idToColumn = request.Columns.Select((column, index) => (column.Id, index))
             .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
