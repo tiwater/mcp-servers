@@ -28,6 +28,12 @@ public static class NativeTextMutation
     public static SetTextReceipt Apply(SetTextRequest request)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
+        for (var index = 0; index < request.Changes.Count; index++)
+        {
+            var change = request.Changes[index];
+            if (change.FontName is not null && (string.IsNullOrWhiteSpace(change.FontName) || change.Text.Length == 0))
+                throw new InvalidOperationException($"font-name-requires-nonempty-text: changes[{index}]");
+        }
         var addresses = request.Changes.Select(change => change.Target).ToArray();
         var duplicate = request.Changes
             .Select((change, index) => new { change.Target, Index = index })
@@ -73,7 +79,7 @@ public static class NativeTextMutation
                 for (var index = 0; index < resolved.Count; index++)
                 {
                     var target = Observation.ResolveNativePath(output, resolved[index].StoryPart, resolved[index].NativePath);
-                    SetText(target, request.Changes[index].Text);
+                    SetText(target, request.Changes[index].Text, request.Changes[index].FontName);
                 }
                 SaveChangedStories(output, resolved.Select(item => item.StoryPart));
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
@@ -89,12 +95,18 @@ public static class NativeTextMutation
                     return new SetTextReadback(
                         item.Address,
                         item.Kind,
-                        text);
+                        text,
+                        ReadFontName(target));
                 }).ToArray();
             }
             for (var index = 0; index < readback.Count; index++)
+            {
                 if (!StringComparer.Ordinal.Equals(readback[index].Text, request.Changes[index].Text))
                     throw new InvalidOperationException("output-readback-content-mismatch");
+                if (request.Changes[index].FontName is not null
+                    && !StringComparer.Ordinal.Equals(readback[index].FontName, request.Changes[index].FontName))
+                    throw new InvalidOperationException("output-readback-font-mismatch");
+            }
             var receipt = new SetTextReceipt(
                 "tiwater.docx-set-text-receipt/v1",
                 "tiwater.docx.cli",
@@ -111,7 +123,7 @@ public static class NativeTextMutation
         }
     }
 
-    internal static void SetText(OpenXmlElement target, string text)
+    internal static void SetText(OpenXmlElement target, string text, string? fontName = null)
     {
         switch (target)
         {
@@ -122,6 +134,7 @@ public static class NativeTextMutation
                 foreach (var child in paragraph.ChildElements
                              .Where(child => child is DocumentFormat.OpenXml.Wordprocessing.Run or ProofError).ToArray())
                     child.Remove();
+                if (fontName is not null) ApplyFontName(runProperties ??= new RunProperties(), fontName);
                 var replacementRun = TextRun(runProperties, text);
                 if (replacementRun is not null)
                     paragraph.InsertAt(replacementRun, Math.Min(insertionIndex, paragraph.ChildElements.Count));
@@ -143,6 +156,7 @@ public static class NativeTextMutation
                 var replacement = new Paragraph();
                 if (paragraphProperties is not null) replacement.Append((ParagraphProperties)paragraphProperties.CloneNode(true));
                 foreach (var bookmark in bookmarkStarts) replacement.Append(bookmark);
+                if (fontName is not null) ApplyFontName(cellRunProperties ??= new RunProperties(), fontName);
                 AppendText(replacement, cellRunProperties, text);
                 foreach (var bookmark in bookmarkEnds) replacement.Append(bookmark);
                 cell.Append(replacement);
@@ -150,6 +164,31 @@ public static class NativeTextMutation
             default:
                 throw new InvalidOperationException("target-ref-must-be-paragraph-or-cell");
         }
+    }
+
+    private static void ApplyFontName(RunProperties properties, string? fontName)
+    {
+        if (fontName is null) return;
+        if (string.IsNullOrWhiteSpace(fontName)) throw new InvalidOperationException("font-name-must-not-be-empty");
+        var fonts = properties.RunFonts ?? new RunFonts();
+        fonts.Ascii = fontName;
+        fonts.HighAnsi = fontName;
+        fonts.ComplexScript = fontName;
+        if (fonts.Parent is null) properties.AddChild(fonts, true);
+    }
+
+    private static string? ReadFontName(OpenXmlElement target)
+    {
+        var runs = target.Descendants<Run>().Where(run => !string.IsNullOrEmpty(run.InnerText)).ToArray();
+        if (runs.Length == 0) return null;
+        var names = runs.Select(run =>
+        {
+            var fonts = run.RunProperties?.RunFonts;
+            return fonts?.Ascii?.Value is { } ascii
+                && StringComparer.Ordinal.Equals(fonts.HighAnsi?.Value, ascii)
+                && StringComparer.Ordinal.Equals(fonts.ComplexScript?.Value, ascii) ? ascii : null;
+        }).Distinct(StringComparer.Ordinal).ToArray();
+        return names.Length == 1 ? names[0] : null;
     }
 
     private static void AppendText(OpenXmlCompositeElement parent, RunProperties? properties, string text)
@@ -200,9 +239,9 @@ public static class NativeTextMutation
         => uri.OriginalString.StartsWith("/", StringComparison.Ordinal) ? uri.OriginalString : "/" + uri.OriginalString;
 }
 
-public sealed record SetTextChange(DocxObjectAddress Target, string Text);
+public sealed record SetTextChange(DocxObjectAddress Target, string Text, string? FontName = null);
 public sealed record SetTextRequest(string Input, IReadOnlyList<SetTextChange> Changes, string Output, string ReceiptOutput);
-public sealed record SetTextReadback(DocxObjectAddress Address, string Kind, string Text);
+public sealed record SetTextReadback(DocxObjectAddress Address, string Kind, string Text, string? FontName);
 public sealed record SetTextReceipt(
     string Schema,
     string Provider,

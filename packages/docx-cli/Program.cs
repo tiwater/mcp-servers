@@ -26,6 +26,7 @@ public static class Cli
         NativeContentCopy.Command,
         NativeTextMutation.Command,
         NativeParagraphPaginationMutation.Command,
+        NativeTableWidthMutation.Command,
         NativeObjectMutation.InsertCommand,
         NativeObjectMutation.DeleteCommand,
         NativeCellMutation.MergeCommand,
@@ -87,6 +88,8 @@ public static class Cli
                 _ when args[0] == NativeTextMutation.Command => Task.FromResult(NativeTextMutation.Run(args[1..])),
                 _ when args[0] == NativeParagraphPaginationMutation.Command
                     => Task.FromResult(NativeParagraphPaginationMutation.Run(args[1..])),
+                _ when args[0] == NativeTableWidthMutation.Command
+                    => Task.FromResult(NativeTableWidthMutation.Run(args[1..])),
                 _ when args[0] is NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                     => Task.FromResult(NativeObjectMutation.Run(args[0], args[1..])),
                 _ when args[0] is NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
@@ -194,6 +197,7 @@ public static class Cli
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
             _ when ObservationCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
             _ when command is NativeContentCopy.Command or NativeTextMutation.Command or NativeParagraphPaginationMutation.Command
+                or NativeTableWidthMutation.Command
                 or NativeDocumentCreate.Command
                 or NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                 or NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand

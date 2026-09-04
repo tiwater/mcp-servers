@@ -34,6 +34,11 @@
           },
           "text": {
             "type": "string"
+          },
+          "fontName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional Latin and complex-script font family for the replacement run. East Asian font settings remain inherited from the target."
           }
         },
         "required": [

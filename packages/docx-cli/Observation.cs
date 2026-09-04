@@ -196,7 +196,20 @@ public static class Observation
         var context = TableContext(snapshot,
             snapshot.Objects.Single(item => item.Address == selected.Address));
         return new DocxTableReadResult("tiwater.docx-table-read/v2", address, rows.Length,
-            columnCount, gridColumns, context.PrecedingParagraph, context.FollowingParagraph, rows);
+            columnCount, TableWidthValue(table), gridColumns, context.PrecedingParagraph, context.FollowingParagraph, rows);
+    }
+
+    internal static DocxTableWidth? TableWidthValue(Table table)
+    {
+        var width = table.GetFirstChild<TableProperties>()?.TableWidth;
+        if (width?.Type?.Value is null || string.IsNullOrWhiteSpace(width.Width?.Value)) return null;
+        var nativeType = width.Type.Value;
+        var type = nativeType == TableWidthUnitValues.Dxa ? "dxa"
+            : nativeType == TableWidthUnitValues.Pct ? "pct"
+            : nativeType == TableWidthUnitValues.Auto ? "auto"
+            : nativeType == TableWidthUnitValues.Nil ? "nil"
+            : nativeType.ToString().ToLowerInvariant();
+        return new DocxTableWidth(type, width.Width.Value);
     }
 
     private static DocxTableContext TableContext(Snapshot snapshot, NativeObject table)
@@ -786,6 +799,7 @@ public sealed record DocxTableReadResult(
     [property: JsonPropertyName("address")] DocxObjectAddress Address,
     [property: JsonPropertyName("rowCount")] int RowCount,
     [property: JsonPropertyName("columnCount")] int ColumnCount,
+    [property: JsonPropertyName("tableWidth")] DocxTableWidth? TableWidth,
     [property: JsonPropertyName("gridColumns")] IReadOnlyList<DocxTableReadGridColumn> GridColumns,
     [property: JsonPropertyName("precedingParagraph")] DocxTableContextParagraph? PrecedingParagraph,
     [property: JsonPropertyName("followingParagraph")] DocxTableContextParagraph? FollowingParagraph,

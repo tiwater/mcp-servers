@@ -497,6 +497,10 @@ const docxTableReadOutput = docxObservationOutput('docx_read_table').extend({
   address: docxAddress,
   rowCount: z.number().int().nonnegative(),
   columnCount: z.number().int().nonnegative(),
+  tableWidth: z.object({
+    type: z.enum(['auto', 'dxa', 'nil', 'pct']),
+    value: z.string(),
+  }).strict().nullable(),
   gridColumns: z.array(z.object({
     address: docxAddress,
     widthTwips: z.number().int().positive().nullable(),
@@ -601,7 +605,7 @@ const tools = [
   {
     name: 'docx_set_text',
     effectKind: 'document-mutation',
-    description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. Use this only for newly derived text. Content copied or selected from a source DOCX uses docx_replace_content_from_source so native runs such as superscript and subscript are retained. This does not insert objects, change table structure, copy source formatting, or decide business wording.',
+    description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. A change may explicitly set the Latin and complex-script font family of its nonempty replacement run; East Asian font settings remain inherited from the target. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. Use this only for newly derived text. Content copied or selected from a source DOCX uses docx_replace_content_from_source so native runs such as superscript and subscript are retained. This does not insert objects, change table structure, copy source formatting, or decide business wording.',
     inputSchema: inputContract('docx_set_text'),
     outputSchema: fixedEditOutput('docx_set_text'),
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
@@ -612,6 +616,14 @@ const tools = [
     description: 'Set native pagination properties on explicitly selected current DOCX paragraphs. Each change sets at least one pagination property. keepWithNext keeps a paragraph with the immediately following paragraph or table but does not guarantee that a table header remains with its first body row. keepLinesTogether keeps one paragraph on one page; pageBreakBefore starts it on a new page; preventWidowOrphanLines controls isolated first or last lines. Omitted properties remain unchanged. The caller chooses paragraphs from current native addresses; the provider does not decide document layout or business meaning.',
     inputSchema: inputContract('docx_set_paragraph_pagination'),
     outputSchema: fixedEditOutput('docx_set_paragraph_pagination'),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
+  },
+  {
+    name: 'docx_set_table_width',
+    effectKind: 'document-mutation',
+    description: 'Set the explicit native width of one or more selected current DOCX tables. Width type is pct, dxa, auto, or nil; pct/dxa take an exact positive Open XML value and auto/nil take 0. This does not change grid-column widths, autofit behavior, cell widths, table structure, content, or business meaning.',
+    inputSchema: inputContract('docx_set_table_width'),
+    outputSchema: fixedEditOutput('docx_set_table_width'),
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
@@ -1103,6 +1115,7 @@ async function docxObservation(tool, args) {
         address: payload.address,
         rowCount: payload.rowCount,
         columnCount: payload.columnCount,
+        tableWidth: payload.tableWidth,
         gridColumns: payload.gridColumns,
         precedingParagraph: payload.precedingParagraph,
         followingParagraph: payload.followingParagraph,
@@ -1120,6 +1133,7 @@ async function docxObservation(tool, args) {
           address: payload.address,
           rowCount: payload.rowCount,
           columnCount: payload.columnCount,
+          tableWidth: payload.tableWidth,
           gridColumns: payload.gridColumns,
           precedingParagraph: payload.precedingParagraph,
           followingParagraph: payload.followingParagraph,
@@ -1175,6 +1189,7 @@ async function docxObservation(tool, args) {
         address: payload.address,
         rowCount: payload.rowCount,
         columnCount: payload.columnCount,
+        tableWidth: payload.tableWidth,
         gridColumns: payload.gridColumns,
         precedingParagraph: payload.precedingParagraph,
         followingParagraph: payload.followingParagraph,

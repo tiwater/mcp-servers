@@ -215,14 +215,25 @@
       }
     },
     {
+      "name": "docx_set_table_width",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_set_table_width.schema.json",
+        "sha256": "7a51a25a139ffa57c76eeed43dc2a8b9252fafdc0d299ede995f68d44021a3a6"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_set_table_width.schema.json",
+        "sha256": "7a51a25a139ffa57c76eeed43dc2a8b9252fafdc0d299ede995f68d44021a3a6"
+      }
+    },
+    {
       "name": "docx_set_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_text.schema.json",
-        "sha256": "4d6f69ef474c0a3ceade95cce362fba7e000946bb890e64119177c5519524db2"
+        "sha256": "45d8aa5d95402ac5b17fe07540355f81afa0804214ef319f33d7da11cf3c56cc"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_text.schema.json",
-        "sha256": "4d6f69ef474c0a3ceade95cce362fba7e000946bb890e64119177c5519524db2"
+        "sha256": "45d8aa5d95402ac5b17fe07540355f81afa0804214ef319f33d7da11cf3c56cc"
       }
     },
     {

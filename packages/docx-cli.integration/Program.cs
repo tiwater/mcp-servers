@@ -27,6 +27,82 @@ try
     Require(rows[2].GetProperty("cells")[0].GetProperty("verticalMergeOwner").GetRawText()
             == rows[1].GetProperty("cells")[0].GetProperty("address").GetRawText(),
         "vertical continuation did not point to its restart owner");
+    Require(initial.GetProperty("tableWidth").GetProperty("type").GetString() == "dxa"
+            && initial.GetProperty("tableWidth").GetProperty("value").GetString() == "6000",
+        "table read did not expose the explicit native table width");
+
+    var fontOutput = Path.Combine(root, "set-text-font.docx");
+    var fontReceipt = Path.Combine(root, "set-text-font-receipt.json");
+    Run("docx_set_text", new
+    {
+        input = original,
+        changes = new[]
+        {
+            new
+            {
+                target = rows[1].GetProperty("cells")[1].GetProperty("address").Clone(),
+                text = "Latin 42",
+                fontName = "Unseen Latin Font",
+            },
+        },
+        output = fontOutput,
+        receiptOutput = fontReceipt,
+    });
+    using (var fontDocument = WordprocessingDocument.Open(fontOutput, false))
+    {
+        var fontRun = fontDocument.MainDocumentPart!.Document.Descendants<Run>()
+            .Single(run => run.InnerText == "Latin 42");
+        Require(fontRun.RunProperties?.RunFonts?.Ascii?.Value == "Unseen Latin Font"
+                && fontRun.RunProperties?.RunFonts?.HighAnsi?.Value == "Unseen Latin Font"
+                && fontRun.RunProperties?.RunFonts?.ComplexScript?.Value == "Unseen Latin Font",
+            "set text did not apply the selected Latin font family");
+    }
+    var emptyFontReceipt = Path.Combine(root, "set-text-empty-font-receipt.json");
+    var emptyFont = RunExpectAtomicFailure("docx_set_text", original, emptyFontReceipt, new
+    {
+        input = original,
+        changes = new[] { new { target = rows[1].GetProperty("cells")[1].GetProperty("address").Clone(), text = "", fontName = "Unseen Latin Font" } },
+        output = original,
+        receiptOutput = emptyFontReceipt,
+    });
+    Require(emptyFont.Contains("font-name-requires-nonempty-text", StringComparison.Ordinal),
+        "set text claimed a font postcondition for empty replacement text");
+
+    var widthOutput = Path.Combine(root, "set-table-width.docx");
+    var widthReceipt = Path.Combine(root, "set-table-width-receipt.json");
+    Run("docx_set_table_width", new
+    {
+        input = original,
+        changes = new[] { new { table = initial.GetProperty("address").Clone(), width = new { type = "pct", value = "4321" } } },
+        output = widthOutput,
+        receiptOutput = widthReceipt,
+    });
+    var widthReadback = ReadTable(widthOutput, "set-table-width-output");
+    Require(widthReadback.GetProperty("tableWidth").GetProperty("type").GetString() == "pct"
+            && widthReadback.GetProperty("tableWidth").GetProperty("value").GetString() == "4321",
+        "set table width did not produce the requested native width");
+    var autoWidthOutput = Path.Combine(root, "set-table-width-auto.docx");
+    Run("docx_set_table_width", new
+    {
+        input = original,
+        changes = new[] { new { table = initial.GetProperty("address").Clone(), width = new { type = "auto", value = "0" } } },
+        output = autoWidthOutput,
+        receiptOutput = Path.Combine(root, "set-table-width-auto-receipt.json"),
+    });
+    var autoWidthReadback = ReadTable(autoWidthOutput, "set-table-width-auto-output");
+    Require(autoWidthReadback.GetProperty("tableWidth").GetProperty("type").GetString() == "auto"
+            && autoWidthReadback.GetProperty("tableWidth").GetProperty("value").GetString() == "0",
+        "set table width did not preserve the auto width variant");
+    var invalidWidthReceipt = Path.Combine(root, "set-table-width-invalid-receipt.json");
+    var invalidWidth = RunExpectAtomicFailure("docx_set_table_width", original, invalidWidthReceipt, new
+    {
+        input = original,
+        changes = new[] { new { table = initial.GetProperty("address").Clone(), width = new { type = "auto", value = "1" } } },
+        output = original,
+        receiptOutput = invalidWidthReceipt,
+    });
+    Require(invalidWidth.Contains("table-width-invalid", StringComparison.Ordinal),
+        "set table width accepted an unsupported width type");
     var continuation = rows[2].GetProperty("cells")[0];
     var continuationObservation = Run("docx_read_object", new
     {
@@ -2285,7 +2361,7 @@ void CreateDocument(string path)
     using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
     var main = document.AddMainDocumentPart();
     var table = new Table(
-        new TableProperties(),
+        new TableProperties(new TableWidth { Type = TableWidthUnitValues.Dxa, Width = "6000" }),
         new TableGrid(
             new GridColumn { Width = "1200" },
             new GridColumn { Width = "1200" },
