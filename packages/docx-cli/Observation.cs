@@ -178,10 +178,10 @@ public static class Observation
                         ? null
                         : Address(selected.StoryPart, NativePathFor(logicalOwner.Cell)),
                     string.Join("\n", logicalOwner.Cell.Elements<Paragraph>()
-                        .Select(paragraph => paragraph.InnerText)),
+                        .Select(NativeMutationSupport.PlainText)),
                     cell.Cell.Elements<Paragraph>().Select(paragraph => new DocxTableReadParagraph(
                     Address(selected.StoryPart, NativePathFor(paragraph)),
-                    paragraph.InnerText,
+                    NativeMutationSupport.PlainText(paragraph),
                     paragraph.Descendants<Text>().Select(value => new DocxTableReadText(
                         Address(selected.StoryPart, NativePathFor(value)),
                         value.Text,
@@ -513,7 +513,7 @@ public static class Observation
                 ? null
                 : Address(item.StoryPart, NativePathFor(logicalOwner.Cell));
             logicalText = string.Join("\n", logicalOwner.Cell.Elements<Paragraph>()
-                .Select(paragraph => paragraph.InnerText));
+                .Select(NativeMutationSupport.PlainText));
         }
         return new DocxObservationObject(
             item.Address,

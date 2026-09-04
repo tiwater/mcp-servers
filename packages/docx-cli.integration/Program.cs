@@ -41,7 +41,7 @@ try
             new
             {
                 target = rows[1].GetProperty("cells")[1].GetProperty("address").Clone(),
-                text = "Latin 42",
+                text = "Latin 42\n下一行",
                 fontName = "Unseen Latin Font",
             },
         },
@@ -51,12 +51,16 @@ try
     using (var fontDocument = WordprocessingDocument.Open(fontOutput, false))
     {
         var fontRun = fontDocument.MainDocumentPart!.Document.Descendants<Run>()
-            .Single(run => run.InnerText == "Latin 42");
+            .Single(run => run.InnerText == "Latin 42下一行");
         Require(fontRun.RunProperties?.RunFonts?.Ascii?.Value == "Unseen Latin Font"
                 && fontRun.RunProperties?.RunFonts?.HighAnsi?.Value == "Unseen Latin Font"
                 && fontRun.RunProperties?.RunFonts?.ComplexScript?.Value == "Unseen Latin Font",
             "set text did not apply the selected Latin font family");
     }
+    var multilineReadback = ReadTable(fontOutput, "set-text-multiline-output");
+    Require(multilineReadback.GetProperty("rows")[1].GetProperty("cells")[1]
+            .GetProperty("paragraphs")[0].GetProperty("text").GetString() == "Latin 42\n下一行",
+        "table read did not preserve a native line break written by set text");
     var emptyFontReceipt = Path.Combine(root, "set-text-empty-font-receipt.json");
     var emptyFont = RunExpectAtomicFailure("docx_set_text", original, emptyFontReceipt, new
     {
