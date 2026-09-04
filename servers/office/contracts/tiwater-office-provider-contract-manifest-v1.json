@@ -50,6 +50,17 @@
       }
     },
     {
+      "name": "docx_delete_comments",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_delete_comments.schema.json",
+        "sha256": "7f0828426b1f7c53a39dab1789572d49415a5a59980729a07726f662c1fb43de"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_delete_comments.schema.json",
+        "sha256": "7f0828426b1f7c53a39dab1789572d49415a5a59980729a07726f662c1fb43de"
+      }
+    },
+    {
       "name": "docx_delete_object",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_delete_object.schema.json",

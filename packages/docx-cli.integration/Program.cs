@@ -16,6 +16,40 @@ try
 {
     var original = Path.Combine(root, "original.docx");
     CreateDocument(original);
+    var commented = Path.Combine(root, "commented.docx");
+    var uncommented = Path.Combine(root, "uncommented.docx");
+    var uncommentedReceipt = Path.Combine(root, "uncommented-receipt.json");
+    CreateCommentedDocument(commented);
+    var deleteComments = Run("docx_delete_comments", new
+    {
+        input = commented,
+        output = uncommented,
+        receiptOutput = uncommentedReceipt,
+    });
+    Require(deleteComments.GetProperty("summary").GetProperty("appliedCount").GetInt32() == 1,
+        "delete comments did not report the removed comment");
+    using (var uncommentedDocument = WordprocessingDocument.Open(uncommented, false))
+    {
+        var main = uncommentedDocument.MainDocumentPart!;
+        Require(main.WordprocessingCommentsPart is null, "delete comments retained the comments part");
+        Require(!main.Document.Descendants().Any(element =>
+                element is CommentRangeStart or CommentRangeEnd or CommentReference),
+            "delete comments retained a main-story comment marker");
+        Require(main.Document.Body!.InnerText == "Visible content",
+            "delete comments changed visible document content");
+    }
+    var noCommentOutput = Path.Combine(root, "uncommented-noop.docx");
+    var noComment = Run("docx_delete_comments", new
+    {
+        input = uncommented,
+        output = noCommentOutput,
+        receiptOutput = Path.Combine(root, "uncommented-noop-receipt.json"),
+    });
+    Require(noComment.GetProperty("summary").GetProperty("appliedCount").GetInt32() == 0,
+        "delete comments no-op reported a removed comment");
+    using (var noCommentDocument = WordprocessingDocument.Open(noCommentOutput, false))
+        Require(noCommentDocument.MainDocumentPart!.Document.Body!.InnerText == "Visible content",
+            "delete comments no-op changed visible document content");
     var initial = ReadTable(original, "initial");
     Require(initial.GetProperty("schema").GetString() == "tiwater.docx-table-read/v2", "table read schema is not v2");
     Require(initial.GetProperty("gridColumns").GetArrayLength() == 4, "grid columns were not exposed");
@@ -2426,6 +2460,26 @@ void CreateDocument(string path)
     table.Append(new TableRow(Cell("独立"), Cell("丙一"), Cell("丙二"), Cell("丙三")));
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateCommentedDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    main.Document = new Document(new Body(new Paragraph(
+        new CommentRangeStart { Id = "0" },
+        new Run(new Text("Visible content")),
+        new CommentRangeEnd { Id = "0" },
+        new Run(new CommentReference { Id = "0" }))));
+    var commentsPart = main.AddNewPart<WordprocessingCommentsPart>();
+    commentsPart.Comments = new Comments(new Comment(
+        new Paragraph(new Run(new Text("Template instruction XXXX"))))
+    {
+        Id = "0",
+        Author = "Author",
+    });
+    commentsPart.Comments.Save();
     main.Document.Save();
 }
 
