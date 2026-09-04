@@ -43,6 +43,12 @@
         "additionalProperties": false
       }
     },
+    "changesInput": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path to a JSON file containing the same non-empty changes array accepted by changes. Use this for large batches so the array stays out of the tool call.",
+      "x-tiwater-file-role": "read"
+    },
     "output": {
       "type": "string",
       "minLength": 1,
@@ -58,7 +64,6 @@
   },
   "required": [
     "input",
-    "changes",
     "output",
     "receiptOutput"
   ],
