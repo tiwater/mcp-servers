@@ -45,9 +45,9 @@ public static class NativeTextMutation
         var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var resolved = Observation.ResolveAddresses(paths.Input, addresses, "changes.target");
         for (var index = 0; index < resolved.Count; index++)
-            if (resolved[index].Kind is not "paragraph" and not "cell")
+            if (resolved[index].Kind is not "paragraph" and not "cell" and not "text")
                 throw new InvalidOperationException(
-                    $"target-must-be-paragraph-or-cell: changes[{index}].target; kind={resolved[index].Kind}");
+                    $"target-must-be-paragraph-cell-or-text: changes[{index}].target; kind={resolved[index].Kind}");
 
         IReadOnlyDictionary<string, int> baseline;
         using (var input = WordprocessingDocument.Open(paths.Input, false))
@@ -127,6 +127,15 @@ public static class NativeTextMutation
     {
         switch (target)
         {
+            case Text textNode:
+                textNode.Text = text;
+                textNode.Space = SpaceProcessingModeValues.Preserve;
+                if (fontName is not null)
+                {
+                    var textRun = textNode.Ancestors<Run>().First();
+                    ApplyFontName(textRun.RunProperties ??= new RunProperties(), fontName);
+                }
+                break;
             case Paragraph paragraph:
                 var runProperties = paragraph.Descendants<Run>().FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
                 var insertionIndex = paragraph.ChildElements
@@ -179,7 +188,9 @@ public static class NativeTextMutation
 
     private static string? ReadFontName(OpenXmlElement target)
     {
-        var runs = target.Descendants<Run>().Where(run => !string.IsNullOrEmpty(run.InnerText)).ToArray();
+        var runs = target is Text text
+            ? text.Ancestors<Run>().Take(1).ToArray()
+            : target.Descendants<Run>().Where(run => !string.IsNullOrEmpty(run.InnerText)).ToArray();
         if (runs.Length == 0) return null;
         var names = runs.Select(run =>
         {

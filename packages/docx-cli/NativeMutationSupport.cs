@@ -75,7 +75,7 @@ internal static class NativeMutationSupport
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     public static string PlainText(OpenXmlElement target)
-        => string.Concat(target.Descendants<OpenXmlElement>().Select(element => element switch
+        => target is Text directText ? directText.Text : string.Concat(target.Descendants<OpenXmlElement>().Select(element => element switch
         {
             Text text => text.Text,
             Break => "\n",
@@ -107,7 +107,8 @@ internal static class NativeMutationSupport
             RequirePlainTextParagraph(paragraph, true);
             return;
         }
-        throw new InvalidOperationException("target-ref-must-be-paragraph-or-cell");
+        if (target is Text) return;
+        throw new InvalidOperationException("target-ref-must-be-paragraph-cell-or-text");
     }
 
     private static void RequirePlainTextParagraph(Paragraph paragraph, bool allowBookmarks)

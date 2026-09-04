@@ -165,6 +165,7 @@ try
     RunVerticalTextAlignmentObservation();
     RunNativeInlineSelectionComposition();
     RunRichTargetContentReplacement();
+    RunTextNodeSetText();
     RunBookmarkedParagraphInsertion();
     RunLegacyQualifiedTableLookInsertion();
 
@@ -1372,6 +1373,48 @@ void RunRichTargetContentReplacement()
         "content replacement retained non-plain target content");
     RunInput("validate-openxml", target);
     Console.WriteLine("PASS rich target content replacement");
+}
+
+void RunTextNodeSetText()
+{
+    var input = Path.Combine(root, "set-text-node-input.docx");
+    using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(new Paragraph(
+            new Run(new Text("OLD")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+            new Run(new FieldCode(" REF _Ref1 ")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            new Run(new Text("Table 1")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End }))));
+        main.Document.Save();
+    }
+    var detail = Run("docx_read_object", new
+    {
+        input,
+        addresses = new[] { new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" } },
+        kinds = new[] { "text" },
+    });
+    Require(detail.GetProperty("observations")[0].GetProperty("children")[0].GetProperty("object")
+            .GetProperty("text").GetString() == "OLD",
+        "read object did not expose exact text-node content");
+    var output = Path.Combine(root, "set-text-node-output.docx");
+    Run("docx_set_text", new
+    {
+        input,
+        changes = new[] { new { target = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]/w:r[1]/w:t[1]" }, text = "NEW" } },
+        output,
+        receiptOutput = Path.Combine(root, "set-text-node-receipt.json"),
+    });
+    using var result = WordprocessingDocument.Open(output, false);
+    var paragraph = result.MainDocumentPart!.Document.Body!.Elements<Paragraph>().Single();
+    Require(paragraph.InnerText == "NEW REF _Ref1 Table 1"
+            && paragraph.Descendants<FieldChar>().Count() == 3
+            && paragraph.Descendants<FieldCode>().Single().Text == " REF _Ref1 ",
+        "text-node update did not preserve the surrounding field structure");
+    RunInput("validate-openxml", output);
+    Console.WriteLine("PASS text-node set text");
 }
 
 void CreateMergedHeaderSetBodyDocument(string path)
