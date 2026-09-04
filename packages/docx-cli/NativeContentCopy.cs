@@ -245,9 +245,9 @@ public static class NativeContentCopy
     {
         var length = element switch
         {
-            TableCell cell => cell.Elements<Paragraph>().Sum(paragraph => ScalarLength(paragraph.InnerText))
+            TableCell cell => cell.Elements<Paragraph>().Sum(paragraph => ScalarLength(NativeMutationSupport.PlainText(paragraph)))
                 + Math.Max(0, cell.Elements<Paragraph>().Count() - 1),
-            Paragraph paragraph => ScalarLength(paragraph.InnerText),
+            Paragraph paragraph => ScalarLength(NativeMutationSupport.PlainText(paragraph)),
             DocumentFormat.OpenXml.Wordprocessing.Run run => ScalarLength(run.InnerText),
             Text text => ScalarLength(text.Text),
             _ => throw new InvalidOperationException($"source-ref-kind-not-supported-for-content-copy: {element.LocalName}"),
@@ -267,7 +267,7 @@ public static class NativeContentCopy
             Paragraph paragraph => new[] { paragraph },
             _ => throw new InvalidOperationException("text-range-block-must-be-cell-or-paragraph"),
         };
-        var lengths = paragraphs.Select(paragraph => ScalarLength(paragraph.InnerText)).ToArray();
+        var lengths = paragraphs.Select(paragraph => ScalarLength(NativeMutationSupport.PlainText(paragraph))).ToArray();
         var totalLength = lengths.Sum() + Math.Max(0, paragraphs.Length - 1);
         if (start < 0 || length < 0 || start > totalLength - length)
             throw new InvalidOperationException("text-range-out-of-bounds");
@@ -295,32 +295,32 @@ public static class NativeContentCopy
 
     private static Paragraph ParagraphForTextRange(Paragraph source, int start, int length)
     {
-        var sourceText = string.Concat(source.Descendants<Text>().Select(text => text.Text));
-        if (!StringComparer.Ordinal.Equals(source.InnerText, sourceText))
-            throw new InvalidOperationException("text-range-source-must-be-plain-text");
         var output = CloneParagraph(source);
         var cursor = 0;
         var end = start + length;
-        foreach (var text in output.Descendants<Text>().ToArray())
+        foreach (var element in output.Descendants<OpenXmlElement>()
+                     .Where(item => item is Text or Break or CarriageReturn or TabChar).ToArray())
         {
-            var textLength = ScalarLength(text.Text);
+            var value = element is Text text ? text.Text : element is TabChar ? "\t" : "\n";
+            var textLength = ScalarLength(value);
             var overlapStart = Math.Max(start, cursor);
             var overlapEnd = Math.Min(end, cursor + textLength);
             if (overlapStart >= overlapEnd)
             {
-                text.Remove();
+                element.Remove();
             }
-            else
+            else if (element is Text selectedText)
             {
-                text.Text = SliceScalars(text.Text, overlapStart - cursor, overlapEnd - overlapStart);
-                text.Space = SpaceProcessingModeValues.Preserve;
+                selectedText.Text = SliceScalars(selectedText.Text, overlapStart - cursor, overlapEnd - overlapStart);
+                selectedText.Space = SpaceProcessingModeValues.Preserve;
             }
             cursor += textLength;
         }
         foreach (var run in output.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>()
-                     .Where(run => !run.Descendants<Text>().Any()).ToArray())
+                     .Where(run => !run.Descendants<OpenXmlElement>()
+                         .Any(item => item is Text or Break or CarriageReturn or TabChar)).ToArray())
             run.Remove();
-        if (!output.Descendants<Text>().Any())
+        if (!output.Descendants<OpenXmlElement>().Any(item => item is Text or Break or CarriageReturn or TabChar))
             throw new InvalidOperationException("text-range-must-select-text");
         return output;
     }

@@ -1069,6 +1069,7 @@ void RunNativeInlineSelectionComposition()
     var sourceTable = ReadTable(source, "native-inline-selection-source");
     var targetTable = ReadTable(target, "native-inline-selection-target");
     var sourceCell = CellAt(sourceTable, 0, 0);
+    var sourceBreakCell = CellAt(sourceTable, 1, 0);
     var sourceParagraphs = sourceCell.GetProperty("paragraphs");
     var sourceObjects = Run("docx_read_object", new
     {
@@ -1147,6 +1148,19 @@ void RunNativeInlineSelectionComposition()
                     },
                 },
             },
+            new
+            {
+                target = CellAt(targetTable, 6, 0).GetProperty("address").Clone(),
+                sourceInput = source,
+                sourceSelections = new[]
+                {
+                    new
+                    {
+                        address = sourceBreakCell.GetProperty("address").Clone(),
+                        range = new { start = 0, length = "before\nafter".Length },
+                    },
+                },
+            },
         },
         output = target,
         receiptOutput = Path.Combine(root, "native-inline-selection-receipt.json")
@@ -1177,6 +1191,8 @@ void RunNativeInlineSelectionComposition()
         "selections from distinct source paragraphs lost their paragraph boundary");
     Require(CellAt(result, 5, 0).GetProperty("logicalText").GetString() == string.Empty,
         "zero-length native selection did not clear the target");
+    Require(CellAt(result, 6, 0).GetProperty("logicalText").GetString() == "before\nafter",
+        "cell range did not use the published line-break text offsets");
     RunInput("validate-openxml", target);
     Console.WriteLine("PASS native inline selection composition");
 }
@@ -1513,10 +1529,12 @@ void CreateNativeInlineSelectionSourceDocument(string path)
             new Text("pq")),
         new Run(new Text(" omega") { Space = SpaceProcessingModeValues.Preserve }));
     var second = new Paragraph(new Run(new Text("second paragraph")));
+    var withBreak = new Paragraph(new Run(new Text("before"), new Break(), new Text("after")));
     main.Document = new Document(new Body(new Table(
         new TableProperties(),
         new TableGrid(new GridColumn { Width = "5000" }),
-        new TableRow(new TableCell(first, second)))));
+        new TableRow(new TableCell(first, second)),
+        new TableRow(new TableCell(withBreak)))));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();
 }
@@ -1533,7 +1551,8 @@ void CreateNativeInlineSelectionTargetDocument(string path)
         new TableRow(Cell("range target")),
         new TableRow(Cell("paragraph target")),
         new TableRow(Cell("cell range target")),
-        new TableRow(Cell("empty range target")))));
+        new TableRow(Cell("empty range target")),
+        new TableRow(Cell("line-break range target")))));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();
 }
