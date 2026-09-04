@@ -1,6 +1,6 @@
 {
   "name": "@tiwater/office-mcp",
-  "version": "0.21.46",
+  "version": "0.21.47",
   "description": "Published MCP distribution for independent Tiwater Office, PDF, and Text document capabilities",
   "type": "module",
   "license": "MIT",
@@ -27,6 +27,7 @@
     "office/index.mjs",
     "office/docx-object-identity.mjs",
     "office/file-backed-changes.mjs",
+    "office/file-backed-table.mjs",
     "office/README.md",
     "office/contracts/tiwater-office-provider-contract-manifest-v1.json",
     "office/contracts/*.schema.json",

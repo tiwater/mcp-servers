@@ -31,6 +31,7 @@ import {
 } from '../_shared/effect-kind.mjs';
 import { compactDocxObjectIdentity } from './docx-object-identity.mjs';
 import { resolveFileBackedChanges } from './file-backed-changes.mjs';
+import { resolveFileBackedTable } from './file-backed-table.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const inputContractManifest = JSON.parse(await readFile(
@@ -619,7 +620,7 @@ const tools = [
     description: 'Atomically replace one exact current target-table row range with a fully specified table body. Name every target grid column in native order. Every rows[] item must contain its own prototypeRow; there is no table-level prototypeRow. Every cell must contain text: use a string for derived plain text, or null together with sourceInput and exact native sourceSelections. Each explicit cell occupies contiguous columns and may span logical rows; covered columns are omitted from following rows. Native source selections retain run formatting such as superscript and subscript. The provider retains the target table, target cell styles, grid widths, and all content outside the replaced range, and exposes no intermediate document. It does not select source rows, map business columns, infer target shape, derive wording, or copy a source table wholesale.',
     inputSchema: inputContract('docx_set_table'),
     outputSchema: fixedEditOutput('docx_set_table'),
-    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
+    handler: async (args, tool) => fixedEdit(tool, await resolveFileBackedTable(args), docxCandidates),
   },
   {
     name: 'docx_insert_objects',
