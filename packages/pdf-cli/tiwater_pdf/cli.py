@@ -3,7 +3,7 @@
 import argparse
 import base64
 import contextlib
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 import hashlib
 import io
 import json
@@ -1068,12 +1068,31 @@ def llm_ocr(
 
     report_page_progress = page_progress_func or _emit_ocr_page_progress
     pages = []
-    with ThreadPoolExecutor(max_workers=min(max_page_parallel, len(selected_page_indexes) or 1)) as executor:
-        futures = [executor.submit(ocr_page, page_index) for page_index in selected_page_indexes]
-        for completed, future in enumerate(as_completed(futures), start=1):
-            page = future.result()
-            pages.append(page)
-            report_page_progress(completed, len(futures), page)
+    worker_count = min(max_page_parallel, len(selected_page_indexes) or 1)
+    pending_indexes = iter(selected_page_indexes)
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(ocr_page, page_index)
+            for page_index in [next(pending_indexes, None) for _ in range(worker_count)]
+            if page_index is not None
+        }
+        try:
+            while futures:
+                done, futures = wait(futures, return_when=FIRST_COMPLETED)
+                # Observe every completed result before admitting more work.
+                # A terminal page failure must not drain the remaining PDF.
+                for future in done:
+                    page = future.result()
+                    pages.append(page)
+                    report_page_progress(len(pages), len(selected_page_indexes), page)
+                for _ in done:
+                    page_index = next(pending_indexes, None)
+                    if page_index is not None:
+                        futures.add(executor.submit(ocr_page, page_index))
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
     pages.sort(key=lambda page: page["page"])
 
     table_logical_rows = _extract_table_logical_rows(pages)

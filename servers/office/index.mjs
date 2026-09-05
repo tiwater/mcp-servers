@@ -13,6 +13,7 @@ import {
   runCandidateChain,
   runJsonCandidateChain,
   withTempJsonFile,
+  withCommandContext,
 } from '../_shared/tool-runtime.mjs';
 import {
   deliverLargeJsonResult,
@@ -925,12 +926,12 @@ function buildServer() {
           },
         } : {}),
       },
-      async args => {
+      async (args, context) => withCommandContext({ signal: context.signal }, async () => {
         const payload = typeof args.output === 'string'
           ? await withOutputWriteLock(args.output, () => tool.handler(args, tool))
           : await tool.handler(args, tool);
         return createToolResult(payload, { isError: payload?.summary?.pass === false });
-      },
+      }),
     );
   }
   return server;

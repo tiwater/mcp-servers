@@ -1,4 +1,5 @@
 import process from 'node:process';
+import { withCommandContext } from './tool-runtime.mjs';
 
 const JSONRPC_VERSION = '2.0';
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05', '2024-10-07'];
@@ -30,11 +31,16 @@ export class McpStdioServer {
     this.lineBuffer = '';
     this.binaryBuffer = Buffer.alloc(0);
     this.initialized = false;
+    this.calls = new Map();
   }
 
   start() {
     process.stdin.on('data', chunk => this.#onData(chunk));
-    process.stdin.on('end', () => process.exit(0));
+    process.stdin.on('end', () => {
+      for (const call of this.calls.values()) call.controller.abort();
+      // Child cancellation must finish before the transport exits.
+      void Promise.allSettled([...this.calls.values()].map(call => call.promise)).then(() => process.exit(0));
+    });
   }
 
   #onData(chunk) {
@@ -122,6 +128,10 @@ export class McpStdioServer {
           this.initialized = true;
           return;
         }
+        case 'notifications/cancelled': {
+          this.calls.get(params.requestId)?.controller.abort();
+          return;
+        }
         case 'ping': {
           if (!isNotification) writeMessage({ jsonrpc: JSONRPC_VERSION, id, result: {} });
           return;
@@ -131,14 +141,21 @@ export class McpStdioServer {
           return;
         }
         case 'tools/call': {
+          if (isNotification) return;
+          if (this.calls.has(id)) throw Object.assign(new Error('Duplicate active request id'), { code: -32600 });
           const name = params?.name;
           const args = params?.arguments ?? {};
           if (typeof name !== 'string' || !name) {
             if (!isNotification) writeMessage({ jsonrpc: JSONRPC_VERSION, id, error: toError(-32602, 'Invalid params: missing tool name') });
             return;
           }
-          const result = await this.callTool(name, args);
-          if (!isNotification) writeMessage({ jsonrpc: JSONRPC_VERSION, id, result });
+          const controller = new AbortController();
+          const promise = Promise.resolve().then(() => withCommandContext({signal:controller.signal}, () => this.callTool(name, args)));
+          this.calls.set(id, {controller, promise});
+          try {
+            const result = await promise;
+            if (!controller.signal.aborted) writeMessage({ jsonrpc: JSONRPC_VERSION, id, result });
+          } finally { this.calls.delete(id); }
           return;
         }
         default: {

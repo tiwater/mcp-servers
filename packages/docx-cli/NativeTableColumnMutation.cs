@@ -45,7 +45,7 @@ public static class NativeTableColumnMutation
     public static TableColumnMutationReceipt Insert(InsertTableColumnsRequest request)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var refs = request.Changes.SelectMany(change => new[] { change.Table, change.SourceColumn }
                 .Concat(change.Before is null ? [] : [change.Before]))
             .ToArray();
@@ -114,7 +114,7 @@ public static class NativeTableColumnMutation
     public static TableColumnMutationReceipt Delete(DeleteTableColumnsRequest request)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var prepared = new List<PreparedDelete>();
         using (var input = WordprocessingDocument.Open(paths.Input, false))
         {

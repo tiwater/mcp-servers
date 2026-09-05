@@ -60,7 +60,7 @@ public static class NativeObjectMutation
 
     public static InsertObjectsReceipt Insert(InsertObjectsRequest request)
     {
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var targetPath = paths.Input;
         var outputPath = paths.Output;
         var receiptPath = paths.Receipt;
@@ -104,7 +104,7 @@ public static class NativeObjectMutation
 
     public static DeleteObjectReceipt Delete(DeleteObjectRequest request)
     {
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var targetPath = paths.Input;
         var outputPath = paths.Output;
         var receiptPath = paths.Receipt;

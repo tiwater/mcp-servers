@@ -24,7 +24,7 @@ public static class NativeSetTableMutation
 
     public static SetTableReceipt Apply(SetTableRequest request)
     {
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         ValidateContentModes(request.Rows);
         var token = Guid.NewGuid().ToString("N");
         var shapeOutput = paths.Output + $".shape-{token}.docx";

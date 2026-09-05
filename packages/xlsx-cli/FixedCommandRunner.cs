@@ -41,6 +41,7 @@ public static class FixedCommandRunner
         string? receiptOutput = null;
         Artifact? inputArtifact = null;
         var inPlace = false;
+        IDisposable? writeLease = null;
 
         try
         {
@@ -48,7 +49,9 @@ public static class FixedCommandRunner
                 ?? throw new InvalidOperationException("fixed-xlsx-request-invalid");
             var input = RequirePath(root, "input");
             output = RequirePath(root, "output");
-            receiptOutput = RequirePath(root, "receiptOutput");
+            var requestedReceipt = RequirePath(root, "receiptOutput");
+            writeLease = Tiwater.Office.OutputWriteLease.Acquire(output, requestedReceipt);
+            receiptOutput = requestedReceipt;
             inPlace = PathsEqual(output, input);
             if (!inPlace) RequireNewPath(output, "output");
             RequireNewPath(receiptOutput, "receiptOutput");
@@ -73,7 +76,8 @@ public static class FixedCommandRunner
                 && editResult.AppliedOperations.All(operation => operation.Applied)
                 && File.Exists(output);
             var outputArtifact = pass ? Describe(output) : null;
-            if (!pass && !inPlace && File.Exists(output)) File.Delete(output);
+            // Editor owns and cleans its temporary file. A destination can belong
+            // to an earlier or concurrent caller and is never failure scratch.
 
             var receiptPayload = new
             {
@@ -103,8 +107,8 @@ public static class FixedCommandRunner
         }
         catch (Exception error)
         {
-            if (!inPlace && output is not null && File.Exists(output)) File.Delete(output);
-
+            // Do not delete the destination: rejection may precede any edit, or
+            // the document may already have committed before receipt failure.
             if (receiptOutput is not null && !File.Exists(receiptOutput))
             {
                 try
@@ -137,6 +141,7 @@ public static class FixedCommandRunner
             Console.Error.WriteLine(error.Message);
             return 1;
         }
+        finally { writeLease?.Dispose(); }
     }
 
     private static IReadOnlyList<XlsxEditOperation> BuildOperations(Definition definition, JsonArray changes)
