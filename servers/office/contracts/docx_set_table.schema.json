@@ -64,7 +64,18 @@
               "type": "object", "properties": {
                 "columns": { "type": "array", "minItems": 1, "description": "One or more contiguous request-local column IDs occupied by this cell.", "items": { "type": "string", "minLength": 1, "maxLength": 80 } },
                 "rowSpan": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
-                "text": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Required content-mode marker on every cell: use a string for derived plain text; use null together with sourceInput and sourceSelections for native source content." },
+                "text": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Use a string for derived plain text. Omit for textRuns. Existing native-source requests may retain the null content-mode marker." },
+                "textRuns": {
+                  "type": "array", "minItems": 1,
+                  "description": "Exact ordered derived text runs. Each run inherits unrelated formatting from the prototype cell while color and underline are set exactly from this request.",
+                  "items": {
+                    "type": "object", "properties": {
+                      "text": { "type": "string", "minLength": 1 },
+                      "color": { "anyOf": [{ "type": "string", "pattern": "^(?:[0-9A-Fa-f]{6}|[Ff]{2}[0-9A-Fa-f]{6})$" }, { "type": "null" }] },
+                      "underline": { "enum": ["single", "double", false, null] }
+                    }, "required": ["text"], "additionalProperties": false
+                  }
+                },
                 "sourceInput": { "type": "string", "minLength": 1, "description": "Current source DOCX containing sourceSelections. Omit when text is used.", "x-tiwater-file-role": "read" },
                 "sourceSelections": {
                   "type": "array", "minItems": 1,
@@ -86,7 +97,12 @@
                     }, "required": ["address"], "additionalProperties": false
                   }
                 }
-              }, "required": ["columns", "text"], "additionalProperties": false
+              }, "required": ["columns"], "additionalProperties": false,
+              "oneOf": [
+                { "required": ["text"], "properties": { "text": { "type": "string" } }, "not": { "anyOf": [{ "required": ["textRuns"] }, { "required": ["sourceInput"] }, { "required": ["sourceSelections"] }] } },
+                { "required": ["textRuns"], "not": { "anyOf": [{ "required": ["text"] }, { "required": ["sourceInput"] }, { "required": ["sourceSelections"] }] } },
+                { "required": ["sourceInput", "sourceSelections"], "properties": { "text": { "type": "null" } }, "not": { "required": ["textRuns"] } }
+              ]
             }
           },
           "cantSplit": { "type": "boolean" }

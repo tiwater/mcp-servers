@@ -335,6 +335,146 @@ try
         "docx_set_table did not atomically apply shape and native source content");
     RunInput("validate-openxml", atomicTableOutput);
 
+    var richRunTableOutput = Path.Combine(root, "set-table-rich-runs-output.docx");
+    Run("docx_set_table", new
+    {
+        input = atomicTableTarget,
+        table = atomicTargetState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = atomicTargetRows[1].GetProperty("address").Clone(),
+            last = atomicTargetRows[2].GetProperty("address").Clone(),
+        },
+        columns = atomicTargetColumns.EnumerateArray()
+            .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+            .ToArray(),
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = atomicTargetRows[1].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new
+                    {
+                        columns = new[] { "c0" }, rowSpan = (int?)null,
+                        textRuns = new object[]
+                        {
+                            new { text = "Ω-42", color = "FF4A7BC8", underline = (object)"double" },
+                            new { text = " / control", color = (string?)null, underline = (object)false },
+                        },
+                    },
+                    new
+                    {
+                        columns = new[] { "c1" }, rowSpan = (int?)null,
+                        textRuns = new[] { new { text = "single-run", color = (string?)null, underline = "single" } },
+                    },
+                },
+            },
+        },
+        output = richRunTableOutput,
+        receiptOutput = Path.Combine(root, "set-table-rich-runs-receipt.json"),
+    });
+    using (var richRunDocument = WordprocessingDocument.Open(richRunTableOutput, false))
+    {
+        var richCells = richRunDocument.MainDocumentPart!.Document.Descendants<Table>()
+            .Single().Elements<TableRow>().ElementAt(1).Elements<TableCell>().ToArray();
+        var firstRuns = richCells[0].Descendants<Run>().Where(run => run.InnerText.Length > 0).ToArray();
+        Require(firstRuns.Length == 2
+                && firstRuns[0].InnerText == "Ω-42"
+                && firstRuns[0].RunProperties?.Color?.Val?.Value == "4A7BC8"
+                && firstRuns[0].RunProperties?.Underline?.Val?.Value == UnderlineValues.Double
+                && firstRuns[1].InnerText == " / control"
+                && firstRuns[1].RunProperties?.Color is null
+                && firstRuns[1].RunProperties?.Underline is null,
+            "docx_set_table did not preserve the exact ordered rich text run evidence");
+        var boundaryRun = richCells[1].Descendants<Run>().Single(run => run.InnerText.Length > 0);
+        Require(boundaryRun.InnerText == "single-run"
+                && boundaryRun.RunProperties?.Color is null
+                && boundaryRun.RunProperties?.Underline?.Val?.Value == UnderlineValues.Single,
+            "docx_set_table did not support a one-run rich text boundary");
+    }
+    RunInput("validate-openxml", richRunTableOutput);
+
+    var invalidRichRunReceipt = Path.Combine(root, "set-table-rich-runs-invalid-receipt.json");
+    var invalidRichRun = RunExpectAtomicFailure("docx_set_table", atomicTableTarget, invalidRichRunReceipt, new
+    {
+        input = atomicTableTarget,
+        table = atomicTargetState.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = atomicTargetRows[1].GetProperty("address").Clone(),
+            last = atomicTargetRows[2].GetProperty("address").Clone(),
+        },
+        columns = atomicTargetColumns.EnumerateArray()
+            .Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() })
+            .ToArray(),
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = atomicTargetRows[1].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "c0" }, text = "conflicting", textRuns = new[] { new { text = "run", color = "123456" } } },
+                    new { columns = new[] { "c1" }, text = "unchanged" },
+                },
+            },
+        },
+        output = atomicTableTarget,
+        receiptOutput = invalidRichRunReceipt,
+    });
+    Require(invalidRichRun.Contains("requires-exactly-one-content-mode", StringComparison.Ordinal),
+        "docx_set_table accepted both plain text and rich text runs for one cell");
+    var emptyRichRunReceipt = Path.Combine(root, "set-table-rich-runs-empty-receipt.json");
+    var emptyRichRun = RunExpectAtomicFailure("docx_set_table", atomicTableTarget, emptyRichRunReceipt, new
+    {
+        input = atomicTableTarget,
+        table = atomicTargetState.GetProperty("address").Clone(),
+        existingRows = new { first = atomicTargetRows[1].GetProperty("address").Clone(), last = atomicTargetRows[2].GetProperty("address").Clone() },
+        columns = atomicTargetColumns.EnumerateArray().Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() }).ToArray(),
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = atomicTargetRows[1].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "c0" }, textRuns = Array.Empty<object>() },
+                    new { columns = new[] { "c1" }, text = "unchanged" },
+                },
+            },
+        },
+        output = atomicTableTarget,
+        receiptOutput = emptyRichRunReceipt,
+    });
+    Require(emptyRichRun.Contains("text-runs-empty", StringComparison.Ordinal),
+        "docx_set_table accepted a rich text cell after its final run was deleted");
+    var invalidRichColorReceipt = Path.Combine(root, "set-table-rich-runs-color-receipt.json");
+    var invalidRichColor = RunExpectAtomicFailure("docx_set_table", atomicTableTarget, invalidRichColorReceipt, new
+    {
+        input = atomicTableTarget,
+        table = atomicTargetState.GetProperty("address").Clone(),
+        existingRows = new { first = atomicTargetRows[1].GetProperty("address").Clone(), last = atomicTargetRows[2].GetProperty("address").Clone() },
+        columns = atomicTargetColumns.EnumerateArray().Select((column, index) => new { id = "c" + index, gridColumn = column.GetProperty("address").Clone() }).ToArray(),
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = atomicTargetRows[1].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "c0" }, textRuns = new[] { new { text = "invalid", color = "not-rgb" } } },
+                    new { columns = new[] { "c1" }, text = "unchanged" },
+                },
+            },
+        },
+        output = atomicTableTarget,
+        receiptOutput = invalidRichColorReceipt,
+    });
+    Require(invalidRichColor.Contains("color-invalid", StringComparison.Ordinal),
+        "docx_set_table accepted an invalid rich text color");
+
     var validAddress = rows[1].GetProperty("address");
     var malformedAddress = new
     {

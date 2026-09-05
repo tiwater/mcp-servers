@@ -13,6 +13,11 @@ test('published contract accepts inline fields or a file-backed table input', as
   assert.equal(schema.properties.tableInput.type, 'string');
   assert.equal(schema.properties.tableInput['x-tiwater-file-role'], 'read');
   assert.equal(schema.properties.rows.items.properties.cells.minItems, 0);
+  const cell = schema.properties.rows.items.properties.cells.items;
+  assert.equal(cell.properties.textRuns.minItems, 1);
+  assert.deepEqual(cell.properties.textRuns.items.required, ['text']);
+  assert.deepEqual(cell.properties.textRuns.items.properties.underline.enum, ['single', 'double', false, null]);
+  assert.deepEqual(cell.properties.text.anyOf, [{ type: 'string' }, { type: 'null' }]);
   assert.deepEqual(schema.required, ['input', 'output', 'receiptOutput']);
 });
 

@@ -175,6 +175,40 @@ public static class NativeTextMutation
         }
     }
 
+    internal static void SetTextRuns(TableCell cell, IReadOnlyList<SetTableTextRun> textRuns)
+    {
+        var template = cell.Elements<Paragraph>().FirstOrDefault();
+        var paragraphProperties = template?.ParagraphProperties?.CloneNode(true) as ParagraphProperties;
+        var baseRunProperties = template?.Descendants<Run>().FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
+        var bookmarkStarts = cell.Elements<Paragraph>()
+            .SelectMany(paragraph => paragraph.Elements<BookmarkStart>())
+            .Select(bookmark => (BookmarkStart)bookmark.CloneNode(true)).ToArray();
+        var bookmarkEnds = cell.Elements<Paragraph>()
+            .SelectMany(paragraph => paragraph.Elements<BookmarkEnd>())
+            .Select(bookmark => (BookmarkEnd)bookmark.CloneNode(true)).ToArray();
+        foreach (var child in cell.ChildElements.Where(child => child is not TableCellProperties).ToArray()) child.Remove();
+        var paragraph = new Paragraph();
+        if (paragraphProperties is not null) paragraph.Append(paragraphProperties);
+        foreach (var bookmark in bookmarkStarts) paragraph.Append(bookmark);
+        foreach (var textRun in textRuns)
+        {
+            var properties = baseRunProperties?.CloneNode(true) as RunProperties ?? new RunProperties();
+            properties.RemoveAllChildren<Color>();
+            properties.RemoveAllChildren<Underline>();
+            var color = NativeSetTableMutation.ColorValue(textRun.Color);
+            var underline = NativeSetTableMutation.UnderlineValue(textRun.Underline);
+            if (color is not null) properties.Append(new Color { Val = color.ToUpperInvariant() });
+            if (underline is not null)
+                properties.Append(new Underline
+                {
+                    Val = underline == "double" ? UnderlineValues.Double : UnderlineValues.Single,
+                });
+            AppendText(paragraph, properties, textRun.Text);
+        }
+        foreach (var bookmark in bookmarkEnds) paragraph.Append(bookmark);
+        cell.Append(paragraph);
+    }
+
     private static void ApplyFontName(RunProperties properties, string? fontName)
     {
         if (fontName is null) return;
