@@ -94,44 +94,59 @@ public static class NativeContentCopy
         CopyContentRequest request,
         IReadOnlyList<ResolvedDocxAddress> targetRefs)
     {
-        var result = new List<PreparedChange>(request.Changes.Count);
-        for (var index = 0; index < request.Changes.Count; index++)
+        var result = new PreparedChange?[request.Changes.Count];
+        var indexedChanges = request.Changes.Select((change, index) => new
         {
-            var change = request.Changes[index];
-            var sourcePath = Path.GetFullPath(change.SourceInput);
+            Change = change,
+            Index = index,
+            SourcePath = Path.GetFullPath(change.SourceInput),
+        });
+        foreach (var group in indexedChanges.GroupBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase))
+        {
+            var items = group.ToArray();
+            var selections = items.SelectMany(item => item.Change.SourceSelections.Select((selection, selectionIndex) => new
+            {
+                item.Index,
+                SelectionIndex = selectionIndex,
+                Selection = selection,
+            })).ToArray();
             var sourceRefs = Observation.ResolveAddresses(
-                sourcePath,
-                change.SourceSelections.Select(selection => selection.Address).ToArray(),
-                $"changes[{index}].sourceSelections.address");
+                group.Key,
+                selections.Select(item => item.Selection.Address).ToArray(),
+                "changes.sourceSelections.address");
             if (sourceRefs.Any(item => item.StoryPart != MainStory))
                 throw new InvalidOperationException("source-address-must-be-main-document-object");
-            using var sourceDocument = WordprocessingDocument.Open(sourcePath, false);
-            var paragraphs = new List<Paragraph>();
-            Paragraph? activeInlineSourceParagraph = null;
-            for (var sourceIndex = 0; sourceIndex < sourceRefs.Count; sourceIndex++)
+            using var sourceDocument = WordprocessingDocument.Open(group.Key, false);
+            var sourceOffset = 0;
+            foreach (var item in items)
             {
-                var resolved = sourceRefs[sourceIndex];
-                var element = Observation.ResolveNativePath(sourceDocument, resolved.StoryPart, resolved.NativePath);
-                try
+                var paragraphs = new List<Paragraph>();
+                Paragraph? activeInlineSourceParagraph = null;
+                for (var selectionIndex = 0; selectionIndex < item.Change.SourceSelections.Count; selectionIndex++)
                 {
-                    AppendSelection(
-                        paragraphs,
-                        ref activeInlineSourceParagraph,
-                        element,
-                        change.SourceSelections[sourceIndex]);
+                    var resolved = sourceRefs[sourceOffset++];
+                    var element = Observation.ResolveNativePath(sourceDocument, resolved.StoryPart, resolved.NativePath);
+                    try
+                    {
+                        AppendSelection(
+                            paragraphs,
+                            ref activeInlineSourceParagraph,
+                            element,
+                            item.Change.SourceSelections[selectionIndex]);
+                    }
+                    catch (InvalidOperationException exception)
+                    {
+                        throw new InvalidOperationException(
+                            $"changes[{item.Index}].sourceSelections[{selectionIndex}] " +
+                            $"{resolved.StoryPart}#{resolved.NativePath}: {exception.Message}",
+                            exception);
+                    }
                 }
-                catch (InvalidOperationException exception)
-                {
-                    throw new InvalidOperationException(
-                        $"changes[{index}].sourceSelections[{sourceIndex}] " +
-                        $"{resolved.StoryPart}#{resolved.NativePath}: {exception.Message}",
-                        exception);
-                }
+                if (paragraphs.Count == 0) paragraphs.Add(new Paragraph());
+                result[item.Index] = new PreparedChange(targetRefs[item.Index], group.Key, paragraphs);
             }
-            if (paragraphs.Count == 0) paragraphs.Add(new Paragraph());
-            result.Add(new PreparedChange(targetRefs[index], sourcePath, paragraphs));
         }
-        return result;
+        return result.Select(item => item ?? throw new InvalidOperationException("source-change-not-prepared")).ToArray();
     }
 
     private static void PreflightImports(WordprocessingDocument targetDocument, IReadOnlyList<PreparedChange> changes)
