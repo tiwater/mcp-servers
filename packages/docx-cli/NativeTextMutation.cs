@@ -57,6 +57,7 @@ public static class NativeTextMutation
             NativeMutationSupport.RejectOverlappingTargets(targets);
             for (var index = 0; index < targets.Length; index++)
             {
+                if (targets[index] is Paragraph) continue;
                 try
                 {
                     NativeMutationSupport.RequirePlainTextContainer(targets[index]);
@@ -138,15 +139,14 @@ public static class NativeTextMutation
                 break;
             case Paragraph paragraph:
                 var runProperties = paragraph.Descendants<Run>().FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
-                var insertionIndex = paragraph.ChildElements
-                    .TakeWhile(child => child is not DocumentFormat.OpenXml.Wordprocessing.Run and not ProofError).Count();
-                foreach (var child in paragraph.ChildElements
-                             .Where(child => child is DocumentFormat.OpenXml.Wordprocessing.Run or ProofError).ToArray())
-                    child.Remove();
+                var paragraphBookmarkStarts = paragraph.Elements<BookmarkStart>().Select(bookmark => (BookmarkStart)bookmark.CloneNode(true)).ToArray();
+                var paragraphBookmarkEnds = paragraph.Elements<BookmarkEnd>().Select(bookmark => (BookmarkEnd)bookmark.CloneNode(true)).ToArray();
+                foreach (var child in paragraph.ChildElements.Where(child => child is not ParagraphProperties).ToArray()) child.Remove();
+                foreach (var bookmark in paragraphBookmarkStarts) paragraph.Append(bookmark);
                 if (fontName is not null) ApplyFontName(runProperties ??= new RunProperties(), fontName);
                 var replacementRun = TextRun(runProperties, text);
-                if (replacementRun is not null)
-                    paragraph.InsertAt(replacementRun, Math.Min(insertionIndex, paragraph.ChildElements.Count));
+                if (replacementRun is not null) paragraph.Append(replacementRun);
+                foreach (var bookmark in paragraphBookmarkEnds) paragraph.Append(bookmark);
                 break;
             case TableCell cell:
                 var template = cell.Elements<Paragraph>().FirstOrDefault();

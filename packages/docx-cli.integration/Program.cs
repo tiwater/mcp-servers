@@ -203,6 +203,7 @@ try
     RunVerticalTextAlignmentObservation();
     RunNativeInlineSelectionComposition();
     RunRichTargetContentReplacement();
+    RunFieldParagraphSetText();
     RunTextNodeSetText();
     RunBookmarkedParagraphInsertion();
     RunLegacyQualifiedTableLookInsertion();
@@ -1609,6 +1610,46 @@ void RunTextNodeSetText()
         "text-node update did not preserve the surrounding field structure");
     RunInput("validate-openxml", output);
     Console.WriteLine("PASS text-node set text");
+}
+
+void RunFieldParagraphSetText()
+{
+    var input = Path.Combine(root, "set-text-field-paragraph-input.docx");
+    using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        var hyperlink = main.AddHyperlinkRelationship(new Uri("https://example.com/unseen"), true);
+        main.Document = new Document(new Body(new Paragraph(
+            new ParagraphProperties(new Justification { Val = JustificationValues.Both }),
+            new BookmarkStart { Name = "StableAnchor", Id = "87" },
+            new Run(new Text("Before ")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+            new Run(new FieldCode(" REF _Unseen42 ")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            new Run(new Text("Figure 42")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End }),
+            new Hyperlink(new Run(new Text(" old link"))) { Id = hyperlink.Id },
+            new BookmarkEnd { Id = "87" })));
+        main.Document.Save();
+    }
+    var output = Path.Combine(root, "set-text-field-paragraph-output.docx");
+    Run("docx_set_text", new
+    {
+        input,
+        changes = new[] { new { target = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" }, text = "Exact replacement without old field content" } },
+        output,
+        receiptOutput = Path.Combine(root, "set-text-field-paragraph-receipt.json"),
+    });
+    using var result = WordprocessingDocument.Open(output, false);
+    var paragraph = result.MainDocumentPart!.Document.Body!.Elements<Paragraph>().Single();
+    Require(paragraph.InnerText == "Exact replacement without old field content"
+            && paragraph.ParagraphProperties?.Justification?.Val?.Value == JustificationValues.Both
+            && paragraph.Descendants<BookmarkStart>().Single().Name?.Value == "StableAnchor"
+            && paragraph.Descendants<BookmarkEnd>().Single().Id?.Value == "87"
+            && !paragraph.Descendants<OpenXmlElement>().Any(element => element is FieldChar or FieldCode or Hyperlink or SimpleField),
+        "whole-paragraph set text did not replace complex content while preserving paragraph identity");
+    RunInput("validate-openxml", output);
+    Console.WriteLine("PASS field-containing paragraph set text");
 }
 
 void CreateMergedHeaderSetBodyDocument(string path)
