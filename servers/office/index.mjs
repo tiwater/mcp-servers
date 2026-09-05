@@ -614,10 +614,10 @@ const tools = [
   {
     name: 'docx_set_text',
     effectKind: 'document-mutation',
-    description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. A change may explicitly set the Latin and complex-script font family of its nonempty replacement run; East Asian font settings remain inherited from the target. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. Use this only for newly derived text. Content copied or selected from a source DOCX uses docx_replace_content_from_source so native runs such as superscript and subscript are retained. This does not insert objects, change table structure, copy source formatting, or decide business wording.',
+    description: 'Replace the whole text content of paragraph or cell objects observed from this exact input DOCX while retaining target formatting, bookmarks, spans, and vertical merges. Pass small batches in changes or keep a large batch out of the tool call by putting the same changes array in changesInput; both may be combined in one atomic commit. A change may explicitly set the Latin and complex-script font family of its nonempty replacement run; East Asian font settings remain inherited from the target. For a vertically merged logical cell, write its visible text to the restart cell rather than a continue cell. Tabs and line breaks remain native document text controls; targets containing non-text objects are rejected. Use this only for newly derived text. Content copied or selected from a source DOCX uses docx_replace_content_from_source so native runs such as superscript and subscript are retained. This does not insert objects, change table structure, copy source formatting, or decide business wording.',
     inputSchema: inputContract('docx_set_text'),
     outputSchema: fixedEditOutput('docx_set_text'),
-    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
+    handler: async (args, tool) => fixedEdit(tool, await resolveFileBackedChanges(args), docxCandidates),
   },
   {
     name: 'docx_set_paragraph_pagination',

@@ -6,16 +6,21 @@ import test from 'node:test';
 
 import { resolveFileBackedChanges } from './file-backed-changes.mjs';
 
-const schemaPath = new URL('../../packages/docx-cli/contracts/mcp-input/docx_replace_content_from_source.schema.json', import.meta.url);
+const schemaPaths = [
+  new URL('../../packages/docx-cli/contracts/mcp-input/docx_replace_content_from_source.schema.json', import.meta.url),
+  new URL('../../packages/docx-cli/contracts/mcp-input/docx_set_text.schema.json', import.meta.url),
+];
 
 test('published contract exposes independent inline and file-backed inputs', async () => {
-  const schema = JSON.parse(await readFile(schemaPath, 'utf8'));
-  assert.equal(schema.properties.changes.type, 'array');
-  assert.equal(schema.properties.changes.minItems, 1);
-  assert.equal(schema.properties.changesInput.type, 'string');
-  assert.equal(schema.properties.changesInput['x-tiwater-file-role'], 'read');
-  assert.deepEqual(schema.required, ['input', 'output', 'receiptOutput']);
-  assert.equal('anyOf' in schema, false);
+  for (const schemaPath of schemaPaths) {
+    const schema = JSON.parse(await readFile(schemaPath, 'utf8'));
+    assert.equal(schema.properties.changes.type, 'array');
+    assert.equal(schema.properties.changes.minItems, 1);
+    assert.equal(schema.properties.changesInput.type, 'string');
+    assert.equal(schema.properties.changesInput['x-tiwater-file-role'], 'read');
+    assert.deepEqual(schema.required, ['input', 'output', 'receiptOutput']);
+    assert.equal('anyOf' in schema, false);
+  }
 });
 
 test('leaves a small inline changes array unchanged', async () => {

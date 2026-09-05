@@ -240,11 +240,11 @@
       "name": "docx_set_text",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_text.schema.json",
-        "sha256": "45d8aa5d95402ac5b17fe07540355f81afa0804214ef319f33d7da11cf3c56cc"
+        "sha256": "6a69b2ba25551698b8cbc6040fda2c1d2b81afde4a9629a613ca37c9120bebe6"
       },
       "inputContract": {
         "path": "office/contracts/docx_set_text.schema.json",
-        "sha256": "45d8aa5d95402ac5b17fe07540355f81afa0804214ef319f33d7da11cf3c56cc"
+        "sha256": "6a69b2ba25551698b8cbc6040fda2c1d2b81afde4a9629a613ca37c9120bebe6"
       }
     },
     {
