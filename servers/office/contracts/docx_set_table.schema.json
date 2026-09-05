@@ -72,7 +72,12 @@
                     "type": "object", "properties": {
                       "text": { "type": "string", "minLength": 1 },
                       "color": { "anyOf": [{ "type": "string", "pattern": "^(?:[0-9A-Fa-f]{6}|[Ff]{2}[0-9A-Fa-f]{6})$" }, { "type": "null" }] },
-                      "underline": { "enum": ["single", "double", false, null] }
+                      "underline": { "anyOf": [
+                        { "type": "string", "const": "single" },
+                        { "type": "string", "const": "double" },
+                        { "type": "boolean", "const": false },
+                        { "type": "null", "const": null }
+                      ] }
                     }, "required": ["text"], "additionalProperties": false
                   }
                 },
@@ -97,12 +102,7 @@
                     }, "required": ["address"], "additionalProperties": false
                   }
                 }
-              }, "required": ["columns"], "additionalProperties": false,
-              "oneOf": [
-                { "required": ["text"], "properties": { "text": { "type": "string" } }, "not": { "anyOf": [{ "required": ["textRuns"] }, { "required": ["sourceInput"] }, { "required": ["sourceSelections"] }] } },
-                { "required": ["textRuns"], "not": { "anyOf": [{ "required": ["text"] }, { "required": ["sourceInput"] }, { "required": ["sourceSelections"] }] } },
-                { "required": ["sourceInput", "sourceSelections"], "properties": { "text": { "type": "null" } }, "not": { "required": ["textRuns"] } }
-              ]
+              }, "required": ["columns"], "additionalProperties": false
             }
           },
           "cantSplit": { "type": "boolean" }

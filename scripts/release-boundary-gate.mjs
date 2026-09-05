@@ -1082,7 +1082,10 @@ function checkDocxMergedCellDescriptions(tools) {
       || !setTableDescription.includes('does not select source rows')
       || setTableCell?.properties?.rowSpan?.type !== 'integer'
       || setTableCell?.properties?.rowSpan?.minimum !== 1
-      || !setTableCell?.required?.includes('text')
+      || !setTableCell?.required?.includes('columns')
+      || setTableCell?.properties?.textRuns?.type !== 'array'
+      || setTableCell?.properties?.textRuns?.minItems !== 1
+      || setTableCell?.properties?.textRuns?.items?.properties?.text?.minLength !== 1
       || setTableCell?.properties?.sourceInput?.['x-tiwater-file-role'] !== 'read'
       || setTableCell?.properties?.sourceSelections?.type !== 'array'
       || Object.hasOwn(setTableCell?.properties ?? {}, 'verticalMerge')) {
