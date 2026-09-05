@@ -203,6 +203,7 @@ try
     RunVerticalTextAlignmentObservation();
     RunNativeInlineSelectionComposition();
     RunRichTargetContentReplacement();
+    RunSharedSourceBatchReplacement();
     RunFieldParagraphSetText();
     RunTextNodeSetText();
     RunBookmarkedParagraphInsertion();
@@ -1568,6 +1569,57 @@ void RunRichTargetContentReplacement()
         "content replacement retained non-plain target content");
     RunInput("validate-openxml", target);
     Console.WriteLine("PASS rich target content replacement");
+}
+
+void RunSharedSourceBatchReplacement()
+{
+    const int changeCount = 320;
+    var source = Path.Combine(root, "shared-source-batch-source.docx");
+    using (var document = WordprocessingDocument.Create(source, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        var body = new Body(new Paragraph(new Run(new Text("shared source value"))));
+        for (var index = 0; index < 12_000; index++)
+            body.Append(new Paragraph(new Run(new Text(RandomNumberGenerator.GetHexString(64)))));
+        main.Document = new Document(body);
+        main.Document.Save();
+    }
+
+    var target = Path.Combine(root, "shared-source-batch-target.docx");
+    using (var document = WordprocessingDocument.Create(target, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        main.Document = new Document(new Body(Enumerable.Range(0, changeCount)
+            .Select(index => new Paragraph(new Run(new Text($"target {index}"))))));
+        main.Document.Save();
+    }
+
+    var sourceAddress = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" };
+    var changes = Enumerable.Range(1, changeCount).Select(index => new
+    {
+        target = new { part = "/word/document.xml", path = $"/w:document[1]/w:body[1]/w:p[{index}]" },
+        sourceInput = source,
+        sourceSelections = new[] { new { address = sourceAddress } },
+    }).ToArray();
+    var stopwatch = Stopwatch.StartNew();
+    var result = Run("docx_replace_content_from_source", new
+    {
+        input = target,
+        changes,
+        output = target,
+        receiptOutput = Path.Combine(root, "shared-source-batch-receipt.json"),
+    });
+    stopwatch.Stop();
+
+    Require(result.GetProperty("summary").GetProperty("appliedCount").GetInt32() == changeCount,
+        "shared-source batch did not apply every replacement");
+    Require(stopwatch.Elapsed < TimeSpan.FromSeconds(20),
+        $"shared-source batch repeatedly reopened its source document: {stopwatch.Elapsed}");
+    using var output = WordprocessingDocument.Open(target, false);
+    Require(output.MainDocumentPart!.Document.Body!.Elements<Paragraph>()
+            .All(paragraph => paragraph.InnerText == "shared source value"),
+        "shared-source batch produced incorrect replacement content");
+    Console.WriteLine($"PASS shared source batch replacement ({stopwatch.Elapsed.TotalSeconds:F2}s)");
 }
 
 void RunTextNodeSetText()
