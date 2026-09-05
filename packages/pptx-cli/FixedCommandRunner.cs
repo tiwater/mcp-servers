@@ -101,7 +101,8 @@ public static class FixedCommandRunner
         catch (Exception error)
         {
             if (workingOutput is not null && File.Exists(workingOutput)) File.Delete(workingOutput);
-            if (!inPlace && output is not null && File.Exists(output)) File.Delete(output);
+            // Only workingOutput belongs to this failed attempt. The destination
+            // may predate the call or have committed before receipt failure.
 
             if (receiptOutput is not null && !File.Exists(receiptOutput))
             {

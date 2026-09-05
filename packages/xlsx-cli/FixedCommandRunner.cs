@@ -73,7 +73,8 @@ public static class FixedCommandRunner
                 && editResult.AppliedOperations.All(operation => operation.Applied)
                 && File.Exists(output);
             var outputArtifact = pass ? Describe(output) : null;
-            if (!pass && !inPlace && File.Exists(output)) File.Delete(output);
+            // Editor owns and cleans its temporary file. A destination can belong
+            // to an earlier or concurrent caller and is never failure scratch.
 
             var receiptPayload = new
             {
@@ -103,8 +104,8 @@ public static class FixedCommandRunner
         }
         catch (Exception error)
         {
-            if (!inPlace && output is not null && File.Exists(output)) File.Delete(output);
-
+            // Do not delete the destination: rejection may precede any edit, or
+            // the document may already have committed before receipt failure.
             if (receiptOutput is not null && !File.Exists(receiptOutput))
             {
                 try
