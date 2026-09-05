@@ -143,7 +143,6 @@ export class McpStdioServer {
         case 'tools/call': {
           if (isNotification) return;
           if (this.calls.has(id)) throw Object.assign(new Error('Duplicate active request id'), { code: -32600 });
-          if (this.calls.size >= 64) throw Object.assign(new Error('Too many pending tool calls'), { code: -32603 });
           const name = params?.name;
           const args = params?.arguments ?? {};
           if (typeof name !== 'string' || !name) {

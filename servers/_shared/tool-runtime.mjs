@@ -7,8 +7,12 @@ import { spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const invocation = new AsyncLocalStorage();
-const maxCommands = positiveInteger(process.env.TIWATER_MCP_MAX_COMMANDS ?? 4, 'TIWATER_MCP_MAX_COMMANDS');
-const maxQueued = positiveInteger(process.env.TIWATER_MCP_MAX_QUEUED ?? 64, 'TIWATER_MCP_MAX_QUEUED');
+// Capacity is deployment-specific. Unconfigured execution preserves the
+// pre-limiter concurrency; deadlines, cancellation and output caps still apply.
+const maxCommands = process.env.TIWATER_MCP_MAX_COMMANDS === undefined
+  ? Infinity : positiveInteger(process.env.TIWATER_MCP_MAX_COMMANDS, 'TIWATER_MCP_MAX_COMMANDS');
+const maxQueued = process.env.TIWATER_MCP_MAX_QUEUED === undefined
+  ? Infinity : positiveInteger(process.env.TIWATER_MCP_MAX_QUEUED, 'TIWATER_MCP_MAX_QUEUED');
 let activeCommands = 0;
 const commandQueue = [];
 

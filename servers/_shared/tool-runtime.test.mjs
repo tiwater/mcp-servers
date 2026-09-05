@@ -5,6 +5,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 const node = commandCandidate(process.execPath);
+test('default execution does not impose an unconfigured four-command limit', async () => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tiwater-default-concurrency-'));
+  const script=`const fs=require('fs');const dir=${JSON.stringify(dir)};fs.writeFileSync(dir+'/'+process.pid,'');const deadline=Date.now()+500;const timer=setInterval(()=>{const count=fs.readdirSync(dir).length;if(count===6||Date.now()>deadline){clearInterval(timer);console.log(count)}},10)`;
+  try {
+    const results=await Promise.all(Array.from({length:6},()=>runCandidateChain([node],['-e',script])));
+    assert.deepEqual(results.map(result=>Number(result.stdout)),[6,6,6,6,6,6]);
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
 test('bounded commands preserve output and allowed nonzero exits', async () => {
   const result = await runCandidateChain([node], ['-e', 'process.stdout.write("中文");process.stderr.write("note");process.exitCode=3'], {allowedExitCodes:[3]});
   assert.equal(result.stdout, '中文');
@@ -33,6 +41,15 @@ test('only missing executable can select another candidate', async () => {
   await assert.rejects(runCandidateChain([node,node], ['-e','process.exit(7)']), /exit code 7/);
 });
 test('queued deadline cannot start a command after its caller has timed out', async () => {
+  const previous=process.env.TIWATER_MCP_MAX_COMMANDS;
+  let runCandidateChain;
+  try {
+    process.env.TIWATER_MCP_MAX_COMMANDS='4';
+    ({runCandidateChain}=await import('./tool-runtime.mjs?explicit-four-command-limit'));
+  } finally {
+    if(previous===undefined) delete process.env.TIWATER_MCP_MAX_COMMANDS;
+    else process.env.TIWATER_MCP_MAX_COMMANDS=previous;
+  }
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tiwater-queue-'));
   const marker=path.join(dir,'started');
   const busy=Array.from({length:4},()=>runCandidateChain([node],['-e','setTimeout(()=>{},250)']));
