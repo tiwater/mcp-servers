@@ -23,6 +23,20 @@ if (args is ["--inline-boundary-probe", var probeRoot])
     return 0;
 }
 
+if (args is ["--inline-toc-end-probe", var inlineTocRoot])
+{
+    Directory.CreateDirectory(inlineTocRoot);
+    var inlineTocSourcePath = Path.Combine(inlineTocRoot, "inline-toc-end-source.docx");
+    var inlineTocRefreshedPath = Path.Combine(inlineTocRoot, "inline-toc-end-refreshed.docx");
+    var inlineTocOutputPath = Path.Combine(inlineTocRoot, "inline-toc-end-output.docx");
+    CreateDocxPackage(inlineTocSourcePath, InlineTocEndSource(), TocStyles());
+    CreateDocxPackage(inlineTocRefreshedPath, InlineTocEndRefreshed(), TocStyles());
+    DocxFieldResultMerger.Merge(inlineTocSourcePath, inlineTocRefreshedPath, inlineTocOutputPath);
+    VerifyInlineTocEndStyle(inlineTocOutputPath);
+    Console.WriteLine("inline TOC end boundary integration passed");
+    return 0;
+}
+
 var root = Path.Combine(Path.GetTempPath(), "tiwater-convert-integration-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
@@ -146,6 +160,24 @@ static string RefreshedTocDocument() => """
 </w:body></w:document>
 """;
 
+static string InlineTocEndSource() => """
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="TemplateTocOne"/></w:pPr><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> HYPERLINK \\l _TocInlineTarget </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>Top entry</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+  <w:p><w:pPr><w:pStyle w:val="TemplateTocOne"/><w:ind w:firstLine="315"/></w:pPr><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> HYPERLINK \\l _TocSecondTarget </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>Second entry</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+  <w:p w14:paraId="ABCD0001"><w:pPr><w:pStyle w:val="HeadingOne"/></w:pPr><w:r><w:fldChar w:fldCharType="end"/></w:r><w:bookmarkStart w:id="51" w:name="_TocInlineTarget"/><w:r><w:t>Top heading</w:t></w:r><w:bookmarkEnd w:id="51"/></w:p>
+  <w:p w14:paraId="ABCD0002"><w:pPr><w:pStyle w:val="HeadingOne"/></w:pPr><w:bookmarkStart w:id="52" w:name="_TocSecondTarget"/><w:r><w:t>Second heading</w:t></w:r><w:bookmarkEnd w:id="52"/></w:p>
+</w:body></w:document>
+""";
+
+static string InlineTocEndRefreshed() => """
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="WrongListStyle"/></w:pPr><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> HYPERLINK \\l _TocRefreshedTarget </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>Top entry</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+  <w:p><w:pPr><w:pStyle w:val="WrongListStyle"/></w:pPr><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> HYPERLINK \\l _TocRefreshedSecond </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>Second entry</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+  <w:p w14:paraId="ABCD0001"><w:pPr><w:pStyle w:val="HeadingOne"/></w:pPr><w:r><w:fldChar w:fldCharType="end"/></w:r><w:bookmarkStart w:id="61" w:name="_TocRefreshedTarget"/><w:r><w:t>Top heading</w:t></w:r><w:bookmarkEnd w:id="61"/></w:p>
+  <w:p w14:paraId="ABCD0002"><w:pPr><w:pStyle w:val="HeadingOne"/></w:pPr><w:bookmarkStart w:id="62" w:name="_TocRefreshedSecond"/><w:r><w:t>Second heading</w:t></w:r><w:bookmarkEnd w:id="62"/></w:p>
+</w:body></w:document>
+""";
+
 static string InlineBoundarySource() => """
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
   <w:p><w:pPr><w:pStyle w:val="SourceBoundary"/></w:pPr><w:bookmarkStart w:id="90" w:name="_TocOutsideBefore"/><w:bookmarkEnd w:id="90"/><w:r><w:rPr><w:b/></w:rPr><w:t>BEFORE</w:t><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> TOC \c "Figure" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>OLD RESULT</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/><w:t>AFTER</w:t></w:r><w:bookmarkStart w:id="91" w:name="_TocOutsideAfter"/><w:bookmarkEnd w:id="91"/></w:p>
@@ -183,6 +215,24 @@ static void VerifyInlineBoundary(string path)
             && !text.Contains("WPS BEFORE", StringComparison.Ordinal)
             && !text.Contains("WPS AFTER", StringComparison.Ordinal),
         "field merge retained content outside the selected refreshed field boundary");
+}
+
+static void VerifyInlineTocEndStyle(string path)
+{
+    XNamespace w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    var document = XDocument.Parse(ReadPart(path, "word/document.xml"));
+    var entries = document.Descendants(w + "p")
+        .Where(paragraph => paragraph.Descendants(w + "t").Any(text => text.Value.EndsWith("entry", StringComparison.Ordinal)))
+        .ToList();
+    Require(entries.Count == 2 && entries.All(entry =>
+            (string?)entry.Element(w + "pPr")?.Element(w + "pStyle")?.Attribute(w + "val") == "TemplateTocOne"),
+        "TOC entry did not use the source template style when its target follows the field end in the same paragraph");
+    var bookmarkNames = document.Descendants(w + "bookmarkStart")
+        .Select(start => (string?)start.Attribute(w + "name"))
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    Require(bookmarkNames.Contains("_TocRefreshedTarget") && bookmarkNames.Contains("_TocRefreshedSecond"),
+        "TOC target bookmark after an inline field end was not copied back to the source document");
 }
 
 static void VerifyTemplateTocStyles(string path)

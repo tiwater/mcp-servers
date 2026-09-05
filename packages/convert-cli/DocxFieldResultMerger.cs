@@ -357,7 +357,10 @@ internal static class DocxFieldResultMerger
                     || !bookmarkParagraphIds.TryGetValue(bookmarkNames.Single(), out var paragraphIds)
                     || paragraphIds.Count != 1
                     || !sourceParagraphs.TryGetValue(paragraphIds[0], out var sourceHeading))
-                    throw new InvalidOperationException("WPS field refresh produced a TOC entry without a unique source heading.");
+                    throw new InvalidOperationException(
+                        $"WPS field refresh produced a TOC entry without a unique source heading: " +
+                        $"references=[{string.Join(",", bookmarkNames)}], " +
+                        $"paragraphIds=[{(bookmarkNames.Count == 1 && bookmarkParagraphIds.TryGetValue(bookmarkNames.Single(), out var ids) ? string.Join(",", ids) : string.Empty)}].");
                 var level = OutlineLevel(sourceHeading, styles);
                 if (level <= 0)
                     throw new InvalidOperationException("Source template TOC heading has no outline level.");
@@ -376,12 +379,9 @@ internal static class DocxFieldResultMerger
     {
         var body = source.Root!.Element(W + "body")!;
         var blocks = body.Elements().ToList();
-        var indexBlocks = sourceRegions
-            .SelectMany(region => blocks.Skip(region.StartBlock).Take(region.EndBlock - region.StartBlock + 1))
-            .ToHashSet();
         var targets = source.Descendants(W + "bookmarkStart")
             .Where(IsTocBookmark)
-            .Where(start => !indexBlocks.Any(block => start.AncestorsAndSelf().Contains(block)))
+            .Where(start => !sourceRegions.Any(region => IsWithinIndexRegion(start, blocks, region)))
             .GroupBy(start => (string)start.Attribute(W + "name")!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
         var result = new Dictionary<int, XElement>();
@@ -407,12 +407,38 @@ internal static class DocxFieldResultMerger
                 if (result.TryGetValue(level, out var existing))
                 {
                     if (!XNode.DeepEquals(existing, properties))
-                        throw new InvalidOperationException($"Source template defines inconsistent TOC level {level} formatting.");
+                    {
+                        var existingStyle = (string?)existing.Element(W + "pStyle")?.Attribute(W + "val");
+                        var currentStyle = (string?)properties.Element(W + "pStyle")?.Attribute(W + "val");
+                        if (string.IsNullOrWhiteSpace(existingStyle)
+                            || !string.Equals(existingStyle, currentStyle, StringComparison.Ordinal))
+                            throw new InvalidOperationException($"Source template defines inconsistent TOC level {level} formatting.");
+                    }
                 }
                 else result.Add(level, new XElement(properties));
             }
         }
         return result;
+    }
+
+    private static bool IsWithinIndexRegion(
+        XElement element,
+        IReadOnlyList<XElement> blocks,
+        IndexRegion region)
+    {
+        var blockIndex = -1;
+        for (var index = region.StartBlock; index <= region.EndBlock; index++)
+        {
+            if (!element.AncestorsAndSelf().Contains(blocks[index])) continue;
+            blockIndex = index;
+            break;
+        }
+        if (blockIndex < 0) return false;
+
+        var order = XNode.DocumentOrderComparer;
+        if (blockIndex == region.StartBlock && order.Compare(element, region.Start) < 0) return false;
+        if (blockIndex == region.EndBlock && order.Compare(element, region.End) > 0) return false;
+        return true;
     }
 
     private static int OutlineLevel(XElement paragraph, XDocument styles)
@@ -506,6 +532,7 @@ internal static class DocxFieldResultMerger
         var refreshedIndexBlocks = refreshedRegions
             .SelectMany(region => refreshedBlocks.Skip(region.StartBlock).Take(region.EndBlock - region.StartBlock + 1))
             .ToHashSet();
+        var sourceReferencedBookmarkNames = ReferencedBookmarkNames(sourceIndexBlocks);
         var referencedBookmarkNames = ReferencedBookmarkNames(refreshedIndexBlocks);
         var refreshedEnds = refreshed.Descendants(W + "bookmarkEnd")
             .Where(end => !string.IsNullOrWhiteSpace((string?)end.Attribute(W + "id")))
@@ -521,12 +548,13 @@ internal static class DocxFieldResultMerger
         if (!referencedBookmarkNames.SetEquals(foundBookmarkNames))
             throw new InvalidOperationException("WPS field refresh produced an index hyperlink without a unique TOC bookmark.");
         var refreshedStarts = matchingStarts
-            .Where(start => !refreshedIndexBlocks.Any(block => start.AncestorsAndSelf().Contains(block)))
+            .Where(start => !refreshedRegions.Any(region => IsWithinIndexRegion(start, refreshedBlocks, region)))
             .ToList();
 
         var oldStarts = source.Descendants(W + "bookmarkStart")
             .Where(IsTocBookmark)
-            .Where(start => !sourceIndexBlocks.Any(block => start.AncestorsAndSelf().Contains(block)))
+            .Where(start => sourceReferencedBookmarkNames.Contains((string)start.Attribute(W + "name")!))
+            .Where(start => !sourceRegions.Any(region => IsWithinIndexRegion(start, sourceBlocks, region)))
             .ToList();
         var oldIds = oldStarts.Select(start => (string?)start.Attribute(W + "id"))
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -567,9 +595,23 @@ internal static class DocxFieldResultMerger
             copiedStart.SetAttributeValue(W + "id", newId);
             var copiedEnd = new XElement(matchingEnds[0]);
             copiedEnd.SetAttributeValue(W + "id", newId);
-            var paragraphProperties = sourceStartParagraph.Element(W + "pPr");
-            if (paragraphProperties is null) sourceStartParagraph.AddFirst(copiedStart);
-            else paragraphProperties.AddAfterSelf(copiedStart);
+            var inlineEndRegionIndex = Enumerable.Range(0, refreshedRegions.Count)
+                .FirstOrDefault(index =>
+                    ReferenceEquals(refreshedStartParagraph, refreshedBlocks[refreshedRegions[index].EndBlock])
+                    && XNode.DocumentOrderComparer.Compare(start, refreshedRegions[index].End) > 0,
+                    -1);
+            if (inlineEndRegionIndex >= 0)
+            {
+                var sourceBoundary = sourceRegions[inlineEndRegionIndex].End.AncestorsAndSelf()
+                    .First(element => ReferenceEquals(element.Parent, sourceStartParagraph));
+                sourceBoundary.AddAfterSelf(copiedStart);
+            }
+            else
+            {
+                var paragraphProperties = sourceStartParagraph.Element(W + "pPr");
+                if (paragraphProperties is null) sourceStartParagraph.AddFirst(copiedStart);
+                else paragraphProperties.AddAfterSelf(copiedStart);
+            }
             sourceEndParagraph.Add(copiedEnd);
         }
     }
