@@ -34,7 +34,7 @@ public static class NativeContentCopy
     public static CopyContentReceipt Apply(CopyContentRequest request)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var targetPath = paths.Input;
         var outputPath = paths.Output;
         var receiptPath = paths.Receipt;

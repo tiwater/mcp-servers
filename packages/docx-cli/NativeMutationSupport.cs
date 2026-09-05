@@ -10,7 +10,10 @@ namespace Dockit.Docx;
 
 internal static class NativeMutationSupport
 {
-    public sealed record PathsResult(string Input, string Output, string Receipt, bool InPlace);
+    public sealed record PathsResult(string Input, string Output, string Receipt, bool InPlace, IDisposable WriteLease) : IDisposable
+    {
+        public void Dispose() => WriteLease.Dispose();
+    }
 
     public static PathsResult Paths(
         string input,
@@ -23,13 +26,18 @@ internal static class NativeMutationSupport
         if (!File.Exists(inputPath) || Directory.Exists(inputPath))
             throw new InvalidOperationException("input-file-not-found");
         var inPlace = StringComparer.OrdinalIgnoreCase.Equals(inputPath, outputPath);
+        var lease = Tiwater.Office.OutputWriteLease.Acquire(outputPath, receiptPath);
+        try
+        {
         if (!inPlace) RequireNewPath(outputPath, "output");
         RequireNewPath(receiptPath, "receiptOutput");
         if (StringComparer.OrdinalIgnoreCase.Equals(outputPath, receiptPath))
             throw new InvalidOperationException("output-and-receiptOutput-must-be-distinct");
         if (!inPlace) Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
-        return new PathsResult(inputPath, outputPath, receiptPath, inPlace);
+        return new PathsResult(inputPath, outputPath, receiptPath, inPlace, lease);
+        }
+        catch { lease.Dispose(); throw; }
     }
 
     public static void Commit(string temporaryPath, PathsResult paths)

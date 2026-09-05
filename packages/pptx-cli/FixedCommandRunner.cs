@@ -32,6 +32,7 @@ public static class FixedCommandRunner
         string? receiptOutput = null;
         Artifact? inputArtifact = null;
         var inPlace = false;
+        IDisposable? writeLease = null;
 
         try
         {
@@ -39,7 +40,9 @@ public static class FixedCommandRunner
                 ?? throw new InvalidOperationException("fixed-pptx-request-invalid");
             var input = RequirePath(request, "input");
             output = RequirePath(request, "output");
-            receiptOutput = RequirePath(request, "receiptOutput");
+            var requestedReceipt = RequirePath(request, "receiptOutput");
+            writeLease = Tiwater.Office.OutputWriteLease.Acquire(output, requestedReceipt);
+            receiptOutput = requestedReceipt;
             inPlace = PathsEqual(output, input);
             if (!inPlace) RequireNewPath(output, "output");
             RequireNewPath(receiptOutput, "receiptOutput");
@@ -135,6 +138,7 @@ public static class FixedCommandRunner
             Console.Error.WriteLine(error.Message);
             return 1;
         }
+        finally { writeLease?.Dispose(); }
     }
 
     private static FixedResult RunTemplate(JsonObject request, string input, string output)

@@ -1,9 +1,14 @@
 using System.Text.Json;
+using System.Diagnostics;
+using System.Reflection;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using S = DocumentFormat.OpenXml.Spreadsheet;
 using P = DocumentFormat.OpenXml.Presentation;
 using A = DocumentFormat.OpenXml.Drawing;
+
+if (args.Length == 2 && args[0] == "run-xlsx")
+    return Dockit.Xlsx.FixedCommandRunner.Run("xlsx_set_cell_value", [args[1]]);
 
 // Synthetic inputs only: failure must preserve bytes owned by a previous caller.
 var root = Path.Combine(Path.GetTempPath(), $"fixed-command-preservation-{Guid.NewGuid():N}");
@@ -78,6 +83,41 @@ foreach (var format in new[] { "xlsx", "pptx" })
             RequireNoTemporaryFiles(directory);
         });
 }
+Check("xlsx", "concurrent-in-place", directory =>
+{
+    var input = Path.Combine(directory, "input.xlsx");
+    Create("xlsx", input);
+    var processes = new List<Process>();
+    foreach (var cell in new[] { "C4", "D4" })
+    {
+        var request = Path.Combine(directory, $"{cell}.json");
+        var changes = Enumerable.Range(0, 4000).Select(_ => new { sheet = "Synthetic", cell, value = 73 }).ToArray();
+        File.WriteAllText(request, JsonSerializer.Serialize(new { input, output = input, receiptOutput = Path.Combine(directory, $"{cell}.receipt.json"), changes }));
+        var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var argument in new[] { Assembly.GetExecutingAssembly().Location, "run-xlsx", request }) start.ArgumentList.Add(argument);
+        processes.Add(Process.Start(start)!);
+    }
+    var logs = processes.Select(process => (Output: process.StandardOutput.ReadToEndAsync(), Error: process.StandardError.ReadToEndAsync())).ToArray();
+    try
+    {
+        foreach (var process in processes)
+            if (!process.WaitForExit(15000)) { process.Kill(true); throw new Exception("concurrent command exceeded experiment budget"); }
+        Require(processes.Any(process => process.ExitCode == 0), "no concurrent writer succeeded");
+        using var document = SpreadsheetDocument.Open(input, false);
+        var cells = document.WorkbookPart!.WorksheetParts.Single().Worksheet.Descendants<S.Cell>().ToDictionary(cell => cell.CellReference!.Value!);
+        for (var index = 0; index < processes.Count; index++)
+        {
+            var cell = index == 0 ? "C4" : "D4";
+            File.WriteAllText(Path.Combine(directory, $"{cell}.log"), logs[index].Output.Result + logs[index].Error.Result);
+            if (processes[index].ExitCode == 0)
+                Require(cells.TryGetValue(cell, out var value) && value.CellValue?.Text == "73", $"successful writer lost update: {cell}");
+        }
+    }
+    finally
+    {
+        foreach (var process in processes) { if (!process.HasExited) process.Kill(true); process.Dispose(); }
+    }
+});
 Console.WriteLine(JsonSerializer.Serialize(new { cases, failures, artifacts = root }));
 return failures.Count == 0 ? 0 : 1;
 

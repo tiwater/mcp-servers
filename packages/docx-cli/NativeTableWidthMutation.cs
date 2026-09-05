@@ -36,7 +36,7 @@ public static class NativeTableWidthMutation
                 || (change.Width.Type is "dxa" or "pct" ? value == 0 : value != 0))
                 throw new InvalidOperationException($"table-width-invalid: changes[{index}].width");
 
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var resolved = Observation.ResolveAddresses(paths.Input, request.Changes.Select(change => change.Table).ToArray(), "changes.table");
         for (var index = 0; index < resolved.Count; index++)
             if (resolved[index].Kind != "table")

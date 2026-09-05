@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <Compile Include="../shared/WritableFileCopy.cs" Link="WritableFileCopy.cs" />
+    <Compile Include="../shared/OutputWriteLease.cs" Link="OutputWriteLease.cs" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.2.0" />
     <PackageReference Include="NPOI" Version="2.7.2" />
     <ProjectReference Include="../convert-cli/convert.csproj" />

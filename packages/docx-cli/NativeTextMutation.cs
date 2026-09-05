@@ -42,7 +42,7 @@ public static class NativeTextMutation
         if (duplicate is not null)
             throw new InvalidOperationException(
                 $"target-address-duplicate: changes=[{string.Join(',', duplicate.Select(item => item.Index))}]");
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var resolved = Observation.ResolveAddresses(paths.Input, addresses, "changes.target");
         for (var index = 0; index < resolved.Count; index++)
             if (resolved[index].Kind is not "paragraph" and not "cell" and not "text")

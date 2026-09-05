@@ -36,7 +36,7 @@ public static class NativeParagraphPaginationMutation
         var duplicate = request.Changes.GroupBy(change => change.Paragraph).FirstOrDefault(group => group.Count() > 1);
         if (duplicate is not null) throw new InvalidOperationException("paragraph-address-duplicate");
 
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var resolved = Observation.ResolveAddresses(paths.Input, request.Changes.Select(change => change.Paragraph).ToArray(), "changes.paragraph");
         if (resolved.Any(item => item.Kind != "paragraph"))
             throw new InvalidOperationException("target-must-be-paragraph");

@@ -33,7 +33,7 @@ public static class NativeCellMutation
     {
         if (command is not MergeCommand and not SplitCommand) throw new InvalidOperationException("cell-mutation-command-invalid");
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var targetPath = paths.Input;
         var outputPath = paths.Output;
         var receiptPath = paths.Receipt;

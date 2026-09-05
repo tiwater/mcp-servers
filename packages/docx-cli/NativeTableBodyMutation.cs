@@ -13,7 +13,7 @@ internal static class NativeTableBodyMutation
     public static SetTableBodyReceipt Apply(SetTableBodyRequest request)
     {
         if (request.Columns.Count == 0) throw new InvalidOperationException("columns-must-not-be-empty");
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var prepared = Prepare(paths.Input, request);
         IReadOnlyDictionary<string, int> baseline;
         using (var input = WordprocessingDocument.Open(paths.Input, false))

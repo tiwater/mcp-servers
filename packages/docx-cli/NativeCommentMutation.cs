@@ -27,7 +27,7 @@ public static class NativeCommentMutation
 
     public static DeleteCommentsReceipt Apply(DeleteCommentsRequest request)
     {
-        var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         int commentCount;
         int markerCount;
         IReadOnlyDictionary<string, int> baseline;

@@ -41,6 +41,7 @@ public static class FixedCommandRunner
         string? receiptOutput = null;
         Artifact? inputArtifact = null;
         var inPlace = false;
+        IDisposable? writeLease = null;
 
         try
         {
@@ -48,7 +49,9 @@ public static class FixedCommandRunner
                 ?? throw new InvalidOperationException("fixed-xlsx-request-invalid");
             var input = RequirePath(root, "input");
             output = RequirePath(root, "output");
-            receiptOutput = RequirePath(root, "receiptOutput");
+            var requestedReceipt = RequirePath(root, "receiptOutput");
+            writeLease = Tiwater.Office.OutputWriteLease.Acquire(output, requestedReceipt);
+            receiptOutput = requestedReceipt;
             inPlace = PathsEqual(output, input);
             if (!inPlace) RequireNewPath(output, "output");
             RequireNewPath(receiptOutput, "receiptOutput");
@@ -138,6 +141,7 @@ public static class FixedCommandRunner
             Console.Error.WriteLine(error.Message);
             return 1;
         }
+        finally { writeLease?.Dispose(); }
     }
 
     private static IReadOnlyList<XlsxEditOperation> BuildOperations(Definition definition, JsonArray changes)
