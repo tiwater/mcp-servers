@@ -5,9 +5,9 @@
   "properties": {
     "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current" },
     "changes": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": {
-      "sectionIndex": { "type": "integer", "minimum": 0 },
-      "unit": { "const": "twip", "description": "Unit for every supplied margin value." },
-      "margins": { "type": "object", "minProperties": 1, "properties": {
+      "sectionIndex": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "unit": { "type": "string", "const": "twip", "description": "Unit for every supplied margin value." },
+      "margins": { "type": "object", "description": "At least one margin must be supplied; omitted margins remain unchanged.", "properties": {
         "top": { "type": "integer", "minimum": 0, "maximum": 31680 },
         "bottom": { "type": "integer", "minimum": 0, "maximum": 31680 },
         "left": { "type": "integer", "minimum": 0, "maximum": 31680 },

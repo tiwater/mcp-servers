@@ -636,6 +636,22 @@ const tools = [
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
+    name: 'docx_set_section_margins',
+    effectKind: 'document-mutation',
+    description: 'Atomically set explicitly supplied page or header/footer margins on selected current DOCX sections. Sections use zero-based native document order, values use twips, and omitted margins remain unchanged. This does not select sections, calculate layout clearance, insert content, or decide business formatting.',
+    inputSchema: inputContract('docx_set_section_margins'),
+    outputSchema: fixedEditOutput('docx_set_section_margins'),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
+  },
+  {
+    name: 'docx_collapse_trailing_empty_section',
+    effectKind: 'document-mutation',
+    description: 'Atomically remove exactly one observed trailing empty DOCX section by promoting the preceding section properties and removing only intervening empty paragraphs. The operation fails when that native structure is absent and preserves all visible document content. This does not choose business sections, delete nonempty content, or normalize other section breaks.',
+    inputSchema: inputContract('docx_collapse_trailing_empty_section'),
+    outputSchema: fixedEditOutput('docx_collapse_trailing_empty_section'),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
+  },
+  {
     name: 'docx_set_table',
     effectKind: 'document-mutation',
     description: 'Atomically replace one exact current target-table row range with a fully specified table body. Name every target grid column in native order. Every rows[] item must contain its own prototypeRow; there is no table-level prototypeRow. Every cell must contain text: use a string for derived plain text, or null together with sourceInput and exact native sourceSelections. Each explicit cell occupies contiguous columns and may span logical rows; covered columns are omitted from following rows. Native source selections retain run formatting such as superscript and subscript. The provider retains the target table, target cell styles, grid widths, and all content outside the replaced range, and exposes no intermediate document. It does not select source rows, map business columns, infer target shape, derive wording, or copy a source table wholesale.',
