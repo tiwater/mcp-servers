@@ -122,7 +122,9 @@ public static class FormatEditor
         if (!string.IsNullOrWhiteSpace(operation.Color))
         {
             properties.RemoveAllChildren<A.SolidFill>();
-            properties.AppendChild(new A.SolidFill(new A.RgbColorModelHex { Val = operation.Color.ToUpperInvariant() }));
+            properties.AddChild(
+                new A.SolidFill(new A.RgbColorModelHex { Val = operation.Color.ToUpperInvariant() }),
+                true);
             changed.Add("color");
         }
 
