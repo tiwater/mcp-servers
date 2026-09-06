@@ -268,6 +268,7 @@ try
     RunSharedSourceBatchReplacement();
     RunFieldParagraphSetText();
     RunTextNodeSetText();
+    RunRetainedTableNativeSiblingPreservation();
     RunBookmarkedParagraphInsertion();
     RunLegacyQualifiedTableLookInsertion();
 
@@ -1737,6 +1738,132 @@ void RunTextNodeSetText()
         "text-node update did not preserve the surrounding field structure");
     RunInput("validate-openxml", output);
     Console.WriteLine("PASS text-node set text");
+}
+
+void RunRetainedTableNativeSiblingPreservation()
+{
+    var input = Path.Combine(root, "set-table-retained-native-siblings.docx");
+    using (var document = WordprocessingDocument.Create(input, WordprocessingDocumentType.Document))
+    {
+        var main = document.AddMainDocumentPart();
+        var retained = new Paragraph(
+            new BookmarkStart { Name = "CrossTableAnchor", Id = "77" },
+            new CommentRangeStart { Id = "9" },
+            new Run(new Text("anchor")),
+            new SimpleField(new Run(new Text("field"))) { Instruction = " REF _Synthetic " },
+            new CommentRangeEnd { Id = "9" },
+            new Run(new CommentReference { Id = "9" }));
+        var table = new Table(
+            new TableProperties(),
+            new TableGrid(new GridColumn { Width = "1800" }, new GridColumn { Width = "1800" }),
+            new TableRow(Cell("left"), Cell("right")),
+            new TableRow(
+                new TableCell(new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "1800" }), retained),
+                Cell("change me")));
+        main.Document = new Document(new Body(table, new BookmarkEnd { Id = "77" }, new Paragraph(new Run(new Text("after")))));
+        var comments = main.AddNewPart<WordprocessingCommentsPart>();
+        comments.Comments = new Comments(new Comment(new Paragraph(new Run(new Text("retained note"))))
+        {
+            Id = "9",
+            Author = "Reviewer",
+        });
+        comments.Comments.Save();
+        AssignParagraphIdentities(main.Document);
+        main.Document.Save();
+    }
+
+    var state = ReadTable(input, "set-table-retained-native-siblings-input");
+    var source = Path.Combine(root, "set-table-retained-native-siblings-source.docx");
+    File.Copy(input, source, true);
+    var rows = state.GetProperty("rows");
+    var columns = state.GetProperty("gridColumns").EnumerateArray()
+        .Select((column, index) => new { id = "column-" + index, gridColumn = column.GetProperty("address").Clone() })
+        .ToArray();
+    var output = Path.Combine(root, "set-table-retained-native-siblings-output.docx");
+    Run("docx_set_table", new
+    {
+        input,
+        table = state.GetProperty("address").Clone(),
+        existingRows = new
+        {
+            first = rows[1].GetProperty("address").Clone(),
+            last = rows[1].GetProperty("address").Clone(),
+        },
+        columns,
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = rows[1].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new
+                    {
+                        columns = new[] { "column-0" }, text = (string?)null,
+                        sourceInput = source,
+                        sourceSelections = new[] { new { address = rows[1].GetProperty("cells")[0].GetProperty("address").Clone() } },
+                    },
+                    new { columns = new[] { "column-1" }, text = "changed elsewhere" },
+                },
+            },
+        },
+        output,
+        receiptOutput = Path.Combine(root, "set-table-retained-native-siblings-receipt.json"),
+    });
+    using (var result = WordprocessingDocument.Open(output, false))
+    {
+        var body = result.MainDocumentPart!.Document.Body!;
+        Require(body.Descendants<BookmarkStart>().Count(bookmark => bookmark.Id?.Value == "77") == 1
+                && body.Descendants<BookmarkEnd>().Count(bookmark => bookmark.Id?.Value == "77") == 1,
+            "set table discarded a retained cell bookmark boundary");
+        var retainedCell = body.Descendants<Table>().Single().Elements<TableRow>().ElementAt(1).Elements<TableCell>().First();
+        Require(retainedCell.Descendants<CommentRangeStart>().Count() == 1
+                && retainedCell.Descendants<CommentRangeEnd>().Count() == 1
+                && retainedCell.Descendants<CommentReference>().Count() == 1
+                && retainedCell.Descendants<SimpleField>().Count() == 1,
+            "set table discarded retained comment or field siblings");
+    }
+    RunInput("validate-openxml", output);
+
+    var deleteReceipt = Path.Combine(root, "set-table-delete-crossing-bookmark-receipt.json");
+    var deleteError = RunExpectAtomicFailure("docx_set_table", input, deleteReceipt, new
+    {
+        input,
+        table = state.GetProperty("address").Clone(),
+        existingRows = new { first = rows[1].GetProperty("address").Clone(), last = rows[1].GetProperty("address").Clone() },
+        columns,
+        rows = Array.Empty<object>(),
+        output = input,
+        receiptOutput = deleteReceipt,
+    });
+    Require(deleteError.Contains("existingRows-crosses-bookmark-boundary", StringComparison.Ordinal),
+        "set table deleted one side of a cross-boundary bookmark");
+
+    var conflictReceipt = Path.Combine(root, "set-table-change-crossing-bookmark-receipt.json");
+    var conflictError = RunExpectAtomicFailure("docx_set_table", input, conflictReceipt, new
+    {
+        input,
+        table = state.GetProperty("address").Clone(),
+        existingRows = new { first = rows[1].GetProperty("address").Clone(), last = rows[1].GetProperty("address").Clone() },
+        columns,
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = rows[1].GetProperty("address").Clone(),
+                cells = new[]
+                {
+                    new { columns = new[] { "column-0" }, text = "conflicting replacement" },
+                    new { columns = new[] { "column-1" }, text = "change me" },
+                },
+            },
+        },
+        output = input,
+        receiptOutput = conflictReceipt,
+    });
+    Require(conflictError.Contains("existingRows-crosses-bookmark-boundary", StringComparison.Ordinal),
+        "set table replaced one side of a cross-boundary bookmark without preserving it");
+    Console.WriteLine("PASS retained table native sibling preservation");
 }
 
 void RunFieldParagraphSetText()
