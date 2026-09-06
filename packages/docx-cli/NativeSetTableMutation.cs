@@ -53,7 +53,7 @@ public static class NativeSetTableMutation
                 shapeReceipt);
             var shaped = NativeTableBodyMutation.Apply(shapeRequest);
             ApplyRichText(request, shaped, shapeOutput);
-            var changes = BuildContentChanges(request, shaped, shapeOutput);
+            var changes = BuildContentChanges(request, shaped, shapeOutput, retainedSourceText);
             var completed = shapeOutput;
             if (changes.Count > 0)
             {
@@ -204,7 +204,8 @@ public static class NativeSetTableMutation
     private static IReadOnlyList<CopyContentChange> BuildContentChanges(
         SetTableRequest request,
         SetTableBodyReceipt shaped,
-        string shapeOutput)
+        string shapeOutput,
+        IReadOnlyDictionary<(int Row, int Cell), string> retainedSourceText)
     {
         var columnStarts = request.Columns.Select((column, index) => (column.Id, index))
             .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
@@ -215,14 +216,16 @@ public static class NativeSetTableMutation
         {
             if (!rowsByAddress.TryGetValue(shaped.Rows[rowIndex].Address, out var observedRow))
                 throw new InvalidOperationException("set-table-shaped-row-not-found");
-            foreach (var cell in request.Rows[rowIndex].Cells.Where(cell => cell.SourceInput is not null))
+            for (var cellIndex = 0; cellIndex < request.Rows[rowIndex].Cells.Count; cellIndex++)
             {
+                var cell = request.Rows[rowIndex].Cells[cellIndex];
+                if (cell.SourceInput is null) continue;
                 int start;
                 try { start = cell.Columns.Select(id => columnStarts[id]).Min(); }
                 catch (KeyNotFoundException) { throw new InvalidOperationException("set-table-content-column-unknown"); }
                 var target = observedRow.Cells.SingleOrDefault(item => item.GridColumnStart == start)
                     ?? throw new InvalidOperationException("set-table-shaped-cell-not-found");
-                if (IsExactRetainedSourceCell(shapeOutput, cell, target.Address)) continue;
+                if (retainedSourceText.ContainsKey((rowIndex, cellIndex))) continue;
                 result.Add(new CopyContentChange(
                     target.Address,
                     cell.SourceInput!,
@@ -244,37 +247,56 @@ public static class NativeSetTableMutation
         var selectedRows = table.Rows.Skip(first.index).Take(last.index - first.index + 1).ToArray();
         var columnStarts = request.Columns.Select((column, index) => (column.Id, index))
             .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
-        var result = new Dictionary<(int, int), string>();
+        var candidates = new List<((int Row, int Cell) Key, SetTableCell Cell, DocxObjectAddress Target)>();
         for (var rowIndex = 0; rowIndex < request.Rows.Count && rowIndex < selectedRows.Length; rowIndex++)
         for (var cellIndex = 0; cellIndex < request.Rows[rowIndex].Cells.Count; cellIndex++)
         {
             var cell = request.Rows[rowIndex].Cells[cellIndex];
-            if (cell.SourceInput is null) continue;
+            if (cell.SourceInput is null || cell.SourceSelections is not [var selection] || selection.Range is not null)
+                continue;
             int start;
             try { start = cell.Columns.Select(id => columnStarts[id]).Min(); }
             catch (KeyNotFoundException) { continue; }
             var target = selectedRows[rowIndex].Cells.SingleOrDefault(item => item.GridColumnStart == start);
-            if (target is not null && IsExactRetainedSourceCell(request.Input, cell, target.Address))
-                result[(rowIndex, cellIndex)] = target.LogicalText;
+            if (target is not null) candidates.Add(((rowIndex, cellIndex), cell, target.Address));
+        }
+        if (candidates.Count == 0) return new Dictionary<(int, int), string>();
+
+        var targetRefs = Observation.ResolveAddresses(
+            request.Input, candidates.Select(candidate => candidate.Target).ToArray(), "retainedSource.target");
+        var result = new Dictionary<(int, int), string>();
+        using var targetDocument = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(request.Input, false);
+        foreach (var group in candidates.Select((candidate, index) => (candidate, index))
+                     .GroupBy(item => Path.GetFullPath(item.candidate.Cell.SourceInput!), StringComparer.OrdinalIgnoreCase))
+        {
+            var items = group.ToArray();
+            var sourceRefs = Observation.ResolveAddresses(
+                group.Key,
+                items.Select(item => item.candidate.Cell.SourceSelections![0].Address).ToArray(),
+                "retainedSource.source");
+            var sourceIsTarget = StringComparer.OrdinalIgnoreCase.Equals(
+                Path.GetFullPath(request.Input), group.Key);
+            using var separateSourceDocument = sourceIsTarget
+                ? null
+                : DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(group.Key, false);
+            var sourceDocument = separateSourceDocument ?? targetDocument;
+            for (var itemIndex = 0; itemIndex < items.Length; itemIndex++)
+            {
+                var item = items[itemIndex];
+                var targetRef = targetRefs[item.index];
+                var sourceRef = sourceRefs[itemIndex];
+                if (targetRef.Kind != "cell" || sourceRef.Kind != "cell") continue;
+                var targetCell = Observation.ResolveNativePath(targetDocument, targetRef.StoryPart, targetRef.NativePath)
+                    as DocumentFormat.OpenXml.Wordprocessing.TableCell;
+                var sourceCell = Observation.ResolveNativePath(sourceDocument, sourceRef.StoryPart, sourceRef.NativePath)
+                    as DocumentFormat.OpenXml.Wordprocessing.TableCell;
+                if (targetCell is not null && sourceCell is not null
+                    && NativeContent(targetCell).Equals(NativeContent(sourceCell), StringComparison.Ordinal))
+                    result[item.candidate.Key] = selectedRows[item.candidate.Key.Row].Cells
+                        .Single(cell => cell.Address == item.candidate.Target).LogicalText;
+            }
         }
         return result;
-    }
-
-    private static bool IsExactRetainedSourceCell(string input, SetTableCell cell, DocxObjectAddress target)
-    {
-        if (cell.SourceInput is null || cell.SourceSelections is not [var selection] || selection.Range is not null)
-            return false;
-        var targetRef = Observation.ResolveAddresses(input, [target], "retainedSource.target").Single();
-        var sourceRef = Observation.ResolveAddresses(cell.SourceInput, [selection.Address], "retainedSource.source").Single();
-        if (targetRef.Kind != "cell" || sourceRef.Kind != "cell") return false;
-        using var targetDocument = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(input, false);
-        using var sourceDocument = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(cell.SourceInput, false);
-        var targetCell = Observation.ResolveNativePath(targetDocument, targetRef.StoryPart, targetRef.NativePath)
-            as DocumentFormat.OpenXml.Wordprocessing.TableCell;
-        var sourceCell = Observation.ResolveNativePath(sourceDocument, sourceRef.StoryPart, sourceRef.NativePath)
-            as DocumentFormat.OpenXml.Wordprocessing.TableCell;
-        if (targetCell is null || sourceCell is null) return false;
-        return NativeContent(targetCell).Equals(NativeContent(sourceCell), StringComparison.Ordinal);
     }
 
     private static string NativeContent(DocumentFormat.OpenXml.Wordprocessing.TableCell cell)
