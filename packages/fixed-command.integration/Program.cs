@@ -118,6 +118,39 @@ Check("xlsx", "concurrent-in-place", directory =>
         foreach (var process in processes) { if (!process.HasExited) process.Kill(true); process.Dispose(); }
     }
 });
+Check("pptx", "format-color-with-existing-typeface", directory =>
+{
+    var input = Path.Combine(directory, "input.pptx");
+    var output = Path.Combine(directory, "output.pptx");
+    CreateFormatPresentation(input);
+    var request = Path.Combine(directory, "request.json");
+    File.WriteAllText(request, JsonSerializer.Serialize(new
+    {
+        input,
+        output,
+        receiptOutput = Path.Combine(directory, "receipt.json"),
+        changes = new[]
+        {
+            new
+            {
+                slideNumber = 1,
+                shapeId = 7,
+                runIndex = 0,
+                fontFamily = (string?)null,
+                fontSize = (double?)null,
+                color = "4A7BC8",
+                bold = (bool?)null,
+                paragraphAlignment = (string?)null,
+            },
+        },
+    }));
+    Require(Dockit.Pptx.FixedCommandRunner.Run("pptx_apply_format", [request]) == 0, "valid color edit rejected");
+    using var document = PresentationDocument.Open(output, false);
+    var properties = document.PresentationPart!.SlideParts.Single().Slide.Descendants<A.Run>().Single().RunProperties!;
+    Require(properties.GetFirstChild<A.SolidFill>()?.RgbColorModelHex?.Val?.Value == "4A7BC8", "edited color differs");
+    Require(properties.ChildElements.Select(child => child.LocalName).SequenceEqual(new[] { "solidFill", "latin", "ea" }),
+        "color and typeface properties are not in schema order");
+});
 Console.WriteLine(JsonSerializer.Serialize(new { cases, failures, artifacts = root }));
 return failures.Count == 0 ? 0 : 1;
 
@@ -186,4 +219,28 @@ static void Create(string format, string file)
                 new P.ShapeProperties(new A.Transform2D(new A.Offset { X = 100, Y = 200 }, new A.Extents { Cx = 3000, Cy = 4000 }))))));
         presentation.Presentation = new P.Presentation(new P.SlideIdList(new P.SlideId { Id = 256, RelationshipId = presentation.GetIdOfPart(slide) }));
     }
+}
+
+static void CreateFormatPresentation(string file)
+{
+    using var document = PresentationDocument.Create(file, PresentationDocumentType.Presentation);
+    var presentation = document.AddPresentationPart();
+    var slide = presentation.AddNewPart<SlidePart>();
+    slide.Slide = new P.Slide(new P.CommonSlideData(new P.ShapeTree(
+        new P.NonVisualGroupShapeProperties(new P.NonVisualDrawingProperties { Id = 1, Name = "Root" }, new P.NonVisualGroupShapeDrawingProperties(), new P.ApplicationNonVisualDrawingProperties()),
+        new P.GroupShapeProperties(),
+        new P.Shape(
+            new P.NonVisualShapeProperties(new P.NonVisualDrawingProperties { Id = 7, Name = "Synthetic text" }, new P.NonVisualShapeDrawingProperties(), new P.ApplicationNonVisualDrawingProperties()),
+            new P.ShapeProperties(),
+            new P.TextBody(
+                new A.BodyProperties(),
+                new A.ListStyle(),
+                new A.Paragraph(
+                    new A.Run(
+                        new A.RunProperties(
+                            new A.LatinFont { Typeface = "Unseen Sans" },
+                            new A.EastAsianFont { Typeface = "Unseen Sans" }),
+                        new A.Text("unseen synthetic title"))))))));
+    presentation.Presentation = new P.Presentation(new P.SlideIdList(
+        new P.SlideId { Id = 256, RelationshipId = presentation.GetIdOfPart(slide) }));
 }
