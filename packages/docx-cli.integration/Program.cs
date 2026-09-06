@@ -141,6 +141,68 @@ try
     });
     Require(invalidWidth.Contains("table-width-invalid", StringComparison.Ordinal),
         "set table width accepted an unsupported width type");
+
+    var sectionMarginInput = Path.Combine(root, "section-margin-input.docx");
+    var sectionMarginOutput = Path.Combine(root, "section-margin-output.docx");
+    CreateSectionMarginDocument(sectionMarginInput);
+    Run("docx_set_section_margins", new
+    {
+        input = sectionMarginInput,
+        changes = new[] { new { sectionIndex = 1, unit = "twip", margins = new { top = 1777, header = 611 } } },
+        output = sectionMarginOutput,
+        receiptOutput = Path.Combine(root, "section-margin-receipt.json"),
+    });
+    using (var changedMargins = WordprocessingDocument.Open(sectionMarginOutput, false))
+    {
+        var sections = changedMargins.MainDocumentPart!.Document.Body!.Descendants<SectionProperties>().ToArray();
+        var first = sections[0].GetFirstChild<PageMargin>()!;
+        var second = sections[1].GetFirstChild<PageMargin>()!;
+        Require(first.Top?.Value == 1001 && first.Header?.Value == 401,
+            "section margin mutation changed an unselected section");
+        Require(second.Top?.Value == 1777 && second.Header?.Value == 611
+                && second.Bottom?.Value == 1302 && second.Left?.Value == 1402,
+            "section margin mutation did not preserve unspecified values on the selected section");
+    }
+    var invalidSectionMarginReceipt = Path.Combine(root, "section-margin-invalid-receipt.json");
+    var invalidSectionMargin = RunExpectAtomicFailure("docx_set_section_margins", sectionMarginInput, invalidSectionMarginReceipt, new
+    {
+        input = sectionMarginInput,
+        changes = new[] { new { sectionIndex = 1, unit = "point", margins = new { top = 1777 } } },
+        output = sectionMarginInput,
+        receiptOutput = invalidSectionMarginReceipt,
+    });
+    Require(invalidSectionMargin.Contains("section-margin-unit-unsupported", StringComparison.Ordinal),
+        "section margin mutation accepted an unsupported unit");
+
+    var trailingSectionInput = Path.Combine(root, "trailing-section-input.docx");
+    var trailingSectionOutput = Path.Combine(root, "trailing-section-output.docx");
+    CreateTrailingEmptySectionDocument(trailingSectionInput);
+    Run("docx_collapse_trailing_empty_section", new
+    {
+        input = trailingSectionInput,
+        output = trailingSectionOutput,
+        receiptOutput = Path.Combine(root, "trailing-section-receipt.json"),
+    });
+    using (var collapsed = WordprocessingDocument.Open(trailingSectionOutput, false))
+    {
+        var body = collapsed.MainDocumentPart!.Document.Body!;
+        var sections = body.Descendants<SectionProperties>().ToArray();
+        Require(sections.Length == 1, "trailing section collapse did not reduce the section count by one");
+        Require(body.InnerText == "Synthetic visible content", "trailing section collapse changed visible content");
+        Require(sections[0].GetFirstChild<PageSize>()?.Orient?.Value == PageOrientationValues.Landscape
+                && sections[0].GetFirstChild<PageMargin>()?.Top?.Value == 1555,
+            "trailing section collapse did not promote the preceding section properties");
+    }
+    var noTrailingReceipt = Path.Combine(root, "trailing-section-noop-receipt.json");
+    var noTrailing = RunExpectAtomicFailure("docx_collapse_trailing_empty_section", trailingSectionOutput, noTrailingReceipt, new
+    {
+        input = trailingSectionOutput,
+        output = trailingSectionOutput,
+        receiptOutput = noTrailingReceipt,
+    });
+    Require(noTrailing.Contains("trailing-empty-section-not-found", StringComparison.Ordinal),
+        "trailing section collapse accepted a document without the observed structure");
+
     var continuation = rows[2].GetProperty("cells")[0];
     var continuationObservation = Run("docx_read_object", new
     {
@@ -2712,6 +2774,40 @@ void CreateDocument(string path)
     table.Append(new TableRow(Cell("独立"), Cell("丙一"), Cell("丙二"), Cell("丙三")));
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateSectionMarginDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var firstSection = new SectionProperties(
+        new PageMargin { Top = 1001, Bottom = 1101, Left = 1201U, Right = 1301U, Header = 401U, Footer = 501U });
+    var secondSection = new SectionProperties(
+        new PageMargin { Top = 1202, Bottom = 1302, Left = 1402U, Right = 1502U, Header = 402U, Footer = 502U });
+    main.Document = new Document(new Body(
+        new Paragraph(new ParagraphProperties(firstSection), new Run(new Text("First section"))),
+        new Paragraph(new Run(new Text("Second section"))),
+        secondSection));
+    main.Document.Save();
+}
+
+void CreateTrailingEmptySectionDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var preceding = new SectionProperties(
+        new PageSize { Width = 15840U, Height = 12240U, Orient = PageOrientationValues.Landscape },
+        new PageMargin { Top = 1555, Bottom = 1666, Left = 1777U, Right = 1888U, Header = 444U, Footer = 555U });
+    var final = new SectionProperties(
+        new PageSize { Width = 12240U, Height = 15840U, Orient = PageOrientationValues.Portrait },
+        new PageMargin { Top = 999, Bottom = 999, Left = 999U, Right = 999U, Header = 333U, Footer = 333U });
+    main.Document = new Document(new Body(
+        new Paragraph(new Run(new Text("Synthetic visible content"))),
+        new Paragraph(new ParagraphProperties(preceding)),
+        new Paragraph(),
+        new Paragraph(),
+        final));
     main.Document.Save();
 }
 

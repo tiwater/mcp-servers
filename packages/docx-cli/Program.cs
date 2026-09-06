@@ -28,6 +28,8 @@ public static class Cli
         NativeCommentMutation.Command,
         NativeParagraphPaginationMutation.Command,
         NativeTableWidthMutation.Command,
+        NativeSectionMarginMutation.Command,
+        NativeTrailingSectionMutation.Command,
         NativeObjectMutation.InsertCommand,
         NativeObjectMutation.DeleteCommand,
         NativeCellMutation.MergeCommand,
@@ -92,6 +94,10 @@ public static class Cli
                     => Task.FromResult(NativeParagraphPaginationMutation.Run(args[1..])),
                 _ when args[0] == NativeTableWidthMutation.Command
                     => Task.FromResult(NativeTableWidthMutation.Run(args[1..])),
+                _ when args[0] == NativeSectionMarginMutation.Command
+                    => Task.FromResult(NativeSectionMarginMutation.Run(args[1..])),
+                _ when args[0] == NativeTrailingSectionMutation.Command
+                    => Task.FromResult(NativeTrailingSectionMutation.Run(args[1..])),
                 _ when args[0] is NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                     => Task.FromResult(NativeObjectMutation.Run(args[0], args[1..])),
                 _ when args[0] is NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand
@@ -201,6 +207,8 @@ public static class Cli
             _ when command is NativeContentCopy.Command or NativeTextMutation.Command or NativeParagraphPaginationMutation.Command
                 or NativeCommentMutation.Command
                 or NativeTableWidthMutation.Command
+                or NativeSectionMarginMutation.Command
+                or NativeTrailingSectionMutation.Command
                 or NativeDocumentCreate.Command
                 or NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
                 or NativeCellMutation.MergeCommand or NativeCellMutation.SplitCommand

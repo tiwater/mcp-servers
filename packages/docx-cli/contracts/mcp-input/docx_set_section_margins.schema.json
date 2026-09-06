@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_set_section_margins",
+  "type": "object",
+  "properties": {
+    "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current" },
+    "changes": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": {
+      "sectionIndex": { "type": "integer", "minimum": 0 },
+      "unit": { "const": "twip", "description": "Unit for every supplied margin value." },
+      "margins": { "type": "object", "minProperties": 1, "properties": {
+        "top": { "type": "integer", "minimum": 0, "maximum": 31680 },
+        "bottom": { "type": "integer", "minimum": 0, "maximum": 31680 },
+        "left": { "type": "integer", "minimum": 0, "maximum": 31680 },
+        "right": { "type": "integer", "minimum": 0, "maximum": 31680 },
+        "header": { "type": "integer", "minimum": 0, "maximum": 31680 },
+        "footer": { "type": "integer", "minimum": 0, "maximum": 31680 }
+      }, "additionalProperties": false }
+    }, "required": ["sectionIndex", "unit", "margins"], "additionalProperties": false } },
+    "output": { "type": "string", "minLength": 1, "description": "Output DOCX path; may equal input for an atomic in-place update.", "x-tiwater-file-role": "write" },
+    "receiptOutput": { "type": "string", "minLength": 1, "x-tiwater-file-role": "write", "x-tiwater-file-effect": false }
+  },
+  "required": ["input", "changes", "output", "receiptOutput"],
+  "additionalProperties": false
+}

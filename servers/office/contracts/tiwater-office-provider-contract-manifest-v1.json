@@ -28,6 +28,17 @@
       }
     },
     {
+      "name": "docx_collapse_trailing_empty_section",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_collapse_trailing_empty_section.schema.json",
+        "sha256": "aa111bc52626aad17c6a7efd9af1b31a0209c7e40811ba0b80cc96bddf6553ac"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_collapse_trailing_empty_section.schema.json",
+        "sha256": "aa111bc52626aad17c6a7efd9af1b31a0209c7e40811ba0b80cc96bddf6553ac"
+      }
+    },
+    {
       "name": "docx_compare",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_compare.schema.json",
@@ -212,6 +223,17 @@
       "inputContract": {
         "path": "office/contracts/docx_set_paragraph_pagination.schema.json",
         "sha256": "02343da9dd2072257781e7e94a07682639f3de80b4bec0c7d9c0fc5da6a3b2f5"
+      }
+    },
+    {
+      "name": "docx_set_section_margins",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_set_section_margins.schema.json",
+        "sha256": "2add571cfd868bcc20065a67ea06f259b583ebcf5c8061802171bf6708db36a9"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_set_section_margins.schema.json",
+        "sha256": "2add571cfd868bcc20065a67ea06f259b583ebcf5c8061802171bf6708db36a9"
       }
     },
     {
