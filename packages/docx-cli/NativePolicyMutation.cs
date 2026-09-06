@@ -34,6 +34,7 @@ public static class NativePolicyMutation
     public static PolicyMutationReceipt ApplyFontPolicy(ApplyFontPolicyRequest request)
     {
         using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        var inputArtifact = NativeMutationSupport.Describe(paths.Input);
         var policyBytes = File.ReadAllBytes(Path.GetFullPath(request.Policy));
         var policy = FontPolicy.ReadPolicy(policyBytes);
         if (!FontPolicy.TryNormalize(policy, out var normalized, out var error))
@@ -67,6 +68,7 @@ public static class NativePolicyMutation
             if (!validation.Pass) throw new InvalidOperationException("output-font-policy-readback-failed");
             return WriteReceipt(
                 paths,
+                inputArtifact,
                 "tiwater.docx-apply-font-policy-receipt/v1",
                 policySha256,
                 bodyCount,
@@ -85,6 +87,7 @@ public static class NativePolicyMutation
         if (request.IndentCharactersPerLevel < 0)
             throw new InvalidOperationException("indent-characters-per-level-must-be-nonnegative");
         using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
+        var inputArtifact = NativeMutationSupport.Describe(paths.Input);
         var policy = new { request.Italic, request.IndentCharactersPerLevel };
         var policySha256 = NativeMutationSupport.JsonSha256(policy);
         IReadOnlyDictionary<string, int> baseline;
@@ -108,6 +111,7 @@ public static class NativePolicyMutation
             if (!validation.Pass) throw new InvalidOperationException("output-toc-style-policy-readback-failed");
             return WriteReceipt(
                 paths,
+                inputArtifact,
                 "tiwater.docx-apply-toc-style-policy-receipt/v1",
                 policySha256,
                 0,
@@ -123,12 +127,14 @@ public static class NativePolicyMutation
 
     private static PolicyMutationReceipt WriteReceipt(
         NativeMutationSupport.PathsResult paths,
+        ObjectArtifact input,
         string schema,
         string policySha256,
         int bodyRunCount,
         int tableRunCount,
         int appliedCount)
     {
+        var output = NativeMutationSupport.Describe(paths.Output);
         var receipt = new PolicyMutationReceipt(
             schema,
             "tiwater.docx.cli",
@@ -137,7 +143,10 @@ public static class NativePolicyMutation
             bodyRunCount,
             tableRunCount,
             appliedCount,
-            paths.Output);
+            input.Path,
+            input.Sha256,
+            output.Path,
+            output.Sha256);
         File.WriteAllText(paths.Receipt, JsonSerializer.Serialize(receipt, Json.CamelCaseOptions));
         return receipt;
     }
@@ -162,4 +171,7 @@ public sealed record PolicyMutationReceipt(
     int BodyRunCount,
     int TableRunCount,
     int AppliedCount,
-    string Output);
+    string Input,
+    string InputSha256,
+    string Output,
+    string OutputSha256);

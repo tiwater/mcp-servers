@@ -1120,6 +1120,7 @@ void RunTocStylePolicyMatrix()
     {
         var input = Path.Combine(root, $"toc-policy-{italic}-input.docx");
         var output = Path.Combine(root, $"toc-policy-{italic}-output.docx");
+        var receiptOutput = Path.Combine(root, $"toc-policy-{italic}-receipt.json");
         CreateTocPolicyDocument(input);
         Run("docx_apply_toc_style_policy", new
         {
@@ -1127,8 +1128,20 @@ void RunTocStylePolicyMatrix()
             italic,
             indentCharactersPerLevel = indentCharacters,
             output,
-            receiptOutput = Path.Combine(root, $"toc-policy-{italic}-receipt.json")
+            receiptOutput
         });
+        using (var receiptDocument = JsonDocument.Parse(File.ReadAllText(receiptOutput)))
+        {
+            var receipt = receiptDocument.RootElement;
+            Require(Path.GetFullPath(receipt.GetProperty("input").GetString()!) == Path.GetFullPath(input),
+                "TOC policy receipt did not bind its input path");
+            Require(receipt.GetProperty("inputSha256").GetString() == FileHash(input).ToLowerInvariant(),
+                "TOC policy receipt did not bind its input content");
+            Require(Path.GetFullPath(receipt.GetProperty("output").GetString()!) == Path.GetFullPath(output),
+                "TOC policy receipt did not bind its output path");
+            Require(receipt.GetProperty("outputSha256").GetString() == FileHash(output).ToLowerInvariant(),
+                "TOC policy receipt did not bind its output content");
+        }
         using var document = WordprocessingDocument.Open(output, false);
         var entries = document.MainDocumentPart!.Document.Body!.Elements<Paragraph>()
             .Where(paragraph => paragraph.Descendants<Text>().Any(text => text.Text.StartsWith("Entry", StringComparison.Ordinal)))
