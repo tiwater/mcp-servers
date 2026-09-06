@@ -64,6 +64,18 @@ try
     Require(initial.GetProperty("tableWidth").GetProperty("type").GetString() == "dxa"
             && initial.GetProperty("tableWidth").GetProperty("value").GetString() == "6000",
         "table read did not expose the explicit native table width");
+    var allTables = Run("docx_read_all_tables", new { input = original });
+    Require(allTables.GetProperty("schema").GetString() == "tiwater.docx-table-read-set/v1",
+        "all-table read schema is not v1");
+    Require(allTables.GetProperty("tableIndex").GetProperty("tables").GetArrayLength() == 1
+            && allTables.GetProperty("tables").GetArrayLength() == 1,
+        "all-table read did not preserve complete index/detail coverage");
+    var allTable = allTables.GetProperty("tables")[0];
+    var sameAddress = JsonElement.DeepEquals(allTable.GetProperty("address"), initial.GetProperty("address"));
+    var sameRows = JsonElement.DeepEquals(allTable.GetProperty("rows"), initial.GetProperty("rows"));
+    var sameGrid = JsonElement.DeepEquals(allTable.GetProperty("gridColumns"), initial.GetProperty("gridColumns"));
+    Require(sameAddress && sameRows && sameGrid,
+        $"all-table read differs from the corresponding exact table read: address={sameAddress}, rows={sameRows}, grid={sameGrid}");
 
     var fontOutput = Path.Combine(root, "set-text-font.docx");
     var fontReceipt = Path.Combine(root, "set-text-font-receipt.json");

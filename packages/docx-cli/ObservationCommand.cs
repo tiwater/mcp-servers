@@ -10,6 +10,7 @@ public static class ObservationCommand
         "docx_list_objects",
         "docx_table_index",
         "docx_read_table",
+        "docx_read_all_tables",
         "docx_find_literal",
         "docx_read_object",
     };
@@ -35,6 +36,7 @@ public static class ObservationCommand
                 OptionalInt(request, "offset") ?? 0),
             "docx_table_index" => Observation.TableIndex(input),
             "docx_read_table" => Observation.ReadTable(input, RequireAddress(request, "table")),
+            "docx_read_all_tables" => Observation.ReadAllTables(input),
             "docx_find_literal" => Observation.Find(
                 input,
                 RequireString(request, "literal"),

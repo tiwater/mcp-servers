@@ -534,6 +534,15 @@ const docxTableReadOutput = docxObservationOutput('docx_read_table').extend({
   }).strict()).optional(),
 }).strict();
 
+const docxReadAllTablesOutput = z.object({
+  tool: z.literal('docx_read_all_tables'),
+  runtime: runtimeIdentity,
+  source: artifact,
+  artifact,
+  schema: z.literal('tiwater.docx-table-read-set/v1'),
+  tableCount: z.number().int().nonnegative(),
+}).strict();
+
 const docxReadObjectOutput = docxObservationOutput('docx_read_object').extend({
   receipt: z.object({
     schema: z.literal('tiwater.docx-read-object-receipt/v1'),
@@ -594,6 +603,14 @@ const tools = [
     outputSchema: docxTableReadOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: args => docxObservation('docx_read_table', args),
+  },
+  {
+    name: 'docx_read_all_tables',
+    description: 'Read every native table from one current DOCX in document order. The document is opened once and the complete rows, cells, merge ownership, paragraphs, and text nodes are written to output. Only a compact receipt is returned. This tool does not select business tables or infer their meaning.',
+    inputSchema: inputContract('docx_read_all_tables'),
+    outputSchema: docxReadAllTablesOutput,
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    handler: docxReadAllTables,
   },
   {
     name: 'docx_replace_content_from_source',
@@ -1227,6 +1244,22 @@ async function docxObservation(tool, args) {
       };
     }
     throw new Error(`unsupported-docx-observation-tool:${tool}`);
+  });
+}
+
+async function docxReadAllTables(args) {
+  const input = path.resolve(requireString(args.input, 'input'));
+  const output = path.resolve(requireString(args.output, 'output'));
+  return withTempJsonFile({ input }, async requestPath => {
+    const result = await runJsonCandidateChain(docxCandidates, ['docx_read_all_tables', requestPath]);
+    return {
+      tool: 'docx_read_all_tables',
+      runtime: commandRuntime(result),
+      source: await fileArtifact(input),
+      artifact: await writeIdempotentJsonArtifact(output, result.json),
+      schema: result.json.schema,
+      tableCount: result.json.tables.length,
+    };
   });
 }
 
