@@ -37,6 +37,26 @@ if (args is ["--inline-toc-end-probe", var inlineTocRoot])
     return 0;
 }
 
+if (args is ["--duplicate-bookmark-end-probe", var duplicateBookmarkRoot])
+{
+    Directory.CreateDirectory(duplicateBookmarkRoot);
+    var duplicateSourcePath = Path.Combine(duplicateBookmarkRoot, "source.docx");
+    var duplicateRefreshedPath = Path.Combine(duplicateBookmarkRoot, "refreshed.docx");
+    var duplicateOutputPath = Path.Combine(duplicateBookmarkRoot, "output.docx");
+    var source = SourceTocDocument().Replace(
+        "</w:body>", "<w:bookmarkEnd w:id=\"0\"/></w:body>", StringComparison.Ordinal);
+    var refreshed = RefreshedTocDocument()
+        .Replace("w:id=\"41\" w:name=\"_TocFresh1\"", "w:id=\"0\" w:name=\"_TocFresh1\"", StringComparison.Ordinal)
+        .Replace("<w:bookmarkEnd w:id=\"41\"/>", "<w:bookmarkEnd w:id=\"0\"/>", StringComparison.Ordinal)
+        .Replace("</w:body>", "<w:bookmarkEnd w:id=\"0\"/></w:body>", StringComparison.Ordinal);
+    CreateDocxPackage(duplicateSourcePath, source, TocStyles());
+    CreateDocxPackage(duplicateRefreshedPath, refreshed, TocStyles());
+    DocxFieldResultMerger.Merge(duplicateSourcePath, duplicateRefreshedPath, duplicateOutputPath);
+    VerifyDuplicateBookmarkEndRecovery(duplicateOutputPath);
+    Console.WriteLine("duplicate bookmark end integration passed");
+    return 0;
+}
+
 var root = Path.Combine(Path.GetTempPath(), "tiwater-convert-integration-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
@@ -251,6 +271,28 @@ static void VerifyTemplateTocStyles(string path)
     Require(entries.Values.SelectMany(paragraph => paragraph.Descendants(w + "r"))
             .Where(run => run.Descendants(w + "t").Any()).All(run => run.Element(w + "rPr") is null),
         "refreshed TOC text direct formatting overrides the template style");
+}
+
+static void VerifyDuplicateBookmarkEndRecovery(string path)
+{
+    XNamespace w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    var document = XDocument.Parse(ReadPart(path, "word/document.xml"));
+    var start = document.Descendants(w + "bookmarkStart")
+        .Single(element => (string?)element.Attribute(w + "name") == "_TocFresh1");
+    var id = (string?)start.Attribute(w + "id");
+    var ends = document.Descendants(w + "bookmarkEnd")
+        .Where(element => (string?)element.Attribute(w + "id") == id)
+        .ToList();
+    Require(id != "0", "copied TOC bookmark reused an existing bookmark-end identity");
+    Require(ends.Count == 1, "copied TOC bookmark does not have one unique end");
+    Require(ReferenceEquals(start.Ancestors(w + "p").FirstOrDefault(), ends[0].Ancestors(w + "p").FirstOrDefault()),
+        "copied TOC bookmark did not retain its same-paragraph end");
+    Require(document.Descendants(w + "bookmarkEnd")
+            .Select(element => (string?)element.Attribute(w + "id"))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .GroupBy(value => value, StringComparer.Ordinal)
+            .All(group => group.Count() == 1),
+        "merged DOCX contains duplicate bookmark-end identities");
 }
 
 static void Require(bool condition, string message)

@@ -564,7 +564,8 @@ internal static class DocxFieldResultMerger
             element.Remove();
         foreach (var element in oldStarts) element.Remove();
 
-        var usedIds = source.Descendants(W + "bookmarkStart")
+        var usedIds = source.Descendants()
+            .Where(element => element.Name == W + "bookmarkStart" || element.Name == W + "bookmarkEnd")
             .Select(start => (string?)start.Attribute(W + "id"))
             .Where(id => int.TryParse(id, out _))
             .Select(id => int.Parse(id!))
@@ -574,12 +575,24 @@ internal static class DocxFieldResultMerger
         foreach (var start in refreshedStarts)
         {
             var oldId = (string?)start.Attribute(W + "id");
-            if (string.IsNullOrWhiteSpace(oldId)
-                || !refreshedEnds.TryGetValue(oldId, out var matchingEnds)
-                || matchingEnds.Count != 1)
-                throw new InvalidOperationException("WPS field refresh produced an incomplete TOC bookmark pair.");
+            refreshedEnds.TryGetValue(oldId ?? string.Empty, out var matchingEnds);
+            var targetEnds = matchingEnds?
+                .Where(end => !refreshedRegions.Any(region => IsWithinIndexRegion(end, refreshedBlocks, region)))
+                .ToList();
             var refreshedStartParagraph = start.Ancestors(W + "p").FirstOrDefault();
-            var refreshedEndParagraph = matchingEnds[0].Ancestors(W + "p").FirstOrDefault();
+            var sameParagraphEnds = targetEnds?
+                .Where(end => ReferenceEquals(end.Ancestors(W + "p").FirstOrDefault(), refreshedStartParagraph))
+                .Where(end => XNode.DocumentOrderComparer.Compare(start, end) < 0)
+                .ToList();
+            var pairedEnd = sameParagraphEnds?.Count == 1
+                ? sameParagraphEnds[0]
+                : targetEnds?.Count == 1 ? targetEnds[0] : null;
+            if (string.IsNullOrWhiteSpace(oldId) || pairedEnd is null)
+                throw new InvalidOperationException(
+                    $"WPS field refresh produced an incomplete TOC bookmark pair for " +
+                    $"{(string?)start.Attribute(W + "name") ?? "<unnamed>"} " +
+                    $"(id={oldId ?? "<missing>"}, targetEnds={targetEnds?.Count ?? 0}, allEnds={matchingEnds?.Count ?? 0}).");
+            var refreshedEndParagraph = pairedEnd.Ancestors(W + "p").FirstOrDefault();
             var startParagraphId = (string?)refreshedStartParagraph?.Attribute(W14 + "paraId");
             var endParagraphId = (string?)refreshedEndParagraph?.Attribute(W14 + "paraId");
             if (string.IsNullOrWhiteSpace(startParagraphId)
@@ -593,7 +606,7 @@ internal static class DocxFieldResultMerger
             usedIds.Add(int.Parse(newId));
             var copiedStart = new XElement(start);
             copiedStart.SetAttributeValue(W + "id", newId);
-            var copiedEnd = new XElement(matchingEnds[0]);
+            var copiedEnd = new XElement(pairedEnd);
             copiedEnd.SetAttributeValue(W + "id", newId);
             var inlineEndRegionIndex = Enumerable.Range(0, refreshedRegions.Count)
                 .FirstOrDefault(index =>
