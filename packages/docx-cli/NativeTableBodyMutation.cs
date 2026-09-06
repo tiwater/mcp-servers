@@ -94,6 +94,7 @@ internal static class NativeTableBodyMutation
         var idToColumn = request.Columns.Select((column, index) => (column.Id, index))
             .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
         var preparedRows = PrepareRows(request.Rows, prototypeRows, selectedRows, idToColumn, grid.Length);
+        RequirePreservedBookmarkBoundaries(document, selectedRows, preparedRows);
         return new PreparedTable(
             tableRef,
             selectedRows.Select(Observation.NativePathFor).ToArray(),
@@ -197,6 +198,7 @@ internal static class NativeTableBodyMutation
                 if (cellChange.UnchangedContent is null)
                 {
                     NativeTextMutation.SetText(cell, cellChange.Text);
+                    RemoveCopiedIdentities(cell);
                 }
                 else
                 {
@@ -205,7 +207,6 @@ internal static class NativeTableBodyMutation
                     foreach (var child in cellChange.UnchangedContent)
                         cell.Append(child.CloneNode(true));
                 }
-                RemoveCopiedIdentities(cell);
                 row.Append(cell);
             }
             if (CellPositions(row).Sum(item => item.Span) != prepared.GridWidths.Count)
@@ -288,6 +289,51 @@ internal static class NativeTableBodyMutation
             var count = group.Count(selected.Contains);
             if (count > 0 && count != group.Count)
                 throw new InvalidOperationException("existingRows-split-vertical-merge");
+        }
+    }
+
+    private static void RequirePreservedBookmarkBoundaries(
+        WordprocessingDocument document,
+        IReadOnlyList<TableRow> selectedRows,
+        IReadOnlyList<PreparedRow> preparedRows)
+    {
+        var selectedStarts = selectedRows.SelectMany(row => row.Descendants<BookmarkStart>())
+            .Where(bookmark => bookmark.Id?.Value is not null)
+            .GroupBy(bookmark => bookmark.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var selectedEnds = selectedRows.SelectMany(row => row.Descendants<BookmarkEnd>())
+            .Where(bookmark => bookmark.Id?.Value is not null)
+            .GroupBy(bookmark => bookmark.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var allStarts = document.MainDocumentPart!.Document.Descendants<BookmarkStart>()
+            .Where(bookmark => bookmark.Id?.Value is not null)
+            .GroupBy(bookmark => bookmark.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var allEnds = document.MainDocumentPart.Document.Descendants<BookmarkEnd>()
+            .Where(bookmark => bookmark.Id?.Value is not null)
+            .GroupBy(bookmark => bookmark.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var retained = preparedRows.SelectMany(row => row.Cells)
+            .SelectMany(cell => cell.UnchangedContent ?? [])
+            .SelectMany(child => new[] { child }.Concat(child.Descendants())).ToArray();
+        var retainedStarts = retained.OfType<BookmarkStart>()
+            .Where(bookmark => bookmark.Id?.Value is not null)
+            .GroupBy(bookmark => bookmark.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var retainedEnds = retained.OfType<BookmarkEnd>()
+            .Where(bookmark => bookmark.Id?.Value is not null)
+            .GroupBy(bookmark => bookmark.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+        foreach (var id in selectedStarts.Keys.Concat(selectedEnds.Keys).Distinct(StringComparer.Ordinal))
+        {
+            var startsInside = selectedStarts.GetValueOrDefault(id);
+            var endsInside = selectedEnds.GetValueOrDefault(id);
+            var startsOutside = allStarts.GetValueOrDefault(id) - startsInside;
+            var endsOutside = allEnds.GetValueOrDefault(id) - endsInside;
+            if ((endsOutside > 0 && retainedStarts.GetValueOrDefault(id) != startsInside)
+                || (startsOutside > 0 && retainedEnds.GetValueOrDefault(id) != endsInside))
+                throw new InvalidOperationException("existingRows-crosses-bookmark-boundary");
         }
     }
 

@@ -125,6 +125,11 @@ public static class Observation
     public static DocxTableIndexResult TableIndex(string input)
     {
         var snapshot = Snapshot.Open(input);
+        return TableIndex(snapshot);
+    }
+
+    private static DocxTableIndexResult TableIndex(Snapshot snapshot)
+    {
         var tables = snapshot.Objects.Where(item => item.Kind == "table").Select(item =>
         {
             var identity = ToObject(snapshot, item);
@@ -150,8 +155,24 @@ public static class Observation
     public static DocxTableReadResult ReadTable(string input, DocxObjectAddress address)
     {
         var snapshot = Snapshot.Open(input);
-        var selected = ResolveAddresses(snapshot, new[] { address }, "table").Single();
-        if (selected.Kind != "table" || selected.Element is not Table table)
+        var resolved = ResolveAddresses(snapshot, new[] { address }, "table").Single();
+        var selected = snapshot.Objects.Single(item => ReferenceEquals(item.Element, resolved.Element));
+        return ReadTable(snapshot, selected);
+    }
+
+    public static DocxTableReadSetResult ReadAllTables(string input)
+    {
+        var snapshot = Snapshot.Open(input);
+        var tables = snapshot.Objects
+            .Where(item => item.Kind == "table")
+            .Select(item => ReadTable(snapshot, item))
+            .ToArray();
+        return new DocxTableReadSetResult("tiwater.docx-table-read-set/v1", TableIndex(snapshot), tables);
+    }
+
+    private static DocxTableReadResult ReadTable(Snapshot snapshot, NativeObject selected)
+    {
+        if (selected.Element is not Table table)
             throw new InvalidOperationException("table-reference-kind-invalid");
         var gridColumns = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>()
             .Select(column => new DocxTableReadGridColumn(
@@ -193,9 +214,8 @@ public static class Observation
             table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count() ?? 0,
             rows.Select(row => row.GridBefore + row.Cells.Sum(cell => cell.GridSpan) + row.GridAfter)
                 .DefaultIfEmpty(0).Max());
-        var context = TableContext(snapshot,
-            snapshot.Objects.Single(item => item.Address == selected.Address));
-        return new DocxTableReadResult("tiwater.docx-table-read/v2", address, rows.Length,
+        var context = TableContext(snapshot, selected);
+        return new DocxTableReadResult("tiwater.docx-table-read/v2", selected.Address, rows.Length,
             columnCount, TableWidthValue(table), gridColumns, context.PrecedingParagraph, context.FollowingParagraph, rows);
     }
 
@@ -806,6 +826,11 @@ public sealed record DocxTableReadResult(
     [property: JsonPropertyName("precedingParagraph")] DocxTableContextParagraph? PrecedingParagraph,
     [property: JsonPropertyName("followingParagraph")] DocxTableContextParagraph? FollowingParagraph,
     [property: JsonPropertyName("rows")] IReadOnlyList<DocxTableReadRow> Rows);
+
+public sealed record DocxTableReadSetResult(
+    [property: JsonPropertyName("schema")] string Schema,
+    [property: JsonPropertyName("tableIndex")] DocxTableIndexResult TableIndex,
+    [property: JsonPropertyName("tables")] IReadOnlyList<DocxTableReadResult> Tables);
 
 internal sealed record ProjectedTableCell(
     TableCell Cell,

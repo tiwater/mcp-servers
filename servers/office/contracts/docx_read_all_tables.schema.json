@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_read_all_tables/v1",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Current DOCX to read once.",
+      "x-tiwater-file-role": "read"
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New JSON file that receives every native table in document order, including rows, cells, merges, paragraphs, and text nodes.",
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
+    }
+  },
+  "required": ["input", "output"],
+  "additionalProperties": false
+}
