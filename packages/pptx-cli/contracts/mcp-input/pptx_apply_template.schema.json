@@ -90,6 +90,14 @@
         "additionalProperties": false
       }
     },
+    "systemPlaceholderPolicy": {
+      "type": "string",
+      "enum": [
+        "preserve",
+        "target-template"
+      ],
+      "description": "Whether source slide-level date, footer, header, and slide-number placeholders remain or yield to the selected target template."
+    },
     "output": {
       "type": "string",
       "minLength": 1,
@@ -109,6 +117,7 @@
     "template",
     "targetMasterPath",
     "slides",
+    "systemPlaceholderPolicy",
     "output",
     "receiptOutput"
   ],
