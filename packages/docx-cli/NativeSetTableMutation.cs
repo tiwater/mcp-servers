@@ -292,8 +292,7 @@ public static class NativeSetTableMutation
                     as DocumentFormat.OpenXml.Wordprocessing.TableCell;
                 if (targetCell is not null && sourceCell is not null
                     && NativeContent(targetCell).Equals(NativeContent(sourceCell), StringComparison.Ordinal))
-                    result[item.candidate.Key] = selectedRows[item.candidate.Key.Row].Cells
-                        .Single(cell => cell.Address == item.candidate.Target).LogicalText;
+                    result[item.candidate.Key] = NativeMutationSupport.PlainText(targetCell);
             }
         }
         return result;

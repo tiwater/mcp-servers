@@ -1770,7 +1770,10 @@ void RunRetainedTableNativeSiblingPreservation()
             new TableGrid(new GridColumn { Width = "1800" }, new GridColumn { Width = "1800" }),
             new TableRow(Cell("left"), Cell("right")),
             new TableRow(
-                new TableCell(new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "1800" }), retained),
+                new TableCell(
+                    new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "1800" }),
+                    retained,
+                    new Paragraph(new Run(new Text("second line")))),
                 Cell("change me")));
         main.Document = new Document(new Body(table, new BookmarkEnd { Id = "77" }, new Paragraph(new Run(new Text("after")))));
         var comments = main.AddNewPart<WordprocessingCommentsPart>();
@@ -1785,8 +1788,6 @@ void RunRetainedTableNativeSiblingPreservation()
     }
 
     var state = ReadTable(input, "set-table-retained-native-siblings-input");
-    var source = Path.Combine(root, "set-table-retained-native-siblings-source.docx");
-    File.Copy(input, source, true);
     var rows = state.GetProperty("rows");
     var columns = state.GetProperty("gridColumns").EnumerateArray()
         .Select((column, index) => new { id = "column-" + index, gridColumn = column.GetProperty("address").Clone() })
@@ -1812,7 +1813,7 @@ void RunRetainedTableNativeSiblingPreservation()
                     new
                     {
                         columns = new[] { "column-0" }, text = (string?)null,
-                        sourceInput = source,
+                        sourceInput = input,
                         sourceSelections = new[] { new { address = rows[1].GetProperty("cells")[0].GetProperty("address").Clone() } },
                     },
                     new { columns = new[] { "column-1" }, text = "changed elsewhere" },
