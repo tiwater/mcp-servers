@@ -7,5 +7,6 @@ export function compactDocxObjectIdentity(object) {
     gridSpan: object.gridSpan ?? null,
     verticalMerge: object.verticalMerge ?? null,
     verticalTextAlignment: object.verticalTextAlignment ?? null,
+    checked: object.checked ?? null,
   };
 }

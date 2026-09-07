@@ -430,6 +430,7 @@ const docxObjectIdentity = z.object({
   gridSpan: z.number().int().positive().nullable(),
   verticalMerge: z.string().nullable(),
   verticalTextAlignment: z.enum(['baseline', 'superscript', 'subscript']).nullable(),
+  checked: z.boolean().nullable(),
 }).strict();
 
 const docxNestedObjectIdentity = docxObjectIdentity.pick({
@@ -442,6 +443,7 @@ const docxNestedObjectIdentity = docxObjectIdentity.pick({
   verticalMergeOwner: docxAddress.optional(),
   logicalText: z.string().optional(),
   verticalTextAlignment: z.enum(['baseline', 'superscript', 'subscript']).optional(),
+  checked: z.boolean().optional(),
 }).strict();
 const docxObservationNode = z.lazy(() => z.object({
   object: docxNestedObjectIdentity,
@@ -590,7 +592,7 @@ const tools = [
   },
   {
     name: 'docx_read_object',
-    description: 'Read explicitly selected rows, cells, or paragraphs from one native DOCX. Set returnContent true to return compact requested descendants; if receipt.narrowingRequired is true, request fewer addresses or descendant kinds. Provide output to store the complete selected observation and return its artifact receipt. These channels are independent and may be used together; at least one is required. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. Run and text descendants expose their native verticalTextAlignment when it is baseline, superscript, or subscript. Use docx_read_table for a table range.',
+    description: 'Read explicitly selected rows, cells, paragraphs, or drawings from one native DOCX. Set returnContent true to return compact requested descendants; if receipt.narrowingRequired is true, request fewer addresses or descendant kinds. Provide output to store the complete selected observation and return its artifact receipt. These channels are independent and may be used together; at least one is required. A selected cell exposes its vertical-merge owner and logical text, so a continue cell keeps its physical identity while resolving the restart cell value. Run and text descendants expose their native verticalTextAlignment when it is baseline, superscript, or subscript. A technically recognized image-based checkbox drawing exposes checked; unsupported drawings omit it. Use docx_read_table for a table range.',
     inputSchema: inputContract('docx_read_object'),
     outputSchema: docxReadObjectOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -642,6 +644,14 @@ const tools = [
     description: 'Set native pagination properties on explicitly selected current DOCX paragraphs. Each change sets at least one pagination property. keepWithNext keeps a paragraph with the immediately following paragraph or table but does not guarantee that a table header remains with its first body row. keepLinesTogether keeps one paragraph on one page; pageBreakBefore starts it on a new page; preventWidowOrphanLines controls isolated first or last lines. Omitted properties remain unchanged. The caller chooses paragraphs from current native addresses; the provider does not decide document layout or business meaning.',
     inputSchema: inputContract('docx_set_paragraph_pagination'),
     outputSchema: fixedEditOutput('docx_set_paragraph_pagination'),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
+  },
+  {
+    name: 'docx_set_drawing_checkbox_state',
+    effectKind: 'document-mutation',
+    description: 'Set the visible checked or unchecked state of explicitly selected current DOCX image-based checkbox drawings while retaining each drawing container, native address, size, paragraph, label text, and every unselected drawing. The current provider accepts embedded 24-bit DIB-backed WMF checkboxes and rejects other drawings or images instead of guessing. Shared image parts are isolated before mutation so selecting one checkbox cannot change another. The caller chooses checkbox drawings and states; this tool does not select business options or edit text.',
+    inputSchema: inputContract('docx_set_drawing_checkbox_state'),
+    outputSchema: fixedEditOutput('docx_set_drawing_checkbox_state'),
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
@@ -1028,6 +1038,7 @@ function compactDocxObservation(observation) {
       ...(node.object.verticalMergeOwner === null ? {} : { verticalMergeOwner: node.object.verticalMergeOwner }),
       ...(node.object.logicalText === null ? {} : { logicalText: node.object.logicalText }),
       ...(identity.verticalTextAlignment === null ? {} : { verticalTextAlignment: identity.verticalTextAlignment }),
+      ...(identity.checked === null ? {} : { checked: identity.checked }),
     };
     return {
       object,

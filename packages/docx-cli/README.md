@@ -26,6 +26,9 @@ Inspection reports current package, story, paragraph, run, table, row, cell,
 field, drawing, font, flow, and formatting facts. Complete JSON can be written
 to an artifact path by the Office MCP.
 
+Reading a technically recognized image-based checkbox drawing reports its
+current `checked` state. Unsupported drawings omit that property.
+
 ## Native object mutation
 
 ```bash
@@ -33,6 +36,7 @@ tiwater-docx docx_replace_content_from_source request.json
 tiwater-docx docx_set_text request.json
 tiwater-docx docx_delete_comments request.json
 tiwater-docx docx_set_paragraph_pagination request.json
+tiwater-docx docx_set_drawing_checkbox_state request.json
 tiwater-docx docx_set_table request.json
 tiwater-docx docx_insert_objects request.json
 tiwater-docx docx_delete_object request.json

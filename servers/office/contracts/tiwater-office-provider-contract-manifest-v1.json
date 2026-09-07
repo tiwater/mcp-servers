@@ -2,7 +2,7 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.21.56"
+    "version": "0.21.57"
   },
   "tools": [
     {
@@ -223,6 +223,17 @@
       "inputContract": {
         "path": "office/contracts/docx_replace_style_ids.schema.json",
         "sha256": "5466f70cc69974d4cb2158760491820a43ab2c25ce1c950465a5169c9185ab81"
+      }
+    },
+    {
+      "name": "docx_set_drawing_checkbox_state",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_set_drawing_checkbox_state.schema.json",
+        "sha256": "acab84fcd23f91c700778eac33334d33b6199ed9da0604897bf3bde2146245e0"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_set_drawing_checkbox_state.schema.json",
+        "sha256": "acab84fcd23f91c700778eac33334d33b6199ed9da0604897bf3bde2146245e0"
       }
     },
     {

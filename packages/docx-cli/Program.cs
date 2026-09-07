@@ -27,6 +27,7 @@ public static class Cli
         NativeTextMutation.Command,
         NativeCommentMutation.Command,
         NativeParagraphPaginationMutation.Command,
+        NativeDrawingCheckboxMutation.Command,
         NativeTableWidthMutation.Command,
         NativeSectionMarginMutation.Command,
         NativeTrailingSectionMutation.Command,
@@ -92,6 +93,8 @@ public static class Cli
                 _ when args[0] == NativeCommentMutation.Command => Task.FromResult(NativeCommentMutation.Run(args[1..])),
                 _ when args[0] == NativeParagraphPaginationMutation.Command
                     => Task.FromResult(NativeParagraphPaginationMutation.Run(args[1..])),
+                _ when args[0] == NativeDrawingCheckboxMutation.Command
+                    => Task.FromResult(NativeDrawingCheckboxMutation.Run(args[1..])),
                 _ when args[0] == NativeTableWidthMutation.Command
                     => Task.FromResult(NativeTableWidthMutation.Run(args[1..])),
                 _ when args[0] == NativeSectionMarginMutation.Command
@@ -205,6 +208,7 @@ public static class Cli
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
             _ when ObservationCommand.IsCommand(command) => $"tiwater-docx {command} <request.json>",
             _ when command is NativeContentCopy.Command or NativeTextMutation.Command or NativeParagraphPaginationMutation.Command
+                or NativeDrawingCheckboxMutation.Command
                 or NativeCommentMutation.Command
                 or NativeTableWidthMutation.Command
                 or NativeSectionMarginMutation.Command

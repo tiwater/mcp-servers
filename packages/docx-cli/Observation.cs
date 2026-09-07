@@ -24,10 +24,10 @@ public static class Observation
         int limit,
         int offset)
     {
-        var snapshot = Snapshot.Open(input);
         if (kinds.Count == 0) throw new InvalidOperationException("kinds-is-required");
         foreach (var kind in kinds)
             if (!ListKinds.Contains(kind)) throw new InvalidOperationException($"unsupported-list-kind: {kind}");
+        var snapshot = Snapshot.Open(input, kinds.Contains("drawing"));
         var objects = SelectObjects(snapshot, scope, parent)
             .Where(item => kinds.Contains(item.Kind))
             .ToList();
@@ -70,13 +70,13 @@ public static class Observation
         IReadOnlyList<DocxObjectAddress> addresses,
         IReadOnlySet<string> kinds)
     {
-        var snapshot = Snapshot.Open(input);
         if (addresses.Count == 0) throw new InvalidOperationException("addresses-is-required");
         if (kinds.Count == 0) throw new InvalidOperationException("kinds-is-required");
         foreach (var kind in kinds)
             if (!ReadKinds.Contains(kind)) throw new InvalidOperationException($"unsupported-read-kind: {kind}");
+        var snapshot = Snapshot.Open(input, kinds.Contains("drawing"));
         var selectedObjects = ResolveAddresses(snapshot, addresses, "addresses")
-            .Select(item => new NativeObject(item.Address, item.Kind, item.Element))
+            .Select(item => snapshot.Objects.Single(candidate => candidate.Address == item.Address))
             .ToList();
 
         DocxObservationDetail Detail(NativeObject selected)
@@ -548,7 +548,8 @@ public static class Observation
             verticalMerge,
             verticalMergeOwner,
             logicalText,
-            VerticalTextAlignmentValue(item.Element));
+            VerticalTextAlignmentValue(item.Element),
+            item.Checked);
     }
 
     private static string? VerticalTextAlignmentValue(OpenXmlElement element)
@@ -582,7 +583,8 @@ public static class Observation
     private sealed record NativeObject(
         DocxObjectAddress Address,
         string Kind,
-        OpenXmlElement Element)
+        OpenXmlElement Element,
+        bool? Checked = null)
     {
         public string StoryPart => Address.Part;
         public string NativePath => Address.Path;
@@ -606,7 +608,7 @@ public static class Observation
         public IReadOnlyDictionary<OpenXmlElement, NativeObject> ObjectsByElement { get; }
         public IReadOnlySet<OpenXmlElement> PublishedElements { get; }
 
-        public static Snapshot Open(string input)
+        public static Snapshot Open(string input, bool observeDrawingState = false)
         {
             var path = Path.GetFullPath(input);
             if (!File.Exists(path)) throw new FileNotFoundException("input-docx-not-found", path);
@@ -624,7 +626,10 @@ public static class Observation
                     objects.Add(new NativeObject(
                         new DocxObjectAddress(story.Part, nativePath),
                         kind,
-                        element));
+                        element,
+                        observeDrawingState && element is Drawing drawing
+                            ? NativeDrawingCheckboxMutation.ObserveCheckboxState(document, story.Part, drawing)
+                            : null));
                 }
             }
             return new Snapshot(objects);
@@ -729,7 +734,8 @@ public sealed record DocxObservationObject(
     [property: JsonPropertyName("verticalMerge")] string? VerticalMerge,
     [property: JsonPropertyName("verticalMergeOwner")] DocxObjectAddress? VerticalMergeOwner,
     [property: JsonPropertyName("logicalText")] string? LogicalText,
-    [property: JsonPropertyName("verticalTextAlignment")] string? VerticalTextAlignment);
+    [property: JsonPropertyName("verticalTextAlignment")] string? VerticalTextAlignment,
+    [property: JsonPropertyName("checked")] bool? Checked);
 
 public sealed record DocxTextMatch(
     [property: JsonPropertyName("offset")] int Offset,
