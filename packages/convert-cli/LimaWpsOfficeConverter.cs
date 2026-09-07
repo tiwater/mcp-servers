@@ -205,13 +205,13 @@ internal static class LimaWpsPdfConverter
     }
 
     private static string RemoteCommand(string input, string output, string backend)
-        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/tiwater/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/tiwater/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_PDF_BACKEND={backend}; timeout --kill-after=5s 650s tiwater-convert {SourceFormat(input, backend)}-to-pdf '{input}' '{output}'";
 
     private static string SpreadsheetConversionCommand(string input, string output, string command)
-        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/tiwater/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_XLSX_BACKEND=et; tiwater-convert {command} '{input}' '{output}'";
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/tiwater/wpsrpc-venv/bin/python\"; export TIWATER_OFFICE_XLSX_BACKEND=et; timeout --kill-after=5s 590s tiwater-convert {command} '{input}' '{output}'";
 
     private static string DocumentFieldRefreshCommand(string input, string output)
-        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/tiwater/wpsrpc-venv/bin/python\"; tiwater-convert refresh-docx-fields '{input}' '{output}'";
+        => $"set -e; export DOTNET_ROOT=\"$HOME/.dotnet\"; export PATH=\"$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.local/bin:$PATH\"; export TIWATER_WPSRPC_PYTHON=\"$HOME/.local/share/tiwater/wpsrpc-venv/bin/python\"; timeout --kill-after=5s 230s tiwater-convert refresh-docx-fields '{input}' '{output}'";
 
     private static void RunDocumentFieldRefresh(string limactl, string instance, string input, string output)
     {

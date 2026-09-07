@@ -3,6 +3,28 @@ using System.Text;
 using System.Xml.Linq;
 using Dockit.Convert;
 
+if (args is ["--lima-guest-timeout-probe"])
+{
+    var docx = LimaWpsPdfConverter.CreateDocumentFieldRefreshStartInfo(
+        "/usr/bin/limactl", "isolated-wps", "/shared/input.docx", "/shared/output.docx");
+    var spreadsheet = LimaWpsPdfConverter.CreateSpreadsheetConversionStartInfo(
+        "/usr/bin/limactl", "isolated-wps", "/shared/input.xlsx", "/shared/output.xlsx", "recalculate-xlsx");
+    var pdf = LimaWpsPdfConverter.CreateProcessStartInfo(
+        "/usr/bin/limactl", "isolated-wps", "/shared/input.docx", "/shared/output.pdf");
+
+    Require(docx.ArgumentList[^1].Contains(
+        "timeout --kill-after=5s 230s tiwater-convert refresh-docx-fields '/shared/input.docx' '/shared/output.docx'",
+        StringComparison.Ordinal), "DOCX field refresh is not bounded inside the Lima guest");
+    Require(spreadsheet.ArgumentList[^1].Contains(
+        "timeout --kill-after=5s 590s tiwater-convert recalculate-xlsx '/shared/input.xlsx' '/shared/output.xlsx'",
+        StringComparison.Ordinal), "spreadsheet conversion is not bounded inside the Lima guest");
+    Require(pdf.ArgumentList[^1].Contains(
+        "timeout --kill-after=5s 650s tiwater-convert docx-to-pdf '/shared/input.docx' '/shared/output.pdf'",
+        StringComparison.Ordinal), "PDF conversion is not bounded inside the Lima guest");
+    Console.WriteLine("Lima guest timeout integration passed");
+    return 0;
+}
+
 if (args is ["--merge-probe", var sourcePath, var refreshedPath, var outputPath])
 {
     DocxFieldResultMerger.Merge(sourcePath, refreshedPath, outputPath);
