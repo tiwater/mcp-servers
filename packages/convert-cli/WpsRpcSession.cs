@@ -6,6 +6,7 @@ internal static class WpsRpcSession
 {
     private static readonly string OfficeLeasePath = Path.Combine(Path.GetTempPath(), "tiwater-office.lock");
     internal static readonly TimeSpan OfficeOperationTimeout = TimeSpan.FromMinutes(10);
+    internal static readonly TimeSpan DocumentFieldRefreshTimeout = TimeSpan.FromSeconds(210);
 
     internal static bool IsAvailable()
         => FindOnPath("dbus-run-session") is not null
@@ -150,6 +151,52 @@ internal static class WpsRpcSession
         }
         try { process.Kill(entireProcessTree: true); } catch { }
         throw new TimeoutException(timeoutMessage);
+    }
+
+    internal static HashSet<int> CaptureWpsAutomationProcessIds()
+    {
+        var result = new HashSet<int>();
+        if (!OperatingSystem.IsLinux() || !Directory.Exists("/proc")) return result;
+        foreach (var directory in Directory.EnumerateDirectories("/proc"))
+        {
+            if (!int.TryParse(Path.GetFileName(directory), out var pid)) continue;
+            try
+            {
+                var arguments = System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(directory, "cmdline")))
+                    .Split('\0', StringSplitOptions.RemoveEmptyEntries)
+                    .ToArray();
+                if (IsWpsAutomationCommandLine(arguments)) result.Add(pid);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return result;
+    }
+
+    internal static bool IsWpsAutomationCommandLine(IReadOnlyList<string> arguments)
+    {
+        if (arguments.Count < 3) return false;
+        var executable = Path.GetFileName(arguments[0]);
+        var commandOffset = executable == "bash" && arguments.Count > 1 && Path.GetFileName(arguments[1]) == "wps" ? 1 : 0;
+        if (Path.GetFileName(arguments[commandOffset]) != "wps") return false;
+        return arguments.Skip(commandOffset + 1).Contains("-automation", StringComparer.Ordinal)
+            && arguments.Skip(commandOffset + 1).Any(static argument => argument.StartsWith("-rpcserverport=/wpsrpc-", StringComparison.Ordinal));
+    }
+
+    internal static void TerminateNewWpsAutomationProcesses(IReadOnlySet<int> baseline)
+    {
+        foreach (var pid in CaptureWpsAutomationProcessIds().Where(pid => !baseline.Contains(pid)))
+        {
+            try
+            {
+                using var process = Process.GetProcessById(pid);
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(TimeSpan.FromSeconds(5));
+            }
+            catch (ArgumentException) { }
+            catch (InvalidOperationException) { }
+            catch (System.ComponentModel.Win32Exception) { }
+        }
     }
 
     private static string? FindOnPath(string command)

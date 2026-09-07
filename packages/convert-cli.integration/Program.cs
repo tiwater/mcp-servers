@@ -25,6 +25,38 @@ if (args is ["--lima-guest-timeout-probe"])
     return 0;
 }
 
+if (args is ["--wps-automation-process-probe"])
+{
+    Require(WpsRpcSession.DocumentFieldRefreshTimeout == TimeSpan.FromSeconds(210),
+        "document refresh must finish cleanup before the 230-second Lima guest deadline");
+    Require(WpsRpcSession.IsWpsAutomationCommandLine(new[] {
+        "/opt/kingsoft/wps-office/office6/wps", "-automation", "-rpcserverport=/wpsrpc-123-456"
+    }), "direct WPS automation process was not identified");
+    Require(WpsRpcSession.IsWpsAutomationCommandLine(new[] {
+        "/bin/bash", "/usr/bin/wps", "-automation", "-rpcserverport=/wpsrpc-123-456"
+    }), "WPS launcher automation process was not identified");
+    Require(!WpsRpcSession.IsWpsAutomationCommandLine(new[] {
+        "/opt/kingsoft/wps-office/office6/wps", "/home/customer/report.docx"
+    }), "interactive WPS process must not be identified as an automation session");
+    Require(!WpsRpcSession.IsWpsAutomationCommandLine(new[] {
+        "/usr/bin/wpp", "-automation", "-rpcserverport=/wpsrpc-123-456"
+    }), "a different Office application must not be identified as Writer automation");
+    var refreshScript = WpsPdfConverter.RefreshFieldsHelperScript;
+    var figureUpdate = refreshScript.IndexOf("TableOfFigures.Update", StringComparison.Ordinal);
+    var contentsUpdate = refreshScript.IndexOf("TableOfContents.Update", StringComparison.Ordinal);
+    Require(figureUpdate >= 0 && contentsUpdate > figureUpdate,
+        "WPS must update figure indexes before contents indexes");
+    Require(!refreshScript.Contains("UpdatePageNumbers", StringComparison.Ordinal),
+        "full index updates must not be followed by a duplicate WPS page-number update");
+    Require(refreshScript.Contains("shutil.copy2(input_path, output_path)", StringComparison.Ordinal)
+            && refreshScript.Contains("documents.Open(output_path", StringComparison.Ordinal)
+            && refreshScript.Contains("Document.Save\", document.Save()", StringComparison.Ordinal)
+            && !refreshScript.Contains("SaveAs2", StringComparison.Ordinal),
+        "WPS refresh must save an isolated working copy in place");
+    Console.WriteLine("WPS automation process integration passed");
+    return 0;
+}
+
 if (args is ["--merge-probe", var sourcePath, var refreshedPath, var outputPath])
 {
     DocxFieldResultMerger.Merge(sourcePath, refreshedPath, outputPath);
