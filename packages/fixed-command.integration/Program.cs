@@ -118,6 +118,56 @@ Check("xlsx", "concurrent-in-place", directory =>
         foreach (var process in processes) { if (!process.HasExited) process.Kill(true); process.Dispose(); }
     }
 });
+Check("xlsx", "atomic-mixed-operation-handoff", directory =>
+{
+    var input = Path.Combine(directory, "input.xlsx");
+    var output = Path.Combine(directory, "output.xlsx");
+    var operationsInput = Path.Combine(directory, "operations.json");
+    var receiptOutput = Path.Combine(directory, "receipt.json");
+    var request = Path.Combine(directory, "request.json");
+    Create("xlsx", input);
+    File.WriteAllText(operationsInput, JsonSerializer.Serialize(new
+    {
+        operations = new object[]
+        {
+            new { type = "insertRows", sheet = "Synthetic", startRow = 4, count = 1 },
+            new { type = "copyRow", sheet = "Synthetic", sourceRow = 5, targetRow = 4, translateFormulas = true },
+            new { type = "setCellValue", sheet = "Synthetic", cell = "C4", value = 73 },
+        },
+    }));
+    File.WriteAllText(request, JsonSerializer.Serialize(new { input, operationsInput, output, receiptOutput }));
+
+    Require(Dockit.Xlsx.AtomicOperationRunner.Run([request]) == 0, "valid mixed operation handoff rejected");
+    using var document = SpreadsheetDocument.Open(output, false);
+    var cells = document.WorkbookPart!.WorksheetParts.Single().Worksheet.Descendants<S.Cell>()
+        .ToDictionary(cell => cell.CellReference!.Value!);
+    Require(cells["C4"].CellValue?.Text == "73", "mixed batch final value differs");
+    Require(cells["C5"].CellValue?.Text == "11", "mixed batch did not preserve shifted source row");
+    using var receipt = JsonDocument.Parse(File.ReadAllText(receiptOutput));
+    Require(receipt.RootElement.GetProperty("pass").GetBoolean(), "mixed batch receipt not passing");
+    Require(receipt.RootElement.GetProperty("operationCount").GetInt32() == 3, "mixed batch receipt count differs");
+});
+Check("xlsx", "atomic-mixed-operation-rejection-preserves-output", directory =>
+{
+    var input = Path.Combine(directory, "input.xlsx");
+    var output = Path.Combine(directory, "output.xlsx");
+    var operationsInput = Path.Combine(directory, "operations.json");
+    var receiptOutput = Path.Combine(directory, "receipt.json");
+    var request = Path.Combine(directory, "request.json");
+    Create("xlsx", input);
+    File.WriteAllText(operationsInput, JsonSerializer.Serialize(new
+    {
+        operations = new object[]
+        {
+            new { type = "setCellValue", sheet = "Synthetic", cell = "C4", value = 73 },
+            new { type = "unsupportedOperation", sheet = "Synthetic", cell = "D4", value = 19 },
+        },
+    }));
+    File.WriteAllText(request, JsonSerializer.Serialize(new { input, operationsInput, output, receiptOutput }));
+
+    Require(Dockit.Xlsx.AtomicOperationRunner.Run([request]) == 1, "unsupported mixed operation must fail");
+    Require(!File.Exists(output), "failed mixed operation batch left output bytes");
+});
 Check("pptx", "format-color-with-existing-typeface", directory =>
 {
     var input = Path.Combine(directory, "input.pptx");

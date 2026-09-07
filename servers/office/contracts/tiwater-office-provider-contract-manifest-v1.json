@@ -2,7 +2,7 @@
   "schema": "tiwater.office-provider-contract-manifest/v1",
   "provider": {
     "id": "@tiwater/office-mcp",
-    "version": "0.21.55"
+    "version": "0.21.56"
   },
   "tools": [
     {
@@ -454,6 +454,17 @@
       "inputContract": {
         "path": "office/contracts/pptx_validate.schema.json",
         "sha256": "06d5f29f7ed23ab53fdf7a5de09cbfb6a800e7a19ae076a3d6d80abf22c464be"
+      }
+    },
+    {
+      "name": "xlsx_apply_operations",
+      "providerContract": {
+        "source": "packages/xlsx-cli/contracts/mcp-input/xlsx_apply_operations.schema.json",
+        "sha256": "89b0946543671b5dc75ce40db9656f23b3909bc2a9ef945e7cdf5b73f40845d2"
+      },
+      "inputContract": {
+        "path": "office/contracts/xlsx_apply_operations.schema.json",
+        "sha256": "89b0946543671b5dc75ce40db9656f23b3909bc2a9ef945e7cdf5b73f40845d2"
       }
     },
     {

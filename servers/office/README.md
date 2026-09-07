@@ -20,18 +20,22 @@ OpenXML-internal identifiers, not filesystem arguments.
 - DOCX: inspect document/tables, export, compare, validate OpenXML, apply or validate font and
   table-of-contents style policies, refresh document fields, replace object text, transform styles,
   and batch one fixed edit action.
-- XLS/XLSX: convert legacy XLS with ET, inspect/export, validate, and batch
-  one fixed workbook edit action.
+- XLS/XLSX: convert legacy XLS with ET, inspect/export, validate, batch one
+  fixed workbook edit action, or atomically apply one immutable provider-ready
+  mixed-operation handoff.
 - PPTX: inspect/export, bind selected masters/layouts, apply text formatting,
   set exact top-level object geometry, replace existing picture media, and
   validate OpenXML.
 - Office: render DOC/DOCX/XLS/XLSX/PPT/PPTX to PDF with the corresponding native
   WPS backend.
 
-Each mutation tool fixes its provider operation type. Callers submit only the
+Fixed-action mutation tools fix their provider operation type. Callers submit only the
 coordinates and values for that action, so they cannot provide an arbitrary
 operation discriminator or a multi-action plan language. A call may batch
 multiple changes only when every change has the same action kind.
+The atomic XLSX handoff capability accepts only a file identity for an already
+approved operation artifact. It does not choose, rewrite, partition, or infer
+operations, and it commits workbook bytes only when the complete ordered handoff succeeds.
 When a completed mutation receipt reports `summary.pass=false`, the MCP result
 also sets the standard `isError` field; consumers do not need a private failure
 interpretation.

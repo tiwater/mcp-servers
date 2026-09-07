@@ -17,6 +17,7 @@ internal static class Cli
         "export-json",
         "inventory-regions",
         "xlsx_read_range",
+        "xlsx_apply_operations",
         "validate",
         .. FixedCommandRunner.Commands,
     ];
@@ -54,6 +55,7 @@ internal static class Cli
                 "export-json" => Task.FromResult(Extractor.RunExportJson(args[1..])),
                 "inventory-regions" => Task.FromResult(RegionInventory.Run(args[1..])),
                 "xlsx_read_range" => Task.FromResult(RangeReader.Run(args[1..])),
+                "xlsx_apply_operations" => Task.FromResult(AtomicOperationRunner.Run(args[1..])),
                 "validate" => RunValidateAsync(args[1..]),
                 _ when FixedCommandRunner.IsCommand(args[0]) => Task.FromResult(FixedCommandRunner.Run(args[0], args[1..])),
                 _ => FailUnknown(args[0]),
@@ -106,6 +108,7 @@ internal static class Cli
         Console.WriteLine("  export-json <input.xlsx> [<output.json>]");
         Console.WriteLine("  inventory-regions <input.xlsx> [<output.json>] [--schema v1|v2]");
         Console.WriteLine("  xlsx_read_range <request.json>");
+        Console.WriteLine("  xlsx_apply_operations <request.json>");
         Console.WriteLine("  validate <input.xlsx>");
         foreach (var command in FixedCommandRunner.Commands)
             Console.WriteLine($"  {command} <request.json>");
@@ -125,6 +128,7 @@ internal static class Cli
             "export-json" => PrintUsageLine("tiwater-xlsx export-json <input.xlsx> [<output.json>]"),
             "inventory-regions" => PrintUsageLine("tiwater-xlsx inventory-regions <input.xlsx> [<output.json>] [--schema v1|v2]"),
             "xlsx_read_range" => PrintUsageLine("tiwater-xlsx xlsx_read_range <request.json>"),
+            "xlsx_apply_operations" => PrintUsageLine("tiwater-xlsx xlsx_apply_operations <request.json>"),
             "validate" => PrintUsageLine("tiwater-xlsx validate <input.xlsx>"),
             _ => false,
         };

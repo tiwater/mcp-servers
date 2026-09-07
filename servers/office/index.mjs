@@ -848,6 +848,14 @@ const tools = [
   },
   ...fixedToolDefinitions(xlsxFixedTools, xlsxCandidates),
   {
+    name: 'xlsx_apply_operations',
+    effectKind: 'document-mutation',
+    description: 'Apply one immutable provider-ready XLSX operation handoff as a single atomic workbook edit. The provider preflights and executes the complete ordered operation list, commits output bytes only when every operation succeeds, and returns one complete receipt.',
+    inputSchema: inputContract('xlsx_apply_operations'),
+    outputSchema: fixedEditOutput('xlsx_apply_operations'),
+    handler: (args, tool) => fixedEdit(tool, args, xlsxCandidates),
+  },
+  {
     name: 'xlsx_validate',
     description: 'Validate an XLSX workbook package and produce OpenXML validation evidence. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('xlsx_validate'),
