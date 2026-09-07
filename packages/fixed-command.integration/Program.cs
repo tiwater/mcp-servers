@@ -133,6 +133,8 @@ Check("xlsx", "atomic-mixed-operation-handoff", directory =>
             new { type = "insertRows", sheet = "Synthetic", startRow = 4, count = 1 },
             new { type = "copyRow", sheet = "Synthetic", sourceRow = 5, targetRow = 4, translateFormulas = true },
             new { type = "setCellValue", sheet = "Synthetic", cell = "C4", value = 73 },
+            new { type = "copyCellFormula", sourceSheet = "Synthetic", sourceCell = "D5", sheet = "Synthetic", cell = "E4", translateFormulas = true },
+            new { type = "copyCellFormula", sourceSheet = "Synthetic", sourceCell = "D5", sheet = "Synthetic", cell = "F4", translateFormulas = false },
         },
     }));
     File.WriteAllText(request, JsonSerializer.Serialize(new { input, operationsInput, output, receiptOutput }));
@@ -143,9 +145,31 @@ Check("xlsx", "atomic-mixed-operation-handoff", directory =>
         .ToDictionary(cell => cell.CellReference!.Value!);
     Require(cells["C4"].CellValue?.Text == "73", "mixed batch final value differs");
     Require(cells["C5"].CellValue?.Text == "11", "mixed batch did not preserve shifted source row");
+    Require(cells["E4"].CellFormula?.Text == "D4+1", "mixed batch did not translate the copied formula cell");
+    Require(cells["F4"].CellFormula?.Text == "C5+1", "mixed batch did not preserve the copied formula when translation was disabled");
     using var receipt = JsonDocument.Parse(File.ReadAllText(receiptOutput));
     Require(receipt.RootElement.GetProperty("pass").GetBoolean(), "mixed batch receipt not passing");
-    Require(receipt.RootElement.GetProperty("operationCount").GetInt32() == 3, "mixed batch receipt count differs");
+    Require(receipt.RootElement.GetProperty("operationCount").GetInt32() == 5, "mixed batch receipt count differs");
+});
+Check("xlsx", "atomic-copy-cell-formula-rejection-preserves-output", directory =>
+{
+    var input = Path.Combine(directory, "input.xlsx");
+    var output = Path.Combine(directory, "output.xlsx");
+    var operationsInput = Path.Combine(directory, "operations.json");
+    var receiptOutput = Path.Combine(directory, "receipt.json");
+    var request = Path.Combine(directory, "request.json");
+    Create("xlsx", input);
+    File.WriteAllText(operationsInput, JsonSerializer.Serialize(new
+    {
+        operations = new object[]
+        {
+            new { type = "copyCellFormula", sourceSheet = "Synthetic", sourceCell = "C4", sheet = "Synthetic", cell = "E4", translateFormulas = true },
+        },
+    }));
+    File.WriteAllText(request, JsonSerializer.Serialize(new { input, operationsInput, output, receiptOutput }));
+
+    Require(Dockit.Xlsx.AtomicOperationRunner.Run([request]) == 1, "non-formula source must fail");
+    Require(!File.Exists(output), "failed formula copy left output bytes");
 });
 Check("xlsx", "atomic-mixed-operation-rejection-preserves-output", directory =>
 {
@@ -254,7 +278,9 @@ static void Create(string format, string file)
         using var document = SpreadsheetDocument.Create(file, SpreadsheetDocumentType.Workbook);
         var workbook = document.AddWorkbookPart();
         var sheet = workbook.AddNewPart<WorksheetPart>();
-        sheet.Worksheet = new S.Worksheet(new S.SheetData(new S.Row(new S.Cell { CellReference = "C4", CellValue = new S.CellValue("11") }) { RowIndex = 4 }));
+        sheet.Worksheet = new S.Worksheet(new S.SheetData(new S.Row(
+            new S.Cell { CellReference = "C4", CellValue = new S.CellValue("11") },
+            new S.Cell { CellReference = "D4", CellFormula = new S.CellFormula("C4+1"), CellValue = new S.CellValue("12") }) { RowIndex = 4 }));
         workbook.Workbook = new S.Workbook(new S.Sheets(new S.Sheet { Id = workbook.GetIdOfPart(sheet), SheetId = 1, Name = "Synthetic" }));
     }
     else

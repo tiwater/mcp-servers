@@ -40,6 +40,10 @@ discriminator. One call batches only the named action. The provider preserves
 unselected workbook content and fails without publishing an output when a
 requested structural change is technically unsafe.
 
+`xlsx_apply_operations` also accepts `copyCellFormula` inside its immutable
+operation handoff. It copies only the source cell formula, preserves the target
+cell style, and optionally translates relative row and column references.
+
 ## Validation
 
 ```bash

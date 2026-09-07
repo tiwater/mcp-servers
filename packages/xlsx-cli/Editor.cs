@@ -90,6 +90,7 @@ internal static class Editor
             "insertRows" => InsertRowsOperation(workbookPart, operation),
             "deleteRows" => DeleteRowsOperation(workbookPart, operation),
             "copyRow" => CopyRowOperation(workbookPart, operation),
+            "copyCellFormula" => CopyCellFormulaOperation(workbookPart, operation),
             "expandSectionRows" => ExpandSectionRowsOperation(workbookPart, operation),
             _ => new XlsxEditAppliedOperation(operation.Type, false, $"Unknown operation type: {operation.Type}"),
         };
@@ -1062,6 +1063,41 @@ internal static class Editor
 
         var changedRange = $"{operation.TargetRow}:{operation.TargetRow}";
         return new XlsxEditAppliedOperation(operation.Type, true, $"Copied row {operation.SourceRow} to {operation.Sheet}!{operation.TargetRow}", operation.Sheet, changedRange);
+    }
+
+    private static XlsxEditAppliedOperation CopyCellFormulaOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.SourceSheet) || string.IsNullOrWhiteSpace(operation.SourceCell)
+            || string.IsNullOrWhiteSpace(operation.Sheet) || string.IsNullOrWhiteSpace(operation.Cell))
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, "sourceSheet, sourceCell, sheet, and cell are required");
+        }
+
+        var sourceWorksheetPart = GetWorksheetPart(workbookPart, operation.SourceSheet, out var error);
+        if (sourceWorksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        var targetWorksheetPart = GetWorksheetPart(workbookPart, operation.Sheet, out error);
+        if (targetWorksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        MaterializeSharedFormulas(sourceWorksheetPart.Worksheet);
+        var source = FindCell(sourceWorksheetPart, operation.SourceCell);
+        if (source?.CellFormula?.Text is not string formula || string.IsNullOrWhiteSpace(formula))
+            return new XlsxEditAppliedOperation(operation.Type, false, $"Source formula cell not found: {operation.SourceSheet}!{operation.SourceCell}");
+
+        var (sourceColumn, sourceRow) = ParseCellReference(operation.SourceCell);
+        var (targetColumn, targetRow) = ParseCellReference(operation.Cell);
+        var copiedFormula = formula;
+        if (operation.TranslateFormulas == true
+            && !TryTranslateFormulaReferences(formula, targetRow - sourceRow, targetColumn - sourceColumn, out copiedFormula, out error))
+        {
+            return new XlsxEditAppliedOperation(operation.Type, false, $"Cannot copy formula {operation.SourceSheet}!{operation.SourceCell} to {operation.Sheet}!{operation.Cell}: {error}");
+        }
+
+        var target = GetOrCreateCell(targetWorksheetPart, operation.Cell);
+        target.CellFormula = new CellFormula(copiedFormula);
+        target.CellValue = null;
+        target.DataType = null;
+        target.InlineString = null;
+        targetWorksheetPart.Worksheet.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Copied formula {operation.SourceSheet}!{operation.SourceCell} to {operation.Sheet}!{operation.Cell}", operation.Sheet, operation.Cell);
     }
 
     private static XlsxEditAppliedOperation ExpandSectionRowsOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -2653,6 +2689,11 @@ internal static class Editor
     {
         if (operation.Type is "setCellValue" or "setRichTextCellValue")
             return TryParseWritableCell(operation.Cell, out _, out _) ? null : "cell must be a bounded A1 reference";
+        if (operation.Type == "copyCellFormula")
+            return TryParseWritableCell(operation.Cell, out _, out _)
+                && TryParseWritableCell(operation.SourceCell, out _, out _)
+                ? null
+                : "sourceCell and cell must be bounded A1 references";
         if (operation.Type == "setCellNumberFormat")
             return TryParseWritableCell(operation.Cell, out _, out _)
                 && (operation.SourceCell is null || TryParseWritableCell(operation.SourceCell, out _, out _))
