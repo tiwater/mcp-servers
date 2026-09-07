@@ -17,6 +17,7 @@ public static class AtomicOperationRunner
         "insertRows",
         "deleteRows",
         "copyRow",
+        "copyCellFormula",
         "expandSectionRows",
         "setPrintArea",
         "setPageSetup",
