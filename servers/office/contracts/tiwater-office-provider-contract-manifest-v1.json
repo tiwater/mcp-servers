@@ -226,6 +226,17 @@
       }
     },
     {
+      "name": "docx_set_drawing_checkbox_state",
+      "providerContract": {
+        "source": "packages/docx-cli/contracts/mcp-input/docx_set_drawing_checkbox_state.schema.json",
+        "sha256": "acab84fcd23f91c700778eac33334d33b6199ed9da0604897bf3bde2146245e0"
+      },
+      "inputContract": {
+        "path": "office/contracts/docx_set_drawing_checkbox_state.schema.json",
+        "sha256": "acab84fcd23f91c700778eac33334d33b6199ed9da0604897bf3bde2146245e0"
+      }
+    },
+    {
       "name": "docx_set_paragraph_pagination",
       "providerContract": {
         "source": "packages/docx-cli/contracts/mcp-input/docx_set_paragraph_pagination.schema.json",

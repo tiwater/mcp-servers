@@ -4,6 +4,9 @@ using System.Text.Json;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 
 if (args.Length != 1 || !File.Exists(args[0]))
     throw new InvalidOperationException("usage: docx-cli.integration <docx.dll>");
@@ -14,6 +17,7 @@ Directory.CreateDirectory(root);
 
 try
 {
+    RunDrawingCheckboxContract();
     var original = Path.Combine(root, "original.docx");
     CreateDocument(original);
     var commented = Path.Combine(root, "commented.docx");
@@ -1127,6 +1131,264 @@ finally
     Directory.Delete(root, recursive: true);
 }
 
+void RunDrawingCheckboxContract()
+{
+    var input = Path.Combine(root, "checkbox-input.docx");
+    CreateDrawingCheckboxDocument(input);
+    var first = DrawingAddress(1);
+    var second = DrawingAddress(2);
+    var nonCheckbox = DrawingAddress(3);
+    var inputText = DrawingDocumentText(input);
+    var inputExtents = DrawingExtents(input);
+    var firstBefore = DrawingMediaHash(input, 0);
+    var secondBefore = DrawingMediaHash(input, 1);
+
+    var checkedOutput = Path.Combine(root, "checkbox-checked.docx");
+    var checkedResult = Run("docx_set_drawing_checkbox_state", new
+    {
+        input,
+        changes = new[] { new { drawing = first, @checked = true } },
+        output = checkedOutput,
+        receiptOutput = Path.Combine(root, "checkbox-checked-receipt.json"),
+    });
+    Require(checkedResult.GetProperty("summary").GetProperty("operationCount").GetInt32() == 1,
+        "checkbox single-change boundary was not applied");
+    Require(DrawingIsChecked(checkedOutput, 0), "checkbox checked state was not written");
+    Require(!DrawingIsChecked(checkedOutput, 1), "shared checkbox image changed an unselected drawing");
+    Require(DrawingMediaHash(checkedOutput, 1) == secondBefore,
+        "shared checkbox image bytes changed for an unselected drawing");
+    Require(DrawingMediaHash(checkedOutput, 0) != firstBefore,
+        "checked mutation did not change the selected media");
+    Require(DrawingDocumentText(checkedOutput) == inputText, "checkbox mutation changed paragraph labels");
+    Require(DrawingExtents(checkedOutput).SequenceEqual(inputExtents), "checkbox mutation changed drawing sizes");
+    Require(ReadDrawingChecked(checkedOutput, first) == true,
+        "fresh drawing observation did not report the checked state");
+    Require(ReadDrawingChecked(checkedOutput, second) == false,
+        "fresh drawing observation did not report the unselected state");
+    Require(ReadDrawingChecked(checkedOutput, nonCheckbox) is null,
+        "fresh drawing observation classified a non-checkbox image");
+
+    var mixedOutput = Path.Combine(root, "checkbox-mixed.docx");
+    var mixed = Run("docx_set_drawing_checkbox_state", new
+    {
+        input = checkedOutput,
+        changes = new[]
+        {
+            new { drawing = second, @checked = true },
+            new { drawing = first, @checked = false },
+        },
+        output = mixedOutput,
+        receiptOutput = Path.Combine(root, "checkbox-mixed-receipt.json"),
+    });
+    Require(mixed.GetProperty("summary").GetProperty("appliedCount").GetInt32() == 2,
+        "checkbox checked and unchecked variants were not applied atomically");
+    Require(!DrawingIsChecked(mixedOutput, 0) && DrawingIsChecked(mixedOutput, 1),
+        "checkbox state readback did not match both requested variants");
+    Require(ReadDrawingChecked(mixedOutput, first) == false && ReadDrawingChecked(mixedOutput, second) == true,
+        "independent drawing observation did not match both requested variants");
+    Require(DrawingDocumentText(mixedOutput) == inputText && DrawingExtents(mixedOutput).SequenceEqual(inputExtents),
+        "batch checkbox mutation changed container properties");
+
+    var duplicateReceipt = Path.Combine(root, "checkbox-duplicate-receipt.json");
+    var duplicate = RunExpectAtomicFailure("docx_set_drawing_checkbox_state", input, duplicateReceipt, new
+    {
+        input,
+        changes = new[] { new { drawing = first, @checked = true }, new { drawing = first, @checked = false } },
+        output = input,
+        receiptOutput = duplicateReceipt,
+    });
+    Require(duplicate.Contains("drawing-address-duplicate", StringComparison.Ordinal),
+        "duplicate checkbox target was not rejected");
+
+    var wrongKindReceipt = Path.Combine(root, "checkbox-wrong-kind-receipt.json");
+    var wrongKind = RunExpectAtomicFailure("docx_set_drawing_checkbox_state", input, wrongKindReceipt, new
+    {
+        input,
+        changes = new[] { new { drawing = new { part = "/word/document.xml", path = "/w:document[1]/w:body[1]/w:p[1]" }, @checked = true } },
+        output = input,
+        receiptOutput = wrongKindReceipt,
+    });
+    Require(wrongKind.Contains("target-must-be-drawing", StringComparison.Ordinal),
+        "non-drawing checkbox target was not rejected");
+
+    var nonCheckboxReceipt = Path.Combine(root, "checkbox-non-checkbox-receipt.json");
+    var unrelated = RunExpectAtomicFailure("docx_set_drawing_checkbox_state", input, nonCheckboxReceipt, new
+    {
+        input,
+        changes = new[] { new { drawing = nonCheckbox, @checked = true } },
+        output = input,
+        receiptOutput = nonCheckboxReceipt,
+    });
+    Require(unrelated.Contains("drawing-is-not-supported-image-checkbox", StringComparison.Ordinal),
+        "non-checkbox drawing was not rejected");
+
+    var wrongBindingReceipt = Path.Combine(root, "checkbox-wrong-binding-receipt.json");
+    var wrongBinding = RunExpectAtomicFailure("docx_set_drawing_checkbox_state", input, wrongBindingReceipt, new
+    {
+        input,
+        changes = new[] { new { drawing = new { part = "/word/header1.xml", path = DrawingPath(1) }, @checked = true } },
+        output = input,
+        receiptOutput = wrongBindingReceipt,
+    });
+    Require(wrongBinding.Contains("object-address-not-found", StringComparison.Ordinal),
+        "checkbox address bound to another story was not rejected");
+
+    var emptyReceipt = Path.Combine(root, "checkbox-empty-receipt.json");
+    var empty = RunExpectAtomicFailure("docx_set_drawing_checkbox_state", input, emptyReceipt, new
+    {
+        input,
+        changes = Array.Empty<object>(),
+        output = input,
+        receiptOutput = emptyReceipt,
+    });
+    Require(empty.Contains("changes-must-not-be-empty", StringComparison.Ordinal),
+        "empty checkbox mutation was not rejected");
+    Console.WriteLine("PASS drawing checkbox state contract");
+}
+
+object DrawingAddress(int paragraph)
+    => new
+    {
+        part = "/word/document.xml",
+        path = DrawingPath(paragraph),
+    };
+
+string DrawingPath(int paragraph)
+    => $"/w:document[1]/w:body[1]/w:p[{paragraph}]/w:r[1]/w:drawing[1]";
+
+void CreateDrawingCheckboxDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var checkboxPart = main.AddImagePart("image/x-wmf");
+    using (var stream = new MemoryStream(UncheckedCheckboxWmf(), writable: false)) checkboxPart.FeedData(stream);
+    var checkboxId = main.GetIdOfPart(checkboxPart);
+    var unrelatedPart = main.AddImagePart("image/x-wmf");
+    using (var stream = new MemoryStream(UnrelatedWmf(), writable: false)) unrelatedPart.FeedData(stream);
+    var unrelatedId = main.GetIdOfPart(unrelatedPart);
+    main.Document = new Document(new Body(
+        DrawingParagraph(checkboxId, 1, "First option"),
+        DrawingParagraph(checkboxId, 2, "Second distinct option"),
+        DrawingParagraph(unrelatedId, 3, "Unrelated image")));
+    main.Document.Save();
+}
+
+Paragraph DrawingParagraph(string relationshipId, uint id, string label)
+    => new(new Run(InlinePicture(relationshipId, id)), new Run(new Text(label)));
+
+Drawing InlinePicture(string relationshipId, uint id)
+    => new(new DW.Inline(
+        new DW.Extent { Cx = 198120L, Cy = 259080L },
+        new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+        new DW.DocProperties { Id = id, Name = $"Picture {id}" },
+        new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+        new A.Graphic(new A.GraphicData(
+            new PIC.Picture(
+                new PIC.NonVisualPictureProperties(
+                    new PIC.NonVisualDrawingProperties { Id = id, Name = $"Picture {id}" },
+                    new PIC.NonVisualPictureDrawingProperties(new A.PictureLocks { NoChangeAspect = true })),
+                new PIC.BlipFill(
+                    new A.Blip { Embed = relationshipId },
+                    new A.Stretch(new A.FillRectangle())),
+                new PIC.ShapeProperties(
+                    new A.Transform2D(
+                        new A.Offset { X = 0L, Y = 0L },
+                        new A.Extents { Cx = 198120L, Cy = 259080L }),
+                    new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle })))
+            { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
+    { DistanceFromTop = 0U, DistanceFromBottom = 0U, DistanceFromLeft = 0U, DistanceFromRight = 0U });
+
+byte[] UncheckedCheckboxWmf() => Convert.FromBase64String(
+    "183GmgAAAAAAABoAHgB4AAAAAABtVwEACQAAA/oBAAABAJ8BAAAAAAQAAAADAQgABQAAAAsCAAAAAAUAAAAMAh4AGgADAAAAHgAHAAAA/AIAAP///wAAAAQAAAAtAQAACQAAAB0GIQDwAB4AGgAAAAAABAAAAC0BAAAJAAAAHQYhAPAAHgAIAAAAEgAFAAAACwIAAAAABQAAAAwCHgAaAAUAAAABAv///wAFAAAALgEAAAAABQAAAAIBAQAAAJ8BAABACSAAzAAAAAAAEAAQAAcAAQAoAAAAEAAAABAAAAABABgAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAA////////////////////////////////////////////////////////////////oKCg4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlp////////////////////////////////////////////////4+Pj////oKCgaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlp4+Pj////oKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCg////BAAAACcB//8DAAAAAAA=");
+
+byte[] UnrelatedWmf()
+{
+    var bytes = UncheckedCheckboxWmf();
+    var dib = FindDib(bytes);
+    for (var index = dib.PixelOffset; index < dib.PixelOffset + dib.Stride * dib.Height; index++) bytes[index] = 0;
+    return bytes;
+}
+
+string DrawingDocumentText(string path)
+{
+    using var document = WordprocessingDocument.Open(path, false);
+    return document.MainDocumentPart!.Document.Body!.InnerText;
+}
+
+bool? ReadDrawingChecked(string input, object drawing)
+{
+    var read = Run("docx_read_object", new
+    {
+        input,
+        addresses = new[] { drawing },
+        kinds = new[] { "drawing" },
+    });
+    var observed = read.GetProperty("observations")[0].GetProperty("object");
+    return observed.TryGetProperty("checked", out var value) && value.ValueKind != JsonValueKind.Null
+        ? value.GetBoolean()
+        : null;
+}
+
+IReadOnlyList<(long Width, long Height)> DrawingExtents(string path)
+{
+    using var document = WordprocessingDocument.Open(path, false);
+    return document.MainDocumentPart!.Document.Descendants<DW.Extent>()
+        .Select(value => (value.Cx?.Value ?? 0L, value.Cy?.Value ?? 0L)).ToArray();
+}
+
+string DrawingMediaHash(string path, int drawingIndex)
+{
+    var bytes = DrawingMedia(path, drawingIndex);
+    return Convert.ToHexString(SHA256.HashData(bytes));
+}
+
+bool DrawingIsChecked(string path, int drawingIndex)
+{
+    var bytes = DrawingMedia(path, drawingIndex);
+    var dib = FindDib(bytes);
+    var margin = Math.Max(2, Math.Min(dib.Width, dib.Height) / 8);
+    var dark = 0;
+    for (var y = margin; y < dib.Height - margin; y++)
+    for (var x = margin; x < dib.Width - margin; x++)
+    {
+        var row = dib.BottomUp ? dib.Height - 1 - y : y;
+        var offset = dib.PixelOffset + row * dib.Stride + x * 3;
+        if ((bytes[offset] + bytes[offset + 1] + bytes[offset + 2]) / 3 <= 100) dark++;
+    }
+    return dark >= Math.Max(3, Math.Min(dib.Width, dib.Height) / 3);
+}
+
+byte[] DrawingMedia(string path, int drawingIndex)
+{
+    using var document = WordprocessingDocument.Open(path, false);
+    var main = document.MainDocumentPart!;
+    var drawing = main.Document.Descendants<Drawing>().ElementAt(drawingIndex);
+    var relationshipId = drawing.Descendants<A.Blip>().Single().Embed!.Value!;
+    var image = (ImagePart)main.GetPartById(relationshipId);
+    using var stream = image.GetStream(FileMode.Open, FileAccess.Read);
+    using var memory = new MemoryStream();
+    stream.CopyTo(memory);
+    return memory.ToArray();
+}
+
+(int PixelOffset, int Width, int Height, int Stride, bool BottomUp) FindDib(byte[] bytes)
+{
+    for (var offset = 0; offset <= bytes.Length - 40; offset++)
+    {
+        if (BitConverter.ToUInt32(bytes, offset) != 40) continue;
+        var width = BitConverter.ToInt32(bytes, offset + 4);
+        var signedHeight = BitConverter.ToInt32(bytes, offset + 8);
+        var height = Math.Abs(signedHeight);
+        if (width is < 8 or > 128 || height is < 8 or > 128
+            || BitConverter.ToUInt16(bytes, offset + 12) != 1
+            || BitConverter.ToUInt16(bytes, offset + 14) != 24
+            || BitConverter.ToUInt32(bytes, offset + 16) != 0) continue;
+        var stride = ((width * 24 + 31) / 32) * 4;
+        if (offset + 40 + stride * height <= bytes.Length)
+            return (offset + 40, width, height, stride, signedHeight > 0);
+    }
+    throw new InvalidOperationException("test image has no supported DIB");
+}
 void RunTocStylePolicyMatrix()
 {
     foreach (var (italic, indentCharacters) in new[] { (false, 2), (true, 1) })

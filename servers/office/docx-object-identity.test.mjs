@@ -16,6 +16,7 @@ test('normalizes omitted nullable DOCX identity fields', () => {
     gridSpan: null,
     verticalMerge: null,
     verticalTextAlignment: null,
+    checked: null,
   });
 });
 
@@ -29,6 +30,7 @@ test('preserves native DOCX identity values', () => {
     gridSpan: 2,
     verticalMerge: 'restart',
     verticalTextAlignment: 'superscript',
+    checked: true,
   }), {
     address,
     parentAddress: null,
@@ -37,5 +39,6 @@ test('preserves native DOCX identity values', () => {
     gridSpan: 2,
     verticalMerge: 'restart',
     verticalTextAlignment: 'superscript',
+    checked: true,
   });
 });
