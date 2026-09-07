@@ -225,6 +225,50 @@ Check("pptx", "format-color-with-existing-typeface", directory =>
     Require(properties.ChildElements.Select(child => child.LocalName).SequenceEqual(new[] { "solidFill", "latin", "ea" }),
         "color and typeface properties are not in schema order");
 });
+Check("pptx", "template-system-placeholder-policy", directory =>
+{
+    var source = Path.Combine(directory, "source.pptx");
+    var template = Path.Combine(directory, "template.pptx");
+    CreateTemplatePresentation(source, includeSystemPlaceholder: true);
+    CreateTemplatePresentation(template, includeSystemPlaceholder: false);
+    var templateEvidence = Dockit.Pptx.Inspector.InspectDetail(template);
+    var targetMasterPath = templateEvidence.Masters.Single().Path;
+    var targetLayoutPath = templateEvidence.Masters.Single().Layouts.Single().Path;
+
+    Run("target-template", "target", expectSuccess: true);
+    using (var output = PresentationDocument.Open(Path.Combine(directory, "target.pptx"), false))
+    {
+        var shapes = output.PresentationPart!.SlideParts.Single().Slide.Descendants<P.Shape>().ToList();
+        Require(shapes.All(shape => shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape?.Type?.Value != P.PlaceholderValues.DateAndTime),
+            "target-template retained a source system placeholder");
+        Require(shapes.Any(shape => shape.TextBody?.InnerText == "unseen business text"), "target-template removed business content");
+    }
+
+    Run("preserve", "preserve", expectSuccess: true);
+    using (var output = PresentationDocument.Open(Path.Combine(directory, "preserve.pptx"), false))
+        Require(output.PresentationPart!.SlideParts.Single().Slide.Descendants<P.PlaceholderShape>()
+            .Any(item => item.Type?.Value == P.PlaceholderValues.DateAndTime), "preserve removed a source system placeholder");
+
+    Run("invented", "invalid", expectSuccess: false);
+    Require(!File.Exists(Path.Combine(directory, "invalid.pptx")), "invalid system placeholder policy created output");
+
+    void Run(string policy, string name, bool expectSuccess)
+    {
+        var request = Path.Combine(directory, $"{name}.json");
+        File.WriteAllText(request, JsonSerializer.Serialize(new
+        {
+            input = source,
+            template,
+            targetMasterPath,
+            slides = new[] { new { slideNumber = 1, targetLayoutPath } },
+            systemPlaceholderPolicy = policy,
+            output = Path.Combine(directory, $"{name}.pptx"),
+            receiptOutput = Path.Combine(directory, $"{name}.receipt.json"),
+        }));
+        var exitCode = Dockit.Pptx.FixedCommandRunner.Run("pptx_apply_template", [request]);
+        Require(exitCode == (expectSuccess ? 0 : 1), $"{policy} returned an unexpected exit code");
+    }
+});
 Console.WriteLine(JsonSerializer.Serialize(new { cases, failures, artifacts = root }));
 return failures.Count == 0 ? 0 : 1;
 
@@ -319,4 +363,62 @@ static void CreateFormatPresentation(string file)
                         new A.Text("unseen synthetic title"))))))));
     presentation.Presentation = new P.Presentation(new P.SlideIdList(
         new P.SlideId { Id = 256, RelationshipId = presentation.GetIdOfPart(slide) }));
+}
+
+static void CreateTemplatePresentation(string file, bool includeSystemPlaceholder)
+{
+    using var document = PresentationDocument.Create(file, PresentationDocumentType.Presentation);
+    var presentation = document.AddPresentationPart();
+    var master = presentation.AddNewPart<SlideMasterPart>();
+    var layout = master.AddNewPart<SlideLayoutPart>();
+    layout.SlideLayout = new P.SlideLayout(
+        new P.CommonSlideData(CreateShapeTree()),
+        new P.ColorMapOverride(new A.MasterColorMapping()));
+    layout.AddPart(master);
+    var layoutId = master.GetIdOfPart(layout);
+    master.SlideMaster = new P.SlideMaster(
+        new P.CommonSlideData(CreateShapeTree()),
+        new P.ColorMap
+        {
+            Background1 = A.ColorSchemeIndexValues.Light1,
+            Text1 = A.ColorSchemeIndexValues.Dark1,
+            Background2 = A.ColorSchemeIndexValues.Light2,
+            Text2 = A.ColorSchemeIndexValues.Dark2,
+            Accent1 = A.ColorSchemeIndexValues.Accent1,
+            Accent2 = A.ColorSchemeIndexValues.Accent2,
+            Accent3 = A.ColorSchemeIndexValues.Accent3,
+            Accent4 = A.ColorSchemeIndexValues.Accent4,
+            Accent5 = A.ColorSchemeIndexValues.Accent5,
+            Accent6 = A.ColorSchemeIndexValues.Accent6,
+            Hyperlink = A.ColorSchemeIndexValues.Hyperlink,
+            FollowedHyperlink = A.ColorSchemeIndexValues.FollowedHyperlink,
+        },
+        new P.SlideLayoutIdList(new P.SlideLayoutId { Id = 1U, RelationshipId = layoutId }));
+
+    var slide = presentation.AddNewPart<SlidePart>();
+    var slideTree = CreateShapeTree();
+    if (includeSystemPlaceholder)
+        slideTree.Append(CreateTextShape(2U, "date", "2026/09/07", P.PlaceholderValues.DateAndTime));
+    slideTree.Append(CreateTextShape(5U, "business", "unseen business text", null));
+    slide.Slide = new P.Slide(new P.CommonSlideData(slideTree));
+    slide.AddPart(layout);
+    presentation.Presentation = new P.Presentation(
+        new P.SlideMasterIdList(new P.SlideMasterId { Id = 2147483648U, RelationshipId = presentation.GetIdOfPart(master) }),
+        new P.SlideIdList(new P.SlideId { Id = 256U, RelationshipId = presentation.GetIdOfPart(slide) }),
+        new P.SlideSize { Cx = 12192000, Cy = 6858000 });
+
+    static P.ShapeTree CreateShapeTree() => new(
+        new P.NonVisualGroupShapeProperties(
+            new P.NonVisualDrawingProperties { Id = 1U, Name = "Root" },
+            new P.NonVisualGroupShapeDrawingProperties(),
+            new P.ApplicationNonVisualDrawingProperties()),
+        new P.GroupShapeProperties());
+
+    static P.Shape CreateTextShape(uint id, string name, string text, P.PlaceholderValues? placeholder) => new(
+        new P.NonVisualShapeProperties(
+            new P.NonVisualDrawingProperties { Id = id, Name = name },
+            new P.NonVisualShapeDrawingProperties(),
+            new P.ApplicationNonVisualDrawingProperties(placeholder is null ? null : new P.PlaceholderShape { Type = placeholder })),
+        new P.ShapeProperties(new A.Transform2D(new A.Offset { X = 100, Y = 200 }, new A.Extents { Cx = 3000, Cy = 4000 })),
+        new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text(text)))));
 }

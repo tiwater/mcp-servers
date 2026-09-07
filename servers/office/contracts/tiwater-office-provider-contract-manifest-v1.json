@@ -383,11 +383,11 @@
       "name": "pptx_apply_template",
       "providerContract": {
         "source": "packages/pptx-cli/contracts/mcp-input/pptx_apply_template.schema.json",
-        "sha256": "b059771ca8df233f63a73d94e8a21ca160656e76e6066d4b2c96babe0219a511"
+        "sha256": "12c9a66f9c0330febe511f8db8e986c71c22450dee2b7789fdcc3c8034091917"
       },
       "inputContract": {
         "path": "office/contracts/pptx_apply_template.schema.json",
-        "sha256": "b059771ca8df233f63a73d94e8a21ca160656e76e6066d4b2c96babe0219a511"
+        "sha256": "12c9a66f9c0330febe511f8db8e986c71c22450dee2b7789fdcc3c8034091917"
       }
     },
     {
