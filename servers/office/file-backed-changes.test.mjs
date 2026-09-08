@@ -23,6 +23,17 @@ test('published contract exposes independent inline and file-backed inputs', asy
   }
 });
 
+test('published set-text description exposes its exact native target scope', async () => {
+  const source = await readFile(new URL('./index.mjs', import.meta.url), 'utf8');
+  const toolStart = source.indexOf("name: 'docx_set_text'");
+  const toolEnd = source.indexOf("inputSchema: inputContract('docx_set_text')", toolStart);
+  assert.notEqual(toolStart, -1);
+  assert.notEqual(toolEnd, -1);
+  const description = source.slice(toolStart, toolEnd);
+  assert.match(description, /paragraph or cell objects, or one exact text node/u);
+  assert.match(description, /A text-node target replaces only that node and preserves every surrounding native sibling/u);
+});
+
 test('leaves a small inline changes array unchanged', async () => {
   const args = { changes: [{ value: 'inline' }] };
   assert.equal(await resolveFileBackedChanges(args), args);
