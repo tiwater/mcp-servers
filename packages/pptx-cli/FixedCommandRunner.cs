@@ -161,7 +161,10 @@ public static class FixedCommandRunner
     {
         var operations = DeserializeRequired<IReadOnlyList<FormatEditOperation>>(request, "changes");
         if (operations.Count == 0)
-            throw new InvalidOperationException("changes-must-contain-at-least-one-item");
+        {
+            Tiwater.Office.WritableFileCopy.Copy(input, output, overwrite: true);
+            return new(true, 0, 0, Array.Empty<FormatEditChange>(), Array.Empty<FormatEditIssue>());
+        }
         var result = FormatEditor.Apply(input, new FormatEditPlan(operations), output);
         return new(result.Issues.Count == 0, operations.Count, result.ChangedCount, result.Changes, result.Issues);
     }

@@ -9,7 +9,8 @@
       "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current"
     },
     "changes": {
-      "minItems": 1,
+      "description": "Formatting operations to apply. An empty array is valid: it materializes an unchanged output and a passing receipt with zero operation and applied counts.",
+      "minItems": 0,
       "type": "array",
       "items": {
         "type": "object",
