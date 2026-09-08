@@ -93,20 +93,39 @@ public static class WpsPdfConverter
     {
         var completionMarker = Path.Combine(tempRoot, "writer-output-complete");
         if (File.Exists(completionMarker)) File.Delete(completionMarker);
+        var automationProcesses = WpsRpcSession.CaptureWpsAutomationProcessIds();
         var startInfo = CreateProcessStartInfo(xvfb, tempRoot);
         foreach (var arg in CreateHelperArguments(dbusRunSession, python, helperPath, input, output, completionMarker))
             startInfo.ArgumentList.Add(arg);
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start WPS RPC document field refresh.");
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        var completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
-            process, completionMarker, () => IsDocx(output), WpsRpcSession.OfficeOperationTimeout,
-            "WPS RPC document field refresh timed out after 600 seconds.");
-        var details = WpsRpcSession.CollectDiagnosticOutput(stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
-        if ((!completedOutput && process.ExitCode != 0) || !IsDocx(output))
-            throw new InvalidOperationException($"WPS RPC failed to refresh document fields for {input}." +
-                (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+        try
+        {
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Failed to start WPS RPC document field refresh.");
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            bool completedOutput;
+            try
+            {
+                completedOutput = WpsRpcSession.WaitForCompletedOutputOrExit(
+                    process, completionMarker, () => IsDocx(output), WpsRpcSession.DocumentFieldRefreshTimeout,
+                    "WPS RPC document field refresh timed out after 210 seconds.");
+            }
+            catch (TimeoutException error)
+            {
+                WpsRpcSession.TerminateNewWpsAutomationProcesses(automationProcesses);
+                var timeoutDetails = WpsRpcSession.CollectDiagnosticOutput(stdoutTask, stderrTask, TimeSpan.FromSeconds(5));
+                throw new TimeoutException(error.Message +
+                    (string.IsNullOrWhiteSpace(timeoutDetails) ? string.Empty : $" {timeoutDetails}"), error);
+            }
+            var details = WpsRpcSession.CollectDiagnosticOutput(stdoutTask, stderrTask, TimeSpan.FromMilliseconds(250));
+            if ((!completedOutput && process.ExitCode != 0) || !IsDocx(output))
+                throw new InvalidOperationException($"WPS RPC failed to refresh document fields for {input}." +
+                    (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+        }
+        finally
+        {
+            WpsRpcSession.TerminateNewWpsAutomationProcesses(automationProcesses);
+        }
     }
 
     private static void RunWpsHelper(string xvfb, string dbusRunSession, string python, string helperPath, string input, string output, string tempRoot)
@@ -269,6 +288,7 @@ finally:
 
     internal const string RefreshFieldsHelperScript = """
 import os
+import shutil
 import sys
 
 from pywpsrpc.rpcwpsapi import createWpsRpcInstance, wpsapi
@@ -278,6 +298,7 @@ input_path = os.path.realpath(sys.argv[1])
 output_path = os.path.realpath(sys.argv[2])
 completion_marker = os.path.realpath(sys.argv[3])
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
+shutil.copy2(input_path, output_path)
 
 def require(label, result):
     hr = result[0] if isinstance(result, tuple) else result
@@ -285,40 +306,44 @@ def require(label, result):
         raise SystemExit(f"{label} failed: {hex(hr & 0xffffffff)}")
     return result[1] if isinstance(result, tuple) and len(result) > 1 else None
 
+def trace(stage):
+    print(f"wps-refresh-stage:{stage}", file=sys.stderr, flush=True)
+
 q_app = QtApp(sys.argv)
 rpc = require("createWpsRpcInstance", createWpsRpcInstance())
+trace("application-start")
 app = require("getWpsApplication", rpc.getWpsApplication())
 
 try:
     app.Visible = False
     app.DisplayAlerts = False
     documents = require("get_Documents", app.get_Documents())
-    document = require("Documents.Open", documents.Open(input_path, ReadOnly=False, AddToRecentFiles=False, Visible=False))
+    trace("document-open")
+    document = require("Documents.Open", documents.Open(output_path, ReadOnly=False, AddToRecentFiles=False, Visible=False))
     try:
+        trace("repaginate")
+        require("Document.Repaginate", document.Repaginate())
         tables_of_contents = require("get_TablesOfContents", document.get_TablesOfContents())
         toc_count = require("TablesOfContents.get_Count", tables_of_contents.get_Count())
-        for index in range(1, toc_count + 1):
-            toc = require("TablesOfContents.Item", tables_of_contents.Item(index))
-            require("TableOfContents.Update", toc.Update())
 
         tables_of_figures = require("get_TablesOfFigures", document.get_TablesOfFigures())
         figure_count = require("TablesOfFigures.get_Count", tables_of_figures.get_Count())
+        trace("index-update")
         for index in range(1, figure_count + 1):
             figure = require("TablesOfFigures.Item", tables_of_figures.Item(index))
             require("TableOfFigures.Update", figure.Update())
 
-        require("Document.Repaginate", document.Repaginate())
         for index in range(1, toc_count + 1):
             toc = require("TablesOfContents.Item", tables_of_contents.Item(index))
-            require("TableOfContents.UpdatePageNumbers", toc.UpdatePageNumbers())
-        for index in range(1, figure_count + 1):
-            figure = require("TablesOfFigures.Item", tables_of_figures.Item(index))
-            require("TableOfFigures.UpdatePageNumbers", figure.UpdatePageNumbers())
-        require("Document.SaveAs2 DOCX", document.SaveAs2(output_path, FileFormat=wpsapi.wdFormatXMLDocument))
+            require("TableOfContents.Update", toc.Update())
+
+        trace("document-save")
+        require("Document.Save", document.Save())
         with open(completion_marker, "x", encoding="utf-8") as marker:
             marker.write("complete\n")
             marker.flush()
             os.fsync(marker.fileno())
+        trace("complete")
     finally:
         document.Close(False)
 finally:

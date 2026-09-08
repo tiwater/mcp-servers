@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using Dockit.Convert;
@@ -22,6 +23,74 @@ if (args is ["--lima-guest-timeout-probe"])
         "timeout --kill-after=5s 650s tiwater-convert docx-to-pdf '/shared/input.docx' '/shared/output.pdf'",
         StringComparison.Ordinal), "PDF conversion is not bounded inside the Lima guest");
     Console.WriteLine("Lima guest timeout integration passed");
+    return 0;
+}
+
+if (args is ["--lima-guest-version-probe"])
+{
+    var versionProbeRoot = Path.Combine(Path.GetTempPath(), "tiwater-lima-version-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(versionProbeRoot);
+    try
+    {
+        var input = Path.Combine(versionProbeRoot, "input.docx");
+        var output = Path.Combine(versionProbeRoot, "output.docx");
+        File.WriteAllText(input, "current input");
+        File.WriteAllText(output, "current output");
+        var inputHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(input))).ToLowerInvariant();
+        var outputHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(output))).ToLowerInvariant();
+        string Receipt(string version) => $$"""
+        {"schema":"tiwater.convert-refresh-docx-fields/v1","status":"ok","input_sha256":"{{inputHash}}","output_sha256":"{{outputHash}}","source_format":"docx","target_format":"docx","version":"{{version}}","backend":"wps","refresh_scope":["table-of-contents","table-of-figures"]}
+        """;
+        LimaWpsPdfConverter.ValidateDocumentFieldRefreshEvidence(Receipt("0.9.36"), input, output);
+        var rejected = false;
+        try
+        {
+            LimaWpsPdfConverter.ValidateDocumentFieldRefreshEvidence(Receipt("0.9.35"), input, output);
+        }
+        catch (InvalidOperationException error) when (error.Message ==
+            "Lima WPS guest runtime version mismatch: expected 0.9.36, received 0.9.35.")
+        {
+            rejected = true;
+        }
+        Require(rejected, "Lima host accepted field-refresh evidence from a stale guest runtime");
+        Console.WriteLine("Lima guest version integration passed");
+        return 0;
+    }
+    finally
+    {
+        try { Directory.Delete(versionProbeRoot, recursive: true); } catch { }
+    }
+}
+
+if (args is ["--wps-automation-process-probe"])
+{
+    Require(WpsRpcSession.DocumentFieldRefreshTimeout == TimeSpan.FromSeconds(210),
+        "document refresh must finish cleanup before the 230-second Lima guest deadline");
+    Require(WpsRpcSession.IsWpsAutomationCommandLine(new[] {
+        "/opt/kingsoft/wps-office/office6/wps", "-automation", "-rpcserverport=/wpsrpc-123-456"
+    }), "direct WPS automation process was not identified");
+    Require(WpsRpcSession.IsWpsAutomationCommandLine(new[] {
+        "/bin/bash", "/usr/bin/wps", "-automation", "-rpcserverport=/wpsrpc-123-456"
+    }), "WPS launcher automation process was not identified");
+    Require(!WpsRpcSession.IsWpsAutomationCommandLine(new[] {
+        "/opt/kingsoft/wps-office/office6/wps", "/home/customer/report.docx"
+    }), "interactive WPS process must not be identified as an automation session");
+    Require(!WpsRpcSession.IsWpsAutomationCommandLine(new[] {
+        "/usr/bin/wpp", "-automation", "-rpcserverport=/wpsrpc-123-456"
+    }), "a different Office application must not be identified as Writer automation");
+    var refreshScript = WpsPdfConverter.RefreshFieldsHelperScript;
+    var figureUpdate = refreshScript.IndexOf("TableOfFigures.Update", StringComparison.Ordinal);
+    var contentsUpdate = refreshScript.IndexOf("TableOfContents.Update", StringComparison.Ordinal);
+    Require(figureUpdate >= 0 && contentsUpdate > figureUpdate,
+        "WPS must update figure indexes before contents indexes");
+    Require(!refreshScript.Contains("UpdatePageNumbers", StringComparison.Ordinal),
+        "full index updates must not be followed by a duplicate WPS page-number update");
+    Require(refreshScript.Contains("shutil.copy2(input_path, output_path)", StringComparison.Ordinal)
+            && refreshScript.Contains("documents.Open(output_path", StringComparison.Ordinal)
+            && refreshScript.Contains("Document.Save\", document.Save()", StringComparison.Ordinal)
+            && !refreshScript.Contains("SaveAs2", StringComparison.Ordinal),
+        "WPS refresh must save an isolated working copy in place");
+    Console.WriteLine("WPS automation process integration passed");
     return 0;
 }
 

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -8,6 +9,9 @@ internal static class LimaWpsPdfConverter
 {
     private const string InstanceEnvironment = "TIWATER_WPS_OFFICE_LIMA_INSTANCE";
     private const string SharedRoot = "/tmp/tiwater-wps-render";
+    private static readonly string ToolVersion =
+        (typeof(LimaWpsPdfConverter).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown")
+        .Split('+', 2)[0];
 
     internal static bool IsAvailable()
         => OperatingSystem.IsMacOS()
@@ -238,6 +242,10 @@ internal static class LimaWpsPdfConverter
     {
         using var document = JsonDocument.Parse(stdout);
         var root = document.RootElement;
+        var guestVersion = root.GetProperty("version").GetString();
+        if (guestVersion != ToolVersion)
+            throw new InvalidOperationException(
+                $"Lima WPS guest runtime version mismatch: expected {ToolVersion}, received {guestVersion ?? "missing"}.");
         if (root.GetProperty("schema").GetString() != "tiwater.convert-refresh-docx-fields/v1"
             || root.GetProperty("status").GetString() != "ok"
             || root.GetProperty("backend").GetString() != "wps"
