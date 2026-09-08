@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using Dockit.Convert;
@@ -23,6 +24,42 @@ if (args is ["--lima-guest-timeout-probe"])
         StringComparison.Ordinal), "PDF conversion is not bounded inside the Lima guest");
     Console.WriteLine("Lima guest timeout integration passed");
     return 0;
+}
+
+if (args is ["--lima-guest-version-probe"])
+{
+    var versionProbeRoot = Path.Combine(Path.GetTempPath(), "tiwater-lima-version-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(versionProbeRoot);
+    try
+    {
+        var input = Path.Combine(versionProbeRoot, "input.docx");
+        var output = Path.Combine(versionProbeRoot, "output.docx");
+        File.WriteAllText(input, "current input");
+        File.WriteAllText(output, "current output");
+        var inputHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(input))).ToLowerInvariant();
+        var outputHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(output))).ToLowerInvariant();
+        string Receipt(string version) => $$"""
+        {"schema":"tiwater.convert-refresh-docx-fields/v1","status":"ok","input_sha256":"{{inputHash}}","output_sha256":"{{outputHash}}","source_format":"docx","target_format":"docx","version":"{{version}}","backend":"wps","refresh_scope":["table-of-contents","table-of-figures"]}
+        """;
+        LimaWpsPdfConverter.ValidateDocumentFieldRefreshEvidence(Receipt("0.9.36"), input, output);
+        var rejected = false;
+        try
+        {
+            LimaWpsPdfConverter.ValidateDocumentFieldRefreshEvidence(Receipt("0.9.35"), input, output);
+        }
+        catch (InvalidOperationException error) when (error.Message ==
+            "Lima WPS guest runtime version mismatch: expected 0.9.36, received 0.9.35.")
+        {
+            rejected = true;
+        }
+        Require(rejected, "Lima host accepted field-refresh evidence from a stale guest runtime");
+        Console.WriteLine("Lima guest version integration passed");
+        return 0;
+    }
+    finally
+    {
+        try { Directory.Delete(versionProbeRoot, recursive: true); } catch { }
+    }
 }
 
 if (args is ["--wps-automation-process-probe"])
