@@ -30,6 +30,7 @@ public static class Cli
         NativeDrawingCheckboxMutation.Command,
         NativeTableWidthMutation.Command,
         NativeSectionMarginMutation.Command,
+        NativeSectionHeaderFooterReferenceCopy.Command,
         NativeTrailingSectionMutation.Command,
         NativeObjectMutation.InsertCommand,
         NativeObjectMutation.DeleteCommand,
@@ -99,6 +100,8 @@ public static class Cli
                     => Task.FromResult(NativeTableWidthMutation.Run(args[1..])),
                 _ when args[0] == NativeSectionMarginMutation.Command
                     => Task.FromResult(NativeSectionMarginMutation.Run(args[1..])),
+                _ when args[0] == NativeSectionHeaderFooterReferenceCopy.Command
+                    => Task.FromResult(NativeSectionHeaderFooterReferenceCopy.Run(args[1..])),
                 _ when args[0] == NativeTrailingSectionMutation.Command
                     => Task.FromResult(NativeTrailingSectionMutation.Run(args[1..])),
                 _ when args[0] is NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand
@@ -203,6 +206,16 @@ public static class Cli
 
     private static bool PrintCommandUsage(string command)
     {
+        if (command == NativeSectionHeaderFooterReferenceCopy.Command)
+        {
+            Console.WriteLine("Purpose: Copy selected native header and footer references between sections in one current DOCX.");
+            Console.WriteLine("Consumes: A request naming current source/target section indexes and selected header/footer stories with default, even, or first types.");
+            Console.WriteLine("Produces: One atomically updated DOCX and a typed before/after receipt for each target section.");
+            Console.WriteLine("Use when: Current section evidence shows a target section must reuse selected header/footer content from another current section.");
+            Console.WriteLine("Do not use for: Selecting sections, editing header/footer content, changing margins or page options, or deciding business formatting.");
+            Console.WriteLine($"Usage: tiwater-docx {NativeSectionHeaderFooterReferenceCopy.Command} <request.json>");
+            return true;
+        }
         var usage = command switch
         {
             "inspect" => "tiwater-docx inspect <input.docx> [--json]",
@@ -212,6 +225,7 @@ public static class Cli
                 or NativeCommentMutation.Command
                 or NativeTableWidthMutation.Command
                 or NativeSectionMarginMutation.Command
+                or NativeSectionHeaderFooterReferenceCopy.Command
                 or NativeTrailingSectionMutation.Command
                 or NativeDocumentCreate.Command
                 or NativeObjectMutation.InsertCommand or NativeObjectMutation.DeleteCommand

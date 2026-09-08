@@ -11,6 +11,14 @@ public sealed record HeadingInfo(string Style, string Text, string Source);
 
 public sealed record PackageSummary(int PartCount, IReadOnlyList<string> Parts);
 
+public sealed record SectionStoryReferenceSummary(string Type, string RelationshipId);
+
+public sealed record SectionSummary(
+    int SectionIndex,
+    bool DifferentFirstPageHeaderFooter,
+    IReadOnlyList<SectionStoryReferenceSummary> HeaderReferences,
+    IReadOnlyList<SectionStoryReferenceSummary> FooterReferences);
+
 public sealed record ContentSummary(
     int ParagraphCount,
     int TableCount,
@@ -19,6 +27,7 @@ public sealed record ContentSummary(
     int TrailingEmptyBodyParagraphCount,
     int HeaderPartCount,
     int FooterPartCount,
+    IReadOnlyList<SectionSummary> Sections,
     IReadOnlyList<HeadingInfo> Headings,
     IReadOnlyList<string> Placeholders);
 

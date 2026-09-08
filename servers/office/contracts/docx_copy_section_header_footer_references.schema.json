@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tiwater.office-mcp-input/docx_copy_section_header_footer_references",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "read",
+      "x-tiwater-document-revision-role": "current"
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "sourceSectionIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "targetSectionIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "references": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "story": { "type": "string", "enum": ["header", "footer"] },
+                "type": { "type": "string", "enum": ["default", "even", "first"] }
+              },
+              "required": ["story", "type"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["sourceSectionIndex", "targetSectionIndex", "references"],
+        "additionalProperties": false
+      }
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Output DOCX path; may equal input for an atomic in-place update.",
+      "x-tiwater-file-role": "write"
+    },
+    "receiptOutput": {
+      "type": "string",
+      "minLength": 1,
+      "x-tiwater-file-role": "write",
+      "x-tiwater-file-effect": false
+    }
+  },
+  "required": ["input", "changes", "output", "receiptOutput"],
+  "additionalProperties": false
+}

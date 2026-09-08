@@ -37,6 +37,7 @@ tiwater-docx docx_set_text request.json
 tiwater-docx docx_delete_comments request.json
 tiwater-docx docx_set_paragraph_pagination request.json
 tiwater-docx docx_set_drawing_checkbox_state request.json
+tiwater-docx docx_copy_section_header_footer_references request.json
 tiwater-docx docx_set_table request.json
 tiwater-docx docx_insert_objects request.json
 tiwater-docx docx_delete_object request.json
@@ -56,6 +57,27 @@ contract from `contracts/mcp-input/`. The provider resolves the supplied OpenXML
 part and native path and enforces only executable OpenXML constraints; callers
 own the selected objects and values. After structural mutation, re-list the
 changed parent when its child paths are needed again.
+
+### `docx_copy_section_header_footer_references`
+
+Purpose: Copy selected native header and footer references from one current DOCX
+section to another section in the same document.
+
+Consumes: One current DOCX and one or more explicit source/target section-index
+pairs with selected `header` or `footer` stories and `default`, `even`, or
+`first` types.
+
+Produces: One atomically updated DOCX and a typed receipt containing before and
+after references for every selected target section.
+
+Use when: Current section evidence establishes that a target section must use
+the same selected header/footer content as another current section.
+
+Do not use for: Selecting sections, editing header/footer content, changing
+margins or first-page/odd-even options, deciding layout requirements, or
+applying scenario-specific policy.
+
+Usage: `tiwater-docx docx_copy_section_header_footer_references <request.json>`
 
 ## Validation
 

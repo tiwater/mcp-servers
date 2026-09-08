@@ -27,6 +27,7 @@ public static class Inspector
         var bodyParagraphTexts = bodyParagraphs.Select(GetParagraphText).ToList();
         var bodyTables = body.Elements<Table>().ToList();
         var tableMetadata = BuildTableMetadata(bodyTables);
+        var sections = body.Descendants<SectionProperties>().ToList();
         var allTexts = allParagraphs.Select(GetParagraphText).Where(text => !string.IsNullOrWhiteSpace(text)).ToList();
 
         var paragraphStyles = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -81,11 +82,20 @@ public static class Inspector
             Content: new ContentSummary(
                 ParagraphCount: allParagraphs.Count,
                 TableCount: allTables.Count,
-                SectionCount: body.Descendants<SectionProperties>().Count(),
+                SectionCount: sections.Count,
                 HasTrailingEmptySection: HasTrailingEmptySection(body),
                 TrailingEmptyBodyParagraphCount: GetTrailingEmptyBodyParagraphs(body).Count,
                 HeaderPartCount: mainPart.HeaderParts.Count(),
                 FooterPartCount: mainPart.FooterParts.Count(),
+                Sections: sections.Select((section, index) => new SectionSummary(
+                    SectionIndex: index,
+                    DifferentFirstPageHeaderFooter: FirstPageHeaderFooterEnabled(section),
+                    HeaderReferences: section.Elements<HeaderReference>()
+                        .Select(reference => SectionStoryReference(reference.Type?.Value, reference.Id?.Value))
+                        .ToList(),
+                    FooterReferences: section.Elements<FooterReference>()
+                        .Select(reference => SectionStoryReference(reference.Type?.Value, reference.Id?.Value))
+                        .ToList())).ToList(),
                 Headings: headings.Take(50).ToList(),
                 Placeholders: placeholders),
             Styles: new StyleSummary(
@@ -561,6 +571,29 @@ public static class Inspector
             .Where(child => child is not BookmarkStart and not BookmarkEnd)
             .ToArray();
         return trailing.Length > 0 && trailing.All(child => child is Paragraph paragraph && IsEmptyBodyParagraph(paragraph));
+    }
+
+    private static bool FirstPageHeaderFooterEnabled(SectionProperties section)
+    {
+        var titlePage = section.GetFirstChild<TitlePage>();
+        return titlePage is not null && (titlePage.Val?.Value ?? true);
+    }
+
+    private static SectionStoryReferenceSummary SectionStoryReference(
+        HeaderFooterValues? type,
+        string? relationshipId)
+        => new(
+            Type: HeaderFooterType(type),
+            RelationshipId: relationshipId
+                            ?? throw new InvalidOperationException("section-header-footer-reference-id-missing"));
+
+    private static string HeaderFooterType(HeaderFooterValues? type)
+    {
+        if (type is null) throw new InvalidOperationException("section-header-footer-reference-type-missing");
+        if (type.Value == HeaderFooterValues.Default) return "default";
+        if (type.Value == HeaderFooterValues.Even) return "even";
+        if (type.Value == HeaderFooterValues.First) return "first";
+        throw new InvalidOperationException("section-header-footer-reference-type-unsupported");
     }
 
     private static bool IsEmptyBodyParagraph(Paragraph paragraph)

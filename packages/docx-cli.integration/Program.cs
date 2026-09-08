@@ -161,6 +161,18 @@ try
     var sectionMarginInput = Path.Combine(root, "section-margin-input.docx");
     var sectionMarginOutput = Path.Combine(root, "section-margin-output.docx");
     CreateSectionMarginDocument(sectionMarginInput);
+    var sectionInspection = RunInspect(sectionMarginInput);
+    var sectionSummaries = sectionInspection.GetProperty("document").GetProperty("Content").GetProperty("Sections");
+    Require(sectionSummaries.GetArrayLength() == 2
+            && sectionSummaries[0].GetProperty("SectionIndex").GetInt32() == 0
+            && sectionSummaries[0].GetProperty("DifferentFirstPageHeaderFooter").GetBoolean()
+            && sectionSummaries[0].GetProperty("HeaderReferences")[0].GetProperty("Type").GetString() == "default"
+            && sectionSummaries[0].GetProperty("FooterReferences")[0].GetProperty("Type").GetString() == "default"
+            && sectionSummaries[1].GetProperty("SectionIndex").GetInt32() == 1
+            && !sectionSummaries[1].GetProperty("DifferentFirstPageHeaderFooter").GetBoolean()
+            && sectionSummaries[1].GetProperty("HeaderReferences").GetArrayLength() == 0
+            && sectionSummaries[1].GetProperty("FooterReferences").GetArrayLength() == 0,
+        "inspect did not expose bounded section header/footer facts");
     Run("docx_set_section_margins", new
     {
         input = sectionMarginInput,
@@ -189,6 +201,88 @@ try
     });
     Require(invalidSectionMargin.Contains("section-margin-unit-unsupported", StringComparison.Ordinal),
         "section margin mutation accepted an unsupported unit");
+
+    var sectionReferenceOutput = Path.Combine(root, "section-reference-output.docx");
+    var sectionReferenceReceipt = Path.Combine(root, "section-reference-receipt.json");
+    Run("docx_copy_section_header_footer_references", new
+    {
+        input = sectionMarginInput,
+        changes = new[] { new
+        {
+            sourceSectionIndex = 0,
+            targetSectionIndex = 1,
+            references = new[]
+            {
+                new { story = "header", type = "default" },
+                new { story = "footer", type = "default" },
+            },
+        } },
+        output = sectionReferenceOutput,
+        receiptOutput = sectionReferenceReceipt,
+    });
+    using (var changedReferences = WordprocessingDocument.Open(sectionReferenceOutput, false))
+    {
+        var sections = changedReferences.MainDocumentPart!.Document.Body!.Descendants<SectionProperties>().ToArray();
+        var sourceHeader = sections[0].Elements<HeaderReference>().Single();
+        var sourceFooter = sections[0].Elements<FooterReference>().Single();
+        var targetHeader = sections[1].Elements<HeaderReference>().Single();
+        var targetFooter = sections[1].Elements<FooterReference>().Single();
+        Require(targetHeader.Id?.Value == sourceHeader.Id?.Value && targetHeader.Type?.Value == HeaderFooterValues.Default,
+            "section reference copy did not bind the selected default header");
+        Require(targetFooter.Id?.Value == sourceFooter.Id?.Value && targetFooter.Type?.Value == HeaderFooterValues.Default,
+            "section reference copy did not bind the selected default footer");
+        Require(sections[0].GetFirstChild<PageMargin>()?.Top?.Value == 1001
+                && sections[1].GetFirstChild<PageMargin>()?.Top?.Value == 1202,
+            "section reference copy changed unrelated section margins");
+        Require(sections[0].GetFirstChild<TitlePage>() is not null
+                && sections[1].GetFirstChild<TitlePage>() is null,
+            "section reference copy changed first-page options");
+        Require(changedReferences.MainDocumentPart.Document.Body.InnerText == "First sectionSecond section",
+            "section reference copy changed visible body content");
+    }
+    using (var receipt = JsonDocument.Parse(File.ReadAllText(sectionReferenceReceipt)))
+    {
+        var changes = receipt.RootElement.GetProperty("changes");
+        Require(changes.GetArrayLength() == 1,
+            "section reference receipt did not report the selected target section");
+        Require(changes[0].GetProperty("before").GetProperty("headerReferences").GetArrayLength() == 0
+                && changes[0].GetProperty("after").GetProperty("headerReferences").GetArrayLength() == 1
+                && changes[0].GetProperty("before").GetProperty("footerReferences").GetArrayLength() == 0
+                && changes[0].GetProperty("after").GetProperty("footerReferences").GetArrayLength() == 1,
+            "section reference receipt did not report exact before and after references");
+    }
+    var duplicateSectionReferenceReceipt = Path.Combine(root, "section-reference-duplicate-receipt.json");
+    var duplicateSectionReference = RunExpectAtomicFailure(
+        "docx_copy_section_header_footer_references",
+        sectionMarginInput,
+        duplicateSectionReferenceReceipt,
+        new
+        {
+            input = sectionMarginInput,
+            changes = new object[]
+            {
+                new { sourceSectionIndex = 0, targetSectionIndex = 1, references = new[] { new { story = "header", type = "default" } } },
+                new { sourceSectionIndex = 0, targetSectionIndex = 1, references = new[] { new { story = "footer", type = "default" } } },
+            },
+            output = sectionMarginInput,
+            receiptOutput = duplicateSectionReferenceReceipt,
+        });
+    Require(duplicateSectionReference.Contains("target-section-index-duplicate", StringComparison.Ordinal),
+        "section reference copy accepted duplicate target changes");
+    var missingSectionReferenceReceipt = Path.Combine(root, "section-reference-missing-receipt.json");
+    var missingSectionReference = RunExpectAtomicFailure(
+        "docx_copy_section_header_footer_references",
+        sectionMarginInput,
+        missingSectionReferenceReceipt,
+        new
+        {
+            input = sectionMarginInput,
+            changes = new[] { new { sourceSectionIndex = 1, targetSectionIndex = 0, references = new[] { new { story = "header", type = "first" } } } },
+            output = sectionMarginInput,
+            receiptOutput = missingSectionReferenceReceipt,
+        });
+    Require(missingSectionReference.Contains("source-section-header-reference-missing", StringComparison.Ordinal),
+        "section reference copy accepted a missing source reference");
 
     var trailingSectionInput = Path.Combine(root, "trailing-section-input.docx");
     var trailingSectionOutput = Path.Combine(root, "trailing-section-output.docx");
@@ -2913,6 +3007,26 @@ JsonElement Run(string command, object request)
     return JsonDocument.Parse(result.Output).RootElement.Clone();
 }
 
+JsonElement RunInspect(string input)
+{
+    var start = new ProcessStartInfo("dotnet")
+    {
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false
+    };
+    start.ArgumentList.Add(cli);
+    start.ArgumentList.Add("inspect");
+    start.ArgumentList.Add(input);
+    start.ArgumentList.Add("--json");
+    using var process = Process.Start(start) ?? throw new InvalidOperationException("failed to start docx cli");
+    var output = process.StandardOutput.ReadToEnd();
+    var error = process.StandardError.ReadToEnd();
+    process.WaitForExit();
+    Require(process.ExitCode == 0, $"inspect failed: {error}\n{output}");
+    return JsonDocument.Parse(output).RootElement.Clone();
+}
+
 string RunExpectFailure(string command, object request)
 {
     var requestPath = Path.Combine(root, Guid.NewGuid().ToString("N") + ".json");
@@ -3196,8 +3310,17 @@ void CreateSectionMarginDocument(string path)
 {
     using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
     var main = document.AddMainDocumentPart();
+    var header = main.AddNewPart<HeaderPart>("rIdHeader");
+    header.Header = new Header(new Paragraph(new Run(new Text("Shared header"))));
+    header.Header.Save();
+    var footer = main.AddNewPart<FooterPart>("rIdFooter");
+    footer.Footer = new Footer(new Paragraph(new Run(new Text("Shared footer"))));
+    footer.Footer.Save();
     var firstSection = new SectionProperties(
-        new PageMargin { Top = 1001, Bottom = 1101, Left = 1201U, Right = 1301U, Header = 401U, Footer = 501U });
+        new HeaderReference { Type = HeaderFooterValues.Default, Id = "rIdHeader" },
+        new FooterReference { Type = HeaderFooterValues.Default, Id = "rIdFooter" },
+        new PageMargin { Top = 1001, Bottom = 1101, Left = 1201U, Right = 1301U, Header = 401U, Footer = 501U },
+        new TitlePage());
     var secondSection = new SectionProperties(
         new PageMargin { Top = 1202, Bottom = 1302, Left = 1402U, Right = 1502U, Header = 402U, Footer = 502U });
     main.Document = new Document(new Body(
