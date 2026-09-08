@@ -932,7 +932,7 @@ const tools = [
   {
     name: 'pptx_apply_format',
     effectKind: 'document-mutation',
-    description: 'Apply one deterministic PPTX formatting plan to a current presentation. This tool executes published formatting operations; it does not derive values, coordinates, or business decisions.',
+    description: 'Apply one deterministic PPTX formatting plan to a current presentation. This tool executes published formatting operations; it does not derive values, coordinates, or business decisions. When no formatting change is required, pass an empty changes array to materialize an unchanged output and a passing receipt with zero operation and applied counts.',
     inputSchema: inputContract('pptx_apply_format'),
     outputSchema: fixedEditOutput('pptx_apply_format'),
     handler: (args, tool) => fixedEdit(tool, args, pptxCandidates),

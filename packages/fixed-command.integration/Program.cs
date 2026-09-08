@@ -225,6 +225,36 @@ Check("pptx", "format-color-with-existing-typeface", directory =>
     Require(properties.ChildElements.Select(child => child.LocalName).SequenceEqual(new[] { "solidFill", "latin", "ea" }),
         "color and typeface properties are not in schema order");
 });
+foreach (var inPlace in new[] { false, true })
+    Check("pptx", inPlace ? "format-empty-in-place" : "format-empty-new-output", directory =>
+    {
+        var input = Path.Combine(directory, "input.pptx");
+        var output = inPlace ? input : Path.Combine(directory, "output.pptx");
+        var receiptPath = Path.Combine(directory, "receipt.json");
+        CreateFormatPresentation(input);
+        var before = File.ReadAllBytes(input);
+        var request = Path.Combine(directory, "request.json");
+        File.WriteAllText(request, JsonSerializer.Serialize(new
+        {
+            input,
+            output,
+            receiptOutput = receiptPath,
+            changes = Array.Empty<object>(),
+        }));
+
+        Require(Dockit.Pptx.FixedCommandRunner.Run("pptx_apply_format", [request]) == 0,
+            "empty format plan was rejected");
+        Require(File.ReadAllBytes(input).SequenceEqual(before), "empty format plan changed input bytes");
+        Require(File.ReadAllBytes(output).SequenceEqual(before), "empty format plan changed output bytes");
+        using var receipt = JsonDocument.Parse(File.ReadAllText(receiptPath));
+        var rootElement = receipt.RootElement;
+        Require(rootElement.GetProperty("pass").GetBoolean(), "empty format receipt did not pass");
+        Require(rootElement.GetProperty("operationCount").GetInt32() == 0, "empty format receipt operation count differs");
+        Require(rootElement.GetProperty("appliedCount").GetInt32() == 0, "empty format receipt applied count differs");
+        Require(rootElement.GetProperty("changes").GetArrayLength() == 0, "empty format receipt contains changes");
+        Require(rootElement.GetProperty("issues").GetArrayLength() == 0, "empty format receipt contains issues");
+        RequireNoTemporaryFiles(directory);
+    });
 Check("pptx", "template-system-placeholder-policy", directory =>
 {
     var source = Path.Combine(directory, "source.pptx");
