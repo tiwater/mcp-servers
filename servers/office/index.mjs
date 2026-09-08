@@ -671,6 +671,14 @@ const tools = [
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
   },
   {
+    name: 'docx_copy_section_header_footer_references',
+    effectKind: 'document-mutation',
+    description: 'Atomically copy selected default, even, or first header/footer references from one current DOCX section to another section in the same document. Sections use zero-based native document order; the referenced content remains unchanged. This does not select sections, edit header/footer content, change margins or page options, calculate layout, or decide business formatting.',
+    inputSchema: inputContract('docx_copy_section_header_footer_references'),
+    outputSchema: fixedEditOutput('docx_copy_section_header_footer_references'),
+    handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
+  },
+  {
     name: 'docx_collapse_trailing_empty_section',
     effectKind: 'document-mutation',
     description: 'Atomically remove exactly one observed trailing empty DOCX section by promoting the preceding section properties and removing only intervening empty paragraphs. The operation fails when that native structure is absent and preserves all visible document content. This does not choose business sections, delete nonempty content, or normalize other section breaks.',
