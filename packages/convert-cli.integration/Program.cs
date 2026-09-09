@@ -104,14 +104,14 @@ if (args is ["--lima-guest-version-probe"])
         string Receipt(string version) => $$"""
         {"schema":"tiwater.convert-refresh-docx-fields/v1","status":"ok","input_sha256":"{{inputHash}}","output_sha256":"{{outputHash}}","source_format":"docx","target_format":"docx","version":"{{version}}","backend":"wps","refresh_scope":["table-of-contents","table-of-figures"]}
         """;
-        LimaWpsPdfConverter.ValidateDocumentFieldRefreshEvidence(Receipt("0.9.36"), input, output);
+        LimaWpsPdfConverter.ValidateDocumentFieldRefreshEvidence(Receipt("0.9.37"), input, output);
         var rejected = false;
         try
         {
-            LimaWpsPdfConverter.ValidateDocumentFieldRefreshEvidence(Receipt("0.9.35"), input, output);
+            LimaWpsPdfConverter.ValidateDocumentFieldRefreshEvidence(Receipt("0.9.36"), input, output);
         }
         catch (InvalidOperationException error) when (error.Message ==
-            "Lima WPS guest runtime version mismatch: expected 0.9.36, received 0.9.35.")
+            "Lima WPS guest runtime version mismatch: expected 0.9.37, received 0.9.36.")
         {
             rejected = true;
         }
