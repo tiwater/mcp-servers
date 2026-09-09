@@ -286,7 +286,7 @@ public static class Observation
         for (var previous = rowIndex - 1; previous >= 0; previous--)
         {
             var candidate = projectedRows[previous].SingleOrDefault(item =>
-                item.GridColumnStart == cell.GridColumnStart && item.GridSpan == cell.GridSpan);
+                item.GridColumnStart == cell.GridColumnStart);
             if (candidate is null || candidate.VerticalMerge is null) break;
             if (candidate.VerticalMerge == "restart") return candidate;
         }

@@ -81,6 +81,16 @@ try
     Require(sameAddress && sameRows && sameGrid,
         $"all-table read differs from the corresponding exact table read: address={sameAddress}, rows={sameRows}, grid={sameGrid}");
 
+    var wideningVerticalMerge = Path.Combine(root, "widening-vertical-merge.docx");
+    CreateWideningVerticalMergeDocument(wideningVerticalMerge);
+    var wideningRows = ReadTable(wideningVerticalMerge, "widening-vertical-merge")
+        .GetProperty("rows");
+    Require(wideningRows[1].GetProperty("cells")[1].GetProperty("verticalMergeOwner").GetRawText()
+            == wideningRows[0].GetProperty("cells")[2].GetProperty("address").GetRawText(),
+        "widening vertical continuation did not point to its restart owner");
+    Require(wideningRows[1].GetProperty("cells")[1].GetProperty("logicalText").GetString() == "合并起点",
+        "widening vertical continuation did not resolve the restart cell text");
+
     var fontOutput = Path.Combine(root, "set-text-font.docx");
     var fontReceipt = Path.Combine(root, "set-text-font-receipt.json");
     Run("docx_set_text", new
@@ -3301,6 +3311,26 @@ void CreateDocument(string path)
     table.Append(new TableRow(
         Cell("", merge: MergedCellValues.Continue), Cell("乙一"), Cell("乙二"), Cell("乙三")));
     table.Append(new TableRow(Cell("独立"), Cell("丙一"), Cell("丙二"), Cell("丙三")));
+    main.Document = new Document(new Body(table));
+    AssignParagraphIdentities(main.Document);
+    main.Document.Save();
+}
+
+void CreateWideningVerticalMergeDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var table = new Table(
+        new TableProperties(),
+        new TableGrid(
+            new GridColumn { Width = "1000" }, new GridColumn { Width = "1000" },
+            new GridColumn { Width = "1000" }, new GridColumn { Width = "1000" }),
+        new TableRow(
+            Cell("左一"), Cell("左二"),
+            Cell("合并起点", merge: MergedCellValues.Restart)),
+        new TableRow(
+            Cell("下一行左侧", span: 2),
+            Cell("", span: 2, merge: MergedCellValues.Continue)));
     main.Document = new Document(new Body(table));
     AssignParagraphIdentities(main.Document);
     main.Document.Save();
