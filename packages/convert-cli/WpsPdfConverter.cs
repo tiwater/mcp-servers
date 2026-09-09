@@ -337,6 +337,14 @@ try:
             toc = require("TablesOfContents.Item", tables_of_contents.Item(index))
             require("TableOfContents.Update", toc.Update())
 
+        # Contents expansion changes the layout used by the earlier figure
+        # indexes. Synchronize those indexes only after both sets exist.
+        trace("final-index-pagination")
+        require("Document.Repaginate", document.Repaginate())
+        for index in range(1, figure_count + 1):
+            figure = require("TablesOfFigures.Item", tables_of_figures.Item(index))
+            require("TableOfFigures.Update", figure.Update())
+
         trace("document-save")
         require("Document.Save", document.Save())
         with open(completion_marker, "x", encoding="utf-8") as marker:

@@ -4,6 +4,69 @@ using System.Text;
 using System.Xml.Linq;
 using Dockit.Convert;
 
+if (args is ["--verify-native-index-pages", var indexedDocx, var nativePdf, var expectedEntryCount])
+{
+    var w = XNamespace.Get("http://schemas.openxmlformats.org/wordprocessingml/2006/main");
+    var document = XDocument.Parse(ReadPart(indexedDocx, "word/document.xml"));
+    using var pdf = UglyToad.PdfPig.PdfDocument.Open(nativePdf);
+    static string Compact(string value) => string.Concat(value.Where(character => !char.IsWhiteSpace(character)));
+    var pages = pdf.GetPages().Select(page => (page.Number, Text: Compact(page.Text))).ToList();
+    var checkedCount = 0;
+    var mismatches = new List<string>();
+    foreach (var paragraph in document.Descendants(w + "p"))
+    {
+        if (!paragraph.Descendants(w + "hyperlink").Any()
+            && !paragraph.Descendants(w + "instrText").Any(node => node.Value.Contains("PAGEREF", StringComparison.Ordinal))) continue;
+        var texts = paragraph.Descendants(w + "t").Select(node => node.Value).ToList();
+        if (texts.Count < 2 || !int.TryParse(texts[^1].Trim(), out var cachedPage)) continue;
+        var label = Compact(string.Concat(texts.Take(texts.Count - 1)));
+        if (label.Length == 0) continue;
+        var matches = pages.Where(page => page.Text.Contains(label, StringComparison.Ordinal)).ToList();
+        Require(matches.Count > 0, "native PDF does not contain index label: " + label);
+        var actualPage = matches[^1].Number;
+        checkedCount++;
+        if (cachedPage != actualPage) mismatches.Add($"{label}: cached={cachedPage}, native={actualPage}");
+    }
+    Require(int.TryParse(expectedEntryCount, out var expectedCount) && expectedCount > 0
+        && checkedCount == expectedCount, "native index comparison count differs from the declared fixture");
+    foreach (var mismatch in mismatches) Console.WriteLine(mismatch);
+    Console.WriteLine($"native index entries={checkedCount}; mismatches={mismatches.Count}");
+    Require(mismatches.Count == 0, "cached index pages differ from native body pagination");
+    return 0;
+}
+
+if (args is ["--index-pagination-order-probe"])
+{
+    var script = WpsPdfConverter.RefreshFieldsHelperScript;
+    var lastContents = script.LastIndexOf("TableOfContents.Update\"", StringComparison.Ordinal);
+    var finalPagination = script.LastIndexOf("document.Repaginate()", StringComparison.Ordinal);
+    var lastFigures = script.LastIndexOf("TableOfFigures.Update\"", StringComparison.Ordinal);
+    Require(lastContents >= 0 && finalPagination > lastContents && lastFigures > finalPagination,
+        "figure index pages must be recomputed after contents expansion and final pagination");
+    Console.WriteLine("index pagination ordering regression passed");
+    return 0;
+}
+
+if (args is ["--index-pagination-fixture", var fixturePath])
+{
+    var body = new StringBuilder();
+    body.Append("<w:p><w:r><w:t>Independent index pagination fixture</w:t></w:r></w:p>");
+    foreach (var code in new[] { " TOC \\o &quot;1-1&quot; \\h ", " TOC \\c &quot;Figure&quot; \\h " })
+        body.Append($"<w:p><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText>{code}</w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:t>Unrefreshed index</w:t></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r></w:p>");
+    for (var index = 1; index <= 26; index++)
+    {
+        body.Append($"<w:p><w:pPr><w:pStyle w:val=\"HeadingOne\"/></w:pPr><w:r><w:t>Independent section {index:D2}</w:t></w:r></w:p>");
+        body.Append($"<w:p><w:r><w:t>Figure </w:t></w:r><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText> SEQ Figure \\* ARABIC </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:t>{index}</w:t></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r><w:r><w:t> Independent marker {index:D2}</w:t></w:r></w:p>");
+    }
+    using var package = ZipFile.Open(fixturePath, ZipArchiveMode.Create);
+    Write(package, "[Content_Types].xml", "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/></Types>");
+    Write(package, "_rels/.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"r1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>");
+    Write(package, "word/_rels/document.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"r1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>");
+    Write(package, "word/styles.xml", TocStyles());
+    Write(package, "word/document.xml", $"<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{body}<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/></w:sectPr></w:body></w:document>");
+    return 0;
+}
+
 if (args is ["--lima-guest-timeout-probe"])
 {
     var docx = LimaWpsPdfConverter.CreateDocumentFieldRefreshStartInfo(
