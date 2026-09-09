@@ -15,6 +15,11 @@
       "description": "New JSON file that receives every native table in document order, including rows, cells, merges, paragraphs, and text nodes.",
       "x-tiwater-file-role": "write",
       "x-tiwater-file-effect": false
+    },
+    "returnContent": {
+      "type": "boolean",
+      "const": false,
+      "description": "Optional compatibility flag for a uniform observation request. Only false is accepted because this tool always writes the complete result to output and never returns table content inline."
     }
   },
   "required": ["input", "output"],

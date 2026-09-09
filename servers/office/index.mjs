@@ -608,7 +608,7 @@ const tools = [
   },
   {
     name: 'docx_read_all_tables',
-    description: 'Read every native table from one current DOCX in document order. The document is opened once and the complete rows, cells, merge ownership, paragraphs, and text nodes are written to output. Only a compact receipt is returned. This tool does not select business tables or infer their meaning.',
+    description: 'Read every native table from one current DOCX in document order. The document is opened once and the complete rows, cells, merge ownership, paragraphs, and text nodes are written to output. Only a compact receipt is returned. The optional compatibility argument returnContent may only be false; true is unsupported because table content is never returned inline. This tool does not select business tables or infer their meaning.',
     inputSchema: inputContract('docx_read_all_tables'),
     outputSchema: docxReadAllTablesOutput,
     annotations: { readOnlyHint: true, idempotentHint: true },
