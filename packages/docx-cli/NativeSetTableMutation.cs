@@ -1,4 +1,6 @@
 using System.Text.Json;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace Dockit.Docx;
 
@@ -35,6 +37,7 @@ public static class NativeSetTableMutation
         try
         {
             var retainedSourceText = RetainedSourceText(request);
+            var bookmarkRestoration = BookmarkRestoration(request, retainedSourceText);
             var shapeRequest = new SetTableBodyRequest(
                 paths.Input,
                 request.Table,
@@ -50,18 +53,20 @@ public static class NativeSetTableMutation
                         cell.RowSpan)).ToArray(),
                     row.CantSplit)).ToArray(),
                 shapeOutput,
-                shapeReceipt);
+                shapeReceipt,
+                bookmarkRestoration.Starts,
+                bookmarkRestoration.Ends);
             var shaped = NativeTableBodyMutation.Apply(shapeRequest);
             ApplyRichText(request, shaped, shapeOutput);
-            var changes = BuildContentChanges(request, shaped, shapeOutput, retainedSourceText);
+            var content = BuildContentChanges(request, shaped, shapeOutput, retainedSourceText, bookmarkRestoration.ByCell);
             var completed = shapeOutput;
-            if (changes.Count > 0)
+            if (content.Changes.Count > 0)
             {
                 NativeContentCopy.Apply(new CopyContentRequest(
                     shapeOutput,
-                    changes,
+                    content.Changes,
                     contentOutput,
-                    contentReceipt));
+                    contentReceipt), content.PreservedBookmarkIdsByChange);
                 completed = contentOutput;
             }
 
@@ -201,17 +206,19 @@ public static class NativeSetTableMutation
         return value is "single" or "double";
     }
 
-    private static IReadOnlyList<CopyContentChange> BuildContentChanges(
+    private static PreparedContentChanges BuildContentChanges(
         SetTableRequest request,
         SetTableBodyReceipt shaped,
         string shapeOutput,
-        IReadOnlyDictionary<(int Row, int Cell), string> retainedSourceText)
+        IReadOnlyDictionary<(int Row, int Cell), string> retainedSourceText,
+        IReadOnlyDictionary<(int Row, int Cell), IReadOnlySet<string>> preservedBookmarksByCell)
     {
         var columnStarts = request.Columns.Select((column, index) => (column.Id, index))
             .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
         var table = Observation.ReadTable(shapeOutput, shaped.Table);
         var rowsByAddress = table.Rows.ToDictionary(row => row.Address, row => row);
         var result = new List<CopyContentChange>();
+        var preserved = new Dictionary<int, IReadOnlySet<string>>();
         for (var rowIndex = 0; rowIndex < request.Rows.Count; rowIndex++)
         {
             if (!rowsByAddress.TryGetValue(shaped.Rows[rowIndex].Address, out var observedRow))
@@ -230,9 +237,92 @@ public static class NativeSetTableMutation
                     target.Address,
                     cell.SourceInput!,
                     cell.SourceSelections!));
+                if (preservedBookmarksByCell.TryGetValue((rowIndex, cellIndex), out var ids))
+                    preserved[result.Count - 1] = ids;
             }
         }
-        return result;
+        return new PreparedContentChanges(result, preserved);
+    }
+
+    private static BookmarkRestorationPlan BookmarkRestoration(
+        SetTableRequest request,
+        IReadOnlyDictionary<(int Row, int Cell), string> retainedSourceText)
+    {
+        var byCell = new Dictionary<(int Row, int Cell), IReadOnlySet<string>>();
+        var restoredStarts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var restoredEnds = new Dictionary<string, int>(StringComparer.Ordinal);
+        using var document = WordprocessingDocument.Open(request.Input, false);
+        var rowRefs = Observation.ResolveAddresses(
+            request.Input, [request.ExistingRows.First, request.ExistingRows.Last], "existingRows");
+        var first = Observation.ResolveNativePath(document, rowRefs[0].StoryPart, rowRefs[0].NativePath) as TableRow;
+        var last = Observation.ResolveNativePath(document, rowRefs[1].StoryPart, rowRefs[1].NativePath) as TableRow;
+        if (first is null || last is null || !ReferenceEquals(first.Parent, last.Parent))
+            return new BookmarkRestorationPlan(byCell, restoredStarts, restoredEnds);
+        var tableRows = first.Parent!.Elements<TableRow>().ToArray();
+        var firstIndex = Array.IndexOf(tableRows, first);
+        var lastIndex = Array.IndexOf(tableRows, last);
+        if (firstIndex < 0 || lastIndex < firstIndex)
+            return new BookmarkRestorationPlan(byCell, restoredStarts, restoredEnds);
+        var selectedRows = tableRows[firstIndex..(lastIndex + 1)].ToHashSet();
+        var selectedRowPaths = selectedRows.Select(Observation.NativePathFor).ToHashSet(StringComparer.Ordinal);
+        var selectedStarts = selectedRows.SelectMany(row => row.Descendants<BookmarkStart>())
+            .Where(item => item.Id?.Value is not null).GroupBy(item => item.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var selectedEnds = selectedRows.SelectMany(row => row.Descendants<BookmarkEnd>())
+            .Where(item => item.Id?.Value is not null).GroupBy(item => item.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var allStarts = document.MainDocumentPart!.Document.Descendants<BookmarkStart>()
+            .Where(item => item.Id?.Value is not null).GroupBy(item => item.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var allEnds = document.MainDocumentPart.Document.Descendants<BookmarkEnd>()
+            .Where(item => item.Id?.Value is not null).GroupBy(item => item.Id!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var crossingIds = selectedStarts.Keys.Concat(selectedEnds.Keys).Distinct(StringComparer.Ordinal)
+            .Where(id => allEnds.GetValueOrDefault(id) > selectedEnds.GetValueOrDefault(id)
+                || allStarts.GetValueOrDefault(id) > selectedStarts.GetValueOrDefault(id))
+            .ToHashSet(StringComparer.Ordinal);
+        if (crossingIds.Count == 0) return new BookmarkRestorationPlan(byCell, restoredStarts, restoredEnds);
+
+        var candidates = new List<((int Row, int Cell) Key, TableCell Cell, HashSet<string> Ids)>();
+        for (var rowIndex = 0; rowIndex < request.Rows.Count; rowIndex++)
+        for (var cellIndex = 0; cellIndex < request.Rows[rowIndex].Cells.Count; cellIndex++)
+        {
+            if (retainedSourceText.ContainsKey((rowIndex, cellIndex))) continue;
+            var cell = request.Rows[rowIndex].Cells[cellIndex];
+            if (cell.SourceInput is null
+                || cell.SourceSelections is not [var selection]
+                || selection.Range is not null) continue;
+            var sourcePath = Path.GetFullPath(cell.SourceInput);
+            var sourceRef = Observation.ResolveAddresses(sourcePath, [selection.Address], "bookmarkSource").Single();
+            var sourceIsTarget = StringComparer.OrdinalIgnoreCase.Equals(sourcePath, Path.GetFullPath(request.Input));
+            using var separateSource = sourceIsTarget ? null : WordprocessingDocument.Open(sourcePath, false);
+            var sourceDocument = separateSource ?? document;
+            var sourceCell = Observation.ResolveNativePath(sourceDocument, sourceRef.StoryPart, sourceRef.NativePath) as TableCell;
+            var sourceRow = sourceCell?.Ancestors<TableRow>().FirstOrDefault();
+            if (sourceCell is null || sourceRow is null || !selectedRowPaths.Contains(Observation.NativePathFor(sourceRow))) continue;
+            var ids = sourceCell.Descendants<BookmarkStart>().Select(item => item.Id?.Value)
+                .Concat(sourceCell.Descendants<BookmarkEnd>().Select(item => item.Id?.Value))
+                .Where(id => id is not null && crossingIds.Contains(id)).Select(id => id!).ToHashSet(StringComparer.Ordinal);
+            if (ids.Count > 0) candidates.Add(((rowIndex, cellIndex), (TableCell)sourceCell.CloneNode(true), ids));
+        }
+        foreach (var id in crossingIds)
+        {
+            var cells = candidates.Where(candidate => candidate.Ids.Contains(id)).ToArray();
+            var candidateStarts = cells.Sum(candidate => candidate.Cell.Descendants<BookmarkStart>().Count(item => item.Id?.Value == id));
+            var candidateEnds = cells.Sum(candidate => candidate.Cell.Descendants<BookmarkEnd>().Count(item => item.Id?.Value == id));
+            if (candidateStarts != selectedStarts.GetValueOrDefault(id)
+                || candidateEnds != selectedEnds.GetValueOrDefault(id)) continue;
+            foreach (var candidate in cells)
+            {
+                if (!byCell.TryGetValue(candidate.Key, out var existing)) existing = new HashSet<string>(StringComparer.Ordinal);
+                var updated = existing.ToHashSet(StringComparer.Ordinal);
+                updated.Add(id);
+                byCell[candidate.Key] = updated;
+            }
+            if (candidateStarts > 0) restoredStarts[id] = candidateStarts;
+            if (candidateEnds > 0) restoredEnds[id] = candidateEnds;
+        }
+        return new BookmarkRestorationPlan(byCell, restoredStarts, restoredEnds);
     }
 
     private static IReadOnlyDictionary<(int Row, int Cell), string> RetainedSourceText(SetTableRequest request)
@@ -323,6 +413,15 @@ public static class NativeSetTableMutation
                     cell.LogicalText)).ToArray());
         }).ToArray();
     }
+
+    private sealed record BookmarkRestorationPlan(
+        IReadOnlyDictionary<(int Row, int Cell), IReadOnlySet<string>> ByCell,
+        IReadOnlyDictionary<string, int> Starts,
+        IReadOnlyDictionary<string, int> Ends);
+
+    private sealed record PreparedContentChanges(
+        IReadOnlyList<CopyContentChange> Changes,
+        IReadOnlyDictionary<int, IReadOnlySet<string>> PreservedBookmarkIdsByChange);
 }
 
 public sealed record SetTableCell(

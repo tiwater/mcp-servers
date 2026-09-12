@@ -94,7 +94,12 @@ internal static class NativeTableBodyMutation
         var idToColumn = request.Columns.Select((column, index) => (column.Id, index))
             .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
         var preparedRows = PrepareRows(request.Rows, prototypeRows, selectedRows, idToColumn, grid.Length);
-        RequirePreservedBookmarkBoundaries(document, selectedRows, preparedRows);
+        RequirePreservedBookmarkBoundaries(
+            document,
+            selectedRows,
+            preparedRows,
+            request.RestoredBookmarkStarts,
+            request.RestoredBookmarkEnds);
         return new PreparedTable(
             tableRef,
             selectedRows.Select(Observation.NativePathFor).ToArray(),
@@ -295,7 +300,9 @@ internal static class NativeTableBodyMutation
     private static void RequirePreservedBookmarkBoundaries(
         WordprocessingDocument document,
         IReadOnlyList<TableRow> selectedRows,
-        IReadOnlyList<PreparedRow> preparedRows)
+        IReadOnlyList<PreparedRow> preparedRows,
+        IReadOnlyDictionary<string, int>? restoredStarts,
+        IReadOnlyDictionary<string, int>? restoredEnds)
     {
         var selectedStarts = selectedRows.SelectMany(row => row.Descendants<BookmarkStart>())
             .Where(bookmark => bookmark.Id?.Value is not null)
@@ -331,8 +338,8 @@ internal static class NativeTableBodyMutation
             var endsInside = selectedEnds.GetValueOrDefault(id);
             var startsOutside = allStarts.GetValueOrDefault(id) - startsInside;
             var endsOutside = allEnds.GetValueOrDefault(id) - endsInside;
-            if ((endsOutside > 0 && retainedStarts.GetValueOrDefault(id) != startsInside)
-                || (startsOutside > 0 && retainedEnds.GetValueOrDefault(id) != endsInside))
+            if ((endsOutside > 0 && retainedStarts.GetValueOrDefault(id) + (restoredStarts?.GetValueOrDefault(id) ?? 0) != startsInside)
+                || (startsOutside > 0 && retainedEnds.GetValueOrDefault(id) + (restoredEnds?.GetValueOrDefault(id) ?? 0) != endsInside))
                 throw new InvalidOperationException("existingRows-crosses-bookmark-boundary");
         }
     }
@@ -470,7 +477,9 @@ public sealed record SetTableBodyRequest(
     IReadOnlyList<SetTableBodyColumn> Columns,
     IReadOnlyList<SetTableBodyRow> Rows,
     string Output,
-    string ReceiptOutput);
+    string ReceiptOutput,
+    IReadOnlyDictionary<string, int>? RestoredBookmarkStarts = null,
+    IReadOnlyDictionary<string, int>? RestoredBookmarkEnds = null);
 public sealed record SetTableBodyCellReadback(int GridColumnStart, int GridSpan, string? VerticalMerge, string Text);
 public sealed record SetTableBodyRowReadback(
     DocxObjectAddress Address,
