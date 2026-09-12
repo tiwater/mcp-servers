@@ -31,7 +31,9 @@ public static class NativeContentCopy
         return 0;
     }
 
-    public static CopyContentReceipt Apply(CopyContentRequest request)
+    public static CopyContentReceipt Apply(
+        CopyContentRequest request,
+        IReadOnlyDictionary<int, IReadOnlySet<string>>? preservedBookmarkIdsByChange = null)
     {
         if (request.Changes.Count == 0) throw new InvalidOperationException("changes-must-not-be-empty");
         using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
@@ -48,7 +50,7 @@ public static class NativeContentCopy
         if (targetRefs.Select(item => item.Address).Distinct().Count() != targetRefs.Count)
             throw new InvalidOperationException("target-address-duplicate");
 
-        var prepared = PrepareSources(request, targetRefs);
+        var prepared = PrepareSources(request, targetRefs, preservedBookmarkIdsByChange);
         IReadOnlyDictionary<string, int> baselineIssues;
         using (var targetDocument = WordprocessingDocument.Open(targetPath, false))
         {
@@ -92,7 +94,8 @@ public static class NativeContentCopy
 
     private static IReadOnlyList<PreparedChange> PrepareSources(
         CopyContentRequest request,
-        IReadOnlyList<ResolvedDocxAddress> targetRefs)
+        IReadOnlyList<ResolvedDocxAddress> targetRefs,
+        IReadOnlyDictionary<int, IReadOnlySet<string>>? preservedBookmarkIdsByChange)
     {
         var result = new PreparedChange?[request.Changes.Count];
         var indexedChanges = request.Changes.Select((change, index) => new
@@ -132,7 +135,8 @@ public static class NativeContentCopy
                             paragraphs,
                             ref activeInlineSourceParagraph,
                             element,
-                            item.Change.SourceSelections[selectionIndex]);
+                            item.Change.SourceSelections[selectionIndex],
+                            preservedBookmarkIdsByChange?.GetValueOrDefault(item.Index));
                     }
                     catch (InvalidOperationException exception)
                     {
@@ -200,7 +204,8 @@ public static class NativeContentCopy
         List<Paragraph> output,
         ref Paragraph? activeInlineSourceParagraph,
         OpenXmlElement element,
-        CopyContentSelection selection)
+        CopyContentSelection selection,
+        IReadOnlySet<string>? preservedBookmarkIds)
     {
         if (selection.Range is not null)
         {
@@ -230,11 +235,11 @@ public static class NativeContentCopy
         switch (element)
         {
             case TableCell cell:
-                output.AddRange(cell.Elements<Paragraph>().Select(CloneParagraph));
+                output.AddRange(cell.Elements<Paragraph>().Select(paragraph => CloneParagraph(paragraph, preservedBookmarkIds)));
                 activeInlineSourceParagraph = null;
                 return;
             case Paragraph paragraph:
-                output.Add(CloneParagraph(paragraph));
+                output.Add(CloneParagraph(paragraph, preservedBookmarkIds));
                 activeInlineSourceParagraph = null;
                 return;
             case DocumentFormat.OpenXml.Wordprocessing.Run run:
@@ -370,7 +375,7 @@ public static class NativeContentCopy
         return output;
     }
 
-    internal static Paragraph CloneParagraph(Paragraph paragraph)
+    internal static Paragraph CloneParagraph(Paragraph paragraph, IReadOnlySet<string>? preservedBookmarkIds = null)
     {
         var clone = (Paragraph)paragraph.CloneNode(true);
         clone.RemoveAttribute("paraId", Word2010Namespace);
@@ -378,7 +383,16 @@ public static class NativeContentCopy
         clone.ParagraphProperties?.Remove();
         foreach (var bookmark in clone.Descendants<BookmarkStart>().Cast<OpenXmlElement>()
                      .Concat(clone.Descendants<BookmarkEnd>()).ToArray())
-            bookmark.Remove();
+        {
+            var id = bookmark switch
+            {
+                BookmarkStart start => start.Id?.Value,
+                BookmarkEnd end => end.Id?.Value,
+                _ => null,
+            };
+            if (id is null || preservedBookmarkIds?.Contains(id) != true)
+                bookmark.Remove();
+        }
         foreach (var cached in clone.Descendants<ProofError>().Cast<OpenXmlElement>()
                      .Concat(clone.Descendants<LastRenderedPageBreak>()).ToArray())
             cached.Remove();

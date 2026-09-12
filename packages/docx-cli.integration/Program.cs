@@ -2204,6 +2204,47 @@ void RunRetainedTableNativeSiblingPreservation()
     }
     RunInput("validate-openxml", output);
 
+    var movedOutput = Path.Combine(root, "set-table-moved-crossing-bookmark.docx");
+    Run("docx_set_table", new
+    {
+        input,
+        table = state.GetProperty("address").Clone(),
+        existingRows = new { first = rows[0].GetProperty("address").Clone(), last = rows[1].GetProperty("address").Clone() },
+        columns,
+        rows = new[]
+        {
+            new
+            {
+                prototypeRow = rows[1].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new
+                    {
+                        columns = new[] { "column-0" }, text = (string?)null,
+                        sourceInput = input,
+                        sourceSelections = new[] { new { address = rows[1].GetProperty("cells")[0].GetProperty("address").Clone() } },
+                    },
+                    new
+                    {
+                        columns = new[] { "column-1" }, text = (string?)null,
+                        sourceInput = input,
+                        sourceSelections = new[] { new { address = rows[1].GetProperty("cells")[1].GetProperty("address").Clone() } },
+                    },
+                },
+            },
+        },
+        output = movedOutput,
+        receiptOutput = Path.Combine(root, "set-table-moved-crossing-bookmark-receipt.json"),
+    });
+    using (var moved = WordprocessingDocument.Open(movedOutput, false))
+    {
+        var body = moved.MainDocumentPart!.Document.Body!;
+        Require(body.Descendants<BookmarkStart>().Count(bookmark => bookmark.Id?.Value == "77") == 1
+                && body.Descendants<BookmarkEnd>().Count(bookmark => bookmark.Id?.Value == "77") == 1,
+            "set table did not relocate the selected side of a crossing bookmark exactly once");
+    }
+    RunInput("validate-openxml", movedOutput);
+
     var deleteReceipt = Path.Combine(root, "set-table-delete-crossing-bookmark-receipt.json");
     var deleteError = RunExpectAtomicFailure("docx_set_table", input, deleteReceipt, new
     {
