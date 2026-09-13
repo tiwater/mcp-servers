@@ -20,16 +20,18 @@ public static class EtRecalculator
         if (FindOnPath("et") is null) throw new InvalidOperationException("ET command not found: et");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         var root = Path.Combine(Path.GetTempPath(), $"tiwater-convert-wps-recalculate-{Guid.NewGuid():N}"); Directory.CreateDirectory(root);
+        var recalculated = Path.Combine(root, "recalculated.xlsx");
         var helper = Path.Combine(root, "recalculate_xlsx_wps.py"); File.WriteAllText(helper, EtHelperScript);
         try
         {
             using var lease = WpsRpcSession.AcquireEtLease();
-            using var process = Process.Start(WpsRpcSession.CreateProcessStartInfo(dbus, xvfb, python, helper, input, output, root)) ?? throw new InvalidOperationException("Failed to start WPS XLSX recalculation.");
+            using var process = Process.Start(WpsRpcSession.CreateProcessStartInfo(dbus, xvfb, python, helper, input, recalculated, root)) ?? throw new InvalidOperationException("Failed to start WPS XLSX recalculation.");
             var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(TimeSpan.FromMinutes(10))) { try { process.Kill(entireProcessTree: true); } catch { } throw new TimeoutException("WPS XLSX recalculation timed out after 600 seconds."); }
             var details = WpsRpcSession.CollectDiagnosticOutput(stdout, stderr, TimeSpan.FromMilliseconds(250));
-            if (process.ExitCode != 0 || !File.Exists(output)) throw new InvalidOperationException("WPS XLSX recalculation failed." + (details.Length > 0 ? $" {details}" : string.Empty));
-            using var stream = File.OpenRead(output); using var workbook = new XSSFWorkbook(stream); if (workbook.NumberOfSheets < 1) throw new InvalidOperationException("WPS recalculation produced an XLSX without worksheets.");
+            if (process.ExitCode != 0 || !File.Exists(recalculated)) throw new InvalidOperationException("WPS XLSX recalculation failed." + (details.Length > 0 ? $" {details}" : string.Empty));
+            using (var stream = File.OpenRead(recalculated)) { using var workbook = new XSSFWorkbook(stream); if (workbook.NumberOfSheets < 1) throw new InvalidOperationException("WPS recalculation produced an XLSX without worksheets."); }
+            XlsxFormulaCacheMerger.Merge(input, recalculated, output);
         }
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
     }
