@@ -338,8 +338,8 @@ internal static class NativeTableBodyMutation
             var endsInside = selectedEnds.GetValueOrDefault(id);
             var startsOutside = allStarts.GetValueOrDefault(id) - startsInside;
             var endsOutside = allEnds.GetValueOrDefault(id) - endsInside;
-            if ((endsOutside > 0 && retainedStarts.GetValueOrDefault(id) + (restoredStarts?.GetValueOrDefault(id) ?? 0) != startsInside)
-                || (startsOutside > 0 && retainedEnds.GetValueOrDefault(id) + (restoredEnds?.GetValueOrDefault(id) ?? 0) != endsInside))
+            if ((endsOutside > 0 && Math.Max(retainedStarts.GetValueOrDefault(id), restoredStarts?.GetValueOrDefault(id) ?? 0) != startsInside)
+                || (startsOutside > 0 && Math.Max(retainedEnds.GetValueOrDefault(id), restoredEnds?.GetValueOrDefault(id) ?? 0) != endsInside))
                 throw new InvalidOperationException("existingRows-crosses-bookmark-boundary");
         }
     }

@@ -38,6 +38,7 @@ public static class NativeSetTableMutation
         {
             var retainedSourceText = RetainedSourceText(request);
             var bookmarkRestoration = BookmarkRestoration(request, retainedSourceText);
+            var richTextOriginals = RichTextOriginals(request);
             var shapeRequest = new SetTableBodyRequest(
                 paths.Input,
                 request.Table,
@@ -49,7 +50,7 @@ public static class NativeSetTableMutation
                         cell.Columns,
                         cell.Text ?? (cell.TextRuns is null
                             ? retainedSourceText.GetValueOrDefault((rowIndex, cellIndex), string.Empty)
-                            : string.Concat(cell.TextRuns.Select(run => run.Text))),
+                            : richTextOriginals.GetValueOrDefault((rowIndex, cellIndex), string.Empty)),
                         cell.RowSpan)).ToArray(),
                     row.CantSplit)).ToArray(),
                 shapeOutput,
@@ -242,6 +243,41 @@ public static class NativeSetTableMutation
             }
         }
         return new PreparedContentChanges(result, preserved);
+    }
+
+    private static IReadOnlyDictionary<(int Row, int Cell), string> RichTextOriginals(SetTableRequest request)
+    {
+        var table = Observation.ReadTable(request.Input, request.Table);
+        var first = table.Rows.Select((row, index) => (row, index))
+            .SingleOrDefault(item => item.row.Address == request.ExistingRows.First);
+        var last = table.Rows.Select((row, index) => (row, index))
+            .SingleOrDefault(item => item.row.Address == request.ExistingRows.Last);
+        if (first.row is null || last.row is null || last.index < first.index)
+            return new Dictionary<(int, int), string>();
+        var selectedRows = table.Rows.Skip(first.index).Take(last.index - first.index + 1).ToArray();
+        var columnStarts = request.Columns.Select((column, index) => (column.Id, index))
+            .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
+        var candidates = new List<((int Row, int Cell) Key, DocxObjectAddress Target)>();
+        for (var rowIndex = 0; rowIndex < request.Rows.Count && rowIndex < selectedRows.Length; rowIndex++)
+        for (var cellIndex = 0; cellIndex < request.Rows[rowIndex].Cells.Count; cellIndex++)
+        {
+            if (request.Rows[rowIndex].Cells[cellIndex].TextRuns is null) continue;
+            int start;
+            try { start = request.Rows[rowIndex].Cells[cellIndex].Columns.Select(id => columnStarts[id]).Min(); }
+            catch (KeyNotFoundException) { continue; }
+            var target = selectedRows[rowIndex].Cells.SingleOrDefault(item => item.GridColumnStart == start);
+            if (target is not null) candidates.Add(((rowIndex, cellIndex), target.Address));
+        }
+        if (candidates.Count == 0) return new Dictionary<(int, int), string>();
+        var refs = Observation.ResolveAddresses(request.Input, candidates.Select(item => item.Target).ToArray(), "richTextOriginal.target");
+        using var document = WordprocessingDocument.Open(request.Input, false);
+        var result = new Dictionary<(int, int), string>();
+        for (var index = 0; index < refs.Count; index++)
+        {
+            var target = Observation.ResolveNativePath(document, refs[index].StoryPart, refs[index].NativePath) as TableCell;
+            if (target is not null) result[candidates[index].Key] = NativeMutationSupport.PlainText(target);
+        }
+        return result;
     }
 
     private static BookmarkRestorationPlan BookmarkRestoration(
