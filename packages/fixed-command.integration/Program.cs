@@ -299,6 +299,26 @@ Check("pptx", "template-system-placeholder-policy", directory =>
         Require(exitCode == (expectSuccess ? 0 : 1), $"{policy} returned an unexpected exit code");
     }
 });
+Check("xlsx", "inspect-font-without-bold-fingerprint", directory =>
+{
+    var input = Path.Combine(directory, "font-evidence.xlsx");
+    CreateFontEvidenceWorkbook(input);
+    using var evidence = JsonDocument.Parse(JsonSerializer.Serialize(Dockit.Xlsx.EvidenceInspector.Inspect(input)));
+    var cells = evidence.RootElement.GetProperty("sheets")[0].GetProperty("cells").EnumerateArray()
+        .ToDictionary(cell => cell.GetProperty("reference").GetString()!, cell => cell.GetProperty("style"));
+    var sansBold = (string reference) => cells[reference].GetProperty("fontWithoutBoldFingerprint").GetString();
+    var wholeFont = (string reference) => cells[reference].GetProperty("fontFingerprint").GetString();
+
+    Require(sansBold("A1") == sansBold("B1"), "true and false bold changed the sans-bold fingerprint");
+    Require(sansBold("A1") == sansBold("C1"), "absent bold changed the sans-bold fingerprint");
+    Require(sansBold("A1") != sansBold("D1"), "another font property did not change the sans-bold fingerprint");
+    Require(sansBold("A1") == sansBold("E1"), "attribute insertion order changed the sans-bold fingerprint");
+    Require(wholeFont("A1") != wholeFont("B1"), "existing whole-font fingerprint lost bold sensitivity");
+    Require(cells["A1"].GetProperty("bold").GetBoolean(), "existing bold=true evidence changed");
+    Require(!cells["B1"].GetProperty("bold").GetBoolean() && !cells["C1"].GetProperty("bold").GetBoolean(), "existing false/absent bold evidence changed");
+    Require(cells["A1"].TryGetProperty("fillFingerprint", out _), "existing style evidence disappeared");
+    Require(sansBold("A1")?.Length == 64, "sans-bold fingerprint is not a deterministic sha256 value");
+});
 Console.WriteLine(JsonSerializer.Serialize(new { cases, failures, artifacts = root }));
 return failures.Count == 0 ? 0 : 1;
 
@@ -451,4 +471,33 @@ static void CreateTemplatePresentation(string file, bool includeSystemPlaceholde
             new P.ApplicationNonVisualDrawingProperties(placeholder is null ? null : new P.PlaceholderShape { Type = placeholder })),
         new P.ShapeProperties(new A.Transform2D(new A.Offset { X = 100, Y = 200 }, new A.Extents { Cx = 3000, Cy = 4000 })),
         new P.TextBody(new A.BodyProperties(), new A.ListStyle(), new A.Paragraph(new A.Run(new A.Text(text)))));
+}
+
+static void CreateFontEvidenceWorkbook(string file)
+{
+    using var document = SpreadsheetDocument.Create(file, SpreadsheetDocumentType.Workbook);
+    var workbook = document.AddWorkbookPart();
+    var worksheet = workbook.AddNewPart<WorksheetPart>();
+    worksheet.Worksheet = new S.Worksheet(new S.SheetData(new S.Row(
+        Enumerable.Range(0, 5).Select(index => new S.Cell {
+            CellReference = $"{(char)('A' + index)}1", CellValue = new S.CellValue(index.ToString()), StyleIndex = (uint)index,
+        })) { RowIndex = 1 }));
+    workbook.Workbook = new S.Workbook(new S.Sheets(new S.Sheet { Id = workbook.GetIdOfPart(worksheet), SheetId = 1, Name = "Fonts" }));
+    var stylePart = workbook.AddNewPart<WorkbookStylesPart>();
+    var orderedColor = new S.Color { Rgb = "FF102030", Tint = 0D };
+    var reversedColor = new S.Color();
+    reversedColor.SetAttribute(new OpenXmlAttribute("tint", string.Empty, "0"));
+    reversedColor.SetAttribute(new OpenXmlAttribute("rgb", string.Empty, "FF102030"));
+    var fonts = new S.Fonts(
+        new S.Font(new S.FontName { Val = "Alpha Sans" }, orderedColor.CloneNode(true), new S.Bold { Val = true }),
+        new S.Font(new S.FontName { Val = "Alpha Sans" }, orderedColor.CloneNode(true), new S.Bold { Val = false }),
+        new S.Font(new S.FontName { Val = "Alpha Sans" }, orderedColor.CloneNode(true)),
+        new S.Font(new S.FontName { Val = "Beta Sans" }, orderedColor.CloneNode(true), new S.Bold { Val = true }),
+        new S.Font(new S.FontName { Val = "Alpha Sans" }, reversedColor, new S.Bold { Val = true }));
+    stylePart.Stylesheet = new S.Stylesheet(
+        fonts,
+        new S.Fills(new S.Fill(new S.PatternFill { PatternType = S.PatternValues.None })),
+        new S.Borders(new S.Border()),
+        new S.CellStyleFormats(new S.CellFormat()),
+        new S.CellFormats(Enumerable.Range(0, 5).Select(index => new S.CellFormat { FontId = (uint)index, ApplyFont = true })));
 }

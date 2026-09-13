@@ -73,6 +73,7 @@ public static class EvidenceInspector
                         borderId,
                         bold = EffectiveBold(fonts, fontId),
                         fontFingerprint = ComponentFingerprint(fonts, fontId, "font"),
+                        fontWithoutBoldFingerprint = FontWithoutBoldFingerprint(fonts, fontId),
                         fillFingerprint = ComponentFingerprint(fills, fillId, "fill"),
                         borderFingerprint = ComponentFingerprint(borders, borderId, "border"),
                         protectionFingerprint = ProtectionFingerprint(locked, hidden),
@@ -261,6 +262,17 @@ public static class EvidenceInspector
         if (id >= components.Count) throw new InvalidDataException($"Workbook {kind} id is out of range: {id}");
         var canonical = new StringBuilder();
         AppendCanonicalElement(canonical, components[(int)id]);
+        return Sha256(canonical.ToString());
+    }
+
+    private static string FontWithoutBoldFingerprint(IReadOnlyList<Font> fonts, uint id)
+    {
+        if (fonts.Count == 0 && id == 0) return Sha256("implicit:font-without-bold:default");
+        if (id >= fonts.Count) throw new InvalidDataException($"Workbook font id is out of range: {id}");
+        var font = (Font)fonts[(int)id].CloneNode(true);
+        font.RemoveAllChildren<Bold>();
+        var canonical = new StringBuilder();
+        AppendCanonicalElement(canonical, font);
         return Sha256(canonical.ToString());
     }
 
