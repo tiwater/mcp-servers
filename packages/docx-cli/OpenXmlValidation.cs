@@ -140,8 +140,10 @@ public static class OpenXmlValidation
             || error.RelatedNode is not OpenXmlUnknownElement tableLayout
             || tableLayout.LocalName != "tblLayout"
             || tableLayout.NamespaceUri != WordprocessingNamespace
-            || tableLayout.Parent is not StyleTableProperties tableProperties
-            || tableProperties.Parent is not Style style
+            || tableLayout.Parent is not OpenXmlElement tableProperties
+            || tableProperties.LocalName != "tblPr"
+            || tableProperties.NamespaceUri != WordprocessingNamespace
+            || tableProperties.Ancestors<Style>().SingleOrDefault() is not Style style
             || style.Parent is not Styles styles
             || tableProperties.ChildElements.Count(child =>
                 child.LocalName == "tblLayout"
@@ -162,11 +164,12 @@ public static class OpenXmlValidation
         if (removeTableLayout)
         {
             foreach (var tableLayout in normalizedStyle
-                .Elements<StyleTableProperties>()
-                .SelectMany(properties => properties.ChildElements)
+                .Descendants()
                 .Where(child =>
                     child.LocalName == "tblLayout"
-                    && child.NamespaceUri == WordprocessingNamespace)
+                    && child.NamespaceUri == WordprocessingNamespace
+                    && child.Parent?.LocalName == "tblPr"
+                    && child.Parent.NamespaceUri == WordprocessingNamespace)
                 .ToList())
             {
                 tableLayout.Remove();

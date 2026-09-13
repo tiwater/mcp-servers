@@ -17,6 +17,7 @@ Directory.CreateDirectory(root);
 
 try
 {
+    RunStyleCompatibilityValidationContract();
     RunDrawingCheckboxContract();
     var original = Path.Combine(root, "original.docx");
     CreateDocument(original);
@@ -1233,6 +1234,82 @@ try
 finally
 {
     Directory.Delete(root, recursive: true);
+}
+
+void RunStyleCompatibilityValidationContract()
+{
+    foreach (var metadataTail in new[] { "qFormat", "semiHidden", "unhideWhenUsed" })
+    {
+        var compatible = Path.Combine(root, $"style-compat-{metadataTail}.docx");
+        CreateStyleCompatibilityDocument(compatible, metadataTail, duplicateTableLayout: false);
+        var result = Execute("validate-openxml", compatible);
+        Require(result.ExitCode == 0,
+            $"compatible nested table-style layout failed for {metadataTail}: {result.Error}\n{result.Output}");
+        using var parsed = JsonDocument.Parse(result.Output);
+        var validation = parsed.RootElement;
+        Require(validation.GetProperty("Pass").GetBoolean()
+                && validation.GetProperty("ErrorCount").GetInt32() == 0,
+            $"compatible nested table-style layout retained errors for {metadataTail}");
+        var warnings = validation.GetProperty("Warnings").EnumerateArray().ToArray();
+        Require(warnings.Count(warning => warning.GetProperty("CompatibilityCode").GetString()
+                    == "wordprocessing-style-trailing-ui-priority") == 1,
+            $"compatible uiPriority ordering was not reported exactly once for {metadataTail}");
+        Require(warnings.Count(warning => warning.GetProperty("CompatibilityCode").GetString()
+                    == "wordprocessing-style-table-layout") == 3,
+            $"compatible direct and conditional table layouts were not completely reported for {metadataTail}");
+    }
+
+    var invalid = Path.Combine(root, "style-compat-duplicate-layout.docx");
+    CreateStyleCompatibilityDocument(invalid, "qFormat", duplicateTableLayout: true);
+    var invalidResult = Execute("validate-openxml", invalid);
+    Require(invalidResult.ExitCode != 0,
+        "duplicate table-layout mutation was accepted as a compatibility warning");
+    using var invalidParsed = JsonDocument.Parse(invalidResult.Output);
+    Require(!invalidParsed.RootElement.GetProperty("Pass").GetBoolean()
+            && invalidParsed.RootElement.GetProperty("ErrorCount").GetInt32() > 0,
+        "duplicate table-layout mutation did not remain a validation error");
+
+    Console.WriteLine("PASS OpenXML style compatibility classification");
+}
+
+void CreateStyleCompatibilityDocument(string path, string metadataTail, bool duplicateTableLayout)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    main.Document = new Document(new Body(new Paragraph(new Run(new Text("Compatibility probe")))));
+    main.Document.Save();
+
+    var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+    var metadata = metadataTail switch
+    {
+        "qFormat" => "<w:qFormat/>",
+        "semiHidden" => "<w:semiHidden/>",
+        "unhideWhenUsed" => "<w:unhideWhenUsed/>",
+        _ => throw new InvalidOperationException($"unsupported style metadata tail: {metadataTail}"),
+    };
+    var duplicate = duplicateTableLayout ? "<w:tblLayout w:type=\"autofit\"/>" : "";
+    var stylesXml = $"""
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:style w:type="table" w:styleId="CompatibilityProbe">
+            <w:name w:val="Compatibility Probe"/>
+            {metadata}
+            <w:uiPriority w:val="64"/>
+            <w:tblPr>
+              <w:tblBorders><w:top w:val="single"/></w:tblBorders>
+              <w:tblLayout w:type="fixed"/>{duplicate}
+            </w:tblPr>
+            <w:tblStylePr w:type="firstRow">
+              <w:tblPr><w:jc w:val="center"/><w:tblLayout w:type="fixed"/></w:tblPr>
+            </w:tblStylePr>
+            <w:tblStylePr w:type="lastRow">
+              <w:tblPr><w:tblLayout w:type="fixed"/></w:tblPr>
+            </w:tblStylePr>
+          </w:style>
+        </w:styles>
+        """;
+    using var writer = new StreamWriter(stylesPart.GetStream(FileMode.Create, FileAccess.Write));
+    writer.Write(stylesXml);
 }
 
 void RunDrawingCheckboxContract()
