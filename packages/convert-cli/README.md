@@ -21,6 +21,11 @@ tiwater-convert xlsx-to-pdf <input.xlsx> <output.pdf>
 tiwater-convert pptx-to-pdf <input.pptx> <output.pdf>
 ```
 
+`recalculate-xlsx` treats the input workbook package as authoritative and imports
+only ET-refreshed cached values and result types for the unchanged formula-cell
+inventory. It fails closed if ET adds, removes, or changes a formula, and it
+preserves non-calculation workbook semantics such as fonts and styles.
+
 `refresh-docx-fields` opens the current DOCX in WPS Writer, refreshes every
 table of contents and table of figures, and repaginates the document. The
 distinct output imports only those refreshed index results and their referenced

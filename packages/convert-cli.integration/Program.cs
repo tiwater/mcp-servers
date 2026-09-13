@@ -1,8 +1,27 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Reflection;
 using System.Text;
 using System.Xml.Linq;
 using Dockit.Convert;
+using NPOI.HSSF.UserModel;
+using NPOI.HSSF.Util;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
+
+if (args is ["--xlsx-formula-cache-merge-probe", var xlsxMergeRoot])
+{
+    RunXlsxFormulaCacheMergeProbe(xlsxMergeRoot);
+    Console.WriteLine("xlsx formula cache merge integration passed");
+    return 0;
+}
+
+if (args is ["--legacy-xls-font-recalculation-probe", var legacyXlsRoot])
+{
+    RunLegacyXlsFontRecalculationProbe(legacyXlsRoot);
+    Console.WriteLine("legacy XLS font recalculation integration passed");
+    return 0;
+}
 
 if (args is ["--verify-native-index-pages", var indexedDocx, var nativePdf, var expectedEntryCount])
 {
@@ -274,6 +293,150 @@ static void Write(ZipArchive archive, string name, string value)
     using var stream = archive.CreateEntry(name).Open();
     using var writer = new StreamWriter(stream, new UTF8Encoding(false));
     writer.Write(value);
+}
+
+static void RunXlsxFormulaCacheMergeProbe(string root)
+{
+    Directory.CreateDirectory(root);
+    var source = Path.Combine(root, "source.xlsx");
+    var recalculated = Path.Combine(root, "recalculated.xlsx");
+    var output = Path.Combine(root, "output.xlsx");
+    const string sourceStyles = """
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2">
+  <font><sz val="11"/><color rgb="FFFF0000"/><name val="Times New Roman"/><family val="1"/></font>
+  <font><b/><sz val="9.5"/><color rgb="FF0000FF"/><name val="Arial"/><family val="2"/></font>
+</fonts></styleSheet>
+""";
+    const string recalculatedStyles = """
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2">
+  <font><sz val="14"/><color rgb="FF00FF00"/><name val="Calibri"/></font>
+  <font><sz val="9.5"/><color rgb="FF0000FF"/><name val="Arial"/></font>
+</fonts></styleSheet>
+""";
+    const string sourceSheet = """
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">
+  <c r="A1" s="1"><v>41</v></c><c r="B1" s="2"><f>A1*2</f><v>0</v></c><c r="C1" s="2"><f t="shared" ref="C1:C2" si="0">A1+1</f><v>0</v></c>
+</row><row r="2"><c r="C2" s="2"><f t="shared" si="0"></f><v>0</v></c></row></sheetData></worksheet>
+""";
+    const string recalculatedSheet = """
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">
+  <c r="A1" s="99"><v>999</v></c><c r="B1" s="99"><f>A1*2</f><v>82</v></c><c r="C1" s="99" t="str"><f t="shared" ref="C1:C2" si="0">A1+1</f><v>42</v></c>
+</row><row r="2"><c r="C2" s="99"><f t="shared" si="0"></f><v>43</v></c></row></sheetData></worksheet>
+""";
+    CreateSyntheticXlsx(source, sourceStyles, sourceSheet);
+    CreateSyntheticXlsx(recalculated, recalculatedStyles, recalculatedSheet);
+    XlsxFormulaCacheMerger.Merge(source, recalculated, output);
+
+    Require(ReadPart(output, "xl/styles.xml") == sourceStyles, "formula-cache merge changed distinct font family, name, size, weight, or color semantics");
+    Require(ReadPart(output, "docProps/custom.xml") == "<properties><marker>source-authoritative</marker></properties>",
+        "formula-cache merge changed a non-calculation package part");
+    var merged = XDocument.Parse(ReadPart(output, "xl/worksheets/sheet1.xml"));
+    XNamespace x = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    var cells = merged.Descendants(x + "c").ToDictionary(cell => (string)cell.Attribute("r")!, StringComparer.Ordinal);
+    Require((string?)cells["A1"].Element(x + "v") == "41" && (string?)cells["A1"].Attribute("s") == "1",
+        "formula-cache merge imported an unplanned non-formula mutation");
+    Require((string?)cells["B1"].Element(x + "v") == "82" && (string?)cells["B1"].Attribute("s") == "2",
+        "formula-cache merge did not import a numeric cache while preserving style");
+    Require((string?)cells["C1"].Element(x + "v") == "42" && (string?)cells["C1"].Attribute("t") == "str",
+        "formula-cache merge did not import the refreshed result type");
+    Require((string?)cells["C2"].Element(x + "v") == "43", "formula-cache merge did not import a shared-formula cache");
+
+    var changedFormula = Path.Combine(root, "changed-formula.xlsx");
+    CreateSyntheticXlsx(changedFormula, recalculatedStyles, recalculatedSheet.Replace("A1*2", "A1*3", StringComparison.Ordinal));
+    RequireThrows(() => XlsxFormulaCacheMerger.Merge(source, changedFormula, Path.Combine(root, "changed-formula-output.xlsx")), "changed a formula");
+
+    var missingFormula = Path.Combine(root, "missing-formula.xlsx");
+    CreateSyntheticXlsx(missingFormula, recalculatedStyles, recalculatedSheet.Replace("<f>A1*2</f>", "", StringComparison.Ordinal));
+    RequireThrows(() => XlsxFormulaCacheMerger.Merge(source, missingFormula, Path.Combine(root, "missing-formula-output.xlsx")), "formula cell inventory");
+
+    var addedFormula = Path.Combine(root, "added-formula.xlsx");
+    CreateSyntheticXlsx(addedFormula, recalculatedStyles, recalculatedSheet.Replace("<c r=\"A1\" s=\"99\"><v>999</v></c>", "<c r=\"A1\" s=\"99\"><f>1+1</f><v>2</v></c>", StringComparison.Ordinal));
+    RequireThrows(() => XlsxFormulaCacheMerger.Merge(source, addedFormula, Path.Combine(root, "added-formula-output.xlsx")), "formula cell inventory");
+}
+
+static void RunLegacyXlsFontRecalculationProbe(string root)
+{
+    Directory.CreateDirectory(root);
+    var legacy = Path.Combine(root, "font-variants.xls");
+    var converted = Path.Combine(root, "font-variants.xlsx");
+    var recalculated = Path.Combine(root, "font-variants-recalculated.xlsx");
+    using (var workbook = new HSSFWorkbook())
+    {
+        var sheet = workbook.CreateSheet("Font variants");
+        var roman = workbook.CreateFont();
+        roman.FontName = "Times New Roman";
+        roman.FontHeightInPoints = 12;
+        roman.IsBold = false;
+        roman.Color = HSSFColor.Red.Index;
+        SetLegacyFontFamily(workbook, roman, 1);
+        var romanStyle = workbook.CreateCellStyle();
+        romanStyle.SetFont(roman);
+
+        var swiss = workbook.CreateFont();
+        swiss.FontName = "Arial";
+        swiss.FontHeightInPoints = 9;
+        swiss.IsBold = true;
+        swiss.IsItalic = true;
+        swiss.Color = HSSFColor.Blue.Index;
+        SetLegacyFontFamily(workbook, swiss, 2);
+        var swissStyle = workbook.CreateCellStyle();
+        swissStyle.SetFont(swiss);
+
+        var first = sheet.CreateRow(0);
+        first.CreateCell(0).SetCellValue(21);
+        var firstFormula = first.CreateCell(1);
+        firstFormula.SetCellFormula("A1*2");
+        firstFormula.CellStyle = romanStyle;
+        var second = sheet.CreateRow(1);
+        second.CreateCell(0).SetCellValue(9);
+        var secondFormula = second.CreateCell(1);
+        secondFormula.SetCellFormula("A2+3");
+        secondFormula.CellStyle = swissStyle;
+        using var stream = File.Create(legacy);
+        workbook.Write(stream, leaveOpen: false);
+    }
+
+    var conversion = WorkbookConverter.ConvertXlsToXlsx(legacy, converted);
+    Require(conversion.Backend == "et", "legacy XLS font regression did not use ET conversion");
+    Require(XDocument.Parse(ReadPart(converted, "xl/styles.xml")).Descendants()
+            .Count(element => element.Name.LocalName == "family") >= 2,
+        "legacy XLS conversion did not produce the font-family semantics under regression");
+    var recalculation = WorkbookRecalculator.RecalculateXlsx(converted, recalculated);
+    Require(recalculation.Backend == "et", "legacy XLS font regression did not use ET recalculation");
+    Require(ReadPart(converted, "xl/styles.xml") == ReadPart(recalculated, "xl/styles.xml"),
+        "legacy XLS font semantics changed during recalculation");
+
+    using var resultStream = File.OpenRead(recalculated);
+    using var result = new XSSFWorkbook(resultStream);
+    var resultSheet = result.GetSheet("Font variants");
+    Require(resultSheet.GetRow(0).GetCell(1).NumericCellValue == 42, "first legacy formula cache was not materialized");
+    Require(resultSheet.GetRow(1).GetCell(1).NumericCellValue == 12, "second legacy formula cache was not materialized");
+}
+
+static void SetLegacyFontFamily(HSSFWorkbook workbook, IFont font, byte family)
+{
+    var internalWorkbookField = typeof(HSSFWorkbook).GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+        .Single(field => field.FieldType.FullName == "NPOI.HSSF.Model.InternalWorkbook");
+    var internalWorkbook = internalWorkbookField.GetValue(workbook)
+        ?? throw new InvalidOperationException("NPOI legacy workbook internals are unavailable.");
+    var fontRecord = internalWorkbook.GetType().GetMethod("GetFontRecordAt")!.Invoke(internalWorkbook, [Convert.ToInt32(font.Index)])
+        ?? throw new InvalidOperationException("NPOI legacy font record is unavailable.");
+    fontRecord.GetType().GetProperty("Family")!.SetValue(fontRecord, family);
+}
+
+static void CreateSyntheticXlsx(string path, string styles, string worksheet)
+{
+    using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+    Write(archive, "xl/styles.xml", styles);
+    Write(archive, "xl/worksheets/sheet1.xml", worksheet);
+    Write(archive, "docProps/custom.xml", "<properties><marker>source-authoritative</marker></properties>");
+}
+
+static void RequireThrows(Action action, string expectedMessage)
+{
+    try { action(); }
+    catch (InvalidOperationException error) when (error.Message.Contains(expectedMessage, StringComparison.Ordinal)) { return; }
+    throw new InvalidOperationException($"Expected failure containing '{expectedMessage}'.");
 }
 
 static string ReadPart(string path, string name)
