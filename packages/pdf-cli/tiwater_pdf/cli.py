@@ -32,6 +32,9 @@ OCR_PAGE_PROMPT = (
     "Each option must have label and a boolean selected that reflects only its visible mark; retain every option and never infer a selection. "
     "Set orientation_degrees to the clockwise rotation required to make the supplied image text upright: exactly 0, 90, 180, or 270. "
     "Do not summarize and do not infer missing values. "
+    "Each tables entry must contain one complete Markdown table; never split its rows into separate array entries. "
+    "A multi-row table must contain exactly one Markdown separator row after all visible header rows. "
+    "A genuinely blank page must return no text, tables, or fields and include the exact warning blank_page. "
     r"Return strict JSON: encode every literal backslash inside a JSON string as \\ and never emit invalid JSON escapes such as \|. "
     r"When markdown requires an escaped pipe, encode it as \\| in the JSON source. "
     "Return one JSON object with keys text, tables, fields, orientation_degrees, warnings. "
@@ -727,6 +730,36 @@ def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
     return rows
 
 
+def _validate_vision_markdown_tables(tables: list) -> list[str]:
+    """Fail closed when provider table fragments cannot form stable rows.
+
+    The public OCR contract represents every recognized table as one Markdown
+    string. Accepting separately returned row fragments loses the relationship
+    between header, identity, result, and template rows while still looking
+    content-bearing to a caller.
+    """
+    validated: list[str] = []
+    for table_index, table in enumerate(tables):
+        if not isinstance(table, str):
+            raise ValueError(f"vision table {table_index} must be a Markdown string")
+        lines = [line for line in table.splitlines() if "|" in line]
+        if not lines:
+            raise ValueError(f"vision table {table_index} contains no Markdown rows")
+        rows = [_split_markdown_table_row(line) for line in lines]
+        separators = [
+            row_index for row_index, cells in enumerate(rows)
+            if _is_markdown_separator_row(cells)
+        ]
+        if len(separators) > 1:
+            raise ValueError(f"vision table {table_index} has multiple separators")
+        if separators and separators[0] == 0:
+            raise ValueError(f"vision table {table_index} has a separator without a header")
+        if len(rows) > 1 and not separators:
+            raise ValueError(f"vision table {table_index} has multiple rows but no separator")
+        validated.append(table)
+    return validated
+
+
 def _extract_table_cell_lines(rows: list[dict]) -> list[dict]:
     """Expose every non-empty normalized cell line with a stable evidence id."""
     lines: list[dict] = []
@@ -930,9 +963,19 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
     message = getattr(choices[0], "message", None)
     content = getattr(message, "content", None) or ""
     parsed = _extract_json_object(content)
-    page_warnings = parsed.get("warnings", []) if isinstance(parsed.get("warnings", []), list) else []
-    page_tables = parsed.get("tables", []) if isinstance(parsed.get("tables", []), list) else []
-    page_fields = parsed.get("fields", []) if isinstance(parsed.get("fields", []), list) else []
+    raw_text = parsed.get("text", "")
+    if not isinstance(raw_text, str):
+        raise ValueError("vision page text must be a string")
+    page_warnings = parsed.get("warnings", [])
+    if not isinstance(page_warnings, list) or not all(isinstance(value, str) for value in page_warnings):
+        raise ValueError("vision page warnings must be an array of strings")
+    raw_tables = parsed.get("tables", [])
+    if not isinstance(raw_tables, list):
+        raise ValueError("vision page tables must be an array")
+    page_tables = _validate_vision_markdown_tables(raw_tables)
+    page_fields = parsed.get("fields", [])
+    if not isinstance(page_fields, list):
+        raise ValueError("vision page fields must be an array")
     raw_orientation = parsed.get("orientation_degrees", 0)
     if isinstance(raw_orientation, bool):
         raise ValueError("orientation_degrees must be one of 0, 90, 180, 270")
@@ -943,14 +986,18 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
     if orientation_degrees not in {0, 90, 180, 270}:
         raise ValueError("orientation_degrees must be one of 0, 90, 180, 270")
     page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
+    normalized_fields = _normalize_form_fields(page_fields, page_number)
+    page_text = raw_text.strip()
+    if not page_text and not page_table_rows and not normalized_fields and "blank_page" not in page_warnings:
+        raise ValueError("vision page has no content and is not declared blank")
     return {
         "page": page_number,
-        "text": str(parsed.get("text", "")).strip(),
+        "text": page_text,
         "tables": page_tables,
         "table_rows": page_table_rows,
         "table_cell_lines": _extract_table_cell_lines(page_table_rows),
         "table_cell_units": _extract_table_cell_units(page_table_rows),
-        "form_fields": _normalize_form_fields(page_fields, page_number),
+        "form_fields": normalized_fields,
         "orientation_degrees": orientation_degrees,
         "warnings": page_warnings,
     }

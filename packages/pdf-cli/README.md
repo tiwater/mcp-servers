@@ -97,6 +97,14 @@ normalized `cells[]`; blank continuation cells remain blank. `table_rows` is
 available both on each page and as a flattened top-level array so downstream
 inventory validation can prove row coverage without reparsing markdown or
 matching known business text.
+Each recognized table must arrive as one complete Markdown string. Multi-row
+tables require one separator after their visible header rows; orphan separator
+rows, split row fragments, and multi-row tables without a
+separator are malformed provider responses and enter the bounded page retry.
+A page with no text, table rows, or form fields is accepted only when the
+provider explicitly marks it with the `blank_page` warning. Exhausting retries
+on either condition fails the page and file instead of publishing structurally
+incomplete evidence as a successful OCR result.
 Interior Markdown columns that contain no evidence in any row are removed
 during normalization. This prevents a vision model from changing downstream
 cell indexes by splitting one visual merged cell into multiple empty columns;
