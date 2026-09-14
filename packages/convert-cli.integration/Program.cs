@@ -350,6 +350,34 @@ static void RunXlsxFormulaCacheMergeProbe(string root)
     var equivalentCells = equivalent.Descendants(x + "c").ToDictionary(cell => (string)cell.Attribute("r")!, StringComparer.Ordinal);
     Require((string?)equivalentCells["B1"].Element(x + "v") == "82", "formula-cache merge rejected an equivalent redundant-plus normalization");
 
+    // ET may also change a range of explicit formulas into one shared-formula
+    // anchor plus followers.  The merger must resolve each follower back to its
+    // translated formula before comparing semantics, while still rejecting a
+    // changed anchor expression.
+    const string explicitFormulaSourceSheet = """
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">
+  <c r="A1" s="1"><v>41</v></c><c r="D1" s="2"><f>A1++2</f><v>0</v></c>
+</row><row r="2"><c r="A2" s="1"><v>42</v></c><c r="D2" s="2"><f>A2++2</f><v>0</v></c></row></sheetData></worksheet>
+""";
+    const string sharedFormulaRecalculatedSheet = """
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">
+  <c r="A1" s="99"><v>999</v></c><c r="D1" s="99"><f t="shared" ref="D1:D2" si="7">A1+2</f><v>43</v></c>
+</row><row r="2"><c r="A2" s="99"><v>999</v></c><c r="D2" s="99"><f t="shared" si="7"></f><v>44</v></c></row></sheetData></worksheet>
+""";
+    var explicitFormulaSource = Path.Combine(root, "explicit-formula-source.xlsx");
+    var sharedFormulaRecalculated = Path.Combine(root, "shared-formula-recalculated.xlsx");
+    var sharedFormulaOutput = Path.Combine(root, "shared-formula-output.xlsx");
+    CreateSyntheticXlsx(explicitFormulaSource, sourceStyles, explicitFormulaSourceSheet);
+    CreateSyntheticXlsx(sharedFormulaRecalculated, recalculatedStyles, sharedFormulaRecalculatedSheet);
+    XlsxFormulaCacheMerger.Merge(explicitFormulaSource, sharedFormulaRecalculated, sharedFormulaOutput);
+    var sharedCells = XDocument.Parse(ReadPart(sharedFormulaOutput, "xl/worksheets/sheet1.xml"))
+        .Descendants(x + "c").ToDictionary(cell => (string)cell.Attribute("r")!, StringComparer.Ordinal);
+    Require((string?)sharedCells["D1"].Element(x + "v") == "43" && (string?)sharedCells["D2"].Element(x + "v") == "44",
+        "formula-cache merge did not resolve an ET shared-formula anchor and follower");
+    var changedSharedFormula = Path.Combine(root, "changed-shared-formula.xlsx");
+    CreateSyntheticXlsx(changedSharedFormula, recalculatedStyles, sharedFormulaRecalculatedSheet.Replace("A1+2", "A1+3", StringComparison.Ordinal));
+    RequireThrows(() => XlsxFormulaCacheMerger.Merge(explicitFormulaSource, changedSharedFormula, Path.Combine(root, "changed-shared-formula-output.xlsx")), "changed a formula");
+
     var quotedPlusFormula = Path.Combine(root, "quoted-plus-formula.xlsx");
     var quotedPlusSource = Path.Combine(root, "quoted-plus-formula-source.xlsx");
     CreateSyntheticXlsx(quotedPlusSource, sourceStyles, sourceSheet.Replace("A1*2", "\"A1++2\"", StringComparison.Ordinal));
