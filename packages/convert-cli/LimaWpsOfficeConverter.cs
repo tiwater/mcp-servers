@@ -91,7 +91,8 @@ internal static class LimaWpsPdfConverter
             ValidateXlsx(stagedOutput);
             var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(output));
             if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
-            File.Copy(stagedOutput, output, overwrite: true);
+            if (requireLegacyInput) File.Copy(stagedOutput, output, overwrite: true);
+            else XlsxFormulaCacheMerger.Merge(input, stagedOutput, output);
         }
         finally
         {
