@@ -25,6 +25,11 @@ dimensions, and print settings. It does not infer headers, business fields, or
 record identities. Inspection accepts current `.xls` and `.xlsx` sources;
 mutation accepts `.xlsx` only.
 
+Each inspected cell style reports both the complete `fontFingerprint` and
+`fontWithoutBoldFingerprint`. The latter hashes the same canonical font XML
+with every `bold` child removed, so a bold-only change remains stable while any
+other font property change remains observable.
+
 ## Fixed technical mutation
 
 ```bash
