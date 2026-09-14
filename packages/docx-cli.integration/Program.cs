@@ -2322,6 +2322,48 @@ void RunRetainedTableNativeSiblingPreservation()
     }
     RunInput("validate-openxml", movedOutput);
 
+    var richOutput = Path.Combine(root, "set-table-rich-text-crossing-bookmark.docx");
+    Run("docx_set_table", new
+    {
+        input,
+        table = state.GetProperty("address").Clone(),
+        existingRows = new { first = rows[0].GetProperty("address").Clone(), last = rows[1].GetProperty("address").Clone() },
+        columns,
+        rows = new object[]
+        {
+            new
+            {
+                prototypeRow = rows[0].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "column-0" }, text = "left" },
+                    new { columns = new[] { "column-1" }, text = "right" },
+                },
+            },
+            new
+            {
+                prototypeRow = rows[1].GetProperty("address").Clone(),
+                cells = new object[]
+                {
+                    new { columns = new[] { "column-0" }, textRuns = new[] { new { text = "changed anchor" } } },
+                    new { columns = new[] { "column-1" }, text = "changed" },
+                },
+            },
+        },
+        output = richOutput,
+        receiptOutput = Path.Combine(root, "set-table-rich-text-crossing-bookmark-receipt.json"),
+    });
+    using (var rich = WordprocessingDocument.Open(richOutput, false))
+    {
+        var body = rich.MainDocumentPart!.Document.Body!;
+        Require(body.Descendants<BookmarkStart>().Count(bookmark => bookmark.Id?.Value == "77") == 1
+                && body.Descendants<BookmarkEnd>().Count(bookmark => bookmark.Id?.Value == "77") == 1,
+            "set table rich-text replacement discarded a crossing bookmark boundary");
+        var richCell = body.Descendants<Table>().Single().Elements<TableRow>().ElementAt(1).Elements<TableCell>().First();
+        Require(richCell.InnerText == "changed anchor", "set table rich-text replacement did not write exact text");
+    }
+    RunInput("validate-openxml", richOutput);
+
     var deleteReceipt = Path.Combine(root, "set-table-delete-crossing-bookmark-receipt.json");
     var deleteError = RunExpectAtomicFailure("docx_set_table", input, deleteReceipt, new
     {
