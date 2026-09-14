@@ -341,6 +341,21 @@ static void RunXlsxFormulaCacheMergeProbe(string root)
         "formula-cache merge did not import the refreshed result type");
     Require((string?)cells["C2"].Element(x + "v") == "43", "formula-cache merge did not import a shared-formula cache");
 
+    var equivalentFormula = Path.Combine(root, "equivalent-formula.xlsx");
+    var equivalentSource = Path.Combine(root, "equivalent-formula-source.xlsx");
+    CreateSyntheticXlsx(equivalentSource, sourceStyles, sourceSheet.Replace("A1*2", "A1++2", StringComparison.Ordinal));
+    CreateSyntheticXlsx(equivalentFormula, recalculatedStyles, recalculatedSheet.Replace("A1*2", "A1+2", StringComparison.Ordinal));
+    XlsxFormulaCacheMerger.Merge(equivalentSource, equivalentFormula, Path.Combine(root, "equivalent-formula-output.xlsx"));
+    var equivalent = XDocument.Parse(ReadPart(Path.Combine(root, "equivalent-formula-output.xlsx"), "xl/worksheets/sheet1.xml"));
+    var equivalentCells = equivalent.Descendants(x + "c").ToDictionary(cell => (string)cell.Attribute("r")!, StringComparer.Ordinal);
+    Require((string?)equivalentCells["B1"].Element(x + "v") == "82", "formula-cache merge rejected an equivalent redundant-plus normalization");
+
+    var quotedPlusFormula = Path.Combine(root, "quoted-plus-formula.xlsx");
+    var quotedPlusSource = Path.Combine(root, "quoted-plus-formula-source.xlsx");
+    CreateSyntheticXlsx(quotedPlusSource, sourceStyles, sourceSheet.Replace("A1*2", "\"A1++2\"", StringComparison.Ordinal));
+    CreateSyntheticXlsx(quotedPlusFormula, recalculatedStyles, recalculatedSheet.Replace("A1*2", "\"A1+2\"", StringComparison.Ordinal));
+    RequireThrows(() => XlsxFormulaCacheMerger.Merge(quotedPlusSource, quotedPlusFormula, Path.Combine(root, "quoted-plus-formula-output.xlsx")), "changed a formula");
+
     var changedFormula = Path.Combine(root, "changed-formula.xlsx");
     CreateSyntheticXlsx(changedFormula, recalculatedStyles, recalculatedSheet.Replace("A1*2", "A1*3", StringComparison.Ordinal));
     RequireThrows(() => XlsxFormulaCacheMerger.Merge(source, changedFormula, Path.Combine(root, "changed-formula-output.xlsx")), "changed a formula");

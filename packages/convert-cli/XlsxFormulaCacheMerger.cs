@@ -103,7 +103,47 @@ internal static class XlsxFormulaCacheMerger
     }
 
     private static string FormulaSignature(XElement formula)
-        => $"{formula.Value}\n{string.Join("\n", formula.Attributes().OrderBy(static attribute => attribute.Name.ToString(), StringComparer.Ordinal).Select(static attribute => $"{attribute.Name}={attribute.Value}"))}";
+        => $"{NormalizeFormula(formula.Value)}\n{string.Join("\n", formula.Attributes().OrderBy(static attribute => attribute.Name.ToString(), StringComparer.Ordinal).Select(static attribute => $"{attribute.Name}={attribute.Value}"))}";
+
+    // ET may canonicalize a redundant unary-plus sequence (for example `A+ +B`
+    // or the compact `A++B`) while recalculating.  That rewrite is semantically
+    // equivalent, unlike changing an operand, function, or reference.  Compare
+    // only this narrow lexical normalization and retain all other formula text.
+    private static string NormalizeFormula(string formula)
+    {
+        if (string.IsNullOrEmpty(formula)) return formula;
+        var result = new System.Text.StringBuilder(formula.Length);
+        var quoted = false;
+        for (var index = 0; index < formula.Length; index++)
+        {
+            var character = formula[index];
+            if (character == '"')
+            {
+                result.Append(character);
+                if (quoted && index + 1 < formula.Length && formula[index + 1] == '"')
+                    result.Append(formula[++index]);
+                else
+                    quoted = !quoted;
+                continue;
+            }
+            if (character == '\'' && !quoted)
+            {
+                result.Append(character);
+                while (++index < formula.Length)
+                {
+                    result.Append(formula[index]);
+                    if (formula[index] != '\'') continue;
+                    if (index + 1 < formula.Length && formula[index + 1] == '\'')
+                        result.Append(formula[++index]);
+                    else break;
+                }
+                continue;
+            }
+            if (!quoted && character == '+' && result.Length > 0 && result[^1] == '+') continue;
+            result.Append(character);
+        }
+        return result.ToString();
+    }
 
     private static void ReplaceCachedValue(XElement sourceCell, XElement refreshedCell)
     {
