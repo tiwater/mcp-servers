@@ -15,6 +15,12 @@
       "minimum": 0,
       "maximum": 9007199254740991
     },
+    "tocStyleLevels": {
+      "type": "object",
+      "properties": {},
+      "description": "Optional exact mapping from current TOC entry paragraph style IDs to displayed one-based levels. When provided, every current TOC entry style must be mapped and unused styles are rejected.",
+      "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 9 }
+    },
     "returnContent": {
       "type": "boolean",
       "description": "Return the complete result directly when it fits the published response limit."

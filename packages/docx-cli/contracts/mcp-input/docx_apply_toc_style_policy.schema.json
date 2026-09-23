@@ -6,6 +6,12 @@
     "input": { "type": "string", "minLength": 1, "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current" },
     "italic": { "type": "boolean" },
     "indentCharactersPerLevel": { "type": "integer", "minimum": 0, "maximum": 21474836 },
+    "tocStyleLevels": {
+      "type": "object",
+      "properties": {},
+      "description": "Optional exact mapping from current TOC entry paragraph style IDs to displayed one-based levels. When provided, every current TOC entry style must be mapped and unused styles are rejected.",
+      "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 9 }
+    },
     "output": { "type": "string", "minLength": 1, "description": "Output DOCX path; may equal input for an atomic in-place update.", "x-tiwater-file-role": "write" },
     "receiptOutput": {
       "type": "string",

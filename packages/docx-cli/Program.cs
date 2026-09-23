@@ -190,7 +190,7 @@ public static class Cli
         Console.WriteLine("  normalize-openxml <input.docx> <output.docx>");
         Console.WriteLine("  docx_create <request.json>");
         Console.WriteLine("  validate-font-policy <input.docx> <policy.json>");
-        Console.WriteLine("  validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level>");
+        Console.WriteLine("  validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level> [toc-style-levels.json]");
         Console.WriteLine("  docx_* <request.json>  (fixed published mutation commands)");
     }
 
@@ -241,7 +241,7 @@ public static class Cli
             "export-json" => "tiwater-docx export-json <input.docx> [<output.json>]",
             "normalize-openxml" => "tiwater-docx normalize-openxml <input.docx> <output.docx>",
             "validate-font-policy" => "tiwater-docx validate-font-policy <input.docx> <policy.json>",
-            "validate-toc-style-policy" => "tiwater-docx validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level>",
+            "validate-toc-style-policy" => "tiwater-docx validate-toc-style-policy <input.docx> <italic> <indent-characters-per-level> [toc-style-levels.json]",
             _ => null,
         };
         if (usage is null) return false;

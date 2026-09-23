@@ -7,13 +7,18 @@ namespace Dockit.Docx;
 
 public static class TocStylePolicy
 {
-    public static int Apply(WordprocessingDocument document, bool italic, int indentCharactersPerLevel)
+    public static int Apply(
+        WordprocessingDocument document,
+        bool italic,
+        int indentCharactersPerLevel,
+        IReadOnlyDictionary<string, int>? tocStyleLevels = null)
     {
         if (indentCharactersPerLevel < 0)
             throw new InvalidOperationException("indent-characters-per-level-must-be-nonnegative");
         var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles
             ?? throw new InvalidOperationException("document-styles-not-found");
-        var entries = TocEntries(document, styles);
+        var entries = TocEntries(document, styles, tocStyleLevels);
+        ValidateStyleLevelMap(entries, tocStyleLevels);
         var matched = 0;
         if (entries.Count == 0)
         {
@@ -65,15 +70,25 @@ public static class TocStylePolicy
 
     public static int RunValidate(string[] args)
     {
-        if (args.Length != 3 || !bool.TryParse(args[1], out var italic)
+        if (args.Length is not (3 or 4) || !bool.TryParse(args[1], out var italic)
             || !int.TryParse(args[2], out var indentCharactersPerLevel) || indentCharactersPerLevel < 0)
-            throw new InvalidOperationException("validate-toc-style-policy requires <input.docx> <italic> <nonnegative-indent-characters-per-level>");
-        var report = Validate(Path.GetFullPath(args[0]), italic, indentCharactersPerLevel);
+            throw new InvalidOperationException("validate-toc-style-policy requires <input.docx> <italic> <nonnegative-indent-characters-per-level> [toc-style-levels.json]");
+        IReadOnlyDictionary<string, int>? tocStyleLevels = null;
+        if (args.Length == 4)
+        {
+            tocStyleLevels = JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(args[3]), Json.Options)
+                ?? throw new InvalidOperationException("toc-style-level-map-invalid");
+        }
+        var report = Validate(Path.GetFullPath(args[0]), italic, indentCharactersPerLevel, tocStyleLevels);
         Console.WriteLine(JsonSerializer.Serialize(report, Json.Options));
         return report.Pass ? 0 : 1;
     }
 
-    public static DocxTocStyleValidationReport Validate(string input, bool italic, int indentCharactersPerLevel)
+    public static DocxTocStyleValidationReport Validate(
+        string input,
+        bool italic,
+        int indentCharactersPerLevel,
+        IReadOnlyDictionary<string, int>? tocStyleLevels = null)
     {
         using var document = WordprocessingDocument.Open(input, false);
         var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles;
@@ -81,8 +96,9 @@ public static class TocStylePolicy
         var matched = 0;
         if (styles is not null)
         {
-            var entries = TocEntries(document, styles);
-            if (entries.Count == 0)
+            var entries = TocEntries(document, styles, tocStyleLevels);
+            findings.AddRange(StyleLevelMapFindings(entries, tocStyleLevels));
+            if (entries.Count == 0 && tocStyleLevels is null)
             {
                 foreach (var style in TocStyles(styles))
                 {
@@ -100,9 +116,10 @@ public static class TocStylePolicy
             }
             else
             {
-                matched = entries.Select(entry => entry.Level).Distinct().Count();
+                matched = entries.Where(entry => entry.Level > 0).Select(entry => entry.Level).Distinct().Count();
                 foreach (var entry in entries)
                 {
+                    if (entry.Level < 1) continue;
                     var expectedIndent = (entry.Level - 1) * indentCharactersPerLevel * 100;
                     var actualIndent = entry.Paragraph.ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value;
                     if (actualIndent != expectedIndent)
@@ -128,7 +145,10 @@ public static class TocStylePolicy
         => styles.Elements<Style>()
             .Where(style => style.Type?.Value == StyleValues.Paragraph && TocLevel(style) >= 1);
 
-    private static IReadOnlyList<TocEntry> TocEntries(WordprocessingDocument document, Styles styles)
+    private static IReadOnlyList<TocEntry> TocEntries(
+        WordprocessingDocument document,
+        Styles styles,
+        IReadOnlyDictionary<string, int>? tocStyleLevels = null)
     {
         var body = document.MainDocumentPart?.Document?.Body;
         if (body is null) return [];
@@ -149,14 +169,40 @@ public static class TocStylePolicy
                 throw new InvalidOperationException("toc-entry-heading-binding-invalid");
             var heading = starts[0].Ancestors<Paragraph>().SingleOrDefault()
                 ?? throw new InvalidOperationException("toc-entry-heading-not-found");
-            var level = OutlineLevel(heading, styles);
-            if (level < 1) continue;
             var styleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
             if (string.IsNullOrWhiteSpace(styleId))
                 throw new InvalidOperationException("toc-entry-style-binding-invalid");
+            var level = tocStyleLevels is not null
+                ? tocStyleLevels.TryGetValue(styleId, out var displayedLevel) ? displayedLevel : 0
+                : OutlineLevel(heading, styles);
+            if (level < 1 && tocStyleLevels is null) continue;
             entries.Add(new TocEntry(paragraph, styleId, level));
         }
         return entries;
+    }
+
+    private static void ValidateStyleLevelMap(IReadOnlyList<TocEntry> entries, IReadOnlyDictionary<string, int>? tocStyleLevels)
+    {
+        var findings = StyleLevelMapFindings(entries, tocStyleLevels);
+        if (findings.Count > 0)
+            throw new InvalidOperationException($"toc-style-level-map-invalid:{string.Join(',', findings.Select(finding => finding.Property + '-' + finding.StyleId))}");
+    }
+
+    private static IReadOnlyList<DocxTocStyleFinding> StyleLevelMapFindings(
+        IReadOnlyList<TocEntry> entries,
+        IReadOnlyDictionary<string, int>? tocStyleLevels)
+    {
+        if (tocStyleLevels is null) return [];
+        var findings = new List<DocxTocStyleFinding>();
+        var entryStyleIds = entries.Select(entry => entry.StyleId).ToHashSet(StringComparer.Ordinal);
+        foreach (var styleId in entryStyleIds.Except(tocStyleLevels.Keys, StringComparer.Ordinal))
+            findings.Add(new(styleId, 0, "toc-style-level-map-style-missing", "mapped-style", null));
+        foreach (var styleId in tocStyleLevels.Keys.Except(entryStyleIds, StringComparer.Ordinal))
+            findings.Add(new(styleId, tocStyleLevels[styleId], "toc-style-level-map-style-unused", "current-entry-style", null));
+        foreach (var (styleId, level) in tocStyleLevels)
+            if (level is < 1 or > 9)
+                findings.Add(new(styleId, level, "toc-style-level-map-level", "1..9", level.ToString()));
+        return findings;
     }
 
     private static int OutlineLevel(Paragraph paragraph, Styles styles)
