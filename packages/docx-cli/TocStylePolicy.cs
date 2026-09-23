@@ -156,9 +156,11 @@ public static class TocStylePolicy
             .Where(start => start.Name?.Value?.StartsWith("_Toc", StringComparison.OrdinalIgnoreCase) == true)
             .GroupBy(start => start.Name!.Value!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        var mappedTocParagraphs = tocStyleLevels is null ? null : HeadingTocEntryParagraphs(body);
         var entries = new List<TocEntry>();
         foreach (var paragraph in body.Descendants<Paragraph>())
         {
+            if (mappedTocParagraphs is not null && !mappedTocParagraphs.Contains(paragraph)) continue;
             var names = paragraph.Descendants<FieldCode>()
                 .SelectMany(code => Regex.Matches(code.Text ?? string.Empty, @"\b_Toc[^\s\""\\]+", RegexOptions.IgnoreCase)
                     .Select(match => match.Value))
@@ -179,6 +181,59 @@ public static class TocStylePolicy
             entries.Add(new TocEntry(paragraph, styleId, level));
         }
         return entries;
+    }
+
+    private static HashSet<Paragraph> HeadingTocEntryParagraphs(Body body)
+    {
+        var entries = new HashSet<Paragraph>();
+        var fields = new Stack<TocFieldState>();
+        foreach (var paragraph in body.Descendants<Paragraph>())
+        {
+            var containsHeadingTocReference = false;
+            foreach (var element in paragraph.Descendants())
+            {
+                if (element is FieldChar fieldChar)
+                {
+                    var fieldType = fieldChar.FieldCharType?.Value;
+                    if (fieldType == FieldCharValues.Begin)
+                    {
+                        fields.Push(new TocFieldState());
+                    }
+                    else if (fieldType == FieldCharValues.Separate && fields.Count > 0)
+                    {
+                        var field = fields.Peek();
+                        field.InResult = true;
+                        field.IsHeadingToc = IsHeadingTocInstruction(field.Instruction);
+                    }
+                    else if (fieldType == FieldCharValues.End && fields.Count > 0)
+                    {
+                        fields.Pop();
+                    }
+                }
+                else if (element is FieldCode fieldCode)
+                {
+                    var instruction = fieldCode.Text ?? string.Empty;
+                    if (fields.Count > 0 && !fields.Peek().InResult)
+                        fields.Peek().Instruction += instruction;
+                    if (fields.Any(field => field.InResult && field.IsHeadingToc)
+                        && Regex.IsMatch(instruction, @"\b_Toc[^\s\""\\]+", RegexOptions.IgnoreCase))
+                        containsHeadingTocReference = true;
+                }
+            }
+            if (containsHeadingTocReference) entries.Add(paragraph);
+        }
+        return entries;
+    }
+
+    private static bool IsHeadingTocInstruction(string instruction)
+        => Regex.IsMatch(instruction, @"^\s*TOC(?:\s|$)", RegexOptions.IgnoreCase)
+            && !Regex.IsMatch(instruction, @"(?:^|\s)\\c(?=\s|$)", RegexOptions.IgnoreCase);
+
+    private sealed class TocFieldState
+    {
+        public string Instruction { get; set; } = string.Empty;
+        public bool InResult { get; set; }
+        public bool IsHeadingToc { get; set; }
     }
 
     private static void ValidateStyleLevelMap(IReadOnlyList<TocEntry> entries, IReadOnlyDictionary<string, int>? tocStyleLevels)
