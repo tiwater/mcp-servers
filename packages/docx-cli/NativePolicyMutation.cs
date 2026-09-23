@@ -88,8 +88,9 @@ public static class NativePolicyMutation
             throw new InvalidOperationException("indent-characters-per-level-must-be-nonnegative");
         using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var inputArtifact = NativeMutationSupport.Describe(paths.Input);
-        var policy = new { request.Italic, request.IndentCharactersPerLevel };
-        var policySha256 = NativeMutationSupport.JsonSha256(policy);
+        var policySha256 = request.TocStyleLevels is null
+            ? NativeMutationSupport.JsonSha256(new { request.Italic, request.IndentCharactersPerLevel })
+            : NativeMutationSupport.JsonSha256(new { request.Italic, request.IndentCharactersPerLevel, request.TocStyleLevels });
         IReadOnlyDictionary<string, int> baseline;
         using (var input = WordprocessingDocument.Open(paths.Input, false))
             baseline = NativeMutationSupport.ValidationIssueCounts(input);
@@ -101,13 +102,13 @@ public static class NativePolicyMutation
             int matched;
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {
-                matched = TocStylePolicy.Apply(output, request.Italic, request.IndentCharactersPerLevel);
+                matched = TocStylePolicy.Apply(output, request.Italic, request.IndentCharactersPerLevel, request.TocStyleLevels);
                 output.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Save();
                 output.MainDocumentPart?.Document?.Save();
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
             }
             NativeMutationSupport.Commit(temporaryPath, paths);
-            var validation = TocStylePolicy.Validate(paths.Output, request.Italic, request.IndentCharactersPerLevel);
+            var validation = TocStylePolicy.Validate(paths.Output, request.Italic, request.IndentCharactersPerLevel, request.TocStyleLevels);
             if (!validation.Pass) throw new InvalidOperationException("output-toc-style-policy-readback-failed");
             return WriteReceipt(
                 paths,
@@ -162,7 +163,13 @@ public static class NativePolicyMutation
 }
 
 public sealed record ApplyFontPolicyRequest(string Input, string Policy, string Output, string ReceiptOutput);
-public sealed record ApplyTocStylePolicyRequest(string Input, bool Italic, int IndentCharactersPerLevel, string Output, string ReceiptOutput);
+public sealed record ApplyTocStylePolicyRequest(
+    string Input,
+    bool Italic,
+    int IndentCharactersPerLevel,
+    string Output,
+    string ReceiptOutput,
+    IReadOnlyDictionary<string, int>? TocStyleLevels = null);
 public sealed record PolicyMutationReceipt(
     string Schema,
     string Provider,

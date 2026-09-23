@@ -785,7 +785,7 @@ const tools = [
   },
   {
     name: 'docx_validate_toc_style_policy',
-    description: 'Validate current DOCX table-of-contents paragraph styles against an explicit policy. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
+    description: 'Validate current DOCX table-of-contents paragraph styles against an explicit policy. Optionally provide an exact mapping from current TOC entry paragraph style IDs to displayed levels. Set returnContent true to return the complete result when it fits the response limit. Provide output to write the complete result to a new JSON file. The two choices are independent and may be used together; at least one is required.',
     inputSchema: inputContract('docx_validate_toc_style_policy'),
     outputSchema: largeResultOutput('docx_validate_toc_style_policy'),
     annotations: { readOnlyHint: true, idempotentHint: true },
@@ -794,7 +794,7 @@ const tools = [
   {
     name: 'docx_apply_toc_style_policy',
     effectKind: 'document-mutation',
-    description: 'Apply explicit italic and per-level indentation values to current built-in table-of-contents paragraph styles. It does not change heading text or refresh fields.',
+    description: 'Apply explicit italic and per-level indentation values to current table-of-contents entries. Optionally provide an exact mapping from current TOC entry paragraph style IDs to displayed levels. It does not change heading text or refresh fields.',
     inputSchema: inputContract('docx_apply_toc_style_policy'),
     outputSchema: fixedEditOutput('docx_apply_toc_style_policy'),
     handler: (args, tool) => fixedEdit(tool, args, docxCandidates),
@@ -1335,10 +1335,15 @@ async function docxValidateFontPolicy(args) {
 
 async function docxValidateTocStylePolicy(args) {
   const input = path.resolve(requireString(args.input, 'input'));
-  const result = await runJsonCandidateChain(docxCandidates, [
-    'validate-toc-style-policy', input, String(args.italic), String(args.indentCharactersPerLevel),
-  ], { allowedExitCodes: [0, 1] });
-  return deliverLargeJsonResult({ tool: 'docx_validate_toc_style_policy', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
+  const validate = async tocStyleLevelsPath => {
+    const commandArgs = ['validate-toc-style-policy', input, String(args.italic), String(args.indentCharactersPerLevel)];
+    if (tocStyleLevelsPath) commandArgs.push(tocStyleLevelsPath);
+    const result = await runJsonCandidateChain(docxCandidates, commandArgs, { allowedExitCodes: [0, 1] });
+    return deliverLargeJsonResult({ tool: 'docx_validate_toc_style_policy', args, runtime: commandRuntime(result), payload: result.json, sourcePaths: [input] });
+  };
+  return args.tocStyleLevels === undefined
+    ? validate(undefined)
+    : withTempJsonFile(args.tocStyleLevels, validate);
 }
 
 async function docxStripDirectFormatting(args) {

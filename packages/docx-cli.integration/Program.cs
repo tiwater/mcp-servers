@@ -1620,6 +1620,73 @@ void RunTocStylePolicyMatrix()
             "TOC policy replaced an undefined template style reference");
         RunInput("validate-openxml", output);
     }
+
+    var mappedInput = Path.Combine(root, "toc-policy-mapped-input.docx");
+    var mappedOutput = Path.Combine(root, "toc-policy-mapped-output.docx");
+    var mappedReceipt = Path.Combine(root, "toc-policy-mapped-receipt.json");
+    var styleLevelsPath = Path.Combine(root, "toc-policy-style-levels.json");
+    var styleLevels = new Dictionary<string, int>(StringComparer.Ordinal)
+    {
+        ["TemplateTocTop"] = 1,
+        ["7"] = 2,
+    };
+    File.WriteAllText(styleLevelsPath, JsonSerializer.Serialize(styleLevels));
+    CreateTocPolicyDocument(mappedInput);
+    Run("docx_apply_toc_style_policy", new
+    {
+        input = mappedInput,
+        italic = false,
+        indentCharactersPerLevel = 2,
+        tocStyleLevels = styleLevels,
+        output = mappedOutput,
+        receiptOutput = mappedReceipt,
+    });
+    using (var document = WordprocessingDocument.Open(mappedOutput, false))
+    {
+        var entries = document.MainDocumentPart!.Document.Body!.Elements<Paragraph>()
+            .Where(paragraph => paragraph.Descendants<Text>().Any(text => text.Text.StartsWith("Entry", StringComparison.Ordinal)))
+            .ToArray();
+        Require(entries.Length == 2
+                && entries[0].ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value == 0
+                && entries[1].ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value == 200,
+            "explicit displayed-level map did not assign consecutive TOC indentation");
+    }
+    var validation = Execute("validate-toc-style-policy", mappedOutput, "false", "2", styleLevelsPath);
+    Require(validation.ExitCode == 0, $"explicit TOC style level validation failed: {validation.Error}\n{validation.Output}");
+    using (var parsed = JsonDocument.Parse(validation.Output))
+        Require(parsed.RootElement.GetProperty("Pass").GetBoolean(), "explicit TOC style level validation returned a failure");
+
+    var missingMap = new Dictionary<string, int>(StringComparer.Ordinal) { ["TemplateTocTop"] = 1 };
+    File.WriteAllText(styleLevelsPath, JsonSerializer.Serialize(missingMap));
+    var missingValidation = Execute("validate-toc-style-policy", mappedOutput, "false", "2", styleLevelsPath);
+    Require(missingValidation.ExitCode == 1, "TOC validation accepted an unmapped current entry style");
+    using (var parsed = JsonDocument.Parse(missingValidation.Output))
+        Require(!parsed.RootElement.GetProperty("Pass").GetBoolean()
+                && parsed.RootElement.GetProperty("Findings").EnumerateArray()
+                    .Any(finding => finding.GetProperty("Property").GetString() == "toc-style-level-map-style-missing"),
+            "TOC validation did not report the missing current entry style");
+
+    var invalidInput = Path.Combine(root, "toc-policy-map-invalid-input.docx");
+    var invalidOutput = Path.Combine(root, "toc-policy-map-invalid-output.docx");
+    var invalidReceipt = Path.Combine(root, "toc-policy-map-invalid-receipt.json");
+    CreateTocPolicyDocument(invalidInput);
+    var invalidMapRequest = new
+    {
+        input = invalidInput,
+        italic = false,
+        indentCharactersPerLevel = 2,
+        tocStyleLevels = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["TemplateTocTop"] = 1,
+            ["7"] = 2,
+            ["unused-style"] = 3,
+        },
+        output = invalidOutput,
+        receiptOutput = invalidReceipt,
+    };
+    var invalidMapFailure = RunExpectAtomicFailure("docx_apply_toc_style_policy", invalidInput, invalidReceipt, invalidMapRequest);
+    Require(invalidMapFailure.Contains("toc-style-level-map-style-unused", StringComparison.Ordinal),
+        "TOC apply did not reject an unused mapped style ID");
 }
 
 void RunMergedHeaderSetBodyMatrix()
@@ -3221,7 +3288,7 @@ void RunInput(string command, string input)
     Require(result.ExitCode == 0, $"{command} failed: {result.Error}\n{result.Output}");
 }
 
-(int ExitCode, string Output, string Error) Execute(string command, string argument)
+(int ExitCode, string Output, string Error) Execute(string command, params string[] arguments)
 {
     var start = new ProcessStartInfo("dotnet")
     {
@@ -3231,7 +3298,7 @@ void RunInput(string command, string input)
     };
     start.ArgumentList.Add(cli);
     start.ArgumentList.Add(command);
-    start.ArgumentList.Add(argument);
+    foreach (var argument in arguments) start.ArgumentList.Add(argument);
     using var process = Process.Start(start) ?? throw new InvalidOperationException("failed to start docx cli");
     var output = process.StandardOutput.ReadToEnd();
     var error = process.StandardError.ReadToEnd();

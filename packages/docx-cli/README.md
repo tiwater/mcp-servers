@@ -85,7 +85,12 @@ Usage: `tiwater-docx docx_copy_section_header_footer_references <request.json>`
 tiwater-docx validate-openxml input.docx
 tiwater-docx validate-font-policy input.docx policy.json
 tiwater-docx validate-toc-style-policy input.docx false 2
+tiwater-docx validate-toc-style-policy input.docx false 2 toc-style-levels.json
 ```
+
+The optional TOC style-level map uses current TOC entry paragraph style IDs as
+keys and displayed one-based levels as values. When supplied, it must cover
+every current TOC entry style and may not contain unused styles.
 
 These commands prove technical package or requested property conditions only.
 They do not determine whether document content is correct for a business task.
