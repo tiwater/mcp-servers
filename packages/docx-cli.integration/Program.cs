@@ -1631,7 +1631,7 @@ void RunTocStylePolicyMatrix()
         ["7"] = 2,
     };
     File.WriteAllText(styleLevelsPath, JsonSerializer.Serialize(styleLevels));
-    CreateTocPolicyDocument(mappedInput);
+    CreateMappedTocPolicyDocument(mappedInput);
     Run("docx_apply_toc_style_policy", new
     {
         input = mappedInput,
@@ -1650,7 +1650,18 @@ void RunTocStylePolicyMatrix()
                 && entries[0].ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value == 0
                 && entries[1].ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value == 200,
             "explicit displayed-level map did not assign consecutive TOC indentation");
+        var captionEntries = document.MainDocumentPart.Document.Body!.Elements<Paragraph>()
+            .Where(paragraph => paragraph.Descendants<Text>().Any(text => text.Text.StartsWith("Table entry", StringComparison.Ordinal)))
+            .ToArray();
+        var captionSummary = string.Join(" | ", captionEntries.Select(paragraph =>
+            $"{paragraph.InnerText}:left={paragraph.ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value}:italic={string.Join(',', paragraph.Descendants<Run>().Where(run => run.GetFirstChild<Text>() is not null).Select(run => run.RunProperties?.Italic?.Val?.Value))}"));
+        Require(captionEntries.Length == 2
+                && captionEntries.All(paragraph => paragraph.ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value == 300)
+                && captionEntries.All(paragraph => paragraph.Descendants<Run>().Where(run => run.GetFirstChild<Text>() is not null)
+                    .All(run => run.RunProperties?.Italic?.Val?.Value == true)),
+            $"explicit TOC policy changed caption-list entries outside the heading TOC field: {captionSummary}");
     }
+    RunInput("validate-openxml", mappedOutput);
     var validation = Execute("validate-toc-style-policy", mappedOutput, "false", "2", styleLevelsPath);
     Require(validation.ExitCode == 0, $"explicit TOC style level validation failed: {validation.Error}\n{validation.Output}");
     using (var parsed = JsonDocument.Parse(validation.Output))
@@ -1669,7 +1680,7 @@ void RunTocStylePolicyMatrix()
     var invalidInput = Path.Combine(root, "toc-policy-map-invalid-input.docx");
     var invalidOutput = Path.Combine(root, "toc-policy-map-invalid-output.docx");
     var invalidReceipt = Path.Combine(root, "toc-policy-map-invalid-receipt.json");
-    CreateTocPolicyDocument(invalidInput);
+    CreateMappedTocPolicyDocument(invalidInput);
     var invalidMapRequest = new
     {
         input = invalidInput,
@@ -1967,6 +1978,56 @@ void CreateTocPolicyDocument(string path)
         TocEntry("TemplateTocTop", "_TocPolicyOne", "Entry one", true),
         TocEntry("7", "_TocPolicyTwo", "Entry two", true)));
     main.Document.Save();
+}
+
+void CreateMappedTocPolicyDocument(string path)
+{
+    CreateTocPolicyDocument(path);
+    using var document = WordprocessingDocument.Open(path, true);
+    var body = document.MainDocumentPart?.Document?.Body
+        ?? throw new InvalidOperationException("mapped TOC fixture body missing");
+    var entries = body.Elements<Paragraph>()
+        .Where(paragraph => paragraph.Descendants<FieldCode>().Any(code => code.Text?.Contains("_TocPolicy", StringComparison.Ordinal) == true))
+        .ToArray();
+    Require(entries.Length == 2, "mapped TOC fixture did not retain both heading entries");
+    AddTocFieldOpening(entries[0], " TOC \\o \"1-3\" \\h \\z \\u ");
+    entries[1].AppendChild(new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+
+    body.Append(
+        new Paragraph(
+            new BookmarkStart { Name = "_TocPolicyTableOne", Id = "3" },
+            new Run(new Text("Table caption one")),
+            new BookmarkEnd { Id = "3" }),
+        new Paragraph(
+            new BookmarkStart { Name = "_TocPolicyTableTwo", Id = "4" },
+            new Run(new Text("Table caption two")),
+            new BookmarkEnd { Id = "4" }),
+        CaptionTocEntry(null, "_TocPolicyTableOne", "Table entry one", beginField: true, endField: false),
+        CaptionTocEntry("CaptionIndex", "_TocPolicyTableTwo", "Table entry two", beginField: false, endField: true));
+    document.MainDocumentPart!.Document.Save();
+}
+
+void AddTocFieldOpening(Paragraph paragraph, string instruction)
+{
+    var properties = paragraph.ParagraphProperties
+        ?? throw new InvalidOperationException("TOC field fixture paragraph properties missing");
+    var begin = paragraph.InsertAfter(new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }), properties);
+    var code = paragraph.InsertAfter(new Run(new FieldCode(instruction)), begin);
+    paragraph.InsertAfter(new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }), code);
+}
+
+Paragraph CaptionTocEntry(string? style, string bookmark, string text, bool beginField, bool endField)
+{
+    var properties = new ParagraphProperties(
+        new Tabs(new TabStop { Val = TabStopValues.Right, Leader = TabStopLeaderCharValues.Dot, Position = 9000 }),
+        new Indentation { LeftChars = 300 });
+    if (style is not null) properties.InsertAt(new ParagraphStyleId { Val = style }, 0);
+    var paragraph = new Paragraph(properties);
+    if (beginField) AddTocFieldOpening(paragraph, " TOC \\h \\z \\c \"Table\" ");
+    paragraph.AppendChild(new Run(new FieldCode($" HYPERLINK \\l {bookmark} ")));
+    paragraph.AppendChild(new Run(new RunProperties(new Italic { Val = true }, new ItalicComplexScript { Val = true }), new Text(text)));
+    if (endField) paragraph.AppendChild(new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+    return paragraph;
 }
 
 void RunBookmarkedParagraphInsertion()
