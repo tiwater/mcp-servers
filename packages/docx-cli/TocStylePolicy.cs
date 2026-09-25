@@ -172,13 +172,13 @@ public static class TocStylePolicy
             var heading = starts[0].Ancestors<Paragraph>().SingleOrDefault()
                 ?? throw new InvalidOperationException("toc-entry-heading-not-found");
             var styleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-            if (string.IsNullOrWhiteSpace(styleId))
+            if (tocStyleLevels is not null && string.IsNullOrWhiteSpace(styleId))
                 throw new InvalidOperationException("toc-entry-style-binding-invalid");
             var level = tocStyleLevels is not null
-                ? tocStyleLevels.TryGetValue(styleId, out var displayedLevel) ? displayedLevel : 0
+                ? tocStyleLevels.TryGetValue(styleId!, out var displayedLevel) ? displayedLevel : 0
                 : OutlineLevel(heading, styles);
             if (level < 1 && tocStyleLevels is null) continue;
-            entries.Add(new TocEntry(paragraph, styleId, level));
+            entries.Add(new TocEntry(paragraph, styleId ?? string.Empty, level));
         }
         return entries;
     }
