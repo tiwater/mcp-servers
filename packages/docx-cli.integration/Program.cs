@@ -1698,6 +1698,40 @@ void RunTocStylePolicyMatrix()
     var invalidMapFailure = RunExpectAtomicFailure("docx_apply_toc_style_policy", invalidInput, invalidReceipt, invalidMapRequest);
     Require(invalidMapFailure.Contains("toc-style-level-map-style-unused", StringComparison.Ordinal),
         "TOC apply did not reject an unused mapped style ID");
+
+    var stylelessCaptionInput = Path.Combine(root, "toc-policy-styleless-caption-input.docx");
+    var stylelessCaptionOutput = Path.Combine(root, "toc-policy-styleless-caption-output.docx");
+    CreateStylelessCaptionTocPolicyDocument(stylelessCaptionInput);
+    Run("docx_apply_toc_style_policy", new
+    {
+        input = stylelessCaptionInput,
+        italic = false,
+        indentCharactersPerLevel = 2,
+        output = stylelessCaptionOutput,
+        receiptOutput = Path.Combine(root, "toc-policy-styleless-caption-receipt.json"),
+    });
+    using (var document = WordprocessingDocument.Open(stylelessCaptionOutput, false))
+    {
+        var body = document.MainDocumentPart!.Document.Body!;
+        var headingEntry = body.Elements<Paragraph>()
+            .Single(paragraph => paragraph.InnerText.Contains("Heading entry", StringComparison.Ordinal));
+        var captionEntry = body.Elements<Paragraph>()
+            .Single(paragraph => paragraph.InnerText.Contains("Table entry", StringComparison.Ordinal));
+        Require(headingEntry.ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value == 0,
+            "styleless caption entry prevented policy application to a heading entry");
+        Require(captionEntry.ParagraphProperties?.ParagraphStyleId is null
+                && captionEntry.ParagraphProperties?.GetFirstChild<Indentation>()?.LeftChars?.Value == 300
+                && captionEntry.Descendants<Run>().Where(run => run.GetFirstChild<Text>() is not null)
+                    .All(run => run.RunProperties?.Italic?.Val?.Value == true),
+            "default heading TOC policy changed an unstyled caption-list entry");
+    }
+    RunInput("validate-openxml", stylelessCaptionOutput);
+    var stylelessCaptionValidation = Execute("validate-toc-style-policy", stylelessCaptionOutput, "false", "2");
+    Require(stylelessCaptionValidation.ExitCode == 0,
+        $"default TOC policy validation failed for an unstyled caption-list entry: {stylelessCaptionValidation.Error}\n{stylelessCaptionValidation.Output}");
+    using (var stylelessValidationDocument = JsonDocument.Parse(stylelessCaptionValidation.Output))
+        Require(stylelessValidationDocument.RootElement.GetProperty("Pass").GetBoolean(),
+            "default TOC policy validation rejected an unstyled caption-list entry");
 }
 
 void RunMergedHeaderSetBodyMatrix()
@@ -2005,6 +2039,32 @@ void CreateMappedTocPolicyDocument(string path)
         CaptionTocEntry(null, "_TocPolicyTableOne", "Table entry one", beginField: true, endField: false),
         CaptionTocEntry("CaptionIndex", "_TocPolicyTableTwo", "Table entry two", beginField: false, endField: true));
     document.MainDocumentPart!.Document.Save();
+}
+
+void CreateStylelessCaptionTocPolicyDocument(string path)
+{
+    using var document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
+    var main = document.AddMainDocumentPart();
+    var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+    stylesPart.Styles = new Styles(
+        HeadingStyle("Heading1", 0),
+        new Style(new StyleName { Val = "Template TOC top" })
+        {
+            Type = StyleValues.Paragraph,
+            StyleId = "TemplateTocTop",
+            CustomStyle = true
+        });
+    stylesPart.Styles.Save();
+    main.Document = new Document(new Body(
+        Heading("Heading1", "_TocStylelessHeading", "Heading", "1"),
+        TocEntry("TemplateTocTop", "_TocStylelessHeading", "Heading entry", true),
+        new Paragraph(
+            new ParagraphProperties(new ParagraphStyleId { Val = "Normal" }),
+            new BookmarkStart { Name = "_TocStylelessTable", Id = "2" },
+            new Run(new Text("Table caption")),
+            new BookmarkEnd { Id = "2" }),
+        CaptionTocEntry(null, "_TocStylelessTable", "Table entry", beginField: true, endField: true)));
+    main.Document.Save();
 }
 
 void AddTocFieldOpening(Paragraph paragraph, string instruction)
