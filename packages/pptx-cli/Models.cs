@@ -312,8 +312,11 @@ public sealed record SlideLayoutAssignment(
     string TargetLayoutPath,
     TransformInfo? ContentBounds = null,
     IReadOnlyList<uint>? ContentShapeIds = null,
-    IReadOnlyList<uint>? SourceLayoutShapeIdsToPreserve = null
+    IReadOnlyList<uint>? SourceLayoutShapeIdsToPreserve = null,
+    IReadOnlyList<SourceSystemShape>? SourceSystemShapes = null
 );
+
+public sealed record SourceSystemShape(uint ShapeId, string SemanticRole);
 
 public sealed record TemplateApplicationResult(
     string Input,
