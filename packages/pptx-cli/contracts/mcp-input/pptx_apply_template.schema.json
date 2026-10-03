@@ -6,7 +6,8 @@
       "type": "string",
       "minLength": 1,
       "description": "Path to the current source PPTX.",
-      "x-tiwater-file-role": "read", "x-tiwater-document-revision-role": "current"
+      "x-tiwater-file-role": "read",
+      "x-tiwater-document-revision-role": "current"
     },
     "template": {
       "type": "string",
@@ -80,6 +81,34 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991
+            }
+          },
+          "sourceSystemShapes": {
+            "type": "array",
+            "description": "Explicitly selected ordinary source text shapes that yield to template system elements; no business-role inference is performed.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "shapeId": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "semanticRole": {
+                  "type": "string",
+                  "enum": [
+                    "date",
+                    "footer",
+                    "header",
+                    "slide-number"
+                  ]
+                }
+              },
+              "required": [
+                "shapeId",
+                "semanticRole"
+              ],
+              "additionalProperties": false
             }
           }
         },

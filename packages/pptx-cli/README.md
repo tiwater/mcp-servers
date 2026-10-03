@@ -33,6 +33,14 @@ from `contracts/mcp-input/`. Requests contain no operation discriminator. The
 provider preserves unselected slide content and publishes no output when a
 requested technical action cannot be completed.
 
+Template application may explicitly select ordinary source text shapes as
+`sourceSystemShapes` within a slide assignment. The caller supplies each shape
+identity and its date, footer, header, or slide-number role. This requires the
+`target-template` system placeholder policy. The provider removes only those
+selected ordinary text shapes; it does not infer roles from text or appearance.
+Pictures, tables, native placeholders, and shapes also selected for content
+fitting are rejected. Omitting this selection preserves the existing behavior.
+
 ## Validation
 
 ```bash

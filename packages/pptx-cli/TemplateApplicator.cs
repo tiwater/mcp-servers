@@ -61,6 +61,28 @@ public static class TemplateApplicator
                 continue;
             }
             var sourceLayout = slide.SlideLayoutPart;
+            var systemShapes = assignment.SourceSystemShapes ?? [];
+            if (systemShapes.Count != systemShapes.Select(item => item.ShapeId).Distinct().Count()
+                || systemShapes.Count > 0 && plan.SystemPlaceholderPolicy != "target-template"
+                || systemShapes.Any(item => item.ShapeId == 0 || item.SemanticRole is not ("date" or "footer" or "header" or "slide-number")
+                    || assignment.ContentShapeIds?.Contains(item.ShapeId) == true))
+            {
+                issues.Add(new(assignment.SlideNumber, "selected source system shapes are invalid"));
+                continue;
+            }
+            var selectedSystemElements = new List<Shape>();
+            foreach (var selected in systemShapes)
+            {
+                var matches = VisualChildren(slide.Slide.CommonSlideData?.ShapeTree)
+                    .Where(element => ShapeIdFor(element) == selected.ShapeId).ToList();
+                if (matches.Count != 1 || matches[0] is not Shape sourceSystemShape || sourceSystemShape.TextBody is null || PlaceholderFor(sourceSystemShape) is not null)
+                {
+                    issues.Add(new(assignment.SlideNumber, $"selected source system shape is not one ordinary text shape: {selected.ShapeId}"));
+                    break;
+                }
+                selectedSystemElements.Add(sourceSystemShape);
+            }
+            if (selectedSystemElements.Count != systemShapes.Count) continue;
             var preserveIds = assignment.SourceLayoutShapeIdsToPreserve ?? [];
             if (preserveIds.Count != preserveIds.Distinct().Count())
             {
@@ -96,6 +118,8 @@ public static class TemplateApplicator
                 var outputShapeId = MaterializeLayoutShape(slide, sourceLayout!, sourceLayoutElements[sourceShapeId]);
                 materializedLayoutShapes.Add(new(assignment.SlideNumber, PartPath(sourceLayout!), sourceShapeId, outputShapeId));
             }
+            foreach (var systemElement in selectedSystemElements) systemElement.Remove();
+            slide.Slide.Save();
             if (slide.SlideLayoutPart is { } oldLayout) slide.DeletePart(oldLayout);
             slide.AddPart(importedLayout);
             changed++;
