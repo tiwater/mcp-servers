@@ -139,6 +139,10 @@
       "description": "New JSON receipt path. Existing files are never overwritten.",
       "x-tiwater-file-role": "write",
       "x-tiwater-file-effect": false
+    },
+    "preserveSourceAppearance": {
+      "type": "boolean",
+      "description": "Retain the source slide theme, color mapping, and existing ordinary shape text styles when applying target layout geometry. Omitted or false retains existing behavior."
     }
   },
   "required": [

@@ -319,7 +319,8 @@ public static class Inspector
                     GetAttributeValue(app?.PlaceholderShape, "type"), null, null,
                     string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody, layoutTextStyle, masterTextStyle),
                     ExtractRuns(shape.TextBody, layoutTextStyle, masterTextStyle, slideContext?.SlideLayoutPart?.SlideMasterPart?.ThemePart,
-                        slideContext?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.ColorMap))
+                        EffectiveColorMap(slideContext), EffectiveThemeOverride(slideContext),
+                        shape.ShapeStyle?.FontReference))
                 {
                     PlaceholderPresent = placeholder is not null,
                     PlaceholderIndex = placeholder?.Index?.Value
@@ -464,7 +465,31 @@ public static class Inspector
         }).ToList();
     }
 
-    private static List<TextRunDetail> ExtractRuns(OpenXmlElement? textBody, OpenXmlElement? layoutTextStyle = null, OpenXmlElement? masterTextStyle = null, ThemePart? themePart = null, OpenXmlElement? colorMap = null)
+    private static OpenXmlElement? EffectiveColorMap(SlidePart? slide)
+    {
+        var slideMap = slide?.Slide?.ColorMapOverride;
+        var layoutMap = slide?.SlideLayoutPart?.SlideLayout?.ColorMapOverride;
+        var selected = slideMap ?? layoutMap;
+        return selected?.OverrideColorMapping
+            ?? (OpenXmlElement?)slide?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.ColorMap;
+    }
+
+    private static A.ThemeOverride? EffectiveThemeOverride(SlidePart? slide)
+    {
+        var current = slide?.ThemeOverridePart?.ThemeOverride;
+        var layout = slide?.SlideLayoutPart?.ThemeOverridePart?.ThemeOverride;
+        if (current is null && layout is null) return null;
+        var merged = new A.ThemeOverride();
+        foreach (var name in new[] { "clrScheme", "fontScheme", "fmtScheme" })
+        {
+            var value = current?.ChildElements.FirstOrDefault(item => item.LocalName == name)
+                ?? layout?.ChildElements.FirstOrDefault(item => item.LocalName == name);
+            if (value is not null) merged.Append(value.CloneNode(true));
+        }
+        return merged;
+    }
+
+    private static List<TextRunDetail> ExtractRuns(OpenXmlElement? textBody, OpenXmlElement? layoutTextStyle = null, OpenXmlElement? masterTextStyle = null, ThemePart? themePart = null, OpenXmlElement? colorMap = null, OpenXmlElement? themeOverride = null, A.FontReference? fontReference = null)
     {
         if (textBody is null)
         {
@@ -507,12 +532,13 @@ public static class Inspector
                     new FormatCandidate(bodyDefaultRunProperties, "shape-list-default"),
                     new FormatCandidate(layoutLevelDefaultRunProperties, $"layout-list-level-{paragraphLevel + 1}"),
                     new FormatCandidate(layoutDefaultRunProperties, "layout-list-default"),
+                    new FormatCandidate(fontReference, "shape-font-reference"),
                     new FormatCandidate(masterLevelDefaultRunProperties, $"master-text-style-level-{paragraphLevel + 1}"),
                     new FormatCandidate(masterDefaultRunProperties, "master-text-style-default")
                 };
-                var fontFamily = Resolve(candidates, properties => ExtractFontFamily(properties, themePart));
+                var fontFamily = Resolve(candidates, properties => ExtractFontFamily(properties, themePart, themeOverride));
                 var fontSize = Resolve(candidates, ExtractFontSize);
-                var color = Resolve(candidates, properties => ExtractColor(properties, themePart, colorMap));
+                var color = Resolve(candidates, properties => ExtractColor(properties, themePart, colorMap, themeOverride));
                 var bold = Resolve(candidates, ExtractBold);
                 runs.Add(new TextRunDetail(
                     RunIndex: runIndex,
@@ -522,7 +548,7 @@ public static class Inspector
                     FontSize: fontSize.Value,
                     Color: color.Value,
                     Bold: bold.Value,
-                    DirectFontFamily: ExtractFontFamily(properties, themePart),
+                    DirectFontFamily: ExtractFontFamily(properties, themePart, themeOverride),
                     DirectFontSize: ExtractFontSize(properties),
                     DirectColor: ExtractDirectColor(properties),
                     DirectBold: ExtractBold(properties),
@@ -631,7 +657,7 @@ public static class Inspector
     private static long? ParseLongAttribute(OpenXmlElement? element, string localName)
         => long.TryParse(GetAttributeValue(element, localName), out var value) ? value : null;
 
-    private static string? ExtractFontFamily(OpenXmlElement? properties, ThemePart? themePart = null)
+    private static string? ExtractFontFamily(OpenXmlElement? properties, ThemePart? themePart = null, OpenXmlElement? themeOverride = null)
     {
         var value = properties?.GetFirstChild<A.EastAsianFont>()?.Typeface?.Value
             ?? properties?.GetFirstChild<A.LatinFont>()?.Typeface?.Value
@@ -641,7 +667,7 @@ public static class Inspector
         var family = value.StartsWith("+mj-", StringComparison.Ordinal) ? "majorFont" : "minorFont";
         var script = value.EndsWith("-ea", StringComparison.Ordinal) ? "ea"
             : value.EndsWith("-cs", StringComparison.Ordinal) ? "cs" : "latin";
-        var fontScheme = themePart?.Theme?.ThemeElements?.FontScheme;
+        var fontScheme = themeOverride?.GetFirstChild<A.FontScheme>() ?? themePart?.Theme?.ThemeElements?.FontScheme;
         var familyElement = fontScheme?.ChildElements.FirstOrDefault(element => element.LocalName == family);
         var resolved = familyElement?.ChildElements.FirstOrDefault(element => element.LocalName == script)
             ?.GetAttribute("typeface", string.Empty).Value;
@@ -657,9 +683,9 @@ public static class Inspector
         return int.TryParse(value, out var fontSize) ? fontSize / 100d : null;
     }
 
-    private static string? ExtractColor(OpenXmlElement? properties, ThemePart? themePart = null, OpenXmlElement? colorMap = null)
+    private static string? ExtractColor(OpenXmlElement? properties, ThemePart? themePart = null, OpenXmlElement? colorMap = null, OpenXmlElement? themeOverride = null)
     {
-        var fill = properties?.GetFirstChild<A.SolidFill>();
+        OpenXmlElement? fill = properties is A.FontReference ? properties : properties?.GetFirstChild<A.SolidFill>();
         var rgb = fill?.GetFirstChild<A.RgbColorModelHex>()?.Val?.Value;
         if (!string.IsNullOrWhiteSpace(rgb)) return rgb.ToUpperInvariant();
         var system = fill?.GetFirstChild<A.SystemColor>();
@@ -669,7 +695,8 @@ public static class Inspector
         if (string.IsNullOrWhiteSpace(schemeName)) return null;
         if (scheme!.ChildElements.Count > 0) return null;
         var mappedName = GetAttributeValue(colorMap, schemeName) ?? schemeName;
-        var themeColor = themePart?.Theme?.ThemeElements?.ColorScheme?.ChildElements
+        var colorScheme = themeOverride?.GetFirstChild<A.ColorScheme>() ?? themePart?.Theme?.ThemeElements?.ColorScheme;
+        var themeColor = colorScheme?.ChildElements
             .FirstOrDefault(element => string.Equals(element.LocalName, mappedName, StringComparison.Ordinal));
         var themeRgb = themeColor?.Descendants<A.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
         if (!string.IsNullOrWhiteSpace(themeRgb)) return themeRgb.ToUpperInvariant();

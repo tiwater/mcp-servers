@@ -41,6 +41,11 @@ selected ordinary text shapes; it does not infer roles from text or appearance.
 Pictures, tables, native placeholders, and shapes also selected for content
 fitting are rejected. Omitting this selection preserves the existing behavior.
 
+Template application accepts `preserveSourceAppearance: true` to retain the source
+slide theme and color mapping while changing layout geometry. Ordinary source
+text keeps its existing direct styling; inherited placeholder styles are
+materialized before changing layouts. Omission retains the previous behavior.
+
 ## Validation
 
 ```bash
