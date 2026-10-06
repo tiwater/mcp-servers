@@ -304,7 +304,8 @@ public sealed record PptxObjectEditIssue(int SlideNumber, uint ShapeId, string M
 public sealed record TemplateApplicationPlan(
     string TargetMasterPath,
     IReadOnlyList<SlideLayoutAssignment> Slides,
-    string SystemPlaceholderPolicy = "preserve"
+    string SystemPlaceholderPolicy = "preserve",
+    bool PreserveSourceAppearance = false
 );
 
 public sealed record SlideLayoutAssignment(

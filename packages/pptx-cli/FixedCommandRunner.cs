@@ -147,7 +147,8 @@ public static class FixedCommandRunner
         var plan = new TemplateApplicationPlan(
             RequireString(request, "targetMasterPath"),
             DeserializeRequired<IReadOnlyList<SlideLayoutAssignment>>(request, "slides"),
-            RequireString(request, "systemPlaceholderPolicy"));
+            RequireString(request, "systemPlaceholderPolicy"),
+            request["preserveSourceAppearance"]?.GetValue<bool>() ?? false);
         var result = TemplateApplicator.Apply(input, template, plan, output);
         return new(
             result.Issues.Count == 0 && result.ChangedSlideCount == plan.Slides.Count,

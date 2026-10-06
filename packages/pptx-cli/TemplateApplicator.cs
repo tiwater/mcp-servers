@@ -60,6 +60,11 @@ public static class TemplateApplicator
                 issues.Add(new(assignment.SlideNumber, "content bounds are required when content shape ids are specified"));
                 continue;
             }
+            if (plan.PreserveSourceAppearance && assignment.ContentBounds is not null)
+            {
+                issues.Add(new(assignment.SlideNumber, "content fitting cannot preserve source font sizes"));
+                continue;
+            }
             var sourceLayout = slide.SlideLayoutPart;
             var systemShapes = assignment.SourceSystemShapes ?? [];
             if (systemShapes.Count != systemShapes.Select(item => item.ShapeId).Distinct().Count()
@@ -106,7 +111,8 @@ public static class TemplateApplicator
             }
             try
             {
-                frozenPlaceholderCount += FreezeSlidePlaceholders(slide, sourceEvidence.Slides[assignment.SlideNumber - 1], assignment.SlideNumber, plan.SystemPlaceholderPolicy, removedSystemPlaceholders);
+                if (plan.PreserveSourceAppearance) PreserveSourceTheme(slide);
+                frozenPlaceholderCount += FreezeSlidePlaceholders(slide, sourceEvidence.Slides[assignment.SlideNumber - 1], assignment.SlideNumber, plan.SystemPlaceholderPolicy, removedSystemPlaceholders, plan.PreserveSourceAppearance);
             }
             catch (InvalidOperationException error)
             {
@@ -139,7 +145,37 @@ public static class TemplateApplicator
         return new TemplateApplicationResult(inputPath, templatePath, outputPath, changed, issues, materializedLayoutShapes, frozenPlaceholderCount, removedSystemPlaceholders);
     }
 
-    private static int FreezeSlidePlaceholders(SlidePart slidePart, SlideDetailReport sourceEvidence, int slideNumber, string systemPlaceholderPolicy, List<RemovedSystemPlaceholder> removed)
+    private static void PreserveSourceTheme(SlidePart slide)
+    {
+        var master = slide.SlideLayoutPart?.SlideMasterPart;
+        var elements = master?.ThemePart?.Theme?.ThemeElements
+            ?? throw new InvalidOperationException("source theme is missing");
+        var existing = slide.ThemeOverridePart?.ThemeOverride;
+        var layoutOverride = slide.SlideLayoutPart?.ThemeOverridePart?.ThemeOverride;
+        var frozen = new A.ThemeOverride();
+        foreach (var name in new[] { "clrScheme", "fontScheme", "fmtScheme" })
+        {
+            var value = existing?.ChildElements.FirstOrDefault(item => item.LocalName == name)
+                ?? layoutOverride?.ChildElements.FirstOrDefault(item => item.LocalName == name)
+                ?? elements.ChildElements.FirstOrDefault(item => item.LocalName == name)
+                ?? throw new InvalidOperationException($"source theme component is missing: {name}");
+            frozen.Append(value.CloneNode(true));
+        }
+        var part = slide.ThemeOverridePart ?? slide.AddNewPart<ThemeOverridePart>();
+        part.ThemeOverride = frozen;
+        part.ThemeOverride.Save();
+        var sourceMapping = slide.Slide.ColorMapOverride
+            ?? slide.SlideLayoutPart?.SlideLayout?.ColorMapOverride;
+        var sourceMap = sourceMapping?.OverrideColorMapping;
+        var effectiveMap = sourceMap ?? (OpenXmlElement?)master?.SlideMaster.ColorMap
+            ?? throw new InvalidOperationException("source color mapping is missing");
+        var attributes = effectiveMap.GetAttributes();
+        var mapping = new A.OverrideColorMapping();
+        mapping.SetAttributes(attributes);
+        slide.Slide.ColorMapOverride = new ColorMapOverride(mapping);
+    }
+
+    private static int FreezeSlidePlaceholders(SlidePart slidePart, SlideDetailReport sourceEvidence, int slideNumber, string systemPlaceholderPolicy, List<RemovedSystemPlaceholder> removed, bool preserveSourceAppearance)
     {
         var slideShapes = VisualChildren(slidePart.Slide?.CommonSlideData?.ShapeTree).Where(element => ShapeIdFor(element) is not null).GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
         var layoutShapes = VisualChildren(slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree).Where(element => ShapeIdFor(element) is not null).GroupBy(ShapeIdFor).Select(group => group.First()).ToList();
@@ -168,7 +204,7 @@ public static class TemplateApplicator
             }
             inheritedByShape.TryGetValue(shape, out var inherited);
             if (placeholder is not null) MaterializeInheritedTransform(shape, inherited.Geometry);
-            if (shape is Shape textShape)
+            if (shape is Shape textShape && (!preserveSourceAppearance || placeholder is not null))
                 MaterializeTextStyle(slidePart, textShape, inherited.Style as Shape, sourceEvidence.Shapes.Single(item => item.ShapeId == ShapeIdFor(shape)));
             if (placeholder is not null && !IsSystemPlaceholder(placeholder)) changed++;
         }
