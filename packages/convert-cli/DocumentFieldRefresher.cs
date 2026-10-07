@@ -4,7 +4,7 @@ public sealed record DocumentFieldRefreshResult(string Backend);
 
 public static class DocumentFieldRefresher
 {
-    public static DocumentFieldRefreshResult RefreshDocxFields(string input, string output)
+    public static DocumentFieldRefreshResult RefreshDocxFields(string input, string output, bool excludeCaptionHeadings = false)
     {
         if (!File.Exists(input))
             throw new InvalidOperationException($"Input file not found: {input}");
@@ -19,7 +19,7 @@ public static class DocumentFieldRefresher
         Directory.CreateDirectory(preparationRoot);
         try
         {
-            var preparedInput = DocxFieldResultMerger.PrepareSourceParagraphIdentities(input, preparationRoot);
+            var preparedInput = DocxFieldResultMerger.PrepareSourceParagraphIdentities(input, preparationRoot, excludeCaptionHeadings);
             if (WpsPdfConverter.IsAvailable())
             {
                 WpsPdfConverter.RefreshDocxFields(preparedInput, output);

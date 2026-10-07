@@ -521,6 +521,17 @@ try
         "docx_set_table did not atomically apply shape and native source content");
     RunInput("validate-openxml", atomicTableOutput);
 
+    // An inherited theme text fill must not override an explicit replacement color.
+    using (var themedTarget = WordprocessingDocument.Open(atomicTableTarget, true))
+    {
+        var firstRun = themedTarget.MainDocumentPart!.Document.Descendants<Table>()
+            .Single().Elements<TableRow>().ElementAt(1).Descendants<Run>().First();
+        var properties = firstRun.RunProperties ?? firstRun.PrependChild(new RunProperties());
+        properties.Append(new OpenXmlUnknownElement("w14", "textFill", "http://schemas.microsoft.com/office/word/2010/wordml")
+        { InnerXml = "<w14:solidFill xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\"><w14:schemeClr w14:val=\"tx1\"/></w14:solidFill>" });
+        themedTarget.MainDocumentPart.Document.Save();
+    }
+
     var richRunTableOutput = Path.Combine(root, "set-table-rich-runs-output.docx");
     Run("docx_set_table", new
     {
@@ -574,6 +585,9 @@ try
                 && firstRuns[1].RunProperties?.Color is null
                 && firstRuns[1].RunProperties?.Underline is null,
             "docx_set_table did not preserve the exact ordered rich text run evidence");
+        Require(!firstRuns[0].RunProperties!.ChildElements.Any(element => element.LocalName == "textFill")
+                && firstRuns[1].RunProperties!.ChildElements.Any(element => element.LocalName == "textFill"),
+            "explicit color must replace inherited text fill, while an unspecified color retains it");
         var boundaryRun = richCells[1].Descendants<Run>().Single(run => run.InnerText.Length > 0);
         Require(boundaryRun.InnerText == "single-run"
                 && boundaryRun.RunProperties?.Color is null

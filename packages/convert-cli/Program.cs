@@ -56,7 +56,10 @@ internal static class Program
                     }));
                     return 0;
                 case "refresh-docx-fields":
-                    var refreshed = DocumentFieldRefresher.RefreshDocxFields(args[1], args[2]);
+                    if (args.Length != 3 && (args.Length != 4 || args[3] != "--exclude-caption-headings"))
+                        throw new InvalidOperationException("refresh-docx-fields-options-invalid");
+                    var excludeCaptionHeadings = args.Length == 4;
+                    var refreshed = DocumentFieldRefresher.RefreshDocxFields(args[1], args[2], excludeCaptionHeadings);
                     Console.WriteLine(JsonSerializer.Serialize(new
                     {
                         schema = "tiwater.convert-refresh-docx-fields/v1",
@@ -69,6 +72,7 @@ internal static class Program
                         target_format = "docx",
                         version = ToolVersion,
                         backend = refreshed.Backend,
+                        exclude_caption_headings = excludeCaptionHeadings,
                         refresh_scope = new[] { "table-of-contents", "table-of-figures" },
                     }));
                     return 0;
@@ -112,7 +116,7 @@ internal static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>");
         Console.WriteLine("  tiwater-convert recalculate-xlsx <input.xlsx> <output.xlsx>");
-        Console.WriteLine("  tiwater-convert refresh-docx-fields <input.docx> <output.docx>");
+        Console.WriteLine("  tiwater-convert refresh-docx-fields <input.docx> <output.docx> [--exclude-caption-headings]");
         Console.WriteLine("  tiwater-convert <docx|xlsx|pptx|doc|xls|ppt|odt|ods|odp|rtf>-to-pdf <input> <output.pdf>");
     }
 

@@ -9,6 +9,34 @@ using NPOI.HSSF.Util;
 using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
 
+if (args is ["--caption-outline-probe", var captionRoot])
+{
+    Directory.CreateDirectory(captionRoot);
+    XNamespace w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    foreach (var label in new[] { "UnseenTable", "表-新结构" })
+    {
+        var source = Path.Combine(captionRoot, label + ".docx");
+        var xml = new XDocument(new XElement(w + "document", new XElement(w + "body",
+            new XElement(w + "p", new XElement(w + "r", new XElement(w + "instrText", $" TOC \\c \"{label}\" "))),
+            new XElement(w + "p", new XElement(w + "pPr", new XElement(w + "outlineLvl", new XAttribute(w + "val", 1))),
+                new XElement(w + "r", new XElement(w + "instrText", $" SEQ \"{label}\" "), new XElement(w + "t", "caption"))),
+            new XElement(w + "p", new XElement(w + "pPr", new XElement(w + "outlineLvl", new XAttribute(w + "val", 2))),
+                new XElement(w + "r", new XElement(w + "instrText", " SEQ Other "), new XElement(w + "t", "unselected"))))));
+        CreateDocxPackage(source, xml.ToString(), TocStyles());
+        var enabledRoot = Path.Combine(captionRoot, label + "-enabled"); Directory.CreateDirectory(enabledRoot);
+        var prepared = DocxFieldResultMerger.PrepareSourceParagraphIdentities(source, enabledRoot, true);
+        var result = XDocument.Parse(ReadPart(prepared, "word/document.xml"));
+        var outlines = result.Descendants(w + "outlineLvl").Select(x => (int)x.Attribute(w + "val")!).ToArray();
+        Require(outlines.SequenceEqual(new[] { 9, 2 }), "caption selection must change only the declared caption outline");
+        var defaultRoot = Path.Combine(captionRoot, label + "-default"); Directory.CreateDirectory(defaultRoot);
+        prepared = DocxFieldResultMerger.PrepareSourceParagraphIdentities(source, defaultRoot);
+        result = XDocument.Parse(ReadPart(prepared, "word/document.xml"));
+        Require(result.Descendants(w + "outlineLvl").Select(x => (int)x.Attribute(w + "val")!).SequenceEqual(new[] { 1, 2 }),
+            "default refresh must retain both source outlines");
+    }
+    return 0;
+}
+
 if (args is ["--xlsx-formula-cache-merge-probe", var xlsxMergeRoot])
 {
     RunXlsxFormulaCacheMergeProbe(xlsxMergeRoot);

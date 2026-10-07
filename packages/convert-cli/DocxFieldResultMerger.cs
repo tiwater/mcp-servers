@@ -11,11 +11,37 @@ internal static class DocxFieldResultMerger
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static readonly XNamespace W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
 
-    internal static string PrepareSourceParagraphIdentities(string sourcePath, string outputDirectory)
+    internal static string PrepareSourceParagraphIdentities(string sourcePath, string outputDirectory, bool excludeCaptionHeadings = false)
     {
         var document = LoadDocument(sourcePath);
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var changed = false;
+        if (excludeCaptionHeadings)
+        {
+            var instructions = document.Descendants(W + "p")
+                .Select(paragraph => string.Concat(paragraph.Descendants(W + "instrText").Select(node => node.Value)))
+                .ToArray();
+            var labels = instructions
+                .SelectMany(instruction => Regex.Matches(instruction, @"\bTOC\b.*?\\c\s+""([^""]+)""", RegexOptions.IgnoreCase)
+                    .Select(match => match.Groups[1].Value))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var paragraph in document.Descendants(W + "p"))
+            {
+                var instruction = string.Concat(paragraph.Descendants(W + "instrText").Select(node => node.Value));
+                var sequence = Regex.Match(instruction, @"\bSEQ\s+(?:""([^""]+)""|([^\s\\]+))", RegexOptions.IgnoreCase);
+                var label = sequence.Groups[1].Success ? sequence.Groups[1].Value : sequence.Groups[2].Value;
+                if (!sequence.Success || !labels.Contains(label)) continue;
+                var properties = paragraph.Element(W + "pPr");
+                if (properties is null) { properties = new XElement(W + "pPr"); paragraph.AddFirst(properties); }
+                properties.Elements(W + "outlineLvl").Remove();
+                var outline = new XElement(W + "outlineLvl", new XAttribute(W + "val", 9));
+                var later = properties.Elements().FirstOrDefault(element => element.Name == W + "divId"
+                    || element.Name == W + "cnfStyle" || element.Name == W + "rPr"
+                    || element.Name == W + "sectPr" || element.Name == W + "pPrChange");
+                if (later is null) properties.Add(outline); else later.AddBeforeSelf(outline);
+                changed = true;
+            }
+        }
         uint nextId = 1;
         foreach (var paragraph in document.Descendants(W + "p"))
         {
