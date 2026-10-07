@@ -197,7 +197,16 @@ public static class NativeTextMutation
             properties.RemoveAllChildren<Underline>();
             var color = NativeSetTableMutation.ColorValue(textRun.Color);
             var underline = NativeSetTableMutation.UnderlineValue(textRun.Underline);
-            if (color is not null) properties.Append(new Color { Val = color.ToUpperInvariant() });
+            if (color is not null)
+            {
+                // Word's text fill overrides w:color. An explicit replacement color
+                // must replace both representations of the inherited appearance.
+                foreach (var fill in properties.ChildElements.Where(element =>
+                             element.LocalName == "textFill"
+                             && element.NamespaceUri == "http://schemas.microsoft.com/office/word/2010/wordml").ToArray())
+                    fill.Remove();
+                properties.Append(new Color { Val = color.ToUpperInvariant() });
+            }
             if (underline is not null)
                 properties.Append(new Underline
                 {

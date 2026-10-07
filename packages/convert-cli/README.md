@@ -15,7 +15,7 @@ A generic CLI for loss-aware office format conversion.
 ```bash
 tiwater-convert xls-to-xlsx <input.xls> <output.xlsx>
 tiwater-convert recalculate-xlsx <input.xlsx> <output.xlsx>
-tiwater-convert refresh-docx-fields <input.docx> <output.docx>
+tiwater-convert refresh-docx-fields <input.docx> <output.docx> [--exclude-caption-headings]
 tiwater-convert docx-to-pdf <input.docx> <output.pdf>
 tiwater-convert xlsx-to-pdf <input.xlsx> <output.pdf>
 tiwater-convert pptx-to-pdf <input.pptx> <output.pdf>
@@ -34,6 +34,12 @@ parts remain input-authoritative. Its JSON receipt conforms to
 `tiwater.convert-refresh-docx-fields/v1` and binds the input and output bytes by
 SHA-256. It fails closed when native WPS Writer is unavailable; no auxiliary
 renderer is accepted for this layout-dependent operation.
+
+`--exclude-caption-headings` explicitly assigns body outline level to paragraphs whose
+SEQ label is selected by a table-of-figures TOC field before refreshing. This keeps
+those captions in the table of figures and excludes them from heading-based contents;
+caption text, sequence fields, styles and other paragraphs are preserved. The default
+refresh retains source outline levels. The receipt records `exclude_caption_headings`.
 
 Successful native WPS PDF conversions include
 `native_render_provenance` conforming to
