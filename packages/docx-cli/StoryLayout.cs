@@ -42,7 +42,7 @@ public static class StoryLayout
             part = s.part.Uri.OriginalString,
             paragraphs = s.root.Descendants<Paragraph>().Where(p => !p.Ancestors<Table>().Any()).Select(p => new {
                 address = new DocxObjectAddress(s.part.Uri.OriginalString, Observation.NativePathFor(p)),
-                text = NativeMutationSupport.PlainText(p),
+                text = NativeMutationSupport.PlainText(p), staticText = StaticText(p),
                 fieldInstructions = p.Descendants<FieldCode>().Select(f => f.Text).Concat(p.Descendants<SimpleField>().Select(f => f.Instruction?.Value ?? "")).ToArray(),
                 rightIndentTwips = p.ParagraphProperties?.Indentation?.Right?.Value,
                 justification = p.ParagraphProperties?.Justification?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value,
@@ -136,6 +136,20 @@ public static class StoryLayout
     private static IEnumerable<(OpenXmlPart part, OpenXmlPartRootElement root)> Stories(MainDocumentPart main)
         => main.HeaderParts.Select(p => ((OpenXmlPart)p, (OpenXmlPartRootElement)p.Header!)).Concat(main.FooterParts.Select(p => ((OpenXmlPart)p, (OpenXmlPartRootElement)p.Footer!)));
     private static string Instructions(Paragraph p) => JsonSerializer.Serialize(p.Descendants<FieldCode>().Select(f => f.Text).Concat(p.Descendants<SimpleField>().Select(f => f.Instruction?.Value ?? "")));
+    private static string StaticText(Paragraph p)
+    {
+        var text = new System.Text.StringBuilder(); var depth = 0;
+        foreach (var item in p.Descendants())
+        {
+            if (item is FieldChar c)
+            {
+                if (c.FieldCharType?.Value == FieldCharValues.Begin) depth++;
+                else if (c.FieldCharType?.Value == FieldCharValues.End) depth = Math.Max(0, depth - 1);
+            }
+            else if (item is Text t && depth == 0 && !t.Ancestors<SimpleField>().Any()) text.Append(t.Text);
+        }
+        return text.ToString();
+    }
     private static bool HasLeadingWhitespace(Paragraph p) => NativeMutationSupport.PlainText(p) is { Length: > 0 } t && char.IsWhiteSpace(t[0]);
     private static void TrimLeadingWhitespace(Paragraph p)
     {
