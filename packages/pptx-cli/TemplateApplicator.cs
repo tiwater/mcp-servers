@@ -217,7 +217,7 @@ public static class TemplateApplicator
         var textBody = shape.TextBody;
         if (textBody is null) return;
         var placeholder = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape;
-        var masterStyle = MasterTextStyle(slidePart, placeholder);
+        var masterStyle = Inspector.MasterTextStyle(slidePart, placeholder);
         var layoutListStyle = layoutShape?.TextBody?.ListStyle;
         var slideListStyle = textBody.ListStyle;
         var paragraphs = textBody.Elements<A.Paragraph>().ToList();
@@ -252,15 +252,6 @@ public static class TemplateApplicator
         }
     }
 
-    private static OpenXmlElement? MasterTextStyle(SlidePart slidePart, PlaceholderShape? placeholder)
-    {
-        var styles = slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.TextStyles;
-        var type = placeholder?.Type?.Value;
-        if (type == PlaceholderValues.Title || type == PlaceholderValues.CenteredTitle) return styles?.TitleStyle;
-        if (type == PlaceholderValues.Body || type == PlaceholderValues.SubTitle) return styles?.BodyStyle;
-        return styles?.OtherStyle;
-    }
-
     private static OpenXmlElement? LevelProperties(OpenXmlElement? owner, int level)
         => owner?.ChildElements.FirstOrDefault(element => element.LocalName == $"lvl{level + 1}pPr")
             ?? owner?.ChildElements.FirstOrDefault(element => element.LocalName == "defPPr");
@@ -271,6 +262,10 @@ public static class TemplateApplicator
         foreach (var attribute in source.GetAttributes()) target.SetAttribute(attribute);
         foreach (var child in source.ChildElements)
         {
+            // Bullet type is a choice: a direct no-bullet or numbering value
+            // replaces an inherited character bullet, rather than coexisting.
+            if (IsBulletProperty(child))
+                foreach (var existing in target.ChildElements.Where(IsBulletProperty).ToList()) existing.Remove();
             foreach (var existing in target.ChildElements.Where(item => item.LocalName == child.LocalName).ToList()) existing.Remove();
             target.AddChild(child.CloneNode(true), true);
         }

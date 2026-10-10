@@ -19,6 +19,12 @@ Observation reports current slides, masters, layouts, shapes, transforms,
 paragraphs, runs, pictures, and placeholders. It does not infer slide meaning,
 preferred layouts, or business fields.
 
+Paragraph observation includes effective bullet kind/character, numbering type
+and start, left margin and hanging indent. Content/object placeholders (including
+the omitted default object type) inherit the master body text style. Direct
+paragraph values override inherited values; a direct no-bullet value suppresses
+an inherited bullet.
+
 ## Fixed technical mutation
 
 ```bash

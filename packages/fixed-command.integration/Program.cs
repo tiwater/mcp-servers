@@ -299,6 +299,52 @@ Check("pptx", "template-system-placeholder-policy", directory =>
         Require(exitCode == (expectSuccess ? 0 : 1), $"{policy} returned an unexpected exit code");
     }
 });
+foreach (var variant in new[] { "default-object", "explicit-object", "body", "direct-no-bullet" })
+    Check("pptx", $"template-body-bullet-{variant}", directory =>
+    {
+        var source = Path.Combine(directory, "source.pptx");
+        var template = Path.Combine(directory, "template.pptx");
+        CreateTemplatePresentation(source, includeSystemPlaceholder: false);
+        CreateTemplatePresentation(template, includeSystemPlaceholder: false);
+        using (var document = PresentationDocument.Open(source, true))
+        {
+            var part = document.PresentationPart!;
+            var master = part.SlideMasterParts.Single();
+            master.SlideMaster.Append(new P.TextStyles(new P.TitleStyle(),
+                new P.BodyStyle(new A.Level2ParagraphProperties(
+                    new A.CharacterBullet { Char = "◆" }) { LeftMargin = 685800, Indent = -228600 }),
+                new P.OtherStyle(new A.Level2ParagraphProperties(new A.NoBullet()) { LeftMargin = 0 })));
+            var slide = part.SlideParts.Single();
+            var shape = slide.Slide.Descendants<P.Shape>().Single();
+            var placeholder = new P.PlaceholderShape { Index = 27U };
+            if (variant == "body") placeholder.Type = P.PlaceholderValues.Body;
+            if (variant == "explicit-object") placeholder.Type = P.PlaceholderValues.Object;
+            shape.NonVisualShapeProperties!.ApplicationNonVisualDrawingProperties!.Append(placeholder);
+            var properties = new A.ParagraphProperties { Level = 1 };
+            if (variant == "direct-no-bullet") properties.Append(new A.NoBullet());
+            shape.TextBody!.Elements<A.Paragraph>().Single().PrependChild(properties);
+            master.SlideMaster.Save(); slide.Slide.Save();
+        }
+        var target = Dockit.Pptx.Inspector.InspectDetail(template).Masters.Single();
+        var output = Path.Combine(directory, "output.pptx");
+        var request = Path.Combine(directory, "request.json");
+        File.WriteAllText(request, JsonSerializer.Serialize(new
+        {
+            input = source, template, output, receiptOutput = Path.Combine(directory, "receipt.json"),
+            targetMasterPath = target.Path,
+            slides = new[] { new { slideNumber = 1, targetLayoutPath = target.Layouts.Single().Path } },
+            preserveSourceAppearance = true,
+        }));
+        Require(Dockit.Pptx.FixedCommandRunner.Run("pptx_apply_template", [request]) == 0, "body-style application rejected");
+        var observed = Dockit.Pptx.Inspector.InspectDetail(output).Slides.Single().Shapes.Single().Paragraphs.Single();
+        Require(observed.MarginLeft == 685800 && observed.Indent == -228600, "body level margins changed");
+        Require(observed.BulletKind == (variant == "direct-no-bullet" ? "none" : "character"), "effective bullet kind changed");
+        Require(observed.BulletCharacter == (variant == "direct-no-bullet" ? null : "◆"), "effective bullet marker changed");
+        using var written = PresentationDocument.Open(output, false);
+        var types = written.PresentationPart!.SlideParts.Single().Slide.Descendants<A.ParagraphProperties>().Single()
+            .ChildElements.Count(item => item.LocalName is "buNone" or "buChar" or "buAutoNum" or "buBlip");
+        Require(types == 1, "paragraph contains competing bullet choices");
+    });
 Check("xlsx", "inspect-font-without-bold-fingerprint", directory =>
 {
     var input = Path.Combine(directory, "font-evidence.xlsx");

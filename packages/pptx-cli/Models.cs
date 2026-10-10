@@ -205,7 +205,13 @@ public sealed record TransformInfo(long X, long Y, long Cx, long Cy);
 public sealed record ParagraphDetail(
     int ParagraphIndex,
     string Text,
-    string? Alignment
+    string? Alignment,
+    string? BulletKind = null,
+    string? BulletCharacter = null,
+    string? NumberingType = null,
+    int? NumberingStartAt = null,
+    long? MarginLeft = null,
+    long? Indent = null
 );
 
 public sealed record TextRunDetail(
