@@ -65,3 +65,5 @@ tiwater-pptx <command> --help
 
 The provider tool list contains technical commands only. The Office MCP adapter
 must expose the same provider-owned requests without adding business fields.
+
+Detailed inspection reports effective placeholder geometry: a slide overrides each offset/extent it declares, then inherits missing components from its uniquely matched layout and master. Slide/layout identity uses the placeholder index (default zero); layout/master identity uses placeholder type. Ambiguous or missing inheritance remains unavailable, never guessed from object names.

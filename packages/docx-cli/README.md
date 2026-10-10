@@ -105,3 +105,15 @@ tiwater-docx <command> --help
 
 The provider tool list contains technical commands only. The Office MCP adapter
 must expose the same provider-owned operations without adding business fields.
+
+### Native story paragraph layout (CLI)
+
+`tiwater-docx docx_read_story_layout <input.docx>` returns section widths and
+current header/footer paragraph addresses, display text, field instructions and
+direct layout properties. `docx_set_story_layout <request.json>` applies explicit
+caller-selected paragraph changes: `paragraph`, `expectedText`,
+`rightInsetFraction` (0–0.2) and `trimLeadingWhitespace`. The request also names
+`input`, `output` and a fresh `receiptOutput`. It sets right alignment and derives
+the right inset from the consuming sections’ usable page width. Body content,
+field instructions and run formatting are preserved; table paragraphs are
+rejected. This capability does not select business targets or change margins.
