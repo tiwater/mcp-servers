@@ -20,6 +20,8 @@ public static class Cli
         "export-json",
         "normalize-openxml",
         NativeDocumentCreate.Command,
+        StoryLayout.InspectCommand,
+        StoryLayout.SetCommand,
         "validate-font-policy",
         "validate-toc-style-policy",
         .. ObservationCommand.Commands,
@@ -79,6 +81,7 @@ public static class Cli
             return args[0] switch
             {
                 "inspect" => RunInspectAsync(args[1..]),
+                StoryLayout.InspectCommand or StoryLayout.SetCommand => Task.FromResult(StoryLayout.Run(args[0], args[1..])),
                 "compare" => RunCompareAsync(args[1..]),
                 "validate-openxml" => Task.FromResult(OpenXmlValidation.Run(args[1..])),
                 "strip-direct-formatting" => Task.FromResult(Transforms.RunStripDirectFormatting(args[1..])),
@@ -206,6 +209,15 @@ public static class Cli
 
     private static bool PrintCommandUsage(string command)
     {
+        if (command == StoryLayout.InspectCommand || command == StoryLayout.SetCommand)
+        {
+            Console.WriteLine("Purpose: Read native header/footer paragraph layout or apply caller-selected right alignment and a page-relative right inset.");
+            Console.WriteLine("Consumes: Current DOCX for reading; mutation request with input, output, receiptOutput and changes (paragraph address, expectedText, rightInsetFraction 0..0.2, trimLeadingWhitespace).");
+            Console.WriteLine("Produces: Current sections and story paragraphs, or atomic mutation with preserved body, run formatting and field instructions and fresh readback receipt.");
+            Console.WriteLine("Do not use for: Choosing business content, rebuilding stories, changing body text, tables, fields or page margins.");
+            Console.WriteLine(command == StoryLayout.InspectCommand ? "Usage: tiwater-docx docx_read_story_layout <input.docx>" : "Usage: tiwater-docx docx_set_story_layout <request.json>");
+            return true;
+        }
         if (command == NativeSectionHeaderFooterReferenceCopy.Command)
         {
             Console.WriteLine("Purpose: Copy selected native header and footer references between sections in one current DOCX.");
