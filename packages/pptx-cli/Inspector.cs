@@ -317,7 +317,7 @@ public static class Inspector
                 shapes.Add(new ShapeDetail(shapeId,
                     shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "shape", zOrder++,
                     GetAttributeValue(app?.PlaceholderShape, "type"), null, null,
-                    string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ExtractTransform(shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody, layoutTextStyle, masterTextStyle),
+                    string.Concat(shape.TextBody?.Descendants<A.Text>().Select(text => text.Text) ?? []), ResolvePlaceholderTransform(slideContext, placeholder, shape.ShapeProperties?.Transform2D), ExtractParagraphs(shape.TextBody, layoutTextStyle, masterTextStyle),
                     ExtractRuns(shape.TextBody, layoutTextStyle, masterTextStyle, slideContext?.SlideLayoutPart?.SlideMasterPart?.ThemePart,
                         EffectiveColorMap(slideContext), EffectiveThemeOverride(slideContext),
                         shape.ShapeStyle?.FontReference))
@@ -341,7 +341,7 @@ public static class Inspector
                 shapes.Add(new ShapeDetail(shapeId,
                     picture.NonVisualPictureProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "picture", zOrder++,
                     GetAttributeValue(placeholder, "type"), mediaPath, mediaHash, string.Empty,
-                    ExtractTransform(picture.ShapeProperties?.Transform2D), [], [])
+                    ResolvePlaceholderTransform(slideContext, placeholder, picture.ShapeProperties?.Transform2D), [], [])
                 {
                     PlaceholderPresent = placeholder is not null,
                     PlaceholderIndex = placeholder?.Index?.Value
@@ -356,7 +356,7 @@ public static class Inspector
                 shapes.Add(new ShapeDetail(shapeId,
                     frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? string.Empty, "graphicFrame", zOrder++,
                     GetAttributeValue(placeholder, "type"), null, null,
-                    string.Concat(frame.Descendants<A.Text>().Select(value => value.Text)), ExtractTransform(frame.Transform),
+                    string.Concat(frame.Descendants<A.Text>().Select(value => value.Text)), ResolvePlaceholderTransform(slideContext, placeholder, frame.Transform),
                     ExtractDescendantParagraphs(frame), ExtractDescendantRuns(frame), ExtractTable(frame))
                 {
                     PlaceholderPresent = placeholder is not null,
@@ -392,6 +392,50 @@ public static class Inspector
                 yield return descendant;
         }
     }
+
+    // A slide placeholder may inherit offset and extent independently from its layout/master.
+    // Match slide-to-layout by placeholder index, then layout-to-master by semantic type.
+    private static TransformInfo? ResolvePlaceholderTransform(SlidePart? slide, PlaceholderShape? placeholder, OpenXmlElement? direct)
+    {
+        var candidates = new List<OpenXmlElement?> { direct };
+        if (slide is not null && placeholder is not null)
+        {
+            var layoutTree = slide.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree;
+            var matches = VisualChildren(layoutTree).Where(item => PlaceholderOf(item) is { } ph && (ph.Index?.Value ?? 0U) == (placeholder.Index?.Value ?? 0U)).ToList();
+            if (matches.Count == 1)
+            {
+                var layoutShape = matches[0];
+                candidates.Add(TransformOf(layoutShape));
+                var layoutPlaceholder = PlaceholderOf(layoutShape)!;
+                var type = GetAttributeValue(layoutPlaceholder, "type") ?? "obj";
+                var masterMatches = VisualChildren(slide.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree)
+                    .Where(item => PlaceholderOf(item) is { } ph && (GetAttributeValue(ph, "type") ?? "obj") == type).ToList();
+                if (masterMatches.Count == 1) candidates.Add(TransformOf(masterMatches[0]));
+            }
+        }
+        var offset = candidates.Where(item => item is not null).SelectMany(item => item!.ChildElements).FirstOrDefault(item => item.LocalName == "off");
+        var extent = candidates.Where(item => item is not null).SelectMany(item => item!.ChildElements).FirstOrDefault(item => item.LocalName == "ext");
+        if (offset is null || extent is null) return null;
+        if (!long.TryParse(GetAttributeValue(offset, "x"), out var x) || !long.TryParse(GetAttributeValue(offset, "y"), out var y)
+            || !long.TryParse(GetAttributeValue(extent, "cx"), out var cx) || !long.TryParse(GetAttributeValue(extent, "cy"), out var cy)) return null;
+        return new TransformInfo(x, y, cx, cy);
+    }
+
+    private static PlaceholderShape? PlaceholderOf(OpenXmlElement item) => item switch
+    {
+        Shape shape => shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape,
+        Picture picture => picture.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape,
+        GraphicFrame frame => frame.NonVisualGraphicFrameProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape,
+        _ => null
+    };
+
+    private static OpenXmlElement? TransformOf(OpenXmlElement item) => item switch
+    {
+        Shape shape => shape.ShapeProperties?.Transform2D,
+        Picture picture => picture.ShapeProperties?.Transform2D,
+        GraphicFrame frame => frame.Transform,
+        _ => null
+    };
 
     private static TransformInfo? ExtractTransform(A.Transform2D? transform)
     {
