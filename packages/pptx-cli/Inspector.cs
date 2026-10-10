@@ -505,7 +505,29 @@ public static class Inspector
                 "l" => A.TextAlignmentTypeValues.Left,
                 _ => null,
             })).Value;
-            return new ParagraphDetail(index, string.Concat(paragraph.Descendants<A.Text>().Select(text => text.Text)), alignment);
+            var candidates = new OpenXmlElement?[]
+            {
+                paragraph.ParagraphProperties,
+                LevelProperties(listStyle, level),
+                LevelProperties(layoutTextStyle, level),
+                LevelProperties(masterTextStyle, level),
+            };
+            var bullet = candidates.Where(item => item is not null)
+                .Select(item => item!.ChildElements.FirstOrDefault(child => child.LocalName is "buNone" or "buChar" or "buAutoNum" or "buBlip"))
+                .FirstOrDefault(item => item is not null);
+            long? Attribute(string name)
+            {
+                var value = candidates.Select(item => GetAttributeValue(item, name)).FirstOrDefault(value => value is not null);
+                return long.TryParse(value, out var number) ? number : null;
+            }
+            var bulletKind = bullet?.LocalName switch
+            {
+                "buNone" => "none", "buChar" => "character", "buAutoNum" => "auto-number", "buBlip" => "picture", _ => null,
+            };
+            return new ParagraphDetail(index, string.Concat(paragraph.Descendants<A.Text>().Select(text => text.Text)), alignment,
+                bulletKind, GetAttributeValue(bullet, "char"), GetAttributeValue(bullet, "type"),
+                int.TryParse(GetAttributeValue(bullet, "startAt"), out var startAt) ? startAt : null,
+                Attribute("marL"), Attribute("indent"));
         }).ToList();
     }
 
@@ -609,13 +631,15 @@ public static class Inspector
         return runs;
     }
 
-    private static OpenXmlElement? MasterTextStyle(SlidePart? slidePart, PlaceholderShape? placeholder)
+    internal static OpenXmlElement? MasterTextStyle(SlidePart? slidePart, PlaceholderShape? placeholder)
     {
         var styles = slidePart?.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.TextStyles;
         if (styles is null) return null;
         var type = GetAttributeValue(placeholder, "type");
         if (type is "title" or "ctrTitle") return styles.TitleStyle;
-        if (type is "body" or "subTitle") return styles.BodyStyle;
+        // Content/object placeholders inherit the master body text style even
+        // when their default object type is omitted in the source package.
+        if (placeholder is not null && type is null or "obj" or "body" or "subTitle") return styles.BodyStyle;
         return styles.OtherStyle;
     }
 
