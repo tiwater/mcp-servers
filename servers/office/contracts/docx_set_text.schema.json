@@ -35,6 +35,12 @@
           "text": {
             "type": "string"
           },
+          "outlineLevel": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9,
+            "description": "Optional explicit paragraph outline level (0–8 headings, 9 body text). Requires a paragraph target. Omit to preserve its existing outline setting."
+          },
           "fontName": {
             "type": "string",
             "minLength": 1,
