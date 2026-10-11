@@ -31,6 +31,8 @@ public static class NativeTextMutation
         for (var index = 0; index < request.Changes.Count; index++)
         {
             var change = request.Changes[index];
+            if (change.OutlineLevel is < 0 or > 9)
+                throw new InvalidOperationException($"outline-level-must-be-between-zero-and-nine: changes[{index}]");
             if (change.FontName is not null && (string.IsNullOrWhiteSpace(change.FontName) || change.Text.Length == 0))
                 throw new InvalidOperationException($"font-name-requires-nonempty-text: changes[{index}]");
         }
@@ -45,9 +47,13 @@ public static class NativeTextMutation
         using var paths = NativeMutationSupport.Paths(request.Input, request.Output, request.ReceiptOutput);
         var resolved = Observation.ResolveAddresses(paths.Input, addresses, "changes.target");
         for (var index = 0; index < resolved.Count; index++)
+        {
             if (resolved[index].Kind is not "paragraph" and not "cell" and not "text")
                 throw new InvalidOperationException(
                     $"target-must-be-paragraph-cell-or-text: changes[{index}].target; kind={resolved[index].Kind}");
+            if (request.Changes[index].OutlineLevel is not null && resolved[index].Kind != "paragraph")
+                throw new InvalidOperationException($"outline-level-requires-paragraph-target: changes[{index}]");
+        }
 
         IReadOnlyDictionary<string, int> baseline;
         using (var input = WordprocessingDocument.Open(paths.Input, false))
@@ -81,6 +87,12 @@ public static class NativeTextMutation
                 {
                     var target = Observation.ResolveNativePath(output, resolved[index].StoryPart, resolved[index].NativePath);
                     SetText(target, request.Changes[index].Text, request.Changes[index].FontName);
+                    if (request.Changes[index].OutlineLevel is { } outlineLevel)
+                    {
+                        var paragraph = (Paragraph)target;
+                        paragraph.ParagraphProperties ??= new ParagraphProperties();
+                        paragraph.ParagraphProperties.OutlineLevel = new OutlineLevel { Val = outlineLevel };
+                    }
                 }
                 SaveChangedStories(output, resolved.Select(item => item.StoryPart));
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
@@ -97,7 +109,10 @@ public static class NativeTextMutation
                         item.Address,
                         item.Kind,
                         text,
-                        ReadFontName(target));
+                        ReadFontName(target))
+                    {
+                        OutlineLevel = (target as Paragraph)?.ParagraphProperties?.OutlineLevel?.Val?.Value,
+                    };
                 }).ToArray();
             }
             for (var index = 0; index < readback.Count; index++)
@@ -107,6 +122,9 @@ public static class NativeTextMutation
                 if (request.Changes[index].FontName is not null
                     && !StringComparer.Ordinal.Equals(readback[index].FontName, request.Changes[index].FontName))
                     throw new InvalidOperationException("output-readback-font-mismatch");
+                if (request.Changes[index].OutlineLevel is { } outlineLevel
+                    && readback[index].OutlineLevel != outlineLevel)
+                    throw new InvalidOperationException("output-readback-outline-level-mismatch");
             }
             var receipt = new SetTextReceipt(
                 "tiwater.docx-set-text-receipt/v1",
@@ -293,9 +311,12 @@ public static class NativeTextMutation
         => uri.OriginalString.StartsWith("/", StringComparison.Ordinal) ? uri.OriginalString : "/" + uri.OriginalString;
 }
 
-public sealed record SetTextChange(DocxObjectAddress Target, string Text, string? FontName = null);
+public sealed record SetTextChange(DocxObjectAddress Target, string Text, string? FontName = null, int? OutlineLevel = null);
 public sealed record SetTextRequest(string Input, IReadOnlyList<SetTextChange> Changes, string Output, string ReceiptOutput);
-public sealed record SetTextReadback(DocxObjectAddress Address, string Kind, string Text, string? FontName);
+public sealed record SetTextReadback(DocxObjectAddress Address, string Kind, string Text, string? FontName)
+{
+    public int? OutlineLevel { get; init; }
+}
 public sealed record SetTextReceipt(
     string Schema,
     string Provider,
