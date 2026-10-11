@@ -170,6 +170,7 @@ public static class Inspector
                 var numbering = paragraph.ParagraphProperties?.NumberingProperties;
                 var numberingId = numbering?.NumberingId?.Val?.Value;
                 var numberingLevel = numbering?.NumberingLevelReference?.Val?.Value;
+                var outlineLevel = paragraph.ParagraphProperties?.OutlineLevel?.Val?.Value;
                 var keepNextProperty = paragraph.ParagraphProperties?.GetFirstChild<KeepNext>();
                 var keepLinesProperty = paragraph.ParagraphProperties?.GetFirstChild<KeepLines>();
                 var keepNext = keepNextProperty is not null && (keepNextProperty.Val?.Value ?? true);
@@ -180,14 +181,14 @@ public static class Inspector
                     {
                         type = "paragraph", paragraphIndex = bodyParagraphIndex,
                         address = ParagraphAddress(mainPart, paragraph), style, numberingId,
-                        numberingLevel, keepNext, keepLines, drawingCount, text,
+                        numberingLevel, outlineLevel, keepNext, keepLines, drawingCount, text,
                     });
                 else
                     nodes.Add(new
                     {
                         type = "paragraph", paragraphIndex = bodyParagraphIndex,
                         address = ParagraphAddress(mainPart, paragraph), style, numberingId,
-                        numberingLevel, keepNext, keepLines, text,
+                        numberingLevel, outlineLevel, keepNext, keepLines, text,
                     });
                 bodyParagraphIndex += 1;
             }
@@ -372,6 +373,8 @@ public static class Inspector
 
     private static bool LooksLikeHeading(Paragraph paragraph, string styleId)
     {
+        if (paragraph.ParagraphProperties?.OutlineLevel?.Val?.Value is { } directLevel)
+            return directLevel < 9;
         if (styleId.StartsWith("Heading", StringComparison.OrdinalIgnoreCase))
         {
             return true;
@@ -523,7 +526,7 @@ public static class Inspector
         {
             var paragraph = bodyParagraphs[index];
             var styleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-            if ((styleId is not null && LooksLikeHeading(paragraph, styleId)) || paragraph.ParagraphProperties?.OutlineLevel is not null)
+            if ((styleId is not null && LooksLikeHeading(paragraph, styleId)) || paragraph.ParagraphProperties?.OutlineLevel?.Val?.Value is < 9)
             {
                 var text = bodyParagraphTexts[index];
                 return string.IsNullOrWhiteSpace(text) ? null : Clip(text, 160);

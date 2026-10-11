@@ -31,6 +31,11 @@ current `checked` state. Unsupported drawings omit that property.
 
 ## Native object mutation
 
+`docx_set_text` accepts an optional `outlineLevel` on paragraph targets: 0–8 are
+heading levels and 9 is body text. Omitting it preserves the existing setting.
+The receipt and fresh inspection expose the direct outline level. Other target
+kinds reject this option before writing.
+
 ```bash
 tiwater-docx docx_replace_content_from_source request.json
 tiwater-docx docx_set_text request.json
