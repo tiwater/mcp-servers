@@ -148,19 +148,19 @@ Successful page evidence records the applied
 and correction, so downstream workflows can audit the extra pass without
 guessing from the extracted text.
 
-OCR configuration is restricted to the per-invocation Supen environment:
+OCR configuration is read from the PDF process's private provider environment:
 
-- `SUPEN_LLM_TOKEN` or `SUPEN_LLM_API_KEY`
-- `SUPEN_LLM_GATEWAY_URL` or `SUPEN_LLM_BASE_URL`
-- the fixed Aliyun `qwen3.8-max` OCR model
+- `OPENROUTER_API_KEY` (preferred) or `OPENAI_API_KEY`
+- `OPENROUTER_BASE_URL` or `OPENAI_BASE_URL` (OpenRouter defaults to `https://openrouter.ai/api/v1`)
+- the fixed OpenRouter `qwen/qwen3.8-max-prime` OCR model
 - `--max-tokens` or `TIWATER_PDF_OCR_MAX_TOKENS` to cap per-page OCR output
 - `--max-parallel` or `TIWATER_PDF_OCR_MAX_PARALLEL` to cap concurrent PDFs in batch mode
 - `--max-page-parallel` or `TIWATER_PDF_OCR_MAX_PAGE_PARALLEL` to cap concurrent pages within each PDF; page results are sorted before cross-page table normalization
 - `--enable-thinking auto|true|false` or `TIWATER_LLM_ENABLE_THINKING` for vendor thinking mode
 
-When running under Supen, `SUPEN_LLM_GATEWAY_URL` should point at the gateway's OpenAI-compatible route, for example `http://127.0.0.1:2755/api/llm/v1`.
-Direct credential/model overrides and OpenAI/OpenRouter/Tiwater credential
-fallbacks are rejected. The credential is not persisted by the PDF server.
+Provider credentials belong to the PDF process environment. Supen is not a credential proxy and does not receive provider keys.
+Direct credential arguments and legacy Supen credential fallbacks are rejected.
+The credential is not persisted by the PDF server.
 Each vision page request retries a bounded three times for transient gateway
 timeouts, throttling, server errors, the gateway's intermittent invalid-URL
 response, and malformed or incomplete model response objects. Parsing and
