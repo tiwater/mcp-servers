@@ -122,7 +122,7 @@ const definitions = new Map([
     outputSchema: largeResultOutputSchema,
   }],
   ['pdf_ocr', {
-    description: 'Observe selected current PDF pages through the fixed Aliyun qwen3.8-max OCR model and per-invocation Supen credential. Set returnContent true to return complete bounded content; provide output to retain the complete immutable result. At least one result channel is required.',
+    description: 'Observe selected current PDF pages through the fixed OpenRouter qwen/qwen3.8-max-prime OCR model and private provider environment. Set returnContent true to return complete bounded content; provide output to retain the complete immutable result. At least one result channel is required.',
     outputSchema: largeResultOutputSchema,
   }],
   ['pdf_extract_table_details', {
@@ -240,7 +240,7 @@ async function pdfExtractTableDetails(args) {
 async function pdfOcr(args) {
   rejectUnexpectedArgs(args, ['input', 'output', 'pages', 'returnContent']);
   const input = path.resolve(requireString(args.input, 'input'));
-  const commandArgs = ['ocr', input, '--provider', 'llm', '--llm-model', 'qwen3.8-max'];
+  const commandArgs = ['ocr', input, '--provider', 'llm', '--llm-model', 'qwen/qwen3.8-max-prime'];
   appendPages(commandArgs, args.pages);
   commandArgs.push('--json');
   const result = await runJsonCandidateChain(pdfCandidates, commandArgs);
@@ -298,7 +298,7 @@ const server = new McpStdioServer({
   name: 'tiwater-pdf',
   version: packageJson.version,
   instructions: [
-    'Generic PDF inspection, deterministic table extraction, and OCR fixed to Aliyun qwen3.8-max through the per-invocation Supen Gateway credential.',
+    'Generic PDF inspection, deterministic table extraction, and OCR fixed to OpenRouter qwen/qwen3.8-max-prime through the PDF process private provider environment.',
     'Every output path is an immutable observation artifact identity: an identical request may replay identical bytes, while every different result uses a different path.',
     'PDF tools report technical observations only and never assign business roles, source dispositions, or delivery decisions.',
   ].join(' '),

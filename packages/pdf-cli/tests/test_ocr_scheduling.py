@@ -32,7 +32,7 @@ class OcrSchedulingTests(unittest.TestCase):
             time.sleep(0.01)
             return {'page': local.index + 1, 'text': f'page-{local.index + 1}', 'orientation_degrees': 0}, 1
 
-        with patch.dict(os.environ, {'SUPEN_LLM_TOKEN': 'synthetic', 'SUPEN_LLM_GATEWAY_URL': 'https://invalid.example/v1'}), patch('openai.OpenAI'), patch.object(cli, '_render_page_image', side_effect=render), patch.object(cli, '_call_vision_page_with_retry', side_effect=vision):
+        with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'synthetic'}), patch('openai.OpenAI'), patch.object(cli, '_render_page_image', side_effect=render), patch.object(cli, '_call_vision_page_with_retry', side_effect=vision):
             if fail:
                 with self.assertRaisesRegex(RuntimeError, 'OCR page 1 failed') as caught:
                     cli.llm_ocr(pdf, max_page_parallel=parallel)

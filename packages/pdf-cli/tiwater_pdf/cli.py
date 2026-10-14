@@ -19,7 +19,7 @@ from pathlib import Path
 import pymupdf as fitz
 from . import __version__
 
-DEFAULT_OCR_MODEL = "qwen3.8-max"
+DEFAULT_OCR_MODEL = "qwen/qwen3.8-max-prime"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 DEFAULT_VISION_REQUEST_ATTEMPTS = 3
 
@@ -405,22 +405,24 @@ def _table_quality_score(header: list, rows: list) -> float:
 
 
 def _resolve_llm_config(api_key: str | None = None, base_url: str | None = None) -> tuple[str, str | None]:
-    """Resolve the per-invocation Supen Gateway credential used by OCR."""
+    """Resolve a private OpenAI-compatible provider credential used by OCR."""
     if api_key is not None or base_url is not None:
-        raise RuntimeError("LLM OCR credentials must be supplied through the per-invocation Supen environment")
+        raise RuntimeError("LLM OCR credentials must be supplied through the process environment")
     resolved_api_key = (
-        os.environ.get("SUPEN_LLM_TOKEN")
-        or os.environ.get("SUPEN_LLM_API_KEY")
+        os.environ.get("OPENROUTER_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
     )
     if not resolved_api_key:
-        raise RuntimeError("LLM OCR requires SUPEN_LLM_TOKEN or SUPEN_LLM_API_KEY")
+        raise RuntimeError("LLM OCR requires OPENROUTER_API_KEY or OPENAI_API_KEY")
 
     resolved_base_url = (
-        os.environ.get("SUPEN_LLM_GATEWAY_URL")
-        or os.environ.get("SUPEN_LLM_BASE_URL")
+        os.environ.get("OPENROUTER_BASE_URL")
+        or os.environ.get("OPENAI_BASE_URL")
     )
+    if not resolved_base_url and os.environ.get("OPENROUTER_API_KEY"):
+        resolved_base_url = "https://openrouter.ai/api/v1"
     if not resolved_base_url:
-        raise RuntimeError("LLM OCR requires SUPEN_LLM_GATEWAY_URL or SUPEN_LLM_BASE_URL")
+        raise RuntimeError("LLM OCR requires OPENROUTER_BASE_URL or OPENAI_BASE_URL")
 
     return resolved_api_key, resolved_base_url
 
@@ -1916,7 +1918,7 @@ def main() -> int:
     ocr_parser = subparsers.add_parser("ocr", help="Extract scanned PDF text with an OpenAI-compatible vision LLM")
     ocr_parser.add_argument("input", type=Path, nargs="+", help="PDF file(s) to OCR")
     ocr_parser.add_argument("--pages", type=str, help="Page numbers (comma-separated, 1-indexed)")
-    ocr_parser.add_argument("--llm-model", choices=[DEFAULT_OCR_MODEL], default=DEFAULT_OCR_MODEL, help="Pinned OCR vision model")
+    ocr_parser.add_argument("--llm-model", default=os.getenv("TIWATER_PDF_OCR_MODEL", DEFAULT_OCR_MODEL), help="Explicit OpenAI-compatible OCR vision model")
     ocr_parser.add_argument("--provider", choices=["llm"], default="llm", help="OCR provider")
     ocr_parser.add_argument("--language", type=str, default=os.getenv("TIWATER_PDF_OCR_LANGUAGE", "eng"), help="Tesseract language for local OCR")
     ocr_parser.add_argument("--zoom", type=float, default=2.5, help="PDF render zoom for page images")
