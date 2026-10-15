@@ -46,6 +46,20 @@ class ProviderConfigTests(unittest.TestCase):
                 base_url="https://openrouter.ai/api/v1",
             )
         )
+        self.assertEqual(
+            cli._build_llm_extra_body(
+                False,
+                base_url="https://openrouter.ai/api/v1",
+            ),
+            {"enable_thinking": False, "reasoning": {"enabled": False}},
+        )
+        self.assertEqual(
+            cli._build_llm_extra_body(
+                False,
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+            {"enable_thinking": False},
+        )
 
     def test_validate_vision_markdown_tables_ignores_empty_strings(self):
         valid_table = "| A | B |\n|---|---|\n| 1 | 2 |"
