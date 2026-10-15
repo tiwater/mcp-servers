@@ -152,7 +152,7 @@ OCR configuration is read from the PDF process's private provider environment:
 
 - `OPENROUTER_API_KEY` (preferred) or `OPENAI_API_KEY`
 - `OPENROUTER_BASE_URL` or `OPENAI_BASE_URL` (OpenRouter defaults to `https://openrouter.ai/api/v1`)
-- the fixed OpenRouter `qwen/qwen3.8-max-prime` OCR model
+- the default OpenRouter `qwen/qwen3.7-plus` OCR model (or `--llm-model` / `TIWATER_PDF_OCR_MODEL`)
 - `--max-tokens` or `TIWATER_PDF_OCR_MAX_TOKENS` to cap per-page OCR output
 - `--max-parallel` or `TIWATER_PDF_OCR_MAX_PARALLEL` to cap concurrent PDFs in batch mode
 - `--max-page-parallel` or `TIWATER_PDF_OCR_MAX_PAGE_PARALLEL` to cap concurrent pages within each PDF; page results are sorted before cross-page table normalization
