@@ -42,8 +42,10 @@ OCR_PAGE_PROMPT = (
 )
 
 OCR_PAGE_JSON_RETRY_PROMPT = (
-    "The previous response could not be decoded as strict JSON. Regenerate the full object rather than explaining or repairing it. "
-    r"All JSON string backslashes must be escaped as \\; never emit \|, and encode a markdown escaped pipe as \\| in the JSON source."
+    "The previous response could not be decoded as strict JSON or contained invalid table structure. "
+    "Regenerate the full object rather than explaining or repairing it. "
+    r"All JSON string backslashes must be escaped as \\; never emit \|, and encode a markdown escaped pipe as \\| in the JSON source. "
+    "CRITICAL: Each element in tables must be ONE single multi-line string containing an entire Markdown table (header rows, one |---|---| separator row, and all data rows joined by \\n); never return individual table rows or |---|---| lines as separate elements of the tables array, and put non-table paragraphs or footers in text rather than tables."
 )
 
 
@@ -983,6 +985,8 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
         if code == "invalid_parameter_error" and "response_format" in message.lower():
             raise _VisionResponseFormatError(message)
         raise ValueError("vision response contains no choices")
+    if getattr(choices[0], "finish_reason", None) == "error":
+        raise _VisionResponseFormatError("vision response aborted with finish_reason=error")
     message = getattr(choices[0], "message", None)
     content = getattr(message, "content", None) or ""
     parsed = _extract_json_object(content)
@@ -995,7 +999,13 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
     raw_tables = parsed.get("tables", [])
     if not isinstance(raw_tables, list):
         raise ValueError("vision page tables must be an array")
-    page_tables = _validate_vision_markdown_tables(raw_tables)
+    filtered_tables = []
+    for entry in raw_tables:
+        if isinstance(entry, str) and entry.strip() and "|" not in entry:
+            raw_text = f"{raw_text}\n{entry.strip()}".strip()
+        else:
+            filtered_tables.append(entry)
+    page_tables = _validate_vision_markdown_tables(filtered_tables)
     page_fields = parsed.get("fields", [])
     if not isinstance(page_fields, list):
         raise ValueError("vision page fields must be an array")
