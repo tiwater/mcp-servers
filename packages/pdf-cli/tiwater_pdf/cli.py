@@ -480,6 +480,20 @@ def _resolve_llm_enable_thinking(
     return _parse_optional_bool(mode)
 
 
+def _build_llm_extra_body(
+    enable_thinking: bool | None,
+    *,
+    base_url: str | None,
+) -> dict | None:
+    if enable_thinking is None:
+        return None
+    extra_body: dict = {"enable_thinking": enable_thinking}
+    if "openrouter.ai" in (base_url or "").lower():
+        extra_body["reasoning"] = {"enabled": enable_thinking}
+    return extra_body
+
+
+
 def _render_page_image(doc, page_num: int, zoom: float = 2.5, rotation_degrees: int = 0) -> bytes:
     page = doc[page_num]
     matrix = fitz.Matrix(zoom, zoom).prerotate(rotation_degrees)
@@ -1067,8 +1081,12 @@ def llm_ocr(
     def ocr_page(page_index: int) -> dict:
         page_number = page_index + 1
         request_kwargs = {}
-        if resolved_enable_thinking is not None:
-            request_kwargs["extra_body"] = {"enable_thinking": resolved_enable_thinking}
+        extra_body = _build_llm_extra_body(
+            resolved_enable_thinking,
+            base_url=resolved_base_url,
+        )
+        if extra_body is not None:
+            request_kwargs["extra_body"] = extra_body
 
         def run_orientation(rotation_degrees: int):
             # Each worker opens its own document because PyMuPDF document/page
