@@ -19,7 +19,7 @@ from pathlib import Path
 import pymupdf as fitz
 from . import __version__
 
-DEFAULT_OCR_MODEL = "qwen/qwen3.8-max-prime"
+DEFAULT_OCR_MODEL = "qwen/qwen3.7-plus"
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 DEFAULT_VISION_REQUEST_ATTEMPTS = 3
 
@@ -468,10 +468,15 @@ def _resolve_llm_enable_thinking(
     if mode in {"auto", ""}:
         model = (llm_model or "").lower()
         base = (base_url or "").lower()
-        is_aliyun = "aliyuncs.com" in base or "dashscope.aliyuncs.com" in base
-        is_bare_aliyun_qwen = "/" not in model and model.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-", "qwen3.8-"))
-        thinking_default_qwen = is_bare_aliyun_qwen or (is_aliyun and model.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-", "qwen3.8-")))
-        return False if thinking_default_qwen else None
+        model_leaf = model.split("/", 1)[-1]
+        is_qwen_thinking_series = model_leaf.startswith(("qwen3.5-", "qwen3.6-", "qwen3.7-", "qwen3.8-"))
+        is_aliyun_or_openrouter = (
+            "/" not in model
+            or model.startswith("qwen/")
+            or "aliyuncs.com" in base
+            or "openrouter.ai" in base
+        )
+        return False if (is_qwen_thinking_series and is_aliyun_or_openrouter) else None
     return _parse_optional_bool(mode)
 
 
@@ -744,6 +749,8 @@ def _validate_vision_markdown_tables(tables: list) -> list[str]:
     for table_index, table in enumerate(tables):
         if not isinstance(table, str):
             raise ValueError(f"vision table {table_index} must be a Markdown string")
+        if not table.strip():
+            continue
         lines = [line for line in table.splitlines() if "|" in line]
         if not lines:
             raise ValueError(f"vision table {table_index} contains no Markdown rows")
@@ -1036,8 +1043,9 @@ def llm_ocr(
     page_progress_func=None,
 ) -> dict:
     """Extract page text from scanned PDFs using an OpenAI-compatible vision model."""
-    if llm_model != DEFAULT_OCR_MODEL:
-        raise ValueError(f"OCR model must be {DEFAULT_OCR_MODEL}")
+    llm_model = str(llm_model or "").strip()
+    if not llm_model:
+        raise ValueError("OCR model must be a non-empty string")
     resolved_api_key, resolved_base_url = _resolve_llm_config(api_key, base_url)
     from openai import OpenAI
     timeout = float(os.environ.get("TIWATER_LLM_TIMEOUT", str(DEFAULT_LLM_TIMEOUT_SECONDS)))

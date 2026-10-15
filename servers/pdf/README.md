@@ -10,7 +10,7 @@ MCP, distributed in the same npm package so both use one trusted release path.
 - `pdf_extract_tables`
 - `pdf_find_table`
 - `pdf_extract_table_details`
-- `pdf_ocr` (pinned OpenRouter `qwen/qwen3.8-max-prime`; private provider environment)
+- `pdf_ocr` (pinned OpenRouter `qwen/qwen3.7-plus`; private provider environment)
 
 Every tool is read-only and records the exact input PDF identity. Read results
 can be retained in immutable JSON artifacts. `pdf_inspect` always requires that
