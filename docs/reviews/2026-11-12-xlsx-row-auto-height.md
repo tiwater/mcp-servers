@@ -1,0 +1,7 @@
+# XLSX explicit row auto-height
+
+`setRowAutoHeight` is an atomic operation on one existing, bounded row. It removes only the OpenXML row height/custom-height attributes. The caller separately approves wrapped value writes and owns final native rendering. Column widths, cells, visibility, outline, and all other row properties remain unchanged.
+
+Development proof used the current biochemical template and approved value operations from Lucid work item `195d0760-613b-4503-bea8-df882944fc04`. The local provider build applied the value writes and row-height operations; fresh provider inspection independently checked 900 current cells, all written values, unchanged columns/merges, and unchanged other row dimensions. Twelve native WPS pages were opened and reviewed, including the complete long buffer text. Proof files are under `/Users/ticos/work/lucid-docs/.lucid-worktrees/submission-multi-input/evidence/ana06-rowheight-provider/`. This is provider development evidence, not completed Lucid scenario acceptance.
+
+Commands executed: `dotnet build packages/xlsx-cli/xlsx.csproj -c Release`; `dotnet run --project packages/fixed-command.integration/FixedCommandIntegration.csproj -c Release`. Fixture outcomes are disregarded and do not support release or integrated correctness claims. The current-input provider operation, independent readback, and native output above are the relevant evidence. Exact published-version clean installation and the consumer's complete current-input runs remain required.

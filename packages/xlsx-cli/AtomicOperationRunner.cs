@@ -23,6 +23,7 @@ public static class AtomicOperationRunner
         "setPageSetup",
         "setRowPageBreaks",
         "setColumnWidth",
+        "setRowAutoHeight",
     };
 
     public static int Run(string[] args)
