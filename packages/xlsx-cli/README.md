@@ -67,3 +67,7 @@ tiwater-xlsx <command> --help
 
 The provider tool list contains technical commands only. The Office MCP adapter
 must expose the same provider-owned requests without adding business fields.
+
+### Automatic height for a written row
+
+The atomic `xlsx_apply_operations` handoff accepts `{ "type": "setRowAutoHeight", "sheet": "Sheet1", "startRow": 2 }`. The row must already exist and be within worksheet bounds. This removes only its explicit height and custom-height flag so the native Office application can size wrapped text. It preserves all cell content, row style, visibility, outline and other rows. Set `wrapText: true` on the approved cell writes separately; this operation does not choose values or change column widths. Final native rendering is required to verify presentation.

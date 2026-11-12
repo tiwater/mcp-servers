@@ -85,6 +85,7 @@ internal static class Editor
             "setPageSetup" => SetPageSetupOperation(workbookPart, operation),
             "setRowPageBreaks" => SetRowPageBreaksOperation(workbookPart, operation),
             "setColumnWidth" => SetColumnWidthOperation(workbookPart, operation),
+            "setRowAutoHeight" => SetRowAutoHeightOperation(workbookPart, operation),
             "setRichTextCellValue" => SetRichTextCellValueOperation(workbookPart, operation),
             "setRangeValues" => SetRangeValuesOperation(workbookPart, operation),
             "insertRows" => InsertRowsOperation(workbookPart, operation),
@@ -318,6 +319,20 @@ internal static class Editor
         });
         workbookPart.Workbook.Save();
         return new XlsxEditAppliedOperation(operation.Type, true, $"Set print area {operation.Sheet}!{operation.Range}");
+    }
+
+    private static XlsxEditAppliedOperation SetRowAutoHeightOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
+    {
+        var worksheetPart = GetWorksheetPart(workbookPart, operation.Sheet!, out var error);
+        if (worksheetPart is null) return new XlsxEditAppliedOperation(operation.Type, false, error!);
+        var rows = worksheetPart.Worksheet.GetFirstChild<SheetData>()?.Elements<Row>()
+            .Where(row => row.RowIndex?.Value == (uint)operation.StartRow!.Value).ToArray() ?? [];
+        if (rows.Length != 1) return new XlsxEditAppliedOperation(operation.Type, false, "Exactly one existing target row is required.");
+        // Leave cells, row style, visibility, outline, and every other row untouched.
+        rows[0].Height = null;
+        rows[0].CustomHeight = null;
+        worksheetPart.Worksheet.Save();
+        return new XlsxEditAppliedOperation(operation.Type, true, $"Enabled automatic height for {operation.Sheet}!{operation.StartRow}");
     }
 
     private static XlsxEditAppliedOperation SetColumnWidthOperation(WorkbookPart workbookPart, XlsxEditOperation operation)
@@ -2725,6 +2740,9 @@ internal static class Editor
             return !string.IsNullOrWhiteSpace(operation.Sheet) && TryValidateBreakBeforeRows(operation.BreakBeforeRows)
                 ? null
                 : "sheet and a strictly increasing list of bounded rows are required";
+        if (operation.Type == "setRowAutoHeight")
+            return !string.IsNullOrWhiteSpace(operation.Sheet) && operation.StartRow is >= 1 and <= MaximumWorksheetRow
+                ? null : "sheet and startRow must identify one bounded existing worksheet row";
         if (operation.Type == "setColumnWidth")
             return TryParseWritableColumn(operation.Column, out _)
                 && operation.Width is not null
