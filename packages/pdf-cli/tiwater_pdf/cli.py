@@ -27,8 +27,12 @@ OCR_PAGE_PROMPT = (
     "Extract the visible text from this PDF page image with high fidelity. "
     "Preserve Chinese and English text, numbers, units, tables, row labels, form fields, checkbox marks, and reading order. "
     "Transcribe identifiers character by character exactly as visible; never repair an uncertain digit from context, and add a warning when uncertain. "
-    "Use markdown tables when the page contains clear tables. "
-    "For labeled values or checkbox conclusions outside a clear table, return fields as an array of objects with label, value, raw_text, and options. "
+    "Use markdown tables in tables for every clear table on the page (including summary tables), even if its text also appears in text; never leave a visible table only as pipe-delimited lines in text. "
+    "Respect vertical table column borders strictly: keep handwritten corrections, review codes (such as PW/RW), initials, signatures, stamps, and dates written in an adjacent column strictly in their own column, never bleeding or concatenating them into a neighboring option or result cell. "
+    "Inside table cells, preserve every visible line separated by <br>, including both Chinese and English option lines and any handwritten option lines added below or beside pre-printed choices. "
+    "Inspect every checkbox glyph independently by checking whether a handwritten tick, cross, or pen stroke lies on or inside that exact box before marking it checked (☑) or unchecked (□). "
+    "Never invert adjacent options (for example, ☑ 是 (Yes) □ 否 (No) vs □ 是 (Yes) ☑ 否 (No)), never assume only one language line is checked in a bilingual cell, and do not miss handwritten ticks on Chinese lines or handwritten added option lines. "
+    "For every labeled value or checkbox conclusion outside a data table or in a form/footer section, return an entry in fields as an array of objects with label, value, raw_text, and options. "
     "Each option must have label and a boolean selected that reflects only its visible mark; retain every option and never infer a selection. "
     "Set orientation_degrees to the clockwise rotation required to make the supplied image text upright: exactly 0, 90, 180, or 270. "
     "Do not summarize and do not infer missing values. "
@@ -67,13 +71,78 @@ def _is_response_format_exception(error: Exception) -> bool:
     ))
 
 
+_RETRYABLE_VISION_EXCEPTION_NAMES = frozenset((
+    "APIConnectionError",
+    "APITimeoutError",
+    "RateLimitError",
+    "InternalServerError",
+    "ConnectError",
+    "ConnectTimeout",
+    "ReadTimeout",
+    "WriteTimeout",
+    "PoolTimeout",
+    "RemoteProtocolError",
+))
+
+_RETRYABLE_VISION_ERROR_MARKERS = (
+    "timeout",
+    "timed out",
+    "connection error",
+    "connection reset",
+    "connection aborted",
+    "connection refused",
+    "connection closed",
+    "broken pipe",
+    "remote protocol error",
+    "server disconnected",
+    "temporarily unavailable",
+    "service unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "rate limit",
+    "too many requests",
+    "provided url does not appear to be valid",
+    "invalid_parameter_error",
+)
+
+
+def _retryable_transport_exception_types() -> tuple[type[BaseException], ...]:
+    types: list[type[BaseException]] = [ConnectionError, TimeoutError]
+    try:
+        import openai
+        for name in ("APIConnectionError", "APITimeoutError", "RateLimitError", "InternalServerError"):
+            exc_type = getattr(openai, name, None)
+            if isinstance(exc_type, type) and issubclass(exc_type, BaseException):
+                types.append(exc_type)
+    except ImportError:
+        pass
+    try:
+        import httpx
+        for name in ("TransportError", "TimeoutException"):
+            exc_type = getattr(httpx, name, None)
+            if isinstance(exc_type, type) and issubclass(exc_type, BaseException):
+                types.append(exc_type)
+    except ImportError:
+        pass
+    return tuple(types)
+
+
 def _is_retryable_vision_error(error: Exception) -> bool:
-    status = getattr(error, "status_code", None)
-    text = str(error).lower()
-    return status == 429 or (isinstance(status, int) and status >= 500) or any(marker in text for marker in (
-        "timeout", "timed out", "connection reset", "temporarily unavailable",
-        "provided url does not appear to be valid", "invalid_parameter_error",
-    ))
+    transport_types = _retryable_transport_exception_types()
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, transport_types) or type(current).__name__ in _RETRYABLE_VISION_EXCEPTION_NAMES:
+            return True
+        status = getattr(current, "status_code", None)
+        if status in (408, 429) or (isinstance(status, int) and status >= 500):
+            return True
+        text = str(current).lower()
+        if any(marker in text for marker in _RETRYABLE_VISION_ERROR_MARKERS):
+            return True
+        current = getattr(current, "__cause__", None)
+    return False
 
 
 def _call_vision_with_retry(
@@ -635,13 +704,36 @@ def _extract_json_object(text: str) -> dict:
     return data
 
 
+def _has_unescaped_pipe(line: str) -> bool:
+    escaped = False
+    for char in line:
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "|":
+            return True
+    return False
+
+
+def _has_trailing_unescaped_pipe(value: str) -> bool:
+    if not value.endswith("|"):
+        return False
+    backslashes = 0
+    index = len(value) - 2
+    while index >= 0 and value[index] == "\\":
+        backslashes += 1
+        index -= 1
+    return backslashes % 2 == 0
+
+
 def _split_markdown_table_row(line: str) -> list[str]:
     """Split one pipe-table row without treating escaped pipes as delimiters."""
     value = line.strip()
     if value.startswith("|"):
         value = value[1:]
-    if value.endswith("|") and not value.endswith(r"\|"):
-        value = value[:-1]
+        if _has_trailing_unescaped_pipe(value):
+            value = value[:-1]
     cells: list[str] = []
     current: list[str] = []
     escaped = False
@@ -660,6 +752,19 @@ def _split_markdown_table_row(line: str) -> list[str]:
         current.append("\\")
     cells.append("".join(current).strip())
     return cells
+
+
+def _escape_markdown_table_cell(cell: str) -> str:
+    return cell.replace("\\", "\\\\").replace("|", r"\|")
+
+
+def _format_markdown_table(rows: list[list[str]], separator_after: int = 0) -> str:
+    lines: list[str] = []
+    for index, row in enumerate(rows):
+        lines.append("| " + " | ".join(_escape_markdown_table_cell(cell) for cell in row) + " |")
+        if index == separator_after:
+            lines.append("| " + " | ".join("---" for _ in row) + " |")
+    return "\n".join(lines)
 
 
 def _is_markdown_separator_row(cells: list[str]) -> bool:
@@ -725,13 +830,102 @@ def _drop_merged_cell_suffix_fragments(rows: list[list[str]]) -> list[list[str]]
     return normalized
 
 
+def _markdown_table_signature(table: str) -> tuple[tuple[str, ...], ...]:
+    parsed = [_split_markdown_table_row(line) for line in table.splitlines() if _has_unescaped_pipe(line)]
+    parsed = _drop_globally_empty_markdown_columns(parsed)
+    parsed = _drop_merged_cell_suffix_fragments(parsed)
+    rows: list[tuple[str, ...]] = []
+    for cells in parsed:
+        if _is_markdown_separator_row(cells):
+            continue
+        rows.append(tuple(re.sub(r"\s+", " ", _normalize_markdown_cell(cell)).strip() for cell in cells))
+    return tuple(rows)
+
+
+def _is_table_covered(
+    candidate_rows: tuple[tuple[str, ...], ...],
+    existing_tables: list[tuple[tuple[str, ...], ...]],
+) -> bool:
+    non_empty_candidate = [row for row in candidate_rows if any(row)]
+    if not non_empty_candidate:
+        return True
+    for existing in existing_tables:
+        if candidate_rows == existing:
+            return True
+        existing_set = set(existing)
+        if all(row in existing_set for row in non_empty_candidate):
+            return True
+    return False
+
+
+def _extract_pipe_tables_from_text(text: str) -> list[str]:
+    """Extract contiguous pipe-delimited tables embedded in page text.
+
+    Vision OCR occasionally emits summary tables inside ``text`` as contiguous
+    pipe-delimited lines without outer pipes or a ``|---|---|`` separator row.
+    Non-pipe prose, single pipe-bearing lines, and mismatched-column runs are
+    ignored.
+    """
+    extracted: list[str] = []
+    content_rows: list[list[str]] = []
+    separator_after: int | None = None
+    expected_width: int | None = None
+
+    def flush() -> None:
+        nonlocal content_rows, separator_after, expected_width
+        if (
+            len(content_rows) >= 2
+            and any(cell.strip() for cell in content_rows[0])
+            and sum(1 for row in content_rows if any(cell.strip() for cell in row)) >= 2
+        ):
+            sep_idx = (
+                separator_after
+                if (separator_after is not None and 0 <= separator_after < len(content_rows))
+                else 0
+            )
+            extracted.append(_format_markdown_table(content_rows, separator_after=sep_idx))
+        content_rows = []
+        separator_after = None
+        expected_width = None
+
+    for raw_line in text.splitlines():
+        if not _has_unescaped_pipe(raw_line):
+            flush()
+            continue
+        cells = _split_markdown_table_row(raw_line)
+        if len(cells) < 2:
+            flush()
+            continue
+        is_sep = _is_markdown_separator_row(cells)
+        if expected_width is not None and len(cells) != expected_width:
+            flush()
+        if is_sep:
+            if not content_rows:
+                continue
+            if separator_after is not None:
+                next_header = content_rows.pop() if len(content_rows) >= 2 else None
+                flush()
+                if next_header is not None:
+                    content_rows = [next_header]
+                    expected_width = len(next_header)
+                    separator_after = 0
+                continue
+            separator_after = len(content_rows) - 1
+            continue
+        expected_width = len(cells)
+        content_rows.append(cells)
+
+    flush()
+    return extracted
+
+
 def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
     """Expose model-returned markdown table rows as stable runtime evidence."""
     rows: list[dict] = []
     for table_index, table in enumerate(tables):
         if not isinstance(table, str):
             continue
-        parsed = [_split_markdown_table_row(line) for line in table.splitlines() if "|" in line]
+        parsed = [_split_markdown_table_row(line) for line in table.splitlines() if _has_unescaped_pipe(line)]
         parsed = _drop_globally_empty_markdown_columns(parsed)
         parsed = _drop_merged_cell_suffix_fragments(parsed)
         separator_index = next((index for index, cells in enumerate(parsed) if _is_markdown_separator_row(cells)), None)
@@ -767,7 +961,7 @@ def _validate_vision_markdown_tables(tables: list) -> list[str]:
             raise ValueError(f"vision table {table_index} must be a Markdown string")
         if not table.strip():
             continue
-        lines = [line for line in table.splitlines() if "|" in line]
+        lines = [line for line in table.splitlines() if _has_unescaped_pipe(line)]
         if not lines:
             raise ValueError(f"vision table {table_index} contains no Markdown rows")
         rows = [_split_markdown_table_row(line) for line in lines]
@@ -822,7 +1016,7 @@ def _is_measurement_unit_continuation(text: str) -> bool:
 
 
 _TABLE_OPTION_MARK = re.compile(
-    r"(?<!\S)(☑|☒|✓|✔|□|☐|√(?=\s|[^\W\d_]))\s*",
+    r"(☑|☒|✓|✔|□|☐|(?<!\S)√(?=\s|[^\W\d_]))\s*",
     re.UNICODE,
 )
 _SELECTED_TABLE_OPTION_MARKS = frozenset(("☑", "☒", "✓", "✔", "√"))
@@ -932,6 +1126,16 @@ def _extract_table_logical_rows(pages: list[dict]) -> list[dict]:
     return logical
 
 
+_LABELED_CHECKBOX_LINE = re.compile(
+    r"^(?P<label>.+?)\s*[:：]\s*(?P<rhs>(?:☑|☒|✓|✔|□|☐|√(?=\s|[^\W\d_])).*)$",
+    re.UNICODE,
+)
+
+
+def _normalize_field_identity(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip().lower()
+
+
 def _normalize_form_fields(fields: list, page_number: int) -> list[dict]:
     """Preserve model-extracted non-tabular fields with stable page provenance."""
     normalized: list[dict] = []
@@ -951,6 +1155,8 @@ def _normalize_form_fields(fields: list, page_number: int) -> list[dict]:
             if not option_label or not isinstance(option.get("selected"), bool):
                 continue
             options.append({"label": option_label, "selected": option["selected"]})
+        if not options and raw_text:
+            options = _table_unit_choices(raw_text)["options"]
         selected_options = [option["label"] for option in options if option["selected"]]
         selection_status = (
             "not-applicable" if not options
@@ -971,6 +1177,60 @@ def _normalize_form_fields(fields: list, page_number: int) -> list[dict]:
             "raw_text": raw_text,
         })
     return normalized
+
+
+def _extract_text_checkbox_form_fields(
+    text: str,
+    existing_fields: list[dict],
+    page_number: int,
+) -> list[dict]:
+    """Extract labeled checkbox lines from non-table page text when absent from fields."""
+    known_labels = {
+        _normalize_field_identity(field["label"])
+        for field in existing_fields
+        if field.get("label")
+    }
+    known_raw = {
+        _normalize_field_identity(field["raw_text"])
+        for field in existing_fields
+        if field.get("raw_text")
+    }
+    extracted: list[dict] = []
+    next_index = len(existing_fields)
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or _has_unescaped_pipe(line):
+            continue
+        match = _LABELED_CHECKBOX_LINE.match(line)
+        if not match:
+            continue
+        label = match.group("label").strip()
+        rhs = match.group("rhs").strip()
+        if not label:
+            continue
+        norm_label = _normalize_field_identity(label)
+        norm_raw = _normalize_field_identity(line)
+        if norm_label in known_labels or norm_raw in known_raw:
+            continue
+        choices = _table_unit_choices(rhs)
+        if not choices["options"]:
+            continue
+        selected_options = choices["selected_options"]
+        extracted.append({
+            "field_id": f"page-{page_number}-field-{next_index}",
+            "page": page_number,
+            "field_index": next_index,
+            "label": label,
+            "value": selected_options[0] if len(selected_options) == 1 else "",
+            "options": choices["options"],
+            "selected_options": selected_options,
+            "selection_status": choices["selection_status"],
+            "raw_text": line,
+        })
+        known_labels.add(norm_label)
+        known_raw.add(norm_raw)
+        next_index += 1
+    return extracted
 
 
 def _parse_vision_page_response(response, page_number: int) -> dict:
@@ -1006,6 +1266,12 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
         else:
             filtered_tables.append(entry)
     page_tables = _validate_vision_markdown_tables(filtered_tables)
+    existing_signatures = [_markdown_table_signature(table) for table in page_tables]
+    for candidate_table in _extract_pipe_tables_from_text(raw_text):
+        candidate_signature = _markdown_table_signature(candidate_table)
+        if not _is_table_covered(candidate_signature, existing_signatures):
+            page_tables.append(candidate_table)
+            existing_signatures.append(candidate_signature)
     page_fields = parsed.get("fields", [])
     if not isinstance(page_fields, list):
         raise ValueError("vision page fields must be an array")
@@ -1019,8 +1285,9 @@ def _parse_vision_page_response(response, page_number: int) -> dict:
     if orientation_degrees not in {0, 90, 180, 270}:
         raise ValueError("orientation_degrees must be one of 0, 90, 180, 270")
     page_table_rows = _extract_markdown_table_rows(page_tables, page_number)
-    normalized_fields = _normalize_form_fields(page_fields, page_number)
     page_text = raw_text.strip()
+    normalized_fields = _normalize_form_fields(page_fields, page_number)
+    normalized_fields.extend(_extract_text_checkbox_form_fields(page_text, normalized_fields, page_number))
     if not page_text and not page_table_rows and not normalized_fields and "blank_page" not in page_warnings:
         raise ValueError("vision page has no content and is not declared blank")
     return {
