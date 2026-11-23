@@ -471,6 +471,104 @@ public sealed class Wave3cDocxTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // 0.20.58: docx_insert_objects numId=0 sentinel & Body append before w:sectPr
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void InsertObjects_SourceParagraphWithExplicitNumIdZero_SucceedsWithAndWithoutNumberingPart()
+    {
+        foreach (var withNumberingPart in new[] { false, true })
+        {
+            var tag = withNumberingPart ? "with-part" : "no-part";
+            var inputPath = Path.Combine(_root, $"numid0-{tag}-input.docx");
+            var outputPath = Path.Combine(_root, $"numid0-{tag}-output.docx");
+            var receiptPath = Path.Combine(_root, $"numid0-{tag}-receipt.json");
+
+            using (var doc = WordprocessingDocument.Create(inputPath, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                if (withNumberingPart) AddSimpleNumbering(main, 3);
+                main.Document = new Document(new Body(
+                    new Paragraph(
+                        new ParagraphProperties(new NumberingProperties(new NumberingId { Val = 0 })),
+                        new Run(new Text("11. Relevant Files"))),
+                    new Paragraph(new Run(new Text("Anchor"))),
+                    new SectionProperties()));
+                main.Document.Save();
+            }
+
+            var sourceHeading = new DocxObjectAddress("/word/document.xml", "/w:document[1]/w:body[1]/w:p[1]");
+            var anchor = new DocxObjectAddress("/word/document.xml", "/w:document[1]/w:body[1]/w:p[2]");
+            var bodyParent = new DocxObjectAddress("/word/document.xml", "/w:document[1]/w:body[1]");
+
+            var receipt = NativeObjectMutation.Insert(new InsertObjectsRequest(
+                inputPath,
+                [new InsertObjectsChange(inputPath, [sourceHeading], bodyParent, anchor, Repeat: 2)],
+                outputPath,
+                receiptPath));
+
+            Assert.Equal(2, receipt.Changes.Count);
+            using var outDoc = WordprocessingDocument.Open(outputPath, false);
+            AssertNoValidationErrors(outDoc);
+            var bodyParagraphs = outDoc.MainDocumentPart!.Document.Body!.Elements<Paragraph>().ToArray();
+            Assert.Equal(4, bodyParagraphs.Length);
+            Assert.Equal(0, bodyParagraphs[1].ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value);
+            Assert.Equal(0, bodyParagraphs[2].ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value);
+            Assert.Equal("Anchor", bodyParagraphs[3].InnerText);
+        }
+    }
+
+    [Fact]
+    public void InsertObjects_AppendToBodyWithBeforeNull_InsertsBeforeTrailingSectionPropertiesInOrder()
+    {
+        var inputPath = Path.Combine(_root, "append-sectpr-input.docx");
+        var outputPath = Path.Combine(_root, "append-sectpr-output.docx");
+        var receiptPath = Path.Combine(_root, "append-sectpr-receipt.json");
+
+        using (var doc = WordprocessingDocument.Create(inputPath, WordprocessingDocumentType.Document))
+        {
+            var main = doc.AddMainDocumentPart();
+            AddSimpleNumbering(main, 5);
+            main.Document = new Document(new Body(
+                new Paragraph(new Run(new Text("Body prototype"))),
+                new Paragraph(
+                    new ParagraphProperties(new NumberingProperties(new NumberingId { Val = 0 })),
+                    new Run(new Text("11. Relevant Files"))),
+                new SectionProperties(new PageSize { Width = 11906U, Height = 16838U })));
+            main.Document.Save();
+        }
+
+        var prototype = new DocxObjectAddress("/word/document.xml", "/w:document[1]/w:body[1]/w:p[1]");
+        var heading = new DocxObjectAddress("/word/document.xml", "/w:document[1]/w:body[1]/w:p[2]");
+        var bodyParent = new DocxObjectAddress("/word/document.xml", "/w:document[1]/w:body[1]");
+
+        // Append 3 body paragraphs after the terminal heading (before: null), including one with numId=0.
+        var receipt = NativeObjectMutation.Insert(new InsertObjectsRequest(
+            inputPath,
+            [
+                new InsertObjectsChange(inputPath, [prototype], bodyParent, Before: null, Repeat: 2),
+                new InsertObjectsChange(inputPath, [heading], bodyParent, Before: null, Repeat: 1),
+            ],
+            outputPath,
+            receiptPath));
+
+        Assert.Equal(3, receipt.Changes.Count);
+        Assert.Equal("/w:document[1]/w:body[1]/w:p[3]", receipt.Changes[0].Address.Path);
+        Assert.Equal("/w:document[1]/w:body[1]/w:p[4]", receipt.Changes[1].Address.Path);
+        Assert.Equal("/w:document[1]/w:body[1]/w:p[5]", receipt.Changes[2].Address.Path);
+
+        using var outDoc = WordprocessingDocument.Open(outputPath, false);
+        AssertNoValidationErrors(outDoc);
+        var children = outDoc.MainDocumentPart!.Document.Body!.ChildElements.ToArray();
+        Assert.Equal(6, children.Length);
+        Assert.IsType<SectionProperties>(children[^1]);
+        var paragraphs = children.Take(5).Cast<Paragraph>().Select(p => p.InnerText).ToArray();
+        Assert.Equal(
+            ["Body prototype", "11. Relevant Files", "Body prototype", "Body prototype", "11. Relevant Files"],
+            paragraphs);
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
