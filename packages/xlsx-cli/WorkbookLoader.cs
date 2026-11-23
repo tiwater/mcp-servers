@@ -117,7 +117,7 @@ internal static class WorkbookLoader
                             formattedRowData.Add(string.Empty);
                             currentColumn++;
                         }
-                        var richTextRuns = OpenXmlRichText.GetCellRichTextRuns(cell, sharedStringTable);
+                        var richTextRuns = OpenXmlRichText.GetCellRichTextRuns(cell, sharedStringTable, stylesPart?.Stylesheet);
                         if (!resolveMergedCells)
                         {
                             rowData.Add(rawValue);
@@ -535,6 +535,7 @@ internal static class WorkbookLoader
             return null;
         }
 
+        var cellFont = cell.CellStyle is not null ? workbook.GetFontAt(cell.CellStyle.FontIndex) : null;
         var runs = new List<RichTextRunReport>();
         var position = 0;
         for (var index = 0; index < richText.NumFormattingRuns; index++)
@@ -542,7 +543,7 @@ internal static class WorkbookLoader
             var start = richText.GetIndexOfFormattingRun(index);
             if (start > position)
             {
-                runs.Add(new RichTextRunReport(text[position..start]));
+                runs.Add(BuildLegacyRichTextRun(text[position..start], cellFont, workbook));
             }
 
             var end = index + 1 < richText.NumFormattingRuns
@@ -554,24 +555,27 @@ internal static class WorkbookLoader
             }
 
             var fontIndex = richText.GetFontOfFormattingRun(index);
-            var font = fontIndex == HSSFRichTextString.NO_FONT ? null : workbook.GetFontAt(fontIndex);
-            runs.Add(new RichTextRunReport(
-                text[start..end],
-                font?.FontName,
-                GetLegacyFontColor(font, workbook),
-                GetLegacyUnderline(font),
-                font?.IsBold ?? false,
-                font?.IsItalic ?? false));
+            var font = fontIndex >= 0 ? workbook.GetFontAt(fontIndex) : null;
+            runs.Add(BuildLegacyRichTextRun(text[start..end], font, workbook));
             position = end;
         }
 
         if (position < text.Length)
         {
-            runs.Add(new RichTextRunReport(text[position..]));
+            runs.Add(BuildLegacyRichTextRun(text[position..], cellFont, workbook));
         }
 
         return runs.Count == 0 ? null : runs;
     }
+
+    private static RichTextRunReport BuildLegacyRichTextRun(string text, IFont? font, HSSFWorkbook workbook)
+        => new(
+            text,
+            font?.FontName,
+            GetLegacyFontColor(font, workbook),
+            GetLegacyUnderline(font),
+            font?.IsBold ?? false,
+            font?.IsItalic ?? false);
 
     private static string? GetLegacyFontColor(IFont? font, HSSFWorkbook workbook)
     {
@@ -581,6 +585,11 @@ internal static class WorkbookLoader
         }
 
         var colorIndex = font.Color;
+        if (colorIndex == (short)FontColor.Normal)
+        {
+            return null;
+        }
+
         var color = workbook.GetCustomPalette().GetColor(colorIndex);
         if (color is null)
         {
@@ -603,8 +612,15 @@ internal static class WorkbookLoader
 
     private static string FormatOpenXmlNumber(double value, uint? styleIndex, WorkbookStylesPart? stylesPart)
     {
+        if (!double.IsFinite(value))
+        {
+            return value.ToString(CultureInfo.InvariantCulture);
+        }
+
         var formatCode = GetNumberFormatCode(styleIndex, stylesPart);
-        if (string.IsNullOrWhiteSpace(formatCode) || string.Equals(formatCode, "General", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(formatCode)
+            || string.Equals(formatCode, "General", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(formatCode, "@", StringComparison.Ordinal))
         {
             return value.ToString("G15", CultureInfo.InvariantCulture);
         }
@@ -621,10 +637,144 @@ internal static class WorkbookLoader
             }
         }
 
-        var decimals = DecimalPlacesFromFormat(formatCode);
-        var scaledValue = formatCode.Contains('%', StringComparison.Ordinal) ? value * 100 : value;
-        var formatted = scaledValue.ToString($"F{decimals}", CultureInfo.InvariantCulture);
-        return formatCode.Contains('%', StringComparison.Ordinal) ? $"{formatted}%" : formatted;
+        var section = SelectNumericFormatSection(formatCode, value);
+        if (string.IsNullOrWhiteSpace(section)
+            || string.Equals(section, "General", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(section, "@", StringComparison.Ordinal))
+        {
+            return value.ToString("G15", CultureInfo.InvariantCulture);
+        }
+
+        if (TryFormatScientificNumber(value, section, out var scientificFormatted))
+        {
+            return scientificFormatted;
+        }
+
+        var decimals = DecimalPlacesFromSection(section);
+        var isPercent = section.Contains('%', StringComparison.Ordinal);
+        var formatted = FormatFixedAwayFromZero(value, decimals, isPercent);
+        return isPercent ? $"{formatted}%" : formatted;
+    }
+
+    private static string SelectNumericFormatSection(string formatCode, double value)
+    {
+        var sections = StripQuotedAndEscapedFormatText(formatCode).Split(';');
+        if (value < 0d && sections.Length >= 2 && !string.IsNullOrWhiteSpace(sections[1]))
+        {
+            return sections[1];
+        }
+
+        if (value == 0d && sections.Length >= 3 && !string.IsNullOrWhiteSpace(sections[2]))
+        {
+            return sections[2];
+        }
+
+        return sections[0];
+    }
+
+    private static string FormatFixedAwayFromZero(double value, int decimals, bool isPercent)
+    {
+        var g15 = value.ToString("G15", CultureInfo.InvariantCulture);
+        if (decimal.TryParse(g15, NumberStyles.Float, CultureInfo.InvariantCulture, out var decimalValue))
+        {
+            var canScale = !isPercent || Math.Abs(decimalValue) <= decimal.MaxValue / 100m;
+            if (canScale && decimals <= 28)
+            {
+                var scaled = isPercent ? decimalValue * 100m : decimalValue;
+                var rounded = Math.Round(scaled, decimals, MidpointRounding.AwayFromZero);
+                if (rounded == 0m)
+                {
+                    rounded = 0m;
+                }
+
+                return rounded.ToString($"F{decimals}", CultureInfo.InvariantCulture);
+            }
+        }
+
+        var scaledDouble = isPercent ? value * 100d : value;
+        var roundedDouble = decimals <= 15
+            ? Math.Round(scaledDouble, decimals, MidpointRounding.AwayFromZero)
+            : scaledDouble;
+        if (roundedDouble == 0d)
+        {
+            roundedDouble = 0d;
+        }
+
+        return roundedDouble.ToString($"F{decimals}", CultureInfo.InvariantCulture);
+    }
+
+    private static bool TryFormatScientificNumber(double value, string section, out string formatted)
+    {
+        var match = Regex.Match(section, @"(?<mantissa>[0#?.,]+)(?<expMarker>[Ee])(?<expSign>[+-])(?<expDigits>[0#?]+)");
+        if (!match.Success)
+        {
+            formatted = string.Empty;
+            return false;
+        }
+
+        var mantissaPattern = match.Groups["mantissa"].Value;
+        var expMarker = match.Groups["expMarker"].Value;
+        var expSign = match.Groups["expSign"].Value;
+        var expDigitsPattern = match.Groups["expDigits"].Value;
+        var decimals = DecimalPlacesFromSection(mantissaPattern);
+        var expMinDigits = Math.Max(1, expDigitsPattern.Count(c => c == '0'));
+
+        var decimalIndex = mantissaPattern.IndexOf('.', StringComparison.Ordinal);
+        var integerPart = decimalIndex >= 0 ? mantissaPattern[..decimalIndex] : mantissaPattern;
+        var integerPlaceholders = integerPart.Count(c => c is '0' or '#' or '?');
+        var exponentStep = integerPlaceholders > 1 && integerPart.Contains('#', StringComparison.Ordinal)
+            ? integerPlaceholders
+            : 1;
+
+        if (value == 0d)
+        {
+            var zeroMantissa = 0m.ToString($"F{decimals}", CultureInfo.InvariantCulture);
+            var zeroExpSign = expSign == "+" ? "+" : string.Empty;
+            var zeroExpDigits = 0.ToString($"D{expMinDigits}", CultureInfo.InvariantCulture);
+            formatted = $"{zeroMantissa}{expMarker}{zeroExpSign}{zeroExpDigits}";
+            return true;
+        }
+
+        var isNegative = value < 0d;
+        var e14 = Math.Abs(value).ToString("E14", CultureInfo.InvariantCulture);
+        var parts = e14.Split('E');
+        var mantissa = decimal.Parse(parts[0], CultureInfo.InvariantCulture);
+        var exponent = int.Parse(parts[1], CultureInfo.InvariantCulture);
+
+        if (exponentStep > 1)
+        {
+            var adjustedExponent = (int)Math.Floor((double)exponent / exponentStep) * exponentStep;
+            var shift = exponent - adjustedExponent;
+            mantissa *= Pow10Decimal(shift);
+            exponent = adjustedExponent;
+        }
+
+        var roundDecimals = Math.Min(decimals, 28);
+        var roundedMantissa = Math.Round(mantissa, roundDecimals, MidpointRounding.AwayFromZero);
+        var carryThreshold = Pow10Decimal(exponentStep);
+        if (roundedMantissa >= carryThreshold)
+        {
+            roundedMantissa /= carryThreshold;
+            exponent += exponentStep;
+        }
+
+        var signText = isNegative ? "-" : string.Empty;
+        var mantissaText = roundedMantissa.ToString($"F{decimals}", CultureInfo.InvariantCulture);
+        var expSignText = exponent < 0 ? "-" : (expSign == "+" ? "+" : string.Empty);
+        var expDigitsText = Math.Abs(exponent).ToString($"D{expMinDigits}", CultureInfo.InvariantCulture);
+        formatted = $"{signText}{mantissaText}{expMarker}{expSignText}{expDigitsText}";
+        return true;
+    }
+
+    private static decimal Pow10Decimal(int power)
+    {
+        var result = 1m;
+        for (var i = 0; i < power; i++)
+        {
+            result *= 10m;
+        }
+
+        return result;
     }
 
     private static string? GetNumberFormatCode(uint? styleIndex, WorkbookStylesPart? stylesPart)
@@ -634,28 +784,34 @@ internal static class WorkbookLoader
             return null;
         }
 
-        var cellFormats = stylesPart.Stylesheet.CellFormats.Elements<CellFormat>().ToList();
+        var stylesheet = stylesPart.Stylesheet;
+        var cellFormats = stylesheet.CellFormats.Elements<CellFormat>().ToList();
         if (styleIndex.Value >= cellFormats.Count)
         {
             return null;
         }
 
-        var numberFormatId = cellFormats[(int)styleIndex.Value].NumberFormatId?.Value;
-        if (numberFormatId is null)
-        {
-            return null;
-        }
+        var cellFormat = cellFormats[(int)styleIndex.Value];
+        var baseFormats = stylesheet.CellStyleFormats?.Elements<CellFormat>().ToList() ?? [];
+        var baseFormatIndex = cellFormat.FormatId?.Value;
+        var baseFormat = baseFormatIndex is not null && baseFormatIndex.Value < baseFormats.Count
+            ? baseFormats[(int)baseFormatIndex.Value]
+            : null;
+        var numberFormatId = SpreadsheetValueNormalizer.EffectiveComponentId(
+            cellFormat.NumberFormatId?.Value,
+            cellFormat.ApplyNumberFormat?.Value,
+            baseFormat?.NumberFormatId?.Value);
 
-        var custom = stylesPart.Stylesheet.NumberingFormats?
+        var custom = stylesheet.NumberingFormats?
             .Elements<NumberingFormat>()
-            .FirstOrDefault(format => format.NumberFormatId?.Value == numberFormatId.Value)
+            .LastOrDefault(format => format.NumberFormatId?.Value == numberFormatId)
             ?.FormatCode?.Value;
         if (!string.IsNullOrWhiteSpace(custom))
         {
             return custom;
         }
 
-        return BuiltInNumberFormat(numberFormatId.Value);
+        return BuiltInNumberFormat(numberFormatId);
     }
 
     private static string? BuiltInNumberFormat(uint numberFormatId) => numberFormatId switch
@@ -697,9 +853,8 @@ internal static class WorkbookLoader
         return cleaned.Contains('y') || cleaned.Contains('d') || cleaned.Contains("m/");
     }
 
-    private static int DecimalPlacesFromFormat(string formatCode)
+    private static int DecimalPlacesFromSection(string section)
     {
-        var section = StripQuotedAndEscapedFormatText(formatCode).Split(';', 2)[0];
         var decimalIndex = section.IndexOf('.', StringComparison.Ordinal);
         if (decimalIndex < 0)
         {
