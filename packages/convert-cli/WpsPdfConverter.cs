@@ -78,10 +78,11 @@ public static class WpsPdfConverter
         try
         {
             using var lease = AcquireRuntimeLease();
+            int? actualPageCount = null;
             RunWithTransientStartupRetry(
-                () => RunFieldRefreshHelper(xvfb, dbusRunSession, python, helperPath, input, refreshedPath, tempRoot),
+                () => actualPageCount = RunFieldRefreshHelper(xvfb, dbusRunSession, python, helperPath, input, refreshedPath, tempRoot),
                 () => { if (File.Exists(refreshedPath)) File.Delete(refreshedPath); });
-            DocxFieldResultMerger.Merge(input, refreshedPath, output);
+            DocxFieldResultMerger.Merge(input, refreshedPath, output, actualPageCount);
         }
         finally
         {
@@ -89,7 +90,7 @@ public static class WpsPdfConverter
         }
     }
 
-    private static void RunFieldRefreshHelper(string xvfb, string dbusRunSession, string python, string helperPath, string input, string output, string tempRoot)
+    private static int? RunFieldRefreshHelper(string xvfb, string dbusRunSession, string python, string helperPath, string input, string output, string tempRoot)
     {
         var completionMarker = Path.Combine(tempRoot, "writer-output-complete");
         if (File.Exists(completionMarker)) File.Delete(completionMarker);
@@ -121,11 +122,25 @@ public static class WpsPdfConverter
             if ((!completedOutput && process.ExitCode != 0) || !IsDocx(output))
                 throw new InvalidOperationException($"WPS RPC failed to refresh document fields for {input}." +
                     (string.IsNullOrWhiteSpace(details) ? string.Empty : $" {details}"));
+            return ReadCompletionMarkerPageCount(completionMarker);
         }
         finally
         {
             WpsRpcSession.TerminateNewWpsAutomationProcesses(automationProcesses);
         }
+    }
+
+    internal static int? ReadCompletionMarkerPageCount(string completionMarker)
+    {
+        if (!File.Exists(completionMarker)) return null;
+        foreach (var line in File.ReadLines(completionMarker))
+        {
+            if (line.StartsWith("pages=", StringComparison.Ordinal)
+                && int.TryParse(line["pages=".Length..].Trim(), out var pages)
+                && pages > 0)
+                return pages;
+        }
+        return null;
     }
 
     private static void RunWpsHelper(string xvfb, string dbusRunSession, string python, string helperPath, string input, string output, string tempRoot)
@@ -345,10 +360,51 @@ try:
             figure = require("TablesOfFigures.Item", tables_of_figures.Item(index))
             require("TableOfFigures.Update", figure.Update())
 
+        trace("header-footer-fields")
+        hr_sections, sections = document.get_Sections()
+        if hr_sections == S_OK and sections is not None:
+            hr_section_count, section_count = sections.get_Count()
+            if hr_section_count == S_OK:
+                for section_index in range(1, section_count + 1):
+                    hr_section, section = sections.Item(section_index)
+                    if hr_section != S_OK or section is None:
+                        continue
+                    for getter in (section.get_Headers, section.get_Footers):
+                        hr_container, container = getter()
+                        if hr_container != S_OK or container is None:
+                            continue
+                        hr_count, container_count = container.get_Count()
+                        if hr_count != S_OK:
+                            continue
+                        for item_index in range(1, container_count + 1):
+                            hr_item, item = container.Item(item_index)
+                            if hr_item != S_OK or item is None:
+                                continue
+                            hr_exists, exists = item.get_Exists()
+                            if hr_exists != S_OK or not exists:
+                                continue
+                            hr_range, item_range = item.get_Range()
+                            if hr_range != S_OK or item_range is None:
+                                continue
+                            hr_fields, fields = item_range.get_Fields()
+                            if hr_fields != S_OK or fields is None:
+                                continue
+                            fields.Update()
+
+        page_count = None
+        try:
+            hr_pages, pages = document.ComputeStatistics(wpsapi.wdStatisticPages)
+            if hr_pages == S_OK and isinstance(pages, int) and pages > 0:
+                page_count = pages
+        except Exception:
+            page_count = None
+
         trace("document-save")
         require("Document.Save", document.Save())
         with open(completion_marker, "x", encoding="utf-8") as marker:
             marker.write("complete\n")
+            if page_count is not None:
+                marker.write(f"pages={page_count}\n")
             marker.flush()
             os.fsync(marker.fileno())
         trace("complete")

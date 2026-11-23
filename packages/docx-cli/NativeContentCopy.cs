@@ -120,10 +120,11 @@ public static class NativeContentCopy
             if (sourceRefs.Any(item => item.StoryPart != MainStory))
                 throw new InvalidOperationException("source-address-must-be-main-document-object");
             using var sourceDocument = WordprocessingDocument.Open(group.Key, false);
+            var sourceStyles = sourceDocument.MainDocumentPart?.StyleDefinitionsPart?.Styles;
             var sourceOffset = 0;
             foreach (var item in items)
             {
-                var paragraphs = new List<Paragraph>();
+                var paragraphs = new List<PreparedParagraph>();
                 Paragraph? activeInlineSourceParagraph = null;
                 for (var selectionIndex = 0; selectionIndex < item.Change.SourceSelections.Count; selectionIndex++)
                 {
@@ -135,6 +136,7 @@ public static class NativeContentCopy
                             paragraphs,
                             ref activeInlineSourceParagraph,
                             element,
+                            sourceStyles,
                             item.Change.SourceSelections[selectionIndex],
                             preservedBookmarkIdsByChange?.GetValueOrDefault(item.Index));
                     }
@@ -146,7 +148,7 @@ public static class NativeContentCopy
                             exception);
                     }
                 }
-                if (paragraphs.Count == 0) paragraphs.Add(new Paragraph());
+                if (paragraphs.Count == 0) paragraphs.Add(new PreparedParagraph(new Paragraph(), false, null));
                 result[item.Index] = new PreparedChange(targetRefs[item.Index], group.Key, paragraphs);
             }
         }
@@ -160,7 +162,7 @@ public static class NativeContentCopy
         {
             using var sourceDocument = WordprocessingDocument.Open(group.Key, false);
             var sourceMain = sourceDocument.MainDocumentPart ?? throw new InvalidOperationException("source-main-part-not-found");
-            var roots = group.SelectMany(change => change.Paragraphs).Cast<OpenXmlElement>().ToArray();
+            var roots = group.SelectMany(change => change.Paragraphs).Select(item => item.Paragraph).Cast<OpenXmlElement>().ToArray();
             foreach (var relationshipId in DocxObjectActions.RelationshipIds(roots).Distinct(StringComparer.Ordinal))
                 if (!DocxObjectActions.CanCopyRelationship(sourceMain, relationshipId, out var error))
                     throw new InvalidOperationException(error);
@@ -175,6 +177,7 @@ public static class NativeContentCopy
     {
         var outputMain = outputDocument.MainDocumentPart ?? throw new InvalidOperationException("target-main-part-not-found");
         var outputBody = outputMain.Document?.Body ?? throw new InvalidOperationException("target-body-not-found");
+        var targetStyles = outputMain.StyleDefinitionsPart?.Styles;
         var targets = changes.Select(change =>
             Observation.ResolveNativePath(outputDocument, change.Target.StoryPart, change.Target.NativePath)).ToArray();
 
@@ -183,7 +186,7 @@ public static class NativeContentCopy
         {
             using var sourceDocument = WordprocessingDocument.Open(group.Key, false);
             var sourceMain = sourceDocument.MainDocumentPart ?? throw new InvalidOperationException("source-main-part-not-found");
-            var roots = group.SelectMany(item => item.change.Paragraphs).Cast<OpenXmlElement>().ToArray();
+            var roots = group.SelectMany(item => item.change.Paragraphs).Select(p => p.Paragraph).Cast<OpenXmlElement>().ToArray();
             if (!DocxObjectActions.TryImportStyles(sourceMain, outputMain, roots, apply: true, out var styleError))
                 throw new InvalidOperationException(styleError);
             if (!DocxObjectActions.TryImportNumbering(sourceMain, outputMain, roots, apply: true, out var numberingError))
@@ -192,18 +195,21 @@ public static class NativeContentCopy
                 .ToDictionary(id => id, id => DocxObjectActions.CopyRelationship(sourceMain, outputMain, id), StringComparer.Ordinal);
             foreach (var item in group)
             {
-                var paragraphs = item.change.Paragraphs.Select(paragraph => (Paragraph)paragraph.CloneNode(true)).ToArray();
-                foreach (var paragraph in paragraphs) DocxObjectActions.RewriteRelationships(paragraph, relationshipMap);
-                DocxObjectActions.RemapDrawingIds(outputBody, paragraphs.Cast<OpenXmlElement>().ToArray());
-                ReplaceTargetContent(targets[item.index], paragraphs);
+                var paragraphs = item.change.Paragraphs
+                    .Select(prepared => prepared with { Paragraph = (Paragraph)prepared.Paragraph.CloneNode(true) })
+                    .ToArray();
+                foreach (var paragraph in paragraphs) DocxObjectActions.RewriteRelationships(paragraph.Paragraph, relationshipMap);
+                DocxObjectActions.RemapDrawingIds(outputBody, paragraphs.Select(p => p.Paragraph).Cast<OpenXmlElement>().ToArray());
+                ReplaceTargetContent(targets[item.index], paragraphs, targetStyles);
             }
         }
     }
 
     private static void AppendSelection(
-        List<Paragraph> output,
+        List<PreparedParagraph> output,
         ref Paragraph? activeInlineSourceParagraph,
         OpenXmlElement element,
+        Styles? sourceStyles,
         CopyContentSelection selection,
         IReadOnlySet<string>? preservedBookmarkIds)
     {
@@ -219,6 +225,7 @@ public static class NativeContentCopy
             {
                 output.AddRange(ParagraphsForTextRange(
                     element,
+                    sourceStyles,
                     selection.Range.Start,
                     selection.Range.Length));
                 activeInlineSourceParagraph = null;
@@ -228,6 +235,7 @@ public static class NativeContentCopy
                 output,
                 ref activeInlineSourceParagraph,
                 SourceParagraph(element),
+                sourceStyles,
                 RunForTextRange(element, selection.Range.Start, selection.Range.Length));
             return;
         }
@@ -235,11 +243,12 @@ public static class NativeContentCopy
         switch (element)
         {
             case TableCell cell:
-                output.AddRange(cell.Elements<Paragraph>().Select(paragraph => CloneParagraph(paragraph, preservedBookmarkIds)));
+                output.AddRange(cell.Elements<Paragraph>().Select(paragraph =>
+                    PrepareParagraph(paragraph, CloneParagraph(paragraph, preservedBookmarkIds), sourceStyles)));
                 activeInlineSourceParagraph = null;
                 return;
             case Paragraph paragraph:
-                output.Add(CloneParagraph(paragraph, preservedBookmarkIds));
+                output.Add(PrepareParagraph(paragraph, CloneParagraph(paragraph, preservedBookmarkIds), sourceStyles));
                 activeInlineSourceParagraph = null;
                 return;
             case DocumentFormat.OpenXml.Wordprocessing.Run run:
@@ -247,6 +256,7 @@ public static class NativeContentCopy
                     output,
                     ref activeInlineSourceParagraph,
                     SourceParagraph(run),
+                    sourceStyles,
                     (DocumentFormat.OpenXml.Wordprocessing.Run)run.CloneNode(true));
                 return;
             case Text text:
@@ -254,11 +264,18 @@ public static class NativeContentCopy
                     output,
                     ref activeInlineSourceParagraph,
                     SourceParagraph(text),
+                    sourceStyles,
                     RunForText(text));
                 return;
             default:
                 throw new InvalidOperationException($"source-ref-kind-not-supported-for-content-copy: {element.LocalName}");
         }
+    }
+
+    private static PreparedParagraph PrepareParagraph(Paragraph source, Paragraph cloned, Styles? sourceStyles)
+    {
+        var (isNumbered, level) = ResolveEffectiveNumbering(source, sourceStyles);
+        return new PreparedParagraph(cloned, isNumbered, level);
     }
 
     private static void ValidateEmptyRange(OpenXmlElement element, int start)
@@ -276,8 +293,9 @@ public static class NativeContentCopy
             throw new InvalidOperationException("text-range-out-of-bounds");
     }
 
-    private static IReadOnlyList<Paragraph> ParagraphsForTextRange(
+    private static IReadOnlyList<PreparedParagraph> ParagraphsForTextRange(
         OpenXmlElement element,
+        Styles? sourceStyles,
         int start,
         int length)
     {
@@ -291,21 +309,24 @@ public static class NativeContentCopy
         var totalLength = lengths.Sum() + Math.Max(0, paragraphs.Length - 1);
         if (start < 0 || length < 0 || start > totalLength - length)
             throw new InvalidOperationException("text-range-out-of-bounds");
-        if (length == 0) return Array.Empty<Paragraph>();
+        if (length == 0) return Array.Empty<PreparedParagraph>();
 
         var end = start + length;
         var cursor = 0;
-        var selected = new List<Paragraph>();
+        var selected = new List<PreparedParagraph>();
         for (var index = 0; index < paragraphs.Length; index++)
         {
             var paragraphEnd = cursor + lengths[index];
             var overlapStart = Math.Max(start, cursor);
             var overlapEnd = Math.Min(end, paragraphEnd);
             if (overlapStart < overlapEnd)
-                selected.Add(ParagraphForTextRange(
+                selected.Add(PrepareParagraph(
                     paragraphs[index],
-                    overlapStart - cursor,
-                    overlapEnd - overlapStart));
+                    ParagraphForTextRange(
+                        paragraphs[index],
+                        overlapStart - cursor,
+                        overlapEnd - overlapStart),
+                    sourceStyles));
             cursor = paragraphEnd + 1;
         }
         if (selected.Count == 0)
@@ -346,17 +367,19 @@ public static class NativeContentCopy
     }
 
     private static void AppendInlineSelection(
-        List<Paragraph> output,
+        List<PreparedParagraph> output,
         ref Paragraph? activeSourceParagraph,
         Paragraph sourceParagraph,
+        Styles? sourceStyles,
         DocumentFormat.OpenXml.Wordprocessing.Run run)
     {
         if (!ReferenceEquals(activeSourceParagraph, sourceParagraph))
         {
-            output.Add(new Paragraph());
+            var (isNumbered, level) = ResolveEffectiveNumbering(sourceParagraph, sourceStyles);
+            output.Add(new PreparedParagraph(new Paragraph(), isNumbered, level));
             activeSourceParagraph = sourceParagraph;
         }
-        output[^1].Append(run);
+        output[^1].Paragraph.Append(run);
     }
 
     private static Paragraph SourceParagraph(OpenXmlElement element)
@@ -433,30 +456,136 @@ public static class NativeContentCopy
 
     private static int ScalarLength(string value) => value.EnumerateRunes().Count();
 
-    internal static void ReplaceCellContent(TableCell target, IReadOnlyList<Paragraph> sourceParagraphs)
+    internal static void ReplaceCellContent(
+        TableCell target,
+        IReadOnlyList<PreparedParagraph> sourceParagraphs,
+        Styles? targetStyles = null)
     {
-        var template = target.Elements<Paragraph>().FirstOrDefault();
-        var paragraphProperties = template?.ParagraphProperties?.CloneNode(true) as ParagraphProperties;
-        var targetRunProperties = template?.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>().FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
+        var targetParagraphs = target.Elements<Paragraph>().ToArray();
+        var targetNumbering = targetParagraphs
+            .Select(paragraph => ResolveEffectiveNumbering(paragraph, targetStyles).IsNumbered)
+            .ToArray();
+        var firstTarget = targetParagraphs.FirstOrDefault();
+        var firstNumberedTarget = targetParagraphs
+            .Where((_, index) => targetNumbering[index])
+            .FirstOrDefault();
+        var firstUnnumberedTarget = targetParagraphs
+            .Where((_, index) => !targetNumbering[index])
+            .FirstOrDefault();
+        var defaultRunProperties = firstTarget?.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>()
+            .FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties;
+
         foreach (var child in target.ChildElements.Where(child => child is not TableCellProperties).ToArray())
             child.Remove();
-        foreach (var source in sourceParagraphs)
+
+        for (var index = 0; index < sourceParagraphs.Count; index++)
         {
-            var paragraph = (Paragraph)source.CloneNode(true);
+            var source = sourceParagraphs[index];
+            var template = SelectTargetParagraphTemplate(
+                targetParagraphs,
+                targetNumbering,
+                index,
+                source.IsNumbered,
+                firstTarget,
+                firstNumberedTarget,
+                firstUnnumberedTarget);
+            var paragraphProperties = template?.ParagraphProperties?.CloneNode(true) as ParagraphProperties;
+            if (!source.IsNumbered
+                && template is not null
+                && ResolveEffectiveNumbering(template, targetStyles).IsNumbered)
+            {
+                paragraphProperties = SuppressListNumbering(paragraphProperties, targetStyles);
+            }
+            var templateRunProperties = template?.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>()
+                .FirstOrDefault()?.RunProperties?.CloneNode(true) as RunProperties
+                ?? defaultRunProperties;
+
+            var paragraph = (Paragraph)source.Paragraph.CloneNode(true);
             paragraph.ParagraphProperties?.Remove();
             if (paragraphProperties is not null)
-                paragraph.PrependChild((ParagraphProperties)paragraphProperties.CloneNode(true));
+                paragraph.PrependChild(paragraphProperties);
             foreach (var run in paragraph.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>())
-                run.RunProperties = MergeRunProperties(targetRunProperties, run.RunProperties);
+                run.RunProperties = MergeRunProperties(templateRunProperties, run.RunProperties);
             target.Append(paragraph);
         }
     }
 
-    private static void ReplaceTargetContent(OpenXmlElement target, IReadOnlyList<Paragraph> sourceParagraphs)
+    private static Paragraph? SelectTargetParagraphTemplate(
+        Paragraph[] targetParagraphs,
+        bool[] targetNumbering,
+        int index,
+        bool sourceIsNumbered,
+        Paragraph? firstTarget,
+        Paragraph? firstNumberedTarget,
+        Paragraph? firstUnnumberedTarget)
+    {
+        if (index < targetParagraphs.Length && targetNumbering[index] == sourceIsNumbered)
+            return targetParagraphs[index];
+        return sourceIsNumbered
+            ? firstNumberedTarget ?? firstTarget
+            : firstUnnumberedTarget ?? firstTarget;
+    }
+
+    private static ParagraphProperties? SuppressListNumbering(ParagraphProperties? properties, Styles? targetStyles)
+    {
+        var result = properties ?? new ParagraphProperties();
+        result.NumberingProperties = null;
+        if (StyleHasActiveNumbering(result.ParagraphStyleId?.Val?.Value, targetStyles))
+            result.NumberingProperties = new NumberingProperties(new NumberingId { Val = 0 });
+        if (result.Indentation?.Hanging is not null)
+        {
+            result.Indentation.Hanging = null;
+            if (!result.Indentation.HasAttributes && !result.Indentation.HasChildren)
+                result.Indentation = null;
+        }
+        return result.ChildElements.Count == 0 && !result.HasAttributes ? null : result;
+    }
+
+    internal static (bool IsNumbered, int? Level) ResolveEffectiveNumbering(Paragraph paragraph, Styles? styles)
+    {
+        var direct = paragraph.ParagraphProperties?.NumberingProperties;
+        if (direct?.NumberingId?.Val?.Value is int directNumId)
+        {
+            if (directNumId == 0) return (false, null);
+            return (true, direct.NumberingLevelReference?.Val?.Value ?? 0);
+        }
+        return ResolveStyleNumbering(paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value, styles);
+    }
+
+    private static bool StyleHasActiveNumbering(string? styleId, Styles? styles)
+        => ResolveStyleNumbering(styleId, styles).IsNumbered;
+
+    private static (bool IsNumbered, int? Level) ResolveStyleNumbering(string? styleId, Styles? styles)
+    {
+        if (string.IsNullOrWhiteSpace(styleId) || styles is null) return (false, null);
+        var styleMap = styles.Elements<Style>()
+            .Where(style => !string.IsNullOrWhiteSpace(style.StyleId?.Value))
+            .GroupBy(style => style.StyleId!.Value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var currentId = styleId;
+        while (!string.IsNullOrWhiteSpace(currentId) && visited.Add(currentId))
+        {
+            if (!styleMap.TryGetValue(currentId, out var style)) break;
+            var numbering = style.StyleParagraphProperties?.NumberingProperties;
+            if (numbering?.NumberingId?.Val?.Value is int styleNumId)
+            {
+                if (styleNumId == 0) return (false, null);
+                return (true, numbering.NumberingLevelReference?.Val?.Value ?? 0);
+            }
+            currentId = style.BasedOn?.Val?.Value;
+        }
+        return (false, null);
+    }
+
+    private static void ReplaceTargetContent(
+        OpenXmlElement target,
+        IReadOnlyList<PreparedParagraph> sourceParagraphs,
+        Styles? targetStyles)
     {
         if (target is TableCell cell)
         {
-            ReplaceCellContent(cell, sourceParagraphs);
+            ReplaceCellContent(cell, sourceParagraphs, targetStyles);
             return;
         }
         if (target is not Paragraph paragraph)
@@ -468,7 +597,7 @@ public static class NativeContentCopy
         var nextIndex = paragraph.ChildElements.Count;
         foreach (var source in sourceParagraphs)
         {
-            foreach (var child in source.ChildElements.Where(child => child is not ParagraphProperties))
+            foreach (var child in source.Paragraph.ChildElements.Where(child => child is not ParagraphProperties))
             {
                 var clone = child.CloneNode(true);
                 foreach (var run in clone.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>())
@@ -535,7 +664,7 @@ public static class NativeContentCopy
         return changes.Select(change =>
         {
             var target = Observation.ResolveNativePath(document, change.Target.StoryPart, change.Target.NativePath);
-            var expected = string.Concat(change.Paragraphs.Select(paragraph => paragraph.InnerText));
+            var expected = string.Concat(change.Paragraphs.Select(paragraph => paragraph.Paragraph.InnerText));
             if (!StringComparer.Ordinal.Equals(target.InnerText, expected))
                 throw new InvalidOperationException("output-readback-content-mismatch");
             return new CopyContentReadback(
@@ -558,10 +687,12 @@ public static class NativeContentCopy
             stream.Length);
     }
 
+    internal sealed record PreparedParagraph(Paragraph Paragraph, bool IsNumbered, int? NumberingLevel);
+
     private sealed record PreparedChange(
         ResolvedDocxAddress Target,
         string SourcePath,
-        IReadOnlyList<Paragraph> Paragraphs);
+        IReadOnlyList<PreparedParagraph> Paragraphs);
 }
 
 public sealed record CopyContentSelection(

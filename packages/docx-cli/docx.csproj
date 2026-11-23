@@ -32,4 +32,8 @@
     <None Include="contracts/**/*.schema.json" Pack="true" PackagePath="contracts/%(RecursiveDir)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="docx-cli.tests" />
+  </ItemGroup>
+
 </Project>
