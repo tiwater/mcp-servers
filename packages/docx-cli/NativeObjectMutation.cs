@@ -329,7 +329,17 @@ public static class NativeObjectMutation
                         RemoveCopiedIdentities(clone);
                         DocxObjectActions.RewriteRelationships(clone, relationshipMap);
                         DocxObjectActions.RemapDrawingIds(outputBody, [clone]);
-                        if (before is null) parent.AppendChild(clone); else parent.InsertBefore(clone, before);
+                        if (before is null)
+                        {
+                            if (parent is Body && parent.Elements<SectionProperties>().LastOrDefault() is { } sectPr)
+                                parent.InsertBefore(clone, sectPr);
+                            else
+                                parent.AppendChild(clone);
+                        }
+                        else
+                        {
+                            parent.InsertBefore(clone, before);
+                        }
                         inserted.Add(clone);
                     }
                 }

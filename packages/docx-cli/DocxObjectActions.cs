@@ -206,7 +206,7 @@ internal static class DocxObjectActions
     {
         error = string.Empty;
         var requested = roots.SelectMany(DescendantsAndSelf).OfType<NumberingId>()
-            .Select(item => item.Val?.Value).Where(value => value is not null).Cast<int>().ToHashSet();
+            .Select(item => item.Val?.Value).Where(value => value is not null && value != 0).Cast<int>().ToHashSet();
         if (requested.Count == 0) return true;
         var sourceNumbering = source.NumberingDefinitionsPart?.Numbering;
         if (sourceNumbering is null) { error = "source numbering definitions are missing"; return false; }
