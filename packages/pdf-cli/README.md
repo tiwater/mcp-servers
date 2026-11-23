@@ -97,10 +97,14 @@ normalized `cells[]`; blank continuation cells remain blank. `table_rows` is
 available both on each page and as a flattened top-level array so downstream
 inventory validation can prove row coverage without reparsing markdown or
 matching known business text.
-Each recognized table must arrive as one complete Markdown string. Multi-row
-tables require one separator after their visible header rows; orphan separator
-rows, split row fragments, and multi-row tables without a
+Each recognized table in `tables[]` must arrive as one complete Markdown string. Multi-row
+tables in `tables[]` require one separator after their visible header rows; orphan separator
+rows, split row fragments, and multi-row `tables[]` entries without a
 separator are malformed provider responses and enter the bounded page retry.
+When a vision provider emits a contiguous pipe-delimited table only inside
+page `text` (with or without outer pipes or a `|---|---|` separator row), the
+runtime extracts and normalizes any uncovered table into `tables[]` and
+`table_rows` while ignoring non-pipe prose and single pipe-bearing lines.
 A page with no text, table rows, or form fields is accepted only when the
 provider explicitly marks it with the `blank_page` warning. Exhausting retries
 on either condition fails the page and file instead of publishing structurally
@@ -161,9 +165,11 @@ OCR configuration is read from the PDF process's private provider environment:
 Provider credentials belong to the PDF process environment. Supen is not a credential proxy and does not receive provider keys.
 Direct credential arguments and legacy Supen credential fallbacks are rejected.
 The credential is not persisted by the PDF server.
-Each vision page request retries a bounded three times for transient gateway
-timeouts, throttling, server errors, the gateway's intermittent invalid-URL
-response, and malformed or incomplete model response objects. Parsing and
+Each vision page request retries a bounded three times for transient transport
+and connection failures (including `APIConnectionError`, `APITimeoutError`, and
+network timeouts), throttling (429), 408/5xx server errors, the gateway's
+intermittent invalid-URL response, and malformed or incomplete model response
+objects. Parsing and
 table normalization happen inside the retry boundary. The base prompt requires
 strict JSON-compatible backslash escaping. After a malformed response, the
 remaining bounded attempts add an explicit JSON-escape correction prompt rather
