@@ -1,7 +1,9 @@
+using System.IO.Packaging;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Xml.Linq;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
@@ -140,7 +142,11 @@ public static class NativeObjectMutation
                 var elements = resolved.Select(item => Observation.ResolveNativePath(output, item.StoryPart, item.NativePath)).ToArray();
                 foreach (var element in elements.OrderByDescending(element => element.Ancestors().Count())) element.Remove();
                 output.MainDocumentPart?.Document?.Save();
-                RejectAddedValidationIssues(output, baseline);
+            }
+            GarbageCollectUnreferencedMedia(temporaryPath, MainStory);
+            using (var validated = WordprocessingDocument.Open(temporaryPath, false))
+            {
+                RejectAddedValidationIssues(validated, baseline);
             }
             NativeMutationSupport.Commit(temporaryPath, paths);
             var receipt = new DeleteObjectReceipt(
@@ -154,6 +160,86 @@ public static class NativeObjectMutation
             NativeMutationSupport.CleanupFailure(temporaryPath, paths);
             throw;
         }
+    }
+
+    private const string RelationshipsNamespace = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private const string StrictRelationshipsNamespace = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+
+    internal static void GarbageCollectUnreferencedMedia(string packagePath, string editedStoryPart)
+    {
+        using var package = Package.Open(packagePath, FileMode.Open, FileAccess.ReadWrite);
+        var editedUri = new Uri(editedStoryPart, UriKind.Relative);
+        var removedTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (package.PartExists(editedUri))
+        {
+            var editedPart = package.GetPart(editedUri);
+            var usedRelIds = CollectReferencedRelationshipIds(editedPart);
+            foreach (var rel in editedPart.GetRelationships().ToArray())
+            {
+                if (rel.TargetMode != TargetMode.Internal) continue;
+                var targetUri = PackUriHelper.ResolvePartUri(editedPart.Uri, rel.TargetUri);
+                if (!IsMediaPartUri(targetUri)) continue;
+                if (usedRelIds.Contains(rel.Id)) continue;
+                editedPart.DeleteRelationship(rel.Id);
+                removedTargets.Add(targetUri.OriginalString);
+            }
+        }
+
+        var stillTargeted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var packageRootUri = new Uri("/", UriKind.Relative);
+        foreach (var rel in package.GetRelationships())
+        {
+            if (rel.TargetMode != TargetMode.Internal) continue;
+            stillTargeted.Add(PackUriHelper.ResolvePartUri(packageRootUri, rel.TargetUri).OriginalString);
+        }
+        foreach (var part in package.GetParts())
+        {
+            if (PackUriHelper.IsRelationshipPartUri(part.Uri)) continue;
+            foreach (var rel in part.GetRelationships())
+            {
+                if (rel.TargetMode != TargetMode.Internal) continue;
+                stillTargeted.Add(PackUriHelper.ResolvePartUri(part.Uri, rel.TargetUri).OriginalString);
+            }
+        }
+
+        foreach (var part in package.GetParts().ToArray())
+        {
+            if (PackUriHelper.IsRelationshipPartUri(part.Uri)) continue;
+            var uriStr = part.Uri.OriginalString;
+            var isCandidate = uriStr.StartsWith("/word/media/", StringComparison.OrdinalIgnoreCase)
+                || removedTargets.Contains(uriStr);
+            if (isCandidate && !stillTargeted.Contains(uriStr))
+                package.DeletePart(part.Uri);
+        }
+        package.Flush();
+    }
+
+    private static HashSet<string> CollectReferencedRelationshipIds(PackagePart part)
+    {
+        using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
+        var document = XDocument.Load(stream, LoadOptions.PreserveWhitespace);
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var element in document.Descendants())
+        {
+            foreach (var attribute in element.Attributes())
+            {
+                var ns = attribute.Name.NamespaceName;
+                if ((ns == RelationshipsNamespace || ns == StrictRelationshipsNamespace)
+                    && !string.IsNullOrWhiteSpace(attribute.Value))
+                {
+                    ids.Add(attribute.Value);
+                }
+            }
+        }
+        return ids;
+    }
+
+    private static bool IsMediaPartUri(Uri targetUri)
+    {
+        var path = targetUri.OriginalString;
+        return path.StartsWith("/word/media/", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/media/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static readonly HashSet<string> CopyableKinds = ["paragraph", "table", "row", "run", "text"];

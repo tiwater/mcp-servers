@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -8,8 +9,18 @@ internal static class DocxFieldResultMerger
 {
     private const string DocumentPart = "word/document.xml";
     private const string StylesPart = "word/styles.xml";
+    private const string SettingsPart = "word/settings.xml";
+    private const string AppPropertiesPart = "docProps/app.xml";
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static readonly XNamespace W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
+    private static readonly HashSet<string> SettingsLocalNamesAfterUpdateFields = new(StringComparer.Ordinal)
+    {
+        "hdrShapeDefaults", "footnotePr", "endnotePr", "compat", "docVars", "rsids",
+        "mathPr", "uiCompat97To2003", "attachedSchema", "themeFontLang", "clrSchemeMapping",
+        "doNotIncludeSubdocsInStats", "doNotAutoCompressPictures", "compatSetting",
+        "decimalSymbol", "listSeparator", "docId", "chartTrackingRefBased", "conflictMode",
+        "discardImageEditingData", "defaultImageDpi"
+    };
 
     internal static string PrepareSourceParagraphIdentities(string sourcePath, string outputDirectory, bool excludeCaptionHeadings = false)
     {
@@ -64,7 +75,7 @@ internal static class DocxFieldResultMerger
         return preparedPath;
     }
 
-    internal static void Merge(string sourcePath, string refreshedPath, string outputPath)
+    internal static void Merge(string sourcePath, string refreshedPath, string outputPath, int? actualPageCount = null)
     {
         var source = LoadDocument(sourcePath);
         var refreshed = LoadDocument(refreshedPath);
@@ -84,10 +95,18 @@ internal static class DocxFieldResultMerger
         CopyTocBookmarks(source, refreshed, sourceRegions, refreshedRegions);
         ReplaceIndexRegions(source, refreshed, sourceRegions, refreshedRegions, bodyFontPolicy);
 
-        WriteDocumentPart(sourcePath, source, outputPath);
+        var updatedParts = new Dictionary<string, XDocument>(StringComparer.OrdinalIgnoreCase)
+        {
+            [DocumentPart] = source,
+        };
+        MergeHeaderFooterFieldsAndSettings(sourcePath, refreshedPath, actualPageCount, updatedParts);
+        WriteParts(sourcePath, updatedParts, outputPath);
     }
 
     private static void WriteDocumentPart(string sourcePath, XDocument document, string outputPath)
+        => WriteParts(sourcePath, new Dictionary<string, XDocument>(StringComparer.OrdinalIgnoreCase) { [DocumentPart] = document }, outputPath);
+
+    private static void WriteParts(string sourcePath, IReadOnlyDictionary<string, XDocument> updatedParts, string outputPath)
     {
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (!string.IsNullOrWhiteSpace(outputDirectory)) Directory.CreateDirectory(outputDirectory);
@@ -98,12 +117,16 @@ internal static class DocxFieldResultMerger
             File.Copy(sourcePath, temporaryOutput, overwrite: false);
             using (var archive = ZipFile.Open(temporaryOutput, ZipArchiveMode.Update))
             {
-                var existing = archive.GetEntry(DocumentPart)
-                    ?? throw new InvalidOperationException($"DOCX package is missing {DocumentPart}.");
-                existing.Delete();
-                var replacement = archive.CreateEntry(DocumentPart, CompressionLevel.Optimal);
-                using var stream = replacement.Open();
-                document.Save(stream, SaveOptions.DisableFormatting);
+                foreach (var (partName, document) in updatedParts)
+                {
+                    var existing = archive.GetEntry(partName)
+                        ?? throw new InvalidOperationException($"DOCX package is missing {partName}.");
+                    var actualName = existing.FullName;
+                    existing.Delete();
+                    var replacement = archive.CreateEntry(actualName, CompressionLevel.Optimal);
+                    using var stream = replacement.Open();
+                    document.Save(stream, SaveOptions.DisableFormatting);
+                }
             }
             File.Move(temporaryOutput, outputPath, overwrite: true);
         }
@@ -112,6 +135,330 @@ internal static class DocxFieldResultMerger
             if (File.Exists(temporaryOutput)) File.Delete(temporaryOutput);
         }
     }
+
+    private static void MergeHeaderFooterFieldsAndSettings(
+        string sourcePath,
+        string refreshedPath,
+        int? actualPageCount,
+        Dictionary<string, XDocument> updatedParts)
+    {
+        using var sourceArchive = ZipFile.OpenRead(sourcePath);
+        using var refreshedArchive = ZipFile.OpenRead(refreshedPath);
+
+        var refreshedAppPages = TryReadAppPageCount(refreshedArchive);
+        int? observedRefreshedNumPages = null;
+
+        foreach (var sourceEntry in sourceArchive.Entries
+                     .Where(entry => IsHeaderOrFooterPart(entry.FullName))
+                     .OrderBy(entry => entry.FullName, StringComparer.OrdinalIgnoreCase))
+        {
+            var sourcePart = LoadEntry(sourceEntry);
+            var sourceFields = FindStoryPageFields(sourcePart);
+            if (sourceFields.Count == 0) continue;
+
+            var refreshedEntry = refreshedArchive.GetEntry(sourceEntry.FullName);
+            var refreshedFields = refreshedEntry is null
+                ? []
+                : FindStoryPageFields(LoadEntry(refreshedEntry));
+            var refreshedNumPages = refreshedFields.Where(field => field.Kind == "NUMPAGES").ToList();
+            var refreshedPages = refreshedFields.Where(field => field.Kind == "PAGE").ToList();
+
+            var numPagesIndex = 0;
+            var pageIndex = 0;
+            var partChanged = false;
+
+            foreach (var sourceField in sourceFields)
+            {
+                if (sourceField.Kind == "NUMPAGES")
+                {
+                    var refreshedField = numPagesIndex < refreshedNumPages.Count
+                        ? refreshedNumPages[numPagesIndex]
+                        : refreshedNumPages.FirstOrDefault();
+                    numPagesIndex++;
+
+                    string? targetValue = null;
+                    if (actualPageCount is > 0)
+                    {
+                        targetValue = actualPageCount.Value.ToString(CultureInfo.InvariantCulture);
+                    }
+                    else
+                    {
+                        var sourceText = ReadStoryFieldCachedText(sourceField).Trim();
+                        var refreshedText = refreshedField is null ? null : ReadStoryFieldCachedText(refreshedField).Trim();
+                        if (!string.IsNullOrWhiteSpace(refreshedText)
+                            && (!StringComparer.Ordinal.Equals(refreshedText, sourceText) || refreshedAppPages is null))
+                        {
+                            targetValue = refreshedText;
+                        }
+                        else if (refreshedAppPages is > 0)
+                        {
+                            targetValue = refreshedAppPages.Value.ToString(CultureInfo.InvariantCulture);
+                        }
+                        else if (!string.IsNullOrWhiteSpace(refreshedText))
+                        {
+                            targetValue = refreshedText;
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(targetValue))
+                    {
+                        if (int.TryParse(targetValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                            && parsed > 0)
+                            observedRefreshedNumPages ??= parsed;
+                        if (SetStoryFieldCachedValue(sourceField, targetValue))
+                            partChanged = true;
+                    }
+                }
+                else if (sourceField.Kind == "PAGE")
+                {
+                    var refreshedField = pageIndex < refreshedPages.Count
+                        ? refreshedPages[pageIndex]
+                        : null;
+                    pageIndex++;
+                    var refreshedText = refreshedField is null ? null : ReadStoryFieldCachedText(refreshedField).Trim();
+                    if (!string.IsNullOrWhiteSpace(refreshedText)
+                        && SetStoryFieldCachedValue(sourceField, refreshedText))
+                        partChanged = true;
+                }
+            }
+
+            if (partChanged)
+                updatedParts[sourceEntry.FullName] = sourcePart;
+        }
+
+        var resolvedPageCount = actualPageCount ?? refreshedAppPages ?? observedRefreshedNumPages;
+        if (resolvedPageCount is > 0 && sourceArchive.GetEntry(AppPropertiesPart) is { } appEntry)
+        {
+            var appDoc = LoadEntry(appEntry);
+            var pagesElement = appDoc.Descendants().FirstOrDefault(element => element.Name.LocalName == "Pages");
+            var formatted = resolvedPageCount.Value.ToString(CultureInfo.InvariantCulture);
+            if (pagesElement is not null && !StringComparer.Ordinal.Equals(pagesElement.Value.Trim(), formatted))
+            {
+                pagesElement.Value = formatted;
+                updatedParts[appEntry.FullName] = appDoc;
+            }
+        }
+
+        if (sourceArchive.GetEntry(SettingsPart) is { } settingsEntry)
+        {
+            var settingsDoc = LoadEntry(settingsEntry);
+            if (EnsureUpdateFieldsTrue(settingsDoc))
+                updatedParts[settingsEntry.FullName] = settingsDoc;
+        }
+    }
+
+    private static bool IsHeaderOrFooterPart(string fullName)
+        => Regex.IsMatch(fullName, @"^word/(?:header|footer)\d*\.xml$", RegexOptions.IgnoreCase);
+
+    private static XDocument LoadEntry(ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        return XDocument.Load(stream, LoadOptions.PreserveWhitespace);
+    }
+
+    private static int? TryReadAppPageCount(ZipArchive archive)
+    {
+        var entry = archive.GetEntry(AppPropertiesPart);
+        if (entry is null) return null;
+        try
+        {
+            var doc = LoadEntry(entry);
+            var pagesValue = doc.Descendants().FirstOrDefault(element => element.Name.LocalName == "Pages")?.Value?.Trim();
+            if (int.TryParse(pagesValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0)
+                return parsed;
+        }
+        catch
+        {
+            // Ignore malformed extended properties and rely on header/footer fields or WPS statistics.
+        }
+        return null;
+    }
+
+    private static bool EnsureUpdateFieldsTrue(XDocument settingsDoc)
+    {
+        var root = settingsDoc.Root;
+        if (root is null || root.Name != W + "settings") return false;
+        var existing = root.Element(W + "updateFields");
+        if (existing is not null)
+        {
+            var current = (string?)existing.Attribute(W + "val");
+            if (StringComparer.OrdinalIgnoreCase.Equals(current, "true")) return false;
+            existing.SetAttributeValue(W + "val", "true");
+            return true;
+        }
+
+        var updateFields = new XElement(W + "updateFields", new XAttribute(W + "val", "true"));
+        var anchor = root.Elements().FirstOrDefault(element => SettingsLocalNamesAfterUpdateFields.Contains(element.Name.LocalName));
+        if (anchor is null) root.Add(updateFields);
+        else anchor.AddBeforeSelf(updateFields);
+        return true;
+    }
+
+    private static List<StoryPageField> FindStoryPageFields(XDocument document)
+    {
+        var root = document.Root;
+        if (root is null) return [];
+
+        var fields = new List<StoryPageField>();
+        var stack = new Stack<StoryFieldFrame>();
+
+        foreach (var element in root.Descendants())
+        {
+            if (element.Name == W + "fldSimple")
+            {
+                var kind = HeaderFooterFieldKind((string?)element.Attribute(W + "instr") ?? string.Empty);
+                if (kind is not null)
+                    fields.Add(new StoryPageField(kind, root, element, null, null, null));
+            }
+            else if (element.Name == W + "fldChar")
+            {
+                var type = (string?)element.Attribute(W + "fldCharType");
+                if (type == "begin")
+                {
+                    stack.Push(new StoryFieldFrame(element));
+                }
+                else if (type == "separate")
+                {
+                    if (stack.Count > 0)
+                        stack.Peek().Separate ??= element;
+                }
+                else if (type == "end")
+                {
+                    if (stack.Count == 0) continue;
+                    var frame = stack.Pop();
+                    var kind = HeaderFooterFieldKind(frame.Instruction.ToString());
+                    if (kind is not null)
+                        fields.Add(new StoryPageField(kind, root, null, frame.Begin, frame.Separate, element));
+                }
+            }
+            else if (element.Name == W + "instrText" && stack.Count > 0 && stack.Peek().Separate is null)
+            {
+                stack.Peek().Instruction.Append(element.Value);
+            }
+        }
+
+        return fields;
+    }
+
+    private static string? HeaderFooterFieldKind(string instruction)
+    {
+        var match = Regex.Match(instruction.Trim(), @"^([A-Za-z]+)\b");
+        if (!match.Success) return null;
+        var keyword = match.Groups[1].Value.ToUpperInvariant();
+        return keyword is "PAGE" or "NUMPAGES" ? keyword : null;
+    }
+
+    private static List<XElement> StoryFieldResultTexts(StoryPageField field)
+    {
+        if (field.SimpleField is not null)
+            return field.SimpleField.Descendants(W + "t").ToList();
+        if (field.Separate is null || field.End is null)
+            return [];
+        var order = XNode.DocumentOrderComparer;
+        var scope = field.Separate.Ancestors(W + "p").FirstOrDefault();
+        if (scope is null || !ReferenceEquals(scope, field.End.Ancestors(W + "p").FirstOrDefault()))
+            scope = field.Root;
+        return scope.Descendants(W + "t")
+            .Where(text => order.Compare(text, field.Separate) > 0 && order.Compare(text, field.End) < 0)
+            .ToList();
+    }
+
+    private static string ReadStoryFieldCachedText(StoryPageField field)
+        => string.Concat(StoryFieldResultTexts(field).Select(element => element.Value));
+
+    private static bool SetStoryFieldCachedValue(StoryPageField field, string newValue)
+    {
+        if (field.SimpleField is not null)
+        {
+            var texts = field.SimpleField.Descendants(W + "t").ToList();
+            if (texts.Count > 0)
+            {
+                if (texts.Count == 1 && StringComparer.Ordinal.Equals(texts[0].Value, newValue))
+                    return false;
+                texts[0].Value = newValue;
+                RemoveExtraTextNodes(texts.Skip(1));
+                return true;
+            }
+            field.SimpleField.Add(new XElement(W + "r", new XElement(W + "t", newValue)));
+            return true;
+        }
+
+        if (field.Begin is null || field.End is null) return false;
+        if (field.Separate is not null)
+        {
+            var texts = StoryFieldResultTexts(field);
+            if (texts.Count > 0)
+            {
+                if (texts.Count == 1 && StringComparer.Ordinal.Equals(texts[0].Value, newValue))
+                    return false;
+                texts[0].Value = newValue;
+                RemoveExtraTextNodes(texts.Skip(1));
+                return true;
+            }
+
+            var separateRun = field.Separate.Ancestors(W + "r").FirstOrDefault();
+            var endRun = field.End.Ancestors(W + "r").FirstOrDefault();
+            if (ReferenceEquals(separateRun, endRun) && separateRun is not null)
+            {
+                field.Separate.AddAfterSelf(new XElement(W + "t", newValue));
+                return true;
+            }
+            if (separateRun is not null)
+            {
+                var valueRun = new XElement(W + "r");
+                if (separateRun.Element(W + "rPr") is { } rPr)
+                    valueRun.Add(new XElement(rPr));
+                valueRun.Add(new XElement(W + "t", newValue));
+                separateRun.AddAfterSelf(valueRun);
+                return true;
+            }
+            return false;
+        }
+
+        var beginRun = field.Begin.Ancestors(W + "r").FirstOrDefault();
+        var endRunNoSep = field.End.Ancestors(W + "r").FirstOrDefault();
+        if (endRunNoSep is null) return false;
+        if (ReferenceEquals(beginRun, endRunNoSep))
+        {
+            field.End.AddBeforeSelf(
+                new XElement(W + "fldChar", new XAttribute(W + "fldCharType", "separate")),
+                new XElement(W + "t", newValue));
+            return true;
+        }
+        var sepRun = new XElement(W + "r", new XElement(W + "fldChar", new XAttribute(W + "fldCharType", "separate")));
+        var insertedRun = new XElement(W + "r");
+        if (beginRun?.Element(W + "rPr") is { } beginRPr)
+            insertedRun.Add(new XElement(beginRPr));
+        insertedRun.Add(new XElement(W + "t", newValue));
+        endRunNoSep.AddBeforeSelf(sepRun, insertedRun);
+        return true;
+    }
+
+    private static void RemoveExtraTextNodes(IEnumerable<XElement> extras)
+    {
+        foreach (var extra in extras.ToList())
+        {
+            var parentRun = extra.Parent;
+            extra.Remove();
+            if (parentRun?.Name == W + "r" && !parentRun.Elements().Any(child => child.Name != W + "rPr"))
+                parentRun.Remove();
+        }
+    }
+
+    private sealed class StoryFieldFrame(XElement begin)
+    {
+        internal XElement Begin { get; } = begin;
+        internal XElement? Separate { get; set; }
+        internal System.Text.StringBuilder Instruction { get; } = new();
+    }
+
+    private sealed record StoryPageField(
+        string Kind,
+        XElement Root,
+        XElement? SimpleField,
+        XElement? Begin,
+        XElement? Separate,
+        XElement? End);
 
     private static XDocument LoadDocument(string path)
     {

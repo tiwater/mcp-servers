@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.IO.Packaging;
+using System.Security.Cryptography;
 using System.Text.Json;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -10,6 +12,7 @@ namespace Dockit.Docx;
 public static class NativeDrawingCheckboxMutation
 {
     public const string Command = "docx_set_drawing_checkbox_state";
+    private const string ImageRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
     public static int Run(string[] args)
     {
@@ -42,6 +45,7 @@ public static class NativeDrawingCheckboxMutation
             throw new InvalidOperationException("target-must-be-drawing");
 
         IReadOnlyDictionary<string, int> baseline;
+        var replacements = new PlannedCheckboxImage[resolved.Count];
         using (var input = WordprocessingDocument.Open(paths.Input, false))
         {
             baseline = NativeMutationSupport.ValidationIssueCounts(input);
@@ -49,7 +53,14 @@ public static class NativeDrawingCheckboxMutation
             {
                 var drawing = Observation.ResolveNativePath(input, resolved[index].StoryPart, resolved[index].NativePath) as Drawing
                     ?? throw new InvalidOperationException("target-must-be-drawing");
-                _ = Prepare(input, resolved[index].StoryPart, drawing, $"changes[{index}].drawing");
+                var prepared = Prepare(input, resolved[index].StoryPart, drawing, $"changes[{index}].drawing");
+                var bytes = prepared.Bitmap.WithState(request.Changes[index].Checked);
+                replacements[index] = new PlannedCheckboxImage(
+                    resolved[index].StoryPart,
+                    prepared.ImagePart.ContentType,
+                    ImageExtension(prepared.ImagePart.Uri, prepared.ImagePart.ContentType),
+                    bytes,
+                    Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
             }
         }
 
@@ -57,17 +68,17 @@ public static class NativeDrawingCheckboxMutation
         try
         {
             Tiwater.Office.WritableFileCopy.Copy(paths.Input, temporaryPath);
+            var relationshipIds = WriteStandardMediaParts(temporaryPath, replacements);
             using (var output = WordprocessingDocument.Open(temporaryPath, true))
             {
                 for (var index = 0; index < resolved.Count; index++)
                 {
                     var drawing = Observation.ResolveNativePath(output, resolved[index].StoryPart, resolved[index].NativePath) as Drawing
                         ?? throw new InvalidOperationException("output-drawing-not-found");
-                    var prepared = Prepare(output, resolved[index].StoryPart, drawing, $"changes[{index}].drawing");
-                    var bytes = prepared.Bitmap.WithState(request.Changes[index].Checked);
-                    var replacement = AddImagePart(prepared.OwnerPart, prepared.ImagePart.ContentType);
-                    using (var stream = new MemoryStream(bytes, writable: false)) replacement.FeedData(stream);
-                    prepared.Blip.Embed = prepared.OwnerPart.GetIdOfPart(replacement);
+                    var blips = drawing.Descendants<A.Blip>().ToArray();
+                    if (blips.Length != 1)
+                        throw new InvalidOperationException($"drawing-must-contain-one-embedded-picture: changes[{index}].drawing");
+                    blips[0].Embed = relationshipIds[index];
                 }
                 SaveStories(output, resolved.Select(item => item.StoryPart));
                 NativeMutationSupport.RejectAddedValidationIssues(output, baseline);
@@ -151,17 +162,110 @@ public static class NativeDrawingCheckboxMutation
             ?? throw new InvalidOperationException("object-story-part-not-found");
     }
 
-    private static ImagePart AddImagePart(OpenXmlPartContainer owner, string contentType)
-        => owner switch
+    private static string[] WriteStandardMediaParts(string packagePath, IReadOnlyList<PlannedCheckboxImage> replacements)
+    {
+        using var package = Package.Open(packagePath, FileMode.Open, FileAccess.ReadWrite);
+        var existingPartUris = package.GetParts()
+            .Select(part => part.Uri.OriginalString)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var standardMediaByContent = new Dictionary<(string ContentType, string Sha256), Uri>();
+        foreach (var part in package.GetParts()
+                     .Where(part => part.Uri.OriginalString.StartsWith("/word/media/", StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(part => part.Uri.OriginalString, StringComparer.Ordinal))
         {
-            MainDocumentPart part => part.AddImagePart(contentType),
-            HeaderPart part => part.AddImagePart(contentType),
-            FooterPart part => part.AddImagePart(contentType),
-            FootnotesPart part => part.AddImagePart(contentType),
-            EndnotesPart part => part.AddImagePart(contentType),
-            WordprocessingCommentsPart part => part.AddImagePart(contentType),
-            _ => throw new InvalidOperationException("drawing-story-part-does-not-support-images"),
+            using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
+            using var memory = new MemoryStream();
+            stream.CopyTo(memory);
+            var hash = Convert.ToHexString(SHA256.HashData(memory.ToArray())).ToLowerInvariant();
+            standardMediaByContent.TryAdd((part.ContentType, hash), part.Uri);
+        }
+
+        var assignedRelIds = new string[replacements.Count];
+        for (var index = 0; index < replacements.Count; index++)
+        {
+            var replacement = replacements[index];
+            var ownerUri = new Uri(replacement.StoryPart, UriKind.Relative);
+            if (!package.PartExists(ownerUri))
+                throw new InvalidOperationException("object-story-part-not-found");
+            var ownerPart = package.GetPart(ownerUri);
+
+            var contentKey = (replacement.ContentType, replacement.Sha256);
+            if (!standardMediaByContent.TryGetValue(contentKey, out var mediaUri))
+            {
+                mediaUri = NextStandardMediaUri(existingPartUris, replacement.Extension);
+                var created = package.CreatePart(mediaUri, replacement.ContentType, CompressionOption.Normal);
+                using (var stream = created.GetStream(FileMode.Create, FileAccess.Write))
+                    stream.Write(replacement.Bytes, 0, replacement.Bytes.Length);
+                existingPartUris.Add(mediaUri.OriginalString);
+                standardMediaByContent[contentKey] = mediaUri;
+            }
+
+            var existingRel = ownerPart.GetRelationshipsByType(ImageRelationshipType)
+                .Where(rel => rel.TargetMode == TargetMode.Internal
+                    && !rel.TargetUri.OriginalString.StartsWith('/')
+                    && !rel.TargetUri.OriginalString.StartsWith("..", StringComparison.Ordinal)
+                    && StringComparer.OrdinalIgnoreCase.Equals(
+                        PackUriHelper.ResolvePartUri(ownerPart.Uri, rel.TargetUri).OriginalString,
+                        mediaUri.OriginalString))
+                .OrderBy(rel => rel.Id, StringComparer.Ordinal)
+                .FirstOrDefault();
+
+            if (existingRel is not null)
+            {
+                assignedRelIds[index] = existingRel.Id;
+                continue;
+            }
+
+            var relativeTarget = PackUriHelper.GetRelativeUri(ownerPart.Uri, mediaUri);
+            var relId = NextDeterministicRelationshipId(ownerPart);
+            ownerPart.CreateRelationship(relativeTarget, TargetMode.Internal, ImageRelationshipType, relId);
+            assignedRelIds[index] = relId;
+        }
+
+        package.Flush();
+        return assignedRelIds;
+    }
+
+    private static Uri NextStandardMediaUri(HashSet<string> existingPartUris, string extension)
+    {
+        for (var number = 1; ; number++)
+        {
+            var candidate = $"/word/media/image{number}{extension}";
+            if (!existingPartUris.Contains(candidate))
+                return new Uri(candidate, UriKind.Relative);
+        }
+    }
+
+    private static string NextDeterministicRelationshipId(PackagePart ownerPart)
+    {
+        var existing = ownerPart.GetRelationships()
+            .Select(rel => rel.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        for (var number = 1; ; number++)
+        {
+            var candidate = $"rId{number}";
+            if (!existing.Contains(candidate))
+                return candidate;
+        }
+    }
+
+    private static string ImageExtension(Uri partUri, string contentType)
+    {
+        var ext = Path.GetExtension(partUri.OriginalString);
+        if (!string.IsNullOrWhiteSpace(ext)) return ext.ToLowerInvariant();
+        return contentType.ToLowerInvariant() switch
+        {
+            "image/x-wmf" => ".wmf",
+            "image/x-emf" => ".emf",
+            "image/png" => ".png",
+            "image/jpeg" => ".jpeg",
+            "image/bmp" => ".bmp",
+            "image/gif" => ".gif",
+            "image/tiff" => ".tiff",
+            _ => ".bin",
         };
+    }
 
     private static void SaveStories(WordprocessingDocument document, IEnumerable<string> storyParts)
     {
@@ -176,6 +280,7 @@ public static class NativeDrawingCheckboxMutation
         if (main.WordprocessingCommentsPart?.Comments is not null && selected.Contains(Uri(main.WordprocessingCommentsPart))) main.WordprocessingCommentsPart.Comments.Save();
     }
 
+    private sealed record PlannedCheckboxImage(string StoryPart, string ContentType, string Extension, byte[] Bytes, string Sha256);
     private sealed record PreparedDrawing(OpenXmlPartContainer OwnerPart, ImagePart ImagePart, A.Blip Blip, CheckboxDib Bitmap);
 
     private sealed class CheckboxDib
