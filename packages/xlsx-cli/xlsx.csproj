@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tiwater-xlsx</ToolCommandName>
     <PackageId>tiwater.xlsx.cli</PackageId>
-    <Version>0.3.10</Version>
+    <Version>0.3.11</Version>
     <Authors>Tiwater</Authors>
     <Description>Inspect XLSX templates, export workbook data, and fill spreadsheet templates from the command line.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -20,6 +20,10 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>xlsx;spreadsheet;openxml;excel;cli;tool;tiwater</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="xlsx-cli.tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <Compile Include="../shared/WritableFileCopy.cs" Link="WritableFileCopy.cs" />

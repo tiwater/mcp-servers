@@ -189,14 +189,15 @@ public static class Inspector
                         }
 
                         var visibleText = GetVisibleCellText(cell, sharedStrings);
+                        var richTextRuns = OpenXmlRichText.GetCellRichTextRuns(cell, sharedStrings, stylesheet);
                         cells.Add(new CellEvidenceReport(reference, visibleText ?? string.Empty, cell.CellFormula?.Text,
-                            GetCellStyle(cell, stylesheet), OpenXmlRichText.GetCellRichTextRuns(cell, sharedStrings)));
+                            GetCellStyle(cell, stylesheet), richTextRuns));
                         if (!string.IsNullOrWhiteSpace(visibleText))
                         {
                             textCells.Add(new TextCellReport(
                                 reference,
                                 visibleText,
-                                OpenXmlRichText.GetCellRichTextRuns(cell, sharedStrings)));
+                                richTextRuns));
                         }
 
                         if (cell.CellFormula is not null)

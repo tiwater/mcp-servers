@@ -123,7 +123,7 @@ public static partial class RangeReader
                     formula.SharedIndex?.Value,
                     formula.Reference?.Value),
                 cell is null ? null : Inspector.GetCellStyle(cell, stylesheet),
-                cell is null ? null : OpenXmlRichText.GetCellRichTextRuns(cell, sharedStrings),
+                cell is null ? null : OpenXmlRichText.GetCellRichTextRuns(cell, sharedStrings, stylesheet),
                 merge?.Canonical,
                 merge is null ? null : CellReference(merge.StartColumn, merge.StartRow)));
         }
