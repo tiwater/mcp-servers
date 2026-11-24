@@ -90,11 +90,27 @@ class OcrProviderConformanceTest(unittest.TestCase):
 
         self.assertEqual(len(calls), 3)
 
-    def test_rejects_multiline_table_without_separator(self):
+    def test_normalizes_multiline_table_without_separator(self):
+        page = _parse_vision_page_response(response_with({
+            "text": "Inventory",
+            "tables": ["| Key | Reading |\n| novel-1 | 7.3 |\n| novel-2 | 8.1 |"],
+            "fields": [],
+            "orientation_degrees": 0,
+            "warnings": [],
+        }), 4)
+        self.assertEqual(len(page["tables"]), 1)
+        self.assertIn("| --- | --- |", page["tables"][0])
+        self.assertEqual(len(page["table_rows"]), 3)
+        self.assertTrue(page["table_rows"][0]["is_header"])
+        self.assertEqual(page["table_rows"][0]["cells"], ["Key", "Reading"])
+        self.assertFalse(page["table_rows"][1]["is_header"])
+        self.assertEqual(page["table_rows"][1]["cells"], ["novel-1", "7.3"])
+        self.assertEqual(page["table_rows"][2]["cells"], ["novel-2", "8.1"])
+
         with self.assertRaisesRegex(ValueError, "table 0 has multiple rows but no separator"):
             _parse_vision_page_response(response_with({
                 "text": "Inventory",
-                "tables": ["| Key | Reading |\n| novel-1 | 7.3 |"],
+                "tables": ["| OnlyOneCol |\n| AnotherCol |"],
                 "fields": [],
                 "orientation_degrees": 0,
                 "warnings": [],
