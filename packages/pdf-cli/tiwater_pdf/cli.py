@@ -948,12 +948,15 @@ def _extract_markdown_table_rows(tables: list, page_number: int) -> list[dict]:
 
 
 def _validate_vision_markdown_tables(tables: list) -> list[str]:
-    """Fail closed when provider table fragments cannot form stable rows.
+    """Fail closed on fragmented table entries and normalize separatorless tables.
 
     The public OCR contract represents every recognized table as one Markdown
     string. Accepting separately returned row fragments loses the relationship
     between header, identity, result, and template rows while still looking
-    content-bearing to a caller.
+    content-bearing to a caller.  When a vision model emits a complete
+    multi-row pipe table inside one string without a ``|---|---|`` separator
+    line, normalize it by inserting a Markdown separator after row 0 (matching
+    ``_extract_pipe_tables_from_text``) instead of failing the page OCR.
     """
     validated: list[str] = []
     for table_index, table in enumerate(tables):
@@ -974,7 +977,10 @@ def _validate_vision_markdown_tables(tables: list) -> list[str]:
         if separators and separators[0] == 0:
             raise ValueError(f"vision table {table_index} has a separator without a header")
         if len(rows) > 1 and not separators:
-            raise ValueError(f"vision table {table_index} has multiple rows but no separator")
+            if max((len(cells) for cells in rows), default=0) < 2:
+                raise ValueError(f"vision table {table_index} has multiple rows but no separator")
+            validated.append(_format_markdown_table(rows, separator_after=0))
+            continue
         validated.append(table)
     return validated
 
